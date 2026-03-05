@@ -221,7 +221,7 @@ const CreateGoodsReceipt = () => {
                             <span className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center font-bold">1</span>
                             <h3 className="text-base md:text-lg font-bold text-gray-800 uppercase tracking-tight">Thông tin phiếu nhập</h3>
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
                             <div className="space-y-2">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Mã phiếu (tự sinh)</label>
                                 <input
@@ -254,7 +254,7 @@ const CreateGoodsReceipt = () => {
                                 </select>
                             </div>
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
                             <div className="space-y-2">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Ngày nhập *</label>
                                 <input
@@ -301,91 +301,110 @@ const CreateGoodsReceipt = () => {
                             </button>
                         </div>
 
-                        <div className="overflow-x-auto">
-                            <table className="w-full">
-                                <thead>
-                                    <tr className="bg-gray-50/80">
-                                        <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-center w-12">#</th>
-                                        <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-left w-36">Loại</th>
-                                        <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-left">Tên hàng hóa *</th>
-                                        <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-left">Serial / Mã</th>
-                                        <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-left w-40">Trạng thái</th>
-                                        <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-center w-24">SL</th>
-                                        <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-left w-28 whitespace-nowrap">ĐVT</th>
-                                        <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-right w-36 whitespace-nowrap">Đơn giá (VNĐ)</th>
-                                        <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-right w-36 whitespace-nowrap">Thành tiền</th>
-                                        <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-left">Ghi chú</th>
-                                        <th className="px-4 py-3 w-12"></th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                    {items.map((item, idx) => (
-                                        <tr key={idx} className="hover:bg-emerald-50/30 transition-colors">
-                                            <td className="px-4 py-3 text-center text-sm font-bold text-gray-400">{idx + 1}</td>
-                                            <td className="px-4 py-3">
-                                                <select
-                                                    value={item.item_type}
-                                                    disabled={isReadOnly}
-                                                    onChange={(e) => updateItem(idx, 'item_type', e.target.value)}
-                                                    className={`w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 ${isReadOnly ? 'cursor-not-allowed bg-gray-50' : 'cursor-pointer'}`}
-                                                >
-                                                    {ITEM_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
-                                                </select>
-                                            </td>
-                                            <td className="px-4 py-3">
+                        <div className="space-y-4">
+                            {items.map((item, idx) => (
+                                <div key={idx} className="bg-white border border-gray-200 p-5 md:p-6 rounded-2xl md:rounded-3xl space-y-5 md:space-y-6 shadow-sm relative transition-all hover:border-emerald-200 hover:shadow-md">
+                                    <div className="flex items-center justify-between pb-3 md:pb-4 border-b border-gray-100">
+                                        <div className="font-black text-emerald-700 md:text-lg flex items-center gap-2">
+                                            <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center text-xs">{idx + 1}</span>
+                                            Hàng hóa nhập
+                                        </div>
+                                        {items.length > 1 && (
+                                            <button
+                                                onClick={() => removeItem(idx)}
+                                                className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all flex items-center gap-2 text-sm font-bold"
+                                            >
+                                                <Trash2 className="w-4 h-4" /> <span className="hidden md:inline">Xóa dòng này</span>
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6">
+                                        {/* Row 1/Col 1: Basic Info */}
+                                        <div className="md:col-span-4 space-y-4">
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-wider">Tên hàng hóa *</label>
                                                 <input
                                                     value={item.item_name}
                                                     onChange={(e) => updateItem(idx, 'item_name', e.target.value)}
-                                                    placeholder="Tên hàng hóa..."
-                                                    className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
+                                                    placeholder="Nhập tên hàng hóa..."
+                                                    className="w-full px-4 py-3 bg-gray-50/50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 transition-all"
                                                 />
-                                            </td>
-                                            <td className="px-4 py-3">
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="space-y-1.5">
+                                                    <label className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-wider">Loại</label>
+                                                    <select
+                                                        value={item.item_type}
+                                                        disabled={isReadOnly}
+                                                        onChange={(e) => updateItem(idx, 'item_type', e.target.value)}
+                                                        className={`w-full px-4 py-3 bg-gray-50/50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 transition-all ${isReadOnly ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+                                                    >
+                                                        {ITEM_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                                                    </select>
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <label className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-wider">Trạng thái</label>
+                                                    <select
+                                                        value={item.item_status}
+                                                        disabled={isReadOnly}
+                                                        onChange={(e) => updateItem(idx, 'item_status', e.target.value)}
+                                                        className={`w-full px-4 py-3 bg-gray-50/50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 transition-all ${isReadOnly ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+                                                    >
+                                                        <option value="">-- Chọn --</option>
+                                                        {item.item_type === 'MAY' ? (
+                                                            MACHINE_STATUSES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)
+                                                        ) : (item.item_type === 'BINH' || item.item_type === 'BINH_CO_KHI') ? (
+                                                            CYLINDER_STATUSES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)
+                                                        ) : null}
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Row 1/Col 2: Identity & Quantities */}
+                                        <div className="md:col-span-4 space-y-4">
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-wider">Serial / Mã (Nếu có)</label>
                                                 <input
                                                     value={item.serial_number}
                                                     onChange={(e) => updateItem(idx, 'serial_number', e.target.value)}
-                                                    placeholder="Serial..."
-                                                    className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
+                                                    placeholder="Nhập serial hoặc mã quản lý..."
+                                                    className="w-full px-4 py-3 bg-gray-50/50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 transition-all"
                                                 />
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <select
-                                                    value={item.item_status}
-                                                    disabled={isReadOnly}
-                                                    onChange={(e) => updateItem(idx, 'item_status', e.target.value)}
-                                                    className={`w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 ${isReadOnly ? 'cursor-not-allowed bg-gray-50' : 'cursor-pointer'}`}
-                                                >
-                                                    <option value="">-- Chọn --</option>
-                                                    {item.item_type === 'MAY' ? (
-                                                        MACHINE_STATUSES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)
-                                                    ) : (item.item_type === 'BINH' || item.item_type === 'BINH_CO_KHI') ? (
-                                                        CYLINDER_STATUSES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)
-                                                    ) : null}
-                                                </select>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <input
-                                                    type="number"
-                                                    min="1"
-                                                    value={item.quantity}
-                                                    onChange={(e) => {
-                                                        const q = parseInt(e.target.value) || 1;
-                                                        updateItem(idx, 'quantity', q);
-                                                        updateItem(idx, 'total_price', q * (item.unit_price || 0));
-                                                    }}
-                                                    className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-bold text-center outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
-                                                />
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <select
-                                                    value={item.unit}
-                                                    onChange={(e) => updateItem(idx, 'unit', e.target.value)}
-                                                    className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 cursor-pointer"
-                                                >
-                                                    {ITEM_UNITS.map(u => <option key={u.id} value={u.id}>{u.label}</option>)}
-                                                </select>
-                                            </td>
-                                            <td className="px-4 py-3">
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="space-y-1.5">
+                                                    <label className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-wider">Số lượng</label>
+                                                    <input
+                                                        type="number"
+                                                        min="1"
+                                                        value={item.quantity}
+                                                        onChange={(e) => {
+                                                            const q = parseInt(e.target.value) || 1;
+                                                            updateItem(idx, 'quantity', q);
+                                                            updateItem(idx, 'total_price', q * (item.unit_price || 0));
+                                                        }}
+                                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl text-base font-black text-center text-emerald-700 outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 transition-all shadow-inner"
+                                                    />
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <label className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-wider">Đơn vị tính</label>
+                                                    <select
+                                                        value={item.unit}
+                                                        onChange={(e) => updateItem(idx, 'unit', e.target.value)}
+                                                        className="w-full px-4 py-3 bg-gray-50/50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 cursor-pointer transition-all"
+                                                    >
+                                                        {ITEM_UNITS.map(u => <option key={u.id} value={u.id}>{u.label}</option>)}
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Row 1/Col 3: Pricing & Notes */}
+                                        <div className="md:col-span-4 space-y-4">
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-wider">Đơn giá nhập (VNĐ)</label>
                                                 <input
                                                     type="text"
                                                     value={item.unit_price ? item.unit_price.toLocaleString('vi-VN') : ''}
@@ -396,34 +415,32 @@ const CreateGoodsReceipt = () => {
                                                         updateItem(idx, 'total_price', (item.quantity || 1) * p);
                                                     }}
                                                     placeholder="0"
-                                                    className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-bold text-right outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 placeholder:text-gray-300"
+                                                    className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl text-base font-bold outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 transition-all text-right shadow-inner placeholder:text-gray-300"
                                                 />
-                                            </td>
-                                            <td className="px-4 py-3 text-right font-black text-emerald-700 text-sm whitespace-nowrap">
-                                                {new Intl.NumberFormat('vi-VN').format(item.total_price || 0)} ₫
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <input
-                                                    value={item.note}
-                                                    onChange={(e) => updateItem(idx, 'note', e.target.value)}
-                                                    placeholder="Ghi chú..."
-                                                    className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
-                                                />
-                                            </td>
-                                            <td className="px-4 py-3 text-center">
-                                                {items.length > 1 && (
-                                                    <button
-                                                        onClick={() => removeItem(idx)}
-                                                        className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-4 items-end">
+                                                <div className="space-y-1.5 col-span-2 sm:col-span-1 md:col-span-2 lg:col-span-1">
+                                                    <label className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-wider">Ghi chú</label>
+                                                    <input
+                                                        value={item.note}
+                                                        onChange={(e) => updateItem(idx, 'note', e.target.value)}
+                                                        placeholder="Vd: Xước vỏ..."
+                                                        className="w-full px-4 py-3 bg-gray-50/50 border border-gray-200 rounded-xl text-sm font-medium outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 transition-all"
+                                                    />
+                                                </div>
+                                                <div className="col-span-2 sm:col-span-1 md:col-span-2 lg:col-span-1">
+                                                    <div className="w-full px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm flex flex-col justify-center items-end shadow-sm">
+                                                        <span className="text-[10px] md:text-xs font-bold text-emerald-600/70 uppercase tracking-wider mb-0.5">Thành tiền</span>
+                                                        <span className="font-black text-emerald-700 text-lg leading-none">
+                                                            {new Intl.NumberFormat('vi-VN').format(item.total_price || 0)} <span className="text-sm">₫</span>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
 
                         <div className="p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100 flex items-center justify-between">

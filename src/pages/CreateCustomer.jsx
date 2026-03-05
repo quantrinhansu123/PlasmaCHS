@@ -135,7 +135,7 @@ const CreateCustomer = () => {
 
                 <div className="p-6 md:p-10 space-y-8 md:space-y-10">
                     {/* Section 1: Thông tin định danh */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
                         <div className="space-y-3">
                             <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">1. Mã KH (Hệ thống cấp)</label>
                             <input
@@ -167,7 +167,7 @@ const CreateCustomer = () => {
 
                     {/* Section 2: Liên hệ chi tiết */}
                     <div className="p-6 md:p-8 bg-pink-50/40 rounded-[1.5rem] md:rounded-[2.5rem] border border-pink-100 space-y-6 md:space-y-8">
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
                             <div className="space-y-3">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">4. Tên người đại diện *</label>
                                 <input
@@ -209,7 +209,7 @@ const CreateCustomer = () => {
                     </div>
 
                     {/* Section 3: Phân bổ */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-10">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-10">
                         <div className="space-y-3">
                             <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">8. Kho xuất hàng mặc định *</label>
                             <select
@@ -240,7 +240,7 @@ const CreateCustomer = () => {
                                 {staffList.map(u => <option key={u.id} value={u.name}>{u.name}{u.role ? ` (${u.role})` : ''}</option>)}
                             </select>
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-2 gap-6 md:gap-10 mt-6">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-10 mt-6">
                             <div className="space-y-3">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">11. Đại lý (nơi quản lý KH)</label>
                                 <input

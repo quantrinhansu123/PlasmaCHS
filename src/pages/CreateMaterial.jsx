@@ -134,7 +134,7 @@ const CreateMaterial = () => {
                             <span className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center font-bold">1</span>
                             <h3 className="text-base md:text-lg font-bold text-gray-800 uppercase tracking-tight">Nhóm vật liệu (Category)</h3>
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-2 gap-6 md:gap-8">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-8">
                             <div className="space-y-2 md:col-span-2">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1 flex items-center gap-1.5">
                                     <ListFilter className="w-3.5 h-3.5" />
@@ -160,7 +160,7 @@ const CreateMaterial = () => {
                             <span className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center font-bold">2</span>
                             <h3 className="text-base md:text-lg font-bold text-gray-800 uppercase tracking-tight">Thông số chi tiết</h3>
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-2 gap-6 md:gap-8">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-8">
 
                             {/* Tên vật tư (Luôn hiện) */}
                             <div className="space-y-2 md:col-span-2">

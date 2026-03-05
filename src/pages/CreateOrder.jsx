@@ -448,7 +448,7 @@ const CreateOrder = () => {
 
                     <div className="p-6 md:p-10 space-y-8 md:space-y-10">
                         {/* Section 1: Thông tin định danh */}
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
                             <div className="space-y-2">
                                 <label className="text-xs font-medium text-[#374151] uppercase tracking-wide" style={{ fontFamily: '"Roboto", sans-serif' }}>1. Mã đơn hàng (Tự động)</label>
                                 <input value={formData.orderCode} disabled className="w-full px-4 py-3 bg-[#F3F4F6] border border-[#D1D5DB] font-medium text-[#6B7280] text-sm cursor-not-allowed" style={{ fontFamily: '"Roboto", sans-serif' }} />
@@ -537,7 +537,7 @@ const CreateOrder = () => {
                                 )}
                             </div>
 
-                            <div className="grid grid-cols-2 md:grid-cols-2 gap-6 md:gap-8">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-8">
                                 <div className="space-y-2">
                                     <label className="text-xs font-medium text-[#374151] uppercase tracking-wide" style={{ fontFamily: '"Roboto", sans-serif' }}>5. Tên người nhận *</label>
                                     <input

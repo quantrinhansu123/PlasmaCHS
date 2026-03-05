@@ -89,7 +89,7 @@ const CreateShipper = () => {
                             <span className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center font-bold">1</span>
                             <h3 className="text-base md:text-lg font-bold text-gray-800 uppercase tracking-tight">Hồ sơ nhà vận chuyển</h3>
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
                             <div className="space-y-2">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Tên ĐVVC / Công ty *</label>
                                 <input
@@ -128,7 +128,7 @@ const CreateShipper = () => {
                             <span className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center font-bold">2</span>
                             <h3 className="text-base md:text-lg font-bold text-gray-800 uppercase tracking-tight">Người quản lý & Liên hệ</h3>
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
                             <div className="space-y-2">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Người quản lý *</label>
                                 <input

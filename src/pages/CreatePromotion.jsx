@@ -215,7 +215,7 @@ const CreatePromotion = () => {
                     <div className="p-6 md:p-10 space-y-8">
 
                         {/* Row 1: Mã KM + Số bình */}
-                        <div className="grid grid-cols-2 md:grid-cols-2 gap-6">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                             <div className="space-y-2">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1 flex items-center gap-1.5">
                                     <Tag className="w-3.5 h-3.5" />
@@ -246,7 +246,7 @@ const CreatePromotion = () => {
                         </div>
 
                         {/* Row 2: Ngày bắt đầu + kết thúc */}
-                        <div className="grid grid-cols-2 md:grid-cols-2 gap-6">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                             <div className="space-y-2">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1 flex items-center gap-1.5">
                                     <CalendarDays className="w-3.5 h-3.5" />
@@ -324,7 +324,7 @@ const CreatePromotion = () => {
                             {formData.target_mode === 'CATEGORY' && (
                                 <div className="bg-gray-50 rounded-2xl p-5 border border-gray-100 space-y-3">
                                     <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Chọn loại khách hàng áp dụng:</p>
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                                         {CUSTOMER_CATEGORIES.map(cat => {
                                             const isSelected = formData.target_categories.includes(cat.id);
                                             return (
