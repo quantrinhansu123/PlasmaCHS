@@ -1,14 +1,28 @@
 import {
+    ArcElement,
+    BarElement,
+    CategoryScale,
+    Chart as ChartJS,
+    Legend as ChartLegend,
+    Tooltip as ChartTooltip,
+    LinearScale,
+    LineElement,
+    PointElement,
+    Title
+} from 'chart.js';
+import {
+    ChevronDown,
     Edit,
     Eye,
     Filter,
+    Plus,
     Search,
     Trash2,
     Users
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { useNavigate } from 'react-router-dom';
-import ColumnToggle from '../components/ColumnToggle';
 import CustomerDetailsModal from '../components/Customers/CustomerDetailsModal';
 import CustomerFormModal from '../components/Customers/CustomerFormModal';
 import { WAREHOUSES } from '../constants/orderConstants';
@@ -16,16 +30,36 @@ import useColumnVisibility from '../hooks/useColumnVisibility';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 
+// Register Chart.js components
+ChartJS.register(
+    CategoryScale,
+    LinearScale,
+    BarElement,
+    ArcElement,
+    PointElement,
+    LineElement,
+    Title,
+    ChartTooltip,
+    ChartLegend
+);
+
 const Customers = () => {
     const { role } = usePermissions();
     const navigate = useNavigate();
+    const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
     const [searchTerm, setSearchTerm] = useState('');
-    const [activeCategory, setActiveCategory] = useState('ALL');
     const [customers, setCustomers] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
     const [selectedCustomer, setSelectedCustomer] = useState(null);
+
+    // Filter states
+    const [selectedCategories, setSelectedCategories] = useState([]);
+    const [selectedManagedBy, setSelectedManagedBy] = useState([]);
+    const [selectedCareBy, setSelectedCareBy] = useState([]);
+    const [uniqueManagedBy, setUniqueManagedBy] = useState([]);
+    const [uniqueCareBy, setUniqueCareBy] = useState([]);
 
     const TABLE_COLUMNS_DEF = [
         { key: 'code', label: 'Mã khách hàng' },
@@ -35,7 +69,7 @@ const Customers = () => {
         { key: 'legal_rep', label: 'Người đại diện pháp luật' },
         { key: 'managed_by', label: 'Nhân viên phụ trách' },
         { key: 'category', label: 'Loại khách hàng' },
-        { key: 'current_cylinders', label: 'Số bình hiện có' },
+        { key: 'current_cylinders', label: 'Số vỏ' },
         { key: 'current_machines', label: 'Số máy hiện có' },
         { key: 'borrowed_cylinders', label: 'Vỏ bình đang mượn' },
         { key: 'machines_in_use', label: 'Mã máy đang sử dụng' },
@@ -56,6 +90,14 @@ const Customers = () => {
         fetchCustomers();
     }, []);
 
+    useEffect(() => {
+        // Extract unique values for filters
+        const managedBy = [...new Set(customers.map(c => c.managed_by).filter(Boolean))];
+        const careBy = [...new Set(customers.map(c => c.care_by).filter(Boolean))];
+        setUniqueManagedBy(managedBy);
+        setUniqueCareBy(careBy);
+    }, [customers]);
+
     const fetchCustomers = async () => {
         setIsLoading(true);
         try {
@@ -74,6 +116,11 @@ const Customers = () => {
         }
     };
 
+    const formatNumber = (num) => {
+        if (!num) return '0';
+        return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    };
+
     const getLabel = (list, id) => {
         return list.find(item => item.id === id)?.label || id;
     };
@@ -87,10 +134,26 @@ const Customers = () => {
             (c.address?.toLowerCase().includes(search))
         );
 
-        const matchesCategory = activeCategory === 'ALL' || c.category === activeCategory;
+        // Filter by category
+        const matchesCategory = selectedCategories.length === 0 ||
+            selectedCategories.includes(c.category);
 
-        return matchesSearch && matchesCategory;
+        // Filter by managed_by
+        const matchesManagedBy = selectedManagedBy.length === 0 ||
+            selectedManagedBy.includes(c.managed_by);
+
+        // Filter by care_by
+        const matchesCareBy = selectedCareBy.length === 0 ||
+            selectedCareBy.includes(c.care_by);
+
+        return matchesSearch && matchesCategory && matchesManagedBy && matchesCareBy;
     });
+
+    // Calculate totals
+    const filteredCustomersCount = filteredCustomers.length;
+    const totalCylinders = filteredCustomers.reduce((sum, c) => sum + (c.current_cylinders || 0), 0);
+    const totalMachines = filteredCustomers.reduce((sum, c) => sum + (c.current_machines || 0), 0);
+    const totalBorrowed = filteredCustomers.reduce((sum, c) => sum + (c.borrowed_cylinders || 0), 0);
 
     const handleEditCustomer = (customer) => {
         setSelectedCustomer(customer);
@@ -126,188 +189,580 @@ const Customers = () => {
         setIsFormModalOpen(false);
     };
 
-    return (
-        <div className="p-4 md:p-8 max-w-[1600px] mx-auto font-sans bg-[#F8FAFC] min-h-screen noise-bg">
-            {/* Decorative Background Blobs */}
-            <div className="blob blob-blue w-[500px] h-[500px] -top-20 -left-20 opacity-20"></div>
-            <div className="blob blob-indigo w-[400px] h-[400px] top-1/2 -right-20 opacity-10"></div>
-            <div className="blob blob-cyan w-[300px] h-[300px] bottom-10 left-1/4 opacity-10"></div>
+    // Filter Dropdown Component
+    const FilterDropdown = ({ label, selectedCount, totalCount, onSelectAll, children }) => {
+        const [isOpen, setIsOpen] = useState(false);
 
-            {/* Header Section */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-6 mb-10">
-                <div className="hover-lift">
-                    <h1 className="text-4xl font-black text-slate-800 flex items-center gap-4 tracking-tight">
-                        <div className="w-14 h-14 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-100 transition-transform hover:rotate-3 duration-300">
-                            <Users className="w-8 h-8" />
-                        </div>
-                        Khách hàng
-                    </h1>
-                    <p className="text-slate-500 mt-2 font-bold uppercase tracking-widest text-[10px]">Lưu trữ và theo dõi hồ sơ khách hàng toàn hệ thống</p>
-                </div>
-            </div>
-
-            {/* Main Content Card */}
-            <div className="bg-white rounded-[2.5rem] shadow-premium border border-slate-50">
-                {/* Filters Top Bar */}
-                <div className="p-8 bg-white flex flex-col lg:flex-row gap-6 items-center border-b border-slate-50 glass relative z-20 rounded-t-[2.5rem]">
-                    <div className="relative flex-1 group w-full">
-                        <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300 group-focus-within:text-blue-500 transition-colors" />
-                        <input
-                            type="text"
-                            placeholder="Tìm kiếm mã KH, tên, sđt, địa chỉ..."
-                            className="w-full pl-14 pr-6 py-4 bg-slate-50/50 border border-transparent focus:bg-white focus:border-blue-100 rounded-2xl focus:ring-4 focus:ring-blue-50 outline-none transition-all text-sm font-bold text-slate-600 shadow-inner"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
-                    </div>
-                    <div className="flex items-center gap-4 w-full lg:w-auto">
-                        <div className="relative flex-1 lg:flex-none">
-                            <Filter className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-                            <select
-                                className="w-full lg:w-64 pl-12 pr-10 py-4 bg-slate-50/50 border border-transparent focus:bg-white focus:border-blue-100 rounded-2xl text-sm font-black text-slate-600 outline-none focus:ring-4 focus:ring-blue-50 appearance-none transition-all cursor-pointer shadow-inner"
-                                value={activeCategory}
-                                onChange={(e) => setActiveCategory(e.target.value)}
-                            >
-                                <option value="ALL">Tất cả phân loại</option>
-                                {CUSTOMER_CATEGORIES.map(cat => (
-                                    <option key={cat.id} value={cat.id}>
-                                        {cat.label}
-                                    </option>
-                                ))}
-                            </select>
-                            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                                <Search className="w-4 h-4 rotate-90" />
+        return (
+            <div className="relative">
+                <button
+                    onClick={() => setIsOpen(!isOpen)}
+                    className="flex items-center gap-2 px-4 py-2.5 border border-[#D1D5DB] bg-white text-sm font-medium text-[#374151] hover:bg-[#F9FAFB] transition-all"
+                    style={{ fontFamily: '"Roboto", sans-serif' }}
+                >
+                    <Filter className="w-4 h-4" />
+                    <span>{label}</span>
+                    {selectedCount > 0 && (
+                        <span className="px-2 py-0.5 bg-[#2563EB] text-white text-xs rounded-full">
+                            {selectedCount}
+                        </span>
+                    )}
+                    <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {isOpen && (
+                    <>
+                        <div
+                            className="fixed inset-0 z-10"
+                            onClick={() => setIsOpen(false)}
+                        ></div>
+                        <div className="absolute top-full left-0 mt-1 bg-white border border-[#E5E7EB] shadow-lg z-20 min-w-[250px] max-h-80">
+                            <div className="p-3 border-b border-[#E5E7EB] flex items-center justify-between bg-[#F9FAFB]">
+                                <span className="text-sm font-medium text-[#374151]" style={{ fontFamily: '"Roboto", sans-serif' }}>
+                                    {selectedCount > 0 ? `Đã chọn ${selectedCount}/${totalCount}` : `Chọn ${label.toLowerCase()}`}
+                                </span>
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        onSelectAll();
+                                    }}
+                                    className="text-xs text-[#2563EB] hover:text-[#1D4ED8] font-medium"
+                                    style={{ fontFamily: '"Roboto", sans-serif' }}
+                                >
+                                    {selectedCount === totalCount ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
+                                </button>
+                            </div>
+                            <div className="overflow-y-auto max-h-64">
+                                {children}
                             </div>
                         </div>
-                        <ColumnToggle
-                            columns={TABLE_COLUMNS_DEF}
-                            visibleColumns={visibleColumns}
-                            onToggle={toggleColumn}
-                            onReset={resetColumns}
-                            visibleCount={visibleCount}
-                            totalCount={totalCount}
-                        />
+                    </>
+                )}
+            </div>
+        );
+    };
+
+    // Calculate statistics data for charts
+    const getCategoryStats = () => {
+        const stats = {};
+        filteredCustomers.forEach(customer => {
+            const categoryLabel = getLabel(CUSTOMER_CATEGORIES, customer.category);
+            stats[categoryLabel] = (stats[categoryLabel] || 0) + 1;
+        });
+        return Object.entries(stats).map(([name, value]) => ({ name, value }));
+    };
+
+    const getManagedByStats = () => {
+        const stats = {};
+        filteredCustomers.forEach(customer => {
+            const managedBy = customer.managed_by || 'Không xác định';
+            stats[managedBy] = (stats[managedBy] || 0) + 1;
+        });
+        return Object.entries(stats)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value)
+            .slice(0, 10);
+    };
+
+    const getCareByStats = () => {
+        const stats = {};
+        filteredCustomers.forEach(customer => {
+            const careBy = customer.care_by || 'Không xác định';
+            stats[careBy] = (stats[careBy] || 0) + 1;
+        });
+        return Object.entries(stats)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value)
+            .slice(0, 10);
+    };
+
+    const getCylindersStats = () => {
+        const stats = {
+            'Có bình': 0,
+            'Không có bình': 0
+        };
+        filteredCustomers.forEach(customer => {
+            if ((customer.current_cylinders || 0) > 0) {
+                stats['Có bình']++;
+            } else {
+                stats['Không có bình']++;
+            }
+        });
+        return Object.entries(stats).map(([name, value]) => ({ name, value }));
+    };
+
+    const getMachinesStats = () => {
+        const stats = {
+            'Có máy': 0,
+            'Không có máy': 0
+        };
+        filteredCustomers.forEach(customer => {
+            if ((customer.current_machines || 0) > 0) {
+                stats['Có máy']++;
+            } else {
+                stats['Không có máy']++;
+            }
+        });
+        return Object.entries(stats).map(([name, value]) => ({ name, value }));
+    };
+
+    // Chart colors
+    const chartColors = [
+        '#2563EB', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
+        '#06B6D4', '#F97316', '#84CC16', '#EC4899', '#6366F1'
+    ];
+
+    return (
+        <div className="p-6 bg-[#F8F9FA] min-h-screen" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
+            {/* Navigation Tabs */}
+            <div className="flex items-center gap-1 mb-8 border-b border-[#E5E7EB]">
+                <button
+                    onClick={() => setActiveView('list')}
+                    className={`px-6 py-3 text-sm font-semibold tracking-wide transition-colors ${activeView === 'list'
+                            ? 'text-[#2563EB] border-b-2 border-[#2563EB]'
+                            : 'text-[#6B7280] hover:text-[#374151]'
+                        }`}
+                    style={activeView === 'list' ? { color: '#2563EB', borderBottomColor: '#2563EB' } : { color: '#6B7280' }}
+                >
+                    Danh sách
+                </button>
+                <button
+                    onClick={() => setActiveView('stats')}
+                    className={`px-6 py-3 text-sm font-semibold tracking-wide transition-colors ${activeView === 'stats'
+                            ? 'text-[#2563EB] border-b-2 border-[#2563EB]'
+                            : 'text-[#6B7280] hover:text-[#374151]'
+                        }`}
+                    style={activeView === 'stats' ? { color: '#2563EB', borderBottomColor: '#2563EB' } : { color: '#6B7280' }}
+                >
+                    Thống kê
+                </button>
+            </div>
+
+            {activeView === 'list' ? (
+                <>
+                    {/* Header with Add Button */}
+                    <div className="flex items-center justify-between mb-6">
+                        <h1 className="text-2xl font-semibold text-[#111827] tracking-tight" style={{ color: '#111827' }}>Danh sách khách hàng</h1>
+                        <button
+                            onClick={() => setIsFormModalOpen(true)}
+                            className="flex items-center gap-2 px-5 py-2.5 text-white font-medium text-sm transition-all duration-200 shadow-sm hover:shadow-md"
+                            style={{ backgroundColor: '#2563EB' }}
+                            onMouseEnter={(e) => e.target.style.backgroundColor = '#1D4ED8'}
+                            onMouseLeave={(e) => e.target.style.backgroundColor = '#2563EB'}
+                        >
+                            <Plus className="w-4 h-4" />
+                            Thêm
+                        </button>
+                    </div>
+
+                    {/* Search Bar and Summary Stats - Same Row */}
+                    <div className="mb-6 flex items-center gap-4">
+                        {/* Search Bar */}
+                        <div className="flex-1 relative">
+                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#9CA3AF]" />
+                            <input
+                                type="text"
+                                placeholder="Tìm theo tên, email, SĐT..."
+                                className="w-full pl-12 pr-4 py-3 border border-[#D1D5DB] focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] bg-white text-[#111827] placeholder-[#9CA3AF] text-sm transition-all"
+                                style={{ fontFamily: '"Roboto", sans-serif' }}
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
+                        </div>
+
+                        {/* Summary Stats */}
+                        <div className="flex items-center gap-6 px-6 py-3 bg-[#EFF6FF] border border-[#BFDBFE]">
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm text-[#6B7280]" style={{ fontFamily: '"Roboto", sans-serif' }}>Số lượng khách hàng:</span>
+                                <span className="text-lg font-semibold text-[#2563EB]" style={{ fontFamily: '"Roboto", sans-serif' }}>{filteredCustomersCount}</span>
+                            </div>
+                            <div className="w-px h-8 bg-[#BFDBFE]"></div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm text-[#6B7280]" style={{ fontFamily: '"Roboto", sans-serif' }}>Tổng bình:</span>
+                                <span className="text-lg font-semibold text-[#2563EB]" style={{ fontFamily: '"Roboto", sans-serif' }}>{formatNumber(totalCylinders)}</span>
+                            </div>
+                            <div className="w-px h-8 bg-[#BFDBFE]"></div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm text-[#6B7280]" style={{ fontFamily: '"Roboto", sans-serif' }}>Tổng máy:</span>
+                                <span className="text-lg font-semibold text-[#2563EB]" style={{ fontFamily: '"Roboto", sans-serif' }}>{formatNumber(totalMachines)}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Filter Section */}
+                    <div className="mb-6 flex items-center gap-3 flex-wrap">
+                        {/* Loại khách Dropdown */}
+                        <FilterDropdown
+                            label="Loại khách"
+                            selectedCount={selectedCategories.length}
+                            totalCount={CUSTOMER_CATEGORIES.length}
+                            onSelectAll={() => {
+                                if (selectedCategories.length === CUSTOMER_CATEGORIES.length) {
+                                    setSelectedCategories([]);
+                                } else {
+                                    setSelectedCategories(CUSTOMER_CATEGORIES.map(c => c.id));
+                                }
+                            }}
+                        >
+                            <div className="space-y-1 p-2">
+                                {CUSTOMER_CATEGORIES.map(cat => (
+                                    <label key={cat.id} className="flex items-center gap-2 cursor-pointer hover:bg-[#F3F4F6] p-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedCategories.includes(cat.id)}
+                                            onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setSelectedCategories([...selectedCategories, cat.id]);
+                                                } else {
+                                                    setSelectedCategories(selectedCategories.filter(id => id !== cat.id));
+                                                }
+                                            }}
+                                            className="w-4 h-4 text-[#2563EB] border-[#D1D5DB] focus:ring-[#2563EB]"
+                                        />
+                                        <span className="text-sm text-[#374151]" style={{ fontFamily: '"Roboto", sans-serif' }}>{cat.label}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </FilterDropdown>
+
+                        {/* Nhân viên phụ trách Dropdown */}
+                        <FilterDropdown
+                            label="Nhân viên phụ trách"
+                            selectedCount={selectedManagedBy.length}
+                            totalCount={uniqueManagedBy.length}
+                            onSelectAll={() => {
+                                if (selectedManagedBy.length === uniqueManagedBy.length) {
+                                    setSelectedManagedBy([]);
+                                } else {
+                                    setSelectedManagedBy([...uniqueManagedBy]);
+                                }
+                            }}
+                        >
+                            <div className="space-y-1 p-2">
+                                {uniqueManagedBy.map(managedBy => (
+                                    <label key={managedBy} className="flex items-center gap-2 cursor-pointer hover:bg-[#F3F4F6] p-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedManagedBy.includes(managedBy)}
+                                            onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setSelectedManagedBy([...selectedManagedBy, managedBy]);
+                                                } else {
+                                                    setSelectedManagedBy(selectedManagedBy.filter(m => m !== managedBy));
+                                                }
+                                            }}
+                                            className="w-4 h-4 text-[#2563EB] border-[#D1D5DB] focus:ring-[#2563EB]"
+                                        />
+                                        <span className="text-sm text-[#374151] truncate" style={{ fontFamily: '"Roboto", sans-serif' }} title={managedBy}>{managedBy}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </FilterDropdown>
+
+                        {/* KD chăm sóc Dropdown */}
+                        <FilterDropdown
+                            label="KD chăm sóc"
+                            selectedCount={selectedCareBy.length}
+                            totalCount={uniqueCareBy.length}
+                            onSelectAll={() => {
+                                if (selectedCareBy.length === uniqueCareBy.length) {
+                                    setSelectedCareBy([]);
+                                } else {
+                                    setSelectedCareBy([...uniqueCareBy]);
+                                }
+                            }}
+                        >
+                            <div className="space-y-1 p-2">
+                                {uniqueCareBy.map(careBy => (
+                                    <label key={careBy} className="flex items-center gap-2 cursor-pointer hover:bg-[#F3F4F6] p-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedCareBy.includes(careBy)}
+                                            onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setSelectedCareBy([...selectedCareBy, careBy]);
+                                                } else {
+                                                    setSelectedCareBy(selectedCareBy.filter(c => c !== careBy));
+                                                }
+                                            }}
+                                            className="w-4 h-4 text-[#2563EB] border-[#D1D5DB] focus:ring-[#2563EB]"
+                                        />
+                                        <span className="text-sm text-[#374151] truncate" style={{ fontFamily: '"Roboto", sans-serif' }} title={careBy}>{careBy}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </FilterDropdown>
+                    </div>
+
+                    {/* Main Content Card */}
+                    <div className="bg-white border border-[#E5E7EB] shadow-sm">
+                        {/* Table Section */}
+                        <div className="w-full overflow-x-auto">
+                            <table className="w-full border-collapse">
+                                <thead className="bg-[#F9FAFB]">
+                                    <tr>
+                                        {visibleTableColumns.map(col => (
+                                            <th key={col.key} className="px-4 py-3.5 text-xs font-semibold text-[#374151] text-left uppercase tracking-wider">
+                                                {col.label}
+                                            </th>
+                                        ))}
+                                        <th className="px-4 py-3.5 text-xs font-semibold text-[#374151] text-center uppercase tracking-wider">Thao tác</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-[#E5E7EB]">
+                                    {isLoading ? (
+                                        <tr>
+                                            <td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center">
+                                                <div className="flex flex-col items-center gap-4">
+                                                    <div className="w-8 h-8 border-4 border-[#2563EB] border-t-transparent rounded-full animate-spin"></div>
+                                                    <p className="text-[#6B7280] text-sm font-medium" style={{ fontFamily: '"Roboto", sans-serif' }}>Đang tải dữ liệu...</p>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ) : filteredCustomers.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center">
+                                                <div className="flex flex-col items-center gap-4">
+                                                    <Users className="w-12 h-12 text-[#D1D5DB]" />
+                                                    <p className="text-sm font-medium text-[#6B7280]" style={{ fontFamily: '"Roboto", sans-serif' }}>Không tìm thấy khách hàng nào</p>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ) : filteredCustomers.map((c) => (
+                                        <tr key={c.id} className="hover:bg-[#F9FAFB] transition-colors">
+                                            {isColumnVisible('code') && <td className="px-4 py-4 whitespace-nowrap">
+                                                <span className="text-sm font-medium text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>
+                                                    {c.code}
+                                                </span>
+                                            </td>}
+                                            {isColumnVisible('name') && <td className="px-4 py-4">
+                                                <span className="text-sm font-medium text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>{c.name}</span>
+                                            </td>}
+                                            {isColumnVisible('phone') && <td className="px-4 py-4 text-sm text-[#374151] font-normal" style={{ fontFamily: '"Roboto", sans-serif' }}>{c.phone || '—'}</td>}
+                                            {isColumnVisible('address') && <td className="px-4 py-4 text-sm text-[#374151] font-normal" style={{ fontFamily: '"Roboto", sans-serif' }}>{c.address || '—'}</td>}
+                                            {isColumnVisible('legal_rep') && <td className="px-4 py-4 text-sm text-[#374151] font-normal" style={{ fontFamily: '"Roboto", sans-serif' }}>{c.legal_rep || '—'}</td>}
+                                            {isColumnVisible('managed_by') && <td className="px-4 py-4 text-sm text-[#374151] font-normal" style={{ fontFamily: '"Roboto", sans-serif' }}>{c.managed_by || '—'}</td>}
+                                            {isColumnVisible('category') && <td className="px-4 py-4 text-sm text-[#374151] font-normal" style={{ fontFamily: '"Roboto", sans-serif' }}>{getLabel(CUSTOMER_CATEGORIES, c.category)}</td>}
+                                            {isColumnVisible('current_cylinders') && <td className="px-4 py-4">
+                                                <span className="text-sm font-semibold text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>{formatNumber(c.current_cylinders || 0)}</span>
+                                            </td>}
+                                            {isColumnVisible('current_machines') && <td className="px-4 py-4">
+                                                <span className="text-sm font-semibold text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>{formatNumber(c.current_machines || 0)}</span>
+                                            </td>}
+                                            {isColumnVisible('borrowed_cylinders') && <td className="px-4 py-4">
+                                                <span className="text-sm font-semibold text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>{formatNumber(c.borrowed_cylinders || 0)}</span>
+                                            </td>}
+                                            {isColumnVisible('machines_in_use') && <td className="px-4 py-4 text-sm text-[#374151] font-normal" style={{ fontFamily: '"Roboto", sans-serif' }}>{c.machines_in_use || '—'}</td>}
+                                            {isColumnVisible('care_by') && <td className="px-4 py-4 text-sm text-[#374151] font-normal" style={{ fontFamily: '"Roboto", sans-serif' }}>{c.care_by || '—'}</td>}
+                                            <td className="px-4 py-4 text-center">
+                                                <div className="flex items-center justify-center gap-3">
+                                                    <button
+                                                        onClick={() => handleViewCustomer(c)}
+                                                        className="text-[#9CA3AF] hover:text-[#2563EB] transition-colors p-1 hover:bg-[#EFF6FF]"
+                                                        title="Xem chi tiết"
+                                                    >
+                                                        <Eye className="w-4 h-4" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleEditCustomer(c)}
+                                                        className="text-[#9CA3AF] hover:text-[#2563EB] transition-colors p-1 hover:bg-[#EFF6FF]"
+                                                        title="Chỉnh sửa"
+                                                    >
+                                                        <Edit className="w-4 h-4" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeleteCustomer(c.id, c.name)}
+                                                        className="text-[#9CA3AF] hover:text-[#DC2626] transition-colors p-1 hover:bg-[#FEF2F2]"
+                                                        title="Xóa"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </>
+            ) : (
+                /* Statistics View */
+                <div className="space-y-6">
+                    {/* Summary Stats */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <div className="text-sm text-[#6B7280] mb-2" style={{ fontFamily: '"Roboto", sans-serif' }}>Tổng số khách hàng</div>
+                            <div className="text-2xl font-semibold text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>{filteredCustomersCount}</div>
+                        </div>
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <div className="text-sm text-[#6B7280] mb-2" style={{ fontFamily: '"Roboto", sans-serif' }}>Tổng bình</div>
+                            <div className="text-2xl font-semibold text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>{formatNumber(totalCylinders)}</div>
+                        </div>
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <div className="text-sm text-[#6B7280] mb-2" style={{ fontFamily: '"Roboto", sans-serif' }}>Tổng máy</div>
+                            <div className="text-2xl font-semibold text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>{formatNumber(totalMachines)}</div>
+                        </div>
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <div className="text-sm text-[#6B7280] mb-2" style={{ fontFamily: '"Roboto", sans-serif' }}>Tổng bình mượn</div>
+                            <div className="text-2xl font-semibold text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>{formatNumber(totalBorrowed)}</div>
+                        </div>
+                    </div>
+
+                    {/* Charts Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Category Chart */}
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <h3 className="text-lg font-semibold text-[#111827] mb-4" style={{ fontFamily: '"Roboto", sans-serif' }}>Phân bổ theo Loại khách</h3>
+                            <div style={{ height: '300px' }}>
+                                <PieChartJS
+                                    data={{
+                                        labels: getCategoryStats().map(item => item.name),
+                                        datasets: [{
+                                            data: getCategoryStats().map(item => item.value),
+                                            backgroundColor: chartColors.slice(0, getCategoryStats().length),
+                                            borderColor: '#fff',
+                                            borderWidth: 2
+                                        }]
+                                    }}
+                                    options={{
+                                        responsive: true,
+                                        maintainAspectRatio: false,
+                                        plugins: {
+                                            legend: {
+                                                position: 'bottom'
+                                            }
+                                        }
+                                    }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Managed By Chart */}
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <h3 className="text-lg font-semibold text-[#111827] mb-4" style={{ fontFamily: '"Roboto", sans-serif' }}>Top 10 Nhân viên phụ trách</h3>
+                            <div style={{ height: '300px' }}>
+                                <BarChartJS
+                                    data={{
+                                        labels: getManagedByStats().map(item => item.name.length > 20 ? item.name.substring(0, 20) + '...' : item.name),
+                                        datasets: [{
+                                            label: 'Số khách hàng',
+                                            data: getManagedByStats().map(item => item.value),
+                                            backgroundColor: chartColors[0],
+                                            borderColor: chartColors[0],
+                                            borderWidth: 1
+                                        }]
+                                    }}
+                                    options={{
+                                        responsive: true,
+                                        maintainAspectRatio: false,
+                                        indexAxis: 'y',
+                                        plugins: {
+                                            legend: {
+                                                display: false
+                                            }
+                                        },
+                                        scales: {
+                                            x: {
+                                                beginAtZero: true
+                                            }
+                                        }
+                                    }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Care By Chart */}
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <h3 className="text-lg font-semibold text-[#111827] mb-4" style={{ fontFamily: '"Roboto", sans-serif' }}>Top 10 KD chăm sóc</h3>
+                            <div style={{ height: '300px' }}>
+                                <BarChartJS
+                                    data={{
+                                        labels: getCareByStats().map(item => item.name.length > 20 ? item.name.substring(0, 20) + '...' : item.name),
+                                        datasets: [{
+                                            label: 'Số khách hàng',
+                                            data: getCareByStats().map(item => item.value),
+                                            backgroundColor: chartColors[1],
+                                            borderColor: chartColors[1],
+                                            borderWidth: 1
+                                        }]
+                                    }}
+                                    options={{
+                                        responsive: true,
+                                        maintainAspectRatio: false,
+                                        indexAxis: 'y',
+                                        plugins: {
+                                            legend: {
+                                                display: false
+                                            }
+                                        },
+                                        scales: {
+                                            x: {
+                                                beginAtZero: true
+                                            }
+                                        }
+                                    }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Cylinders Stats Chart */}
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <h3 className="text-lg font-semibold text-[#111827] mb-4" style={{ fontFamily: '"Roboto", sans-serif' }}>Phân bổ Bình</h3>
+                            <div style={{ height: '300px' }}>
+                                <PieChartJS
+                                    data={{
+                                        labels: getCylindersStats().map(item => item.name),
+                                        datasets: [{
+                                            data: getCylindersStats().map(item => item.value),
+                                            backgroundColor: chartColors.slice(0, getCylindersStats().length),
+                                            borderColor: '#fff',
+                                            borderWidth: 2
+                                        }]
+                                    }}
+                                    options={{
+                                        responsive: true,
+                                        maintainAspectRatio: false,
+                                        plugins: {
+                                            legend: {
+                                                position: 'bottom'
+                                            }
+                                        }
+                                    }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Machines Stats Chart */}
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <h3 className="text-lg font-semibold text-[#111827] mb-4" style={{ fontFamily: '"Roboto", sans-serif' }}>Phân bổ Máy</h3>
+                            <div style={{ height: '300px' }}>
+                                <PieChartJS
+                                    data={{
+                                        labels: getMachinesStats().map(item => item.name),
+                                        datasets: [{
+                                            data: getMachinesStats().map(item => item.value),
+                                            backgroundColor: chartColors.slice(0, getMachinesStats().length),
+                                            borderColor: '#fff',
+                                            borderWidth: 2
+                                        }]
+                                    }}
+                                    options={{
+                                        responsive: true,
+                                        maintainAspectRatio: false,
+                                        plugins: {
+                                            legend: {
+                                                position: 'bottom'
+                                            }
+                                        }
+                                    }}
+                                />
+                            </div>
+                        </div>
                     </div>
                 </div>
+            )}
 
-                {/* Table Section */}
-                <div className="w-full overflow-x-auto custom-scrollbar">
-                    <table className="w-full border-collapse min-w-[2000px]">
-                        <thead className="glass-header">
-                            <tr>
-                                {visibleTableColumns.map(col => (
-                                    <th key={col.key} className="px-8 py-6 text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] text-left whitespace-nowrap">
-                                        {col.label}
-                                    </th>
-                                ))}
-                                <th className="px-8 py-6 text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] text-center sticky right-0 z-10 bg-slate-50/80 backdrop-blur-md border-l border-slate-50 shadow-sm">Thao tác</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-50/50">
-                            {isLoading ? (
-                                <tr>
-                                    <td colSpan={visibleTableColumns.length + 1} className="px-8 py-28 text-center">
-                                        <div className="flex flex-col items-center gap-6">
-                                            <div className="w-14 h-14 border-4 border-blue-50 border-t-blue-600 rounded-full animate-spin"></div>
-                                            <p className="text-slate-400 font-black animate-pulse tracking-[0.2em] text-[10px] uppercase">Đang tải hồ sơ khách hàng...</p>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ) : filteredCustomers.length === 0 ? (
-                                <tr>
-                                    <td colSpan={visibleTableColumns.length + 1} className="px-8 py-32 text-center">
-                                        <div className="flex flex-col items-center gap-8 text-slate-400">
-                                            <div className="w-24 h-24 bg-slate-50 rounded-[2.5rem] flex items-center justify-center">
-                                                <Users className="w-12 h-12 text-slate-200" />
-                                            </div>
-                                            <p className="font-black tracking-tight text-xl text-slate-800">
-                                                {searchTerm ? `Không tìm thấy kết quả cho "${searchTerm}"` : 'Chưa có dữ liệu khách hàng'}
-                                            </p>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ) : filteredCustomers.map((c) => (
-                                <tr key={c.id} className="group hover:bg-blue-50/20 transition-all duration-300">
-                                    {isColumnVisible('code') && <td className="px-8 py-7 whitespace-nowrap">
-                                        <span className="font-black text-blue-600 bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100 uppercase tracking-widest text-[11px] group-hover:bg-white group-hover:shadow-sm transition-all">
-                                            {c.code}
-                                        </span>
-                                    </td>}
-                                    {isColumnVisible('name') && <td className="px-8 py-7 whitespace-nowrap font-black text-slate-900 text-base group-hover:text-blue-600 transition-colors">
-                                        {c.name}
-                                    </td>}
-                                    {isColumnVisible('phone') && <td className="px-8 py-7 font-black text-slate-900 whitespace-nowrap">
-                                        {c.phone ? (
-                                            <span className="bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100 group-hover:bg-white transition-all">{c.phone}</span>
-                                        ) : '-'}
-                                    </td>}
-                                    {isColumnVisible('address') && <td className="px-8 py-7 min-w-[250px] text-sm font-bold text-slate-900 leading-relaxed">
-                                        {c.address || '-'}
-                                    </td>}
-                                    {isColumnVisible('legal_rep') && <td className="px-8 py-7 whitespace-nowrap text-slate-900 font-bold">
-                                        {c.legal_rep || '-'}
-                                    </td>}
-                                    {isColumnVisible('managed_by') && <td className="px-8 py-7 whitespace-nowrap text-slate-900 font-black text-xs uppercase tracking-tight">
-                                        {c.managed_by || '-'}
-                                    </td>}
-                                    {isColumnVisible('category') && <td className="px-8 py-7 whitespace-nowrap">
-                                        <span className="inline-flex items-center px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-slate-100 text-slate-500 border border-slate-200 group-hover:bg-white transition-all">
-                                            {getLabel(CUSTOMER_CATEGORIES, c.category)}
-                                        </span>
-                                    </td>}
-                                    {isColumnVisible('current_cylinders') && <td className="px-8 py-7 whitespace-nowrap text-center font-black text-cyan-600 text-lg">
-                                        {c.current_cylinders || 0}
-                                    </td>}
-                                    {isColumnVisible('current_machines') && <td className="px-8 py-7 whitespace-nowrap text-center font-black text-indigo-600 text-lg">
-                                        {c.current_machines || 0}
-                                    </td>}
-                                    {isColumnVisible('borrowed_cylinders') && <td className="px-8 py-7 whitespace-nowrap text-center font-black text-rose-500 text-lg">
-                                        {c.borrowed_cylinders || 0}
-                                    </td>}
-                                    {isColumnVisible('machines_in_use') && <td className="px-8 py-7 min-w-[180px] text-slate-900 font-bold text-sm">
-                                        {c.machines_in_use || '-'}
-                                    </td>}
-                                    {isColumnVisible('care_by') && <td className="px-8 py-7 whitespace-nowrap text-slate-900 font-black text-xs">
-                                        {c.care_by || '-'}
-                                    </td>}
-                                    <td className="px-8 py-7 text-center whitespace-nowrap sticky right-0 z-10 bg-white/80 backdrop-blur-md border-l border-slate-50 group-hover:bg-blue-50/40 transition-all">
-                                        <div className="flex items-center justify-center gap-5">
-                                            <button
-                                                onClick={() => handleViewCustomer(c)}
-                                                className="text-slate-400 hover:text-blue-600 transition-all outline-none"
-                                                title="Xem chi tiết & Công nợ"
-                                            >
-                                                <Eye className="w-5 h-5" />
-                                            </button>
-                                            <button
-                                                onClick={() => handleEditCustomer(c)}
-                                                className="text-slate-400 hover:text-slate-900 transition-all outline-none"
-                                                title="Chỉnh sửa"
-                                            >
-                                                <Edit className="w-5 h-5" />
-                                            </button>
-                                            <button
-                                                onClick={() => handleDeleteCustomer(c.id, c.name)}
-                                                className="text-slate-400 hover:text-slate-900 transition-all outline-none"
-                                                title="Xóa"
-                                            >
-                                                <Trash2 className="w-5 h-5" />
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-
-                {/* Total Count Footbar */}
-                <div className="p-8 bg-slate-50/30 flex items-center justify-between border-t border-slate-50">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
-                        Đang hiển thị <span className="text-blue-600 mx-2 text-lg">{filteredCustomers.length}</span> hồ sơ khách hàng
-                    </p>
-                </div>
-            </div>
+            {/* Modals */}
 
             {/* Modals */}
             {isFormModalOpen && (

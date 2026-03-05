@@ -1,4 +1,5 @@
 import { Home as HomeIcon, Layout, LogOut } from "lucide-react";
+import { useState } from 'react';
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 export default function Header() {
@@ -6,6 +7,9 @@ export default function Header() {
     const location = useLocation();
     const isAuthenticated = true;
     const username = "Lê Minh Công";
+    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+    const isActive = (path) => location.pathname === path;
 
     const handleLogout = () => {
         navigate("/trang-chu");

@@ -243,15 +243,21 @@ h6,
   /* Suppress browser header/footer (URL, Title, Date, Page Numbers) */
   @page {
     size: auto;
-    margin: 0mm;
+    margin: 0;
   }
 
-  /* Hide everything within the root container except the specific print template */
-  body>*:not(.print-only-content) {
-    display: none !important;
+  /* Hide EVERYTHING inside body first */
+  body * {
+    visibility: hidden !important;
   }
 
-  /* Force the print content to be visible */
+  /* Then make .print-only-content and all its children visible */
+  .print-only-content,
+  .print-only-content * {
+    visibility: visible !important;
+  }
+
+  /* Position print content to fill the page */
   .print-only-content {
     display: block !important;
     position: absolute !important;
@@ -263,6 +269,50 @@ h6,
     background: white !important;
   }
 
+  /* Reset ALL global style overrides inside print template */
+  .print-only-content th,
+  .print-only-content td {
+    font-size: inherit !important;
+    font-weight: inherit !important;
+    color: black !important;
+    white-space: normal !important;
+    text-transform: none !important;
+  }
+
+  .print-only-content td span,
+  .print-only-content td div,
+  .print-only-content td p,
+  .print-only-content td a {
+    font-size: inherit !important;
+    font-weight: inherit !important;
+    white-space: normal !important;
+  }
+
+  .print-only-content h1,
+  .print-only-content h2,
+  .print-only-content h3,
+  .print-only-content p,
+  .print-only-content span,
+  .print-only-content div,
+  .print-only-content label {
+    font-weight: inherit !important;
+    color: black !important;
+    opacity: 1 !important;
+    letter-spacing: normal !important;
+  }
+
+  .print-only-content .font-bold {
+    font-weight: 700 !important;
+  }
+
+  .print-only-content .italic {
+    font-style: italic !important;
+  }
+
+  .print-only-content button {
+    display: none !important;
+  }
+
   /* Individual order page styling */
   .order-print-page {
     visibility: visible !important;
@@ -270,7 +320,6 @@ h6,
     width: 100% !important;
     padding: 15mm !important;
     box-sizing: border-box !important;
-    page-break-after: always;
   }
 
   /* Specialized page break */

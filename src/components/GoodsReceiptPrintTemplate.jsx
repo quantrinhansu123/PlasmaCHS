@@ -1,8 +1,5 @@
 import React from 'react';
-import {
-    PRODUCT_TYPES,
-    WAREHOUSES
-} from '../constants/orderConstants';
+import { WAREHOUSES } from '../constants/orderConstants';
 
 const numberToVietnameseWords = (num) => {
     if (!num || num === 0) return 'Không';
@@ -55,16 +52,18 @@ const formatNumber = (val) => {
     return parts.join(',');
 };
 
-// All styles use inline CSS to bypass global !important overrides in index.css
+const getWarehouseLabel = (id) => WAREHOUSES.find(w => w.id === id)?.label || id;
+
+// Inline styles to bypass global !important overrides
 const S = {
     page: {
         fontFamily: '"Times New Roman", Times, serif',
-        fontSize: '13pt',
+        fontSize: '10pt',
         lineHeight: '1.4',
         color: '#000',
         background: '#fff',
         width: '100%',
-        padding: '15mm 20mm 15mm 25mm',
+        padding: '15mm 15mm 15mm 20mm',
         boxSizing: 'border-box',
     },
     header: {
@@ -73,11 +72,11 @@ const S = {
         marginBottom: '5mm',
     },
     headerLeft: {
-        flex: '0 0 58%',
+        flex: '0 0 56%',
         fontSize: '11pt',
     },
     headerRight: {
-        flex: '0 0 40%',
+        flex: '0 0 42%',
         textAlign: 'center',
         fontSize: '10pt',
     },
@@ -127,7 +126,7 @@ const S = {
     },
     debitCredit: {
         textAlign: 'right',
-        fontSize: '13pt',
+        fontSize: '10pt',
         minWidth: '100px',
     },
     infoSection: {
@@ -137,7 +136,7 @@ const S = {
         display: 'flex',
         alignItems: 'baseline',
         marginBottom: '2mm',
-        fontSize: '13pt',
+        fontSize: '10pt',
     },
     infoLabel: {
         whiteSpace: 'nowrap',
@@ -147,16 +146,25 @@ const S = {
         flex: '1',
         borderBottom: '1px dotted #000',
         fontFamily: '"Times New Roman", Times, serif',
-        fontSize: '13pt',
+        fontSize: '10pt',
         padding: '0 4px',
-        minHeight: '20px',
+        minHeight: '18px',
         fontWeight: 'normal',
+    },
+    infoFixedValue: {
+        borderBottom: '1px dotted #000',
+        fontFamily: '"Times New Roman", Times, serif',
+        fontSize: '10pt',
+        padding: '0 4px',
+        minHeight: '18px',
+        fontWeight: 'normal',
+        textAlign: 'center',
     },
     infoRowSplit: {
         display: 'flex',
         alignItems: 'baseline',
         marginBottom: '2mm',
-        fontSize: '13pt',
+        fontSize: '10pt',
     },
     splitHalf: {
         flex: '1',
@@ -233,11 +241,11 @@ const S = {
     },
     summarySection: {
         margin: '3mm 0',
-        fontSize: '13pt',
+        fontSize: '10pt',
     },
     dateFooter: {
         textAlign: 'right',
-        fontSize: '13pt',
+        fontSize: '10pt',
         margin: '3mm 0 2mm',
         fontStyle: 'italic',
         fontWeight: 'normal',
@@ -247,19 +255,18 @@ const S = {
         justifyContent: 'space-between',
         textAlign: 'center',
         marginTop: '5mm',
-        fontSize: '12pt',
+        fontSize: '10pt',
     },
     sigBlock: {
-        width: '18%',
+        width: '23%',
     },
     sigTitle: {
         fontWeight: 'bold',
-        fontSize: '13pt',
-        marginBottom: '2px',
+        fontSize: '10pt',
     },
     sigSubtitle: {
         fontStyle: 'italic',
-        fontSize: '12pt',
+        fontSize: '10pt',
         fontWeight: 'normal',
     },
     sigSpace: {
@@ -274,56 +281,35 @@ const S = {
     },
 };
 
-const OrderItem = ({ order }) => {
-    if (!order) return null;
+const ReceiptItem = ({ receipt, items }) => {
+    if (!receipt) return null;
 
-    const getProductLabel = (id) => PRODUCT_TYPES.find(p => p.id === id)?.label || id;
-    const getWarehouseLabel = (id) => WAREHOUSES.find(w => w.id === id)?.label || id;
-
-    const serials = order.assigned_cylinders?.filter(Boolean) || [];
-    const productLabel = getProductLabel(order.product_type);
-    const isBinh = order.product_type?.startsWith('BINH');
-    const today = new Date(order.created_at || Date.now());
+    const today = receipt.receipt_date ? new Date(receipt.receipt_date) : new Date(receipt.created_at || Date.now());
     const day = String(today.getDate()).padStart(2, '0');
     const month = String(today.getMonth() + 1).padStart(2, '0');
     const year = today.getFullYear();
 
-    // Build table rows
-    const rows = [];
-    if (isBinh && serials.length > 0) {
-        serials.forEach((serial, idx) => {
-            rows.push({
-                stt: idx + 1,
-                name: productLabel,
-                code: serial,
-                unit: 'Bình',
-                qtyReq: 1,
-                qtyAct: 1,
-                price: order.unit_price || 0,
-                total: (order.unit_price || 0) * 1,
-            });
-        });
-    } else {
-        rows.push({
-            stt: 1,
-            name: productLabel,
-            code: order.department || '',
-            unit: isBinh ? 'Bình' : 'Máy',
-            qtyReq: order.quantity || 0,
-            qtyAct: order.quantity || 0,
-            price: order.unit_price || 0,
-            total: (order.quantity || 0) * (order.unit_price || 0),
-        });
-    }
+    const warehouseLabel = getWarehouseLabel(receipt.warehouse_id);
+
+    // Build table rows from items
+    const rows = items.map((item, idx) => ({
+        stt: idx + 1,
+        name: item.item_name || '',
+        code: item.serial_number || item.item_type || '',
+        unit: item.unit || (item.item_name?.toLowerCase().includes('bình') ? 'Bình' : 'Cái'),
+        qtyReq: item.quantity || 0,
+        qtyAct: item.quantity || 0,
+        price: item.unit_price || '',
+        total: item.unit_price && item.quantity ? item.unit_price * item.quantity : '',
+    }));
 
     // Pad to minimum 5 rows
     while (rows.length < 5) {
         rows.push({ stt: '', name: '', code: '', unit: '', qtyReq: '', qtyAct: '', price: '', total: '' });
     }
 
-    const totalQty = isBinh && serials.length > 0 ? serials.length : (order.quantity || 0);
-    const totalAmount = order.total_amount || totalQty * (order.unit_price || 0);
-    const warehouseLabel = getWarehouseLabel(order.warehouse);
+    const totalQty = items.reduce((sum, i) => sum + (i.quantity || 0), 0);
+    const totalAmount = receipt.total_amount || items.reduce((sum, i) => sum + ((i.unit_price || 0) * (i.quantity || 0)), 0);
 
     return (
         <div className="order-print-page" style={S.page}>
@@ -337,7 +323,7 @@ const OrderItem = ({ order }) => {
                     <div style={S.companyInfo}>Tel: 0981878423</div>
                 </div>
                 <div style={S.headerRight}>
-                    <div style={S.formNumber}>Mẫu số: 02 - VT</div>
+                    <div style={S.formNumber}>Mẫu số: 01 - VT</div>
                     <div style={S.formLegal}>
                         (Ban hành theo Thông tư số 133/2016/TT-BTC<br />
                         ngày 26/08/2016 của Bộ Tài chính)
@@ -347,7 +333,7 @@ const OrderItem = ({ order }) => {
 
             {/* ===== TITLE ===== */}
             <div style={S.titleSection}>
-                <div style={S.titleH1}>PHIẾU XUẤT KHO</div>
+                <div style={S.titleH1}>PHIẾU NHẬP KHO</div>
                 <div style={S.dateLine}>
                     Ngày {day} tháng {month} năm {year}
                 </div>
@@ -355,7 +341,7 @@ const OrderItem = ({ order }) => {
 
             <div style={S.titleRow}>
                 <div style={S.titleCenter}>
-                    Số: <span style={{ fontWeight: 'bold' }}>{order.order_code}</span>
+                    Số: <span style={{ fontWeight: 'bold' }}>{receipt.receipt_code}</span>
                 </div>
                 <div style={S.debitCredit}>
                     <div style={{ marginBottom: '2px' }}>Nợ: <span style={S.dots}>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></div>
@@ -366,35 +352,26 @@ const OrderItem = ({ order }) => {
             {/* ===== INFO FIELDS ===== */}
             <div style={S.infoSection}>
                 <div style={S.infoRow}>
-                    <span style={S.infoLabel}>- Họ và tên cơ sở phụ trách:</span>
-                    <span style={S.infoValue}>{order.customer_name || ''}</span>
+                    <span style={S.infoLabel}>- Họ và tên người giao:</span>
+                    <span style={S.infoValue}>{receipt.supplier_name || ''}</span>
                 </div>
                 <div style={S.infoRow}>
-                    <span style={S.infoLabel}>- Nhân viên KD:</span>
-                    <span style={S.infoValue}>{order.sales_person || ''}</span>
-                </div>
-                <div style={S.infoRow}>
-                    <span style={S.infoLabel}>- Họ và tên người nhận hàng:</span>
-                    <span style={S.infoValue}>{order.recipient_name || ''}</span>
-                </div>
-                <div style={S.infoRow}>
-                    <span style={S.infoLabel}>- Địa chỉ (bộ phận):</span>
-                    <span style={S.infoValue}>{order.recipient_address || ''}</span>
-                </div>
-                <div style={S.infoRow}>
-                    <span style={S.infoLabel}>- Số điện thoại:</span>
-                    <span style={S.infoValue}>{order.recipient_phone || ''}</span>
-                </div>
-                <div style={S.infoRow}>
-                    <span style={S.infoLabel}>- Lý do xuất kho:</span>
-                    <span style={S.infoValue}>
-                        Xuất {String(totalQty).padStart(2, '0')} {productLabel}
-                        {order.department ? ` - ${order.department}` : ''}
-                    </span>
+                    <span style={S.infoLabel}>- Theo</span>
+                    <span style={{ ...S.infoFixedValue, width: '80px', flex: '0 0 80px' }}></span>
+                    <span style={S.infoLabel}>&nbsp;số</span>
+                    <span style={{ ...S.infoFixedValue, width: '80px', flex: '0 0 80px' }}>{receipt.receipt_code}</span>
+                    <span style={S.infoLabel}>&nbsp;ngày</span>
+                    <span style={{ ...S.infoFixedValue, width: '40px', flex: '0 0 40px' }}>{day}</span>
+                    <span style={S.infoLabel}>&nbsp;tháng</span>
+                    <span style={{ ...S.infoFixedValue, width: '40px', flex: '0 0 40px' }}>{month}</span>
+                    <span style={S.infoLabel}>&nbsp;năm</span>
+                    <span style={{ ...S.infoFixedValue, width: '50px', flex: '0 0 50px' }}>{year}</span>
+                    <span style={S.infoLabel}>&nbsp;của</span>
+                    <span style={S.infoValue}>{receipt.supplier_name || ''}</span>
                 </div>
                 <div style={S.infoRowSplit}>
                     <div style={S.splitHalf}>
-                        <span style={S.infoLabel}>- Xuất tại kho (ngăn lô):</span>
+                        <span style={S.infoLabel}>- Nhập tại kho:</span>
                         <span style={S.infoValue}>{warehouseLabel || ''}</span>
                     </div>
                     <div style={S.splitHalf}>
@@ -408,19 +385,19 @@ const OrderItem = ({ order }) => {
             <table style={S.table}>
                 <thead>
                     <tr>
-                        <th style={{ ...S.th, width: '6%' }} rowSpan={2}>STT</th>
+                        <th style={{ ...S.th, width: '5%' }} rowSpan={2}>STT</th>
                         <th style={{ ...S.th, width: '28%' }} rowSpan={2}>
                             Tên, nhãn hiệu, quy cách,<br />phẩm chất vật tư, dụng cụ<br />sản phẩm, hàng hóa
                         </th>
                         <th style={{ ...S.th, width: '8%' }} rowSpan={2}>Mã số</th>
-                        <th style={{ ...S.th, width: '8%' }} rowSpan={2}>Đơn vị<br />tính</th>
+                        <th style={{ ...S.th, width: '7%' }} rowSpan={2}>Đơn vị<br />tính</th>
                         <th style={{ ...S.th }} colSpan={2}>Số lượng</th>
                         <th style={{ ...S.th, width: '14%' }} rowSpan={2}>Đơn giá</th>
-                        <th style={{ ...S.th, width: '16%' }} rowSpan={2}>Thành tiền</th>
+                        <th style={{ ...S.th, width: '18%' }} rowSpan={2}>Thành tiền</th>
                     </tr>
                     <tr>
                         <th style={{ ...S.th, width: '10%' }}>Yêu cầu</th>
-                        <th style={{ ...S.th, width: '10%' }}>Thực xuất</th>
+                        <th style={{ ...S.th, width: '10%' }}>Thực nhập</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -467,7 +444,7 @@ const OrderItem = ({ order }) => {
                 Ngày {day} tháng {month} năm {year}
             </div>
 
-            {/* ===== SIGNATURES ===== */}
+            {/* ===== SIGNATURES (4 blocks) ===== */}
             <div style={S.signatureSection}>
                 <div style={S.sigBlock}>
                     <div style={S.sigTitle}>Người lập biểu</div>
@@ -475,7 +452,7 @@ const OrderItem = ({ order }) => {
                     <div style={S.sigSpace}></div>
                 </div>
                 <div style={S.sigBlock}>
-                    <div style={S.sigTitle}>Người nhận hàng</div>
+                    <div style={S.sigTitle}>Người giao hàng</div>
                     <div style={S.sigSubtitle}>(Ký, họ tên)</div>
                     <div style={S.sigSpace}></div>
                 </div>
@@ -489,30 +466,26 @@ const OrderItem = ({ order }) => {
                     <div style={S.sigSubtitle}>(Ký, họ tên)</div>
                     <div style={S.sigSpace}></div>
                 </div>
-                <div style={S.sigBlock}>
-                    <div style={S.sigTitle}>Giám đốc</div>
-                    <div style={S.sigSubtitle}>(Ký, họ tên, đóng dấu)</div>
-                    <div style={S.sigSpace}></div>
-                </div>
             </div>
         </div>
     );
 };
 
-const OrderPrintTemplate = ({ orders }) => {
-    if (!orders) return null;
-    const orderList = Array.isArray(orders) ? orders : [orders];
+const GoodsReceiptPrintTemplate = ({ receipt, items }) => {
+    if (!receipt) return null;
+    const receiptList = Array.isArray(receipt) ? receipt : [receipt];
+    const itemsList = Array.isArray(items) ? items : [];
 
     return (
         <div className="bulk-print-container">
-            {orderList.map((order, index) => (
-                <React.Fragment key={order.id || index}>
-                    <OrderItem order={order} />
-                    {index < orderList.length - 1 && <div className="page-break" />}
+            {receiptList.map((r, index) => (
+                <React.Fragment key={r.id || index}>
+                    <ReceiptItem receipt={r} items={itemsList} />
+                    {index < receiptList.length - 1 && <div className="page-break" />}
                 </React.Fragment>
             ))}
         </div>
     );
 };
 
-export default OrderPrintTemplate;
+export default GoodsReceiptPrintTemplate;

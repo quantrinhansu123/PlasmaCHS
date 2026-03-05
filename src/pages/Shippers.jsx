@@ -1,10 +1,25 @@
 import {
+    Chart as ChartJS,
+    CategoryScale,
+    LinearScale,
+    BarElement,
+    ArcElement,
+    PointElement,
+    LineElement,
+    Title,
+    Tooltip as ChartTooltip,
+    Legend as ChartLegend
+} from 'chart.js';
+import { Bar as BarChartJS, Pie as PieChartJS, Line as LineChartJS } from 'react-chartjs-2';
+import {
     ActivitySquare,
     CheckCircle2,
     ChevronDown,
     Edit,
     Eye,
+    Filter,
     Package,
+    Plus,
     Search,
     Trash2,
     Truck,
@@ -15,9 +30,22 @@ import { useNavigate } from 'react-router-dom';
 import ColumnToggle from '../components/ColumnToggle';
 import ShipperDetailsModal from '../components/Shippers/ShipperDetailsModal';
 import ShipperFormModal from '../components/Shippers/ShipperFormModal';
-import { SHIPPING_TYPES } from '../constants/shipperConstants';
+import { SHIPPING_TYPES, SHIPPER_STATUSES } from '../constants/shipperConstants';
 import useColumnVisibility from '../hooks/useColumnVisibility';
 import { supabase } from '../supabase/config';
+
+// Register Chart.js components
+ChartJS.register(
+    CategoryScale,
+    LinearScale,
+    BarElement,
+    ArcElement,
+    PointElement,
+    LineElement,
+    Title,
+    ChartTooltip,
+    ChartLegend
+);
 
 const TABLE_COLUMNS = [
     { key: 'name', label: 'Đơn vị vận chuyển' },
@@ -30,8 +58,8 @@ const TABLE_COLUMNS = [
 
 const Shippers = () => {
     const navigate = useNavigate();
+    const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
     const [searchTerm, setSearchTerm] = useState('');
-    const [statusFilter, setStatusFilter] = useState('all');
     const [shippers, setShippers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
@@ -39,24 +67,31 @@ const Shippers = () => {
     const [selectedShipper, setSelectedShipper] = useState(null);
     const { visibleColumns, toggleColumn, isColumnVisible, resetColumns, visibleCount, totalCount } = useColumnVisibility('columns_shippers', TABLE_COLUMNS);
     const visibleTableColumns = TABLE_COLUMNS.filter(col => isColumnVisible(col.key));
+    
+    // Filter states
+    const [selectedStatuses, setSelectedStatuses] = useState([]);
+    const [selectedTypes, setSelectedTypes] = useState([]);
+    const [selectedManagers, setSelectedManagers] = useState([]);
+    const [uniqueManagers, setUniqueManagers] = useState([]);
 
     useEffect(() => {
         fetchShippers();
-    }, [statusFilter]);
+    }, []);
+
+    useEffect(() => {
+        // Extract unique managers for filters
+        const managers = [...new Set(shippers.map(s => s.manager_name).filter(Boolean))];
+        setUniqueManagers(managers);
+    }, [shippers]);
 
     const fetchShippers = async () => {
         setLoading(true);
         try {
-            let query = supabase
+            const { data, error } = await supabase
                 .from('shippers')
                 .select('*')
                 .order('created_at', { ascending: false });
 
-            if (statusFilter !== 'all') {
-                query = query.eq('status', statusFilter);
-            }
-
-            const { data, error } = await query;
             if (error) throw error;
             setShippers(data || []);
         } catch (error) {
@@ -106,6 +141,94 @@ const Shippers = () => {
         setIsFormModalOpen(false);
     };
 
+    // Filter Dropdown Component
+    const FilterDropdown = ({ label, selectedCount, totalCount, onSelectAll, children }) => {
+        const [isOpen, setIsOpen] = useState(false);
+
+        return (
+            <div className="relative">
+                <button
+                    onClick={() => setIsOpen(!isOpen)}
+                    className="flex items-center gap-2 px-4 py-2.5 border border-[#D1D5DB] bg-white text-sm font-medium text-[#374151] hover:bg-[#F9FAFB] transition-all"
+                    style={{ fontFamily: '"Roboto", sans-serif' }}
+                >
+                    <Filter className="w-4 h-4" />
+                    <span>{label}</span>
+                    {selectedCount > 0 && (
+                        <span className="px-2 py-0.5 bg-[#2563EB] text-white text-xs rounded-full">
+                            {selectedCount}
+                        </span>
+                    )}
+                    <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {isOpen && (
+                    <>
+                        <div 
+                            className="fixed inset-0 z-10" 
+                            onClick={() => setIsOpen(false)}
+                        ></div>
+                        <div className="absolute top-full left-0 mt-1 bg-white border border-[#E5E7EB] shadow-lg z-20 min-w-[250px] max-h-80">
+                            <div className="p-3 border-b border-[#E5E7EB] flex items-center justify-between bg-[#F9FAFB]">
+                                <span className="text-sm font-medium text-[#374151]" style={{ fontFamily: '"Roboto", sans-serif' }}>
+                                    {selectedCount > 0 ? `Đã chọn ${selectedCount}/${totalCount}` : `Chọn ${label.toLowerCase()}`}
+                                </span>
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        onSelectAll();
+                                    }}
+                                    className="text-xs text-[#2563EB] hover:text-[#1D4ED8] font-medium"
+                                    style={{ fontFamily: '"Roboto", sans-serif' }}
+                                >
+                                    {selectedCount === totalCount ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
+                                </button>
+                            </div>
+                            <div className="overflow-y-auto max-h-64">
+                                {children}
+                            </div>
+                        </div>
+                    </>
+                )}
+            </div>
+        );
+    };
+
+    // Calculate statistics data for charts
+    const getStatusStats = () => {
+        const stats = {};
+        filteredShippers.forEach(shipper => {
+            stats[shipper.status] = (stats[shipper.status] || 0) + 1;
+        });
+        return Object.entries(stats).map(([name, value]) => ({ name, value }));
+    };
+
+    const getTypeStats = () => {
+        const stats = {};
+        filteredShippers.forEach(shipper => {
+            const typeLabel = getLabel(SHIPPING_TYPES, shipper.shipping_type);
+            stats[typeLabel] = (stats[typeLabel] || 0) + 1;
+        });
+        return Object.entries(stats).map(([name, value]) => ({ name, value }));
+    };
+
+    const getManagerStats = () => {
+        const stats = {};
+        filteredShippers.forEach(shipper => {
+            const manager = shipper.manager_name || 'Không xác định';
+            stats[manager] = (stats[manager] || 0) + 1;
+        });
+        return Object.entries(stats)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value)
+            .slice(0, 10);
+    };
+
+    // Chart colors
+    const chartColors = [
+        '#2563EB', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
+        '#06B6D4', '#F97316', '#84CC16', '#EC4899', '#6366F1'
+    ];
+
     const getStatusStyle = (status) => {
         switch (status) {
             case 'Đang hoạt động':
@@ -132,11 +255,43 @@ const Shippers = () => {
         }
     };
 
-    const filteredShippers = shippers.filter(shipper =>
-        shipper.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        shipper.manager_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        shipper.phone.includes(searchTerm)
-    );
+    const formatNumber = (num) => {
+        if (!num) return '0';
+        return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    };
+
+    const getLabel = (list, id) => {
+        return list.find(item => item.id === id)?.label || id;
+    };
+
+    const filteredShippers = shippers.filter(shipper => {
+        const search = searchTerm.toLowerCase();
+        const matchesSearch = (
+            shipper.name?.toLowerCase().includes(search) ||
+            shipper.manager_name?.toLowerCase().includes(search) ||
+            shipper.phone?.includes(search) ||
+            shipper.address?.toLowerCase().includes(search)
+        );
+
+        // Filter by status
+        const matchesStatus = selectedStatuses.length === 0 || 
+            selectedStatuses.includes(shipper.status);
+        
+        // Filter by type
+        const matchesType = selectedTypes.length === 0 || 
+            selectedTypes.includes(shipper.shipping_type);
+        
+        // Filter by manager
+        const matchesManager = selectedManagers.length === 0 || 
+            selectedManagers.includes(shipper.manager_name);
+
+        return matchesSearch && matchesStatus && matchesType && matchesManager;
+    });
+
+    // Calculate totals
+    const filteredShippersCount = filteredShippers.length;
+    const activeCount = filteredShippers.filter(s => s.status === 'Đang hoạt động').length;
+    const suspendedCount = filteredShippers.filter(s => s.status === 'Tạm ngưng').length;
 
     const getInitials = (name) => {
         if (!name) return '??';
@@ -146,173 +301,410 @@ const Shippers = () => {
     };
 
     return (
-        <div className="p-4 md:p-8 max-w-[1600px] mx-auto font-sans bg-[#F8FAFC] min-h-screen noise-bg">
-            {/* Decorative Background Blobs */}
-            <div className="blob blob-indigo w-[500px] h-[500px] -top-20 -left-20 opacity-20"></div>
-            <div className="blob blob-violet w-[400px] h-[400px] top-1/2 -right-20 opacity-10"></div>
-            <div className="blob blob-amber w-[300px] h-[300px] bottom-10 left-1/3 opacity-10"></div>
-
-            {/* Header Section */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
-                <div className="hover-lift">
-                    <h1 className="text-4xl font-black text-slate-800 flex items-center gap-4 tracking-tight">
-                        <div className="w-14 h-14 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-200 transition-transform hover:rotate-3 duration-300">
-                            <Truck className="w-8 h-8" />
-                        </div>
-                        Đơn vị vận chuyển
-                    </h1>
-                    <p className="text-slate-500 mt-2 font-bold uppercase tracking-widest text-[10px]">Quản lý đơn vị vận chuyển nội bộ và thuê ngoài</p>
-                </div>
-
-
+        <div className="p-6 bg-[#F8F9FA] min-h-screen" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
+            {/* Navigation Tabs */}
+            <div className="flex items-center gap-1 mb-8 border-b border-[#E5E7EB]">
+                <button
+                    onClick={() => setActiveView('list')}
+                    className={`px-6 py-3 text-sm font-semibold tracking-wide transition-colors ${
+                        activeView === 'list' 
+                            ? 'text-[#2563EB] border-b-2 border-[#2563EB]' 
+                            : 'text-[#6B7280] hover:text-[#374151]'
+                    }`}
+                    style={activeView === 'list' ? { color: '#2563EB', borderBottomColor: '#2563EB' } : { color: '#6B7280' }}
+                >
+                    Danh sách
+                </button>
+                <button
+                    onClick={() => setActiveView('stats')}
+                    className={`px-6 py-3 text-sm font-semibold tracking-wide transition-colors ${
+                        activeView === 'stats' 
+                            ? 'text-[#2563EB] border-b-2 border-[#2563EB]' 
+                            : 'text-[#6B7280] hover:text-[#374151]'
+                    }`}
+                    style={activeView === 'stats' ? { color: '#2563EB', borderBottomColor: '#2563EB' } : { color: '#6B7280' }}
+                >
+                    Thống kê
+                </button>
             </div>
 
-            {/* Filters Section */}
-            <div className="bg-white p-8 rounded-[2.5rem] shadow-premium border border-slate-50 mb-8 flex flex-col md:flex-row gap-6 items-center glass relative z-20">
-                <div className="flex-1 relative group w-full">
-                    <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300 group-focus-within:text-blue-500 transition-colors" />
-                    <input
-                        type="text"
-                        placeholder="Tìm kiếm theo Tên ĐVVC, Quản lý, SĐT..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full pl-14 pr-6 py-4 bg-slate-50/50 border border-transparent focus:bg-white focus:border-blue-100 rounded-2xl focus:ring-4 focus:ring-blue-50 outline-none transition-all text-sm font-bold text-slate-600 shadow-inner"
-                    />
-                </div>
-                <div className="relative w-full md:w-64">
-                    <select
-                        value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value)}
-                        className="w-full pl-6 pr-12 py-4 bg-slate-50/50 border border-transparent focus:bg-white focus:border-blue-100 rounded-2xl outline-none focus:ring-4 focus:ring-blue-50 font-black text-slate-600 text-sm transition-all cursor-pointer appearance-none shadow-inner"
-                    >
-                        <option value="all">Tất cả Trạng thái</option>
-                        <option value="Đang hoạt động">Đang hoạt động</option>
-                        <option value="Tạm ngưng">Tạm ngưng</option>
-                        <option value="Ngừng hợp tác">Ngừng hợp tác</option>
-                    </select>
-                    <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                        <ChevronDown className="w-4 h-4" />
+            {activeView === 'list' ? (
+                <>
+                    {/* Header with Add Button */}
+                    <div className="flex items-center justify-between mb-6">
+                        <h1 className="text-2xl font-semibold text-[#111827] tracking-tight" style={{ color: '#111827' }}>Danh sách đơn vị vận chuyển</h1>
+                        <button
+                            onClick={handleCreateNew}
+                            className="flex items-center gap-2 px-5 py-2.5 text-white font-medium text-sm transition-all duration-200 shadow-sm hover:shadow-md"
+                            style={{ backgroundColor: '#2563EB' }}
+                            onMouseEnter={(e) => e.target.style.backgroundColor = '#1D4ED8'}
+                            onMouseLeave={(e) => e.target.style.backgroundColor = '#2563EB'}
+                        >
+                            <Plus className="w-4 h-4" />
+                            Thêm
+                        </button>
                     </div>
-                </div>
-                <ColumnToggle columns={TABLE_COLUMNS} visibleColumns={visibleColumns} onToggle={toggleColumn} onReset={resetColumns} visibleCount={visibleCount} totalCount={totalCount} />
-            </div>
 
-            {/* Table Section */}
-            <div className="bg-white rounded-[2.5rem] shadow-premium border border-slate-50 overflow-hidden glass">
-                {loading ? (
-                    <div className="flex flex-col justify-center items-center py-28 space-y-6">
-                        <div className="w-14 h-14 border-4 border-blue-50 border-t-blue-600 rounded-full animate-spin"></div>
-                        <p className="text-slate-400 font-black animate-pulse tracking-[0.2em] text-[10px] uppercase">Đang rà soát danh sách vận chuyển...</p>
-                    </div>
-                ) : filteredShippers.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-32 px-4 text-center">
-                        <div className="w-24 h-24 bg-slate-50 rounded-[2.5rem] flex items-center justify-center mb-8">
-                            <Package className="w-12 h-12 text-slate-200" />
+                    {/* Search Bar and Summary Stats - Same Row */}
+                    <div className="mb-6 flex items-center gap-4">
+                        {/* Search Bar */}
+                        <div className="flex-1 relative">
+                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#9CA3AF]" />
+                            <input
+                                type="text"
+                                placeholder="Tìm theo tên, người quản lý, SĐT, địa chỉ..."
+                                className="w-full pl-12 pr-4 py-3 border border-[#D1D5DB] focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] bg-white text-[#111827] placeholder-[#9CA3AF] text-sm transition-all"
+                                style={{ fontFamily: '"Roboto", sans-serif' }}
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
                         </div>
-                        <h3 className="text-xl font-black text-slate-800 mb-2">Chưa có đơn vị vận chuyển nào</h3>
-                        <p className="text-slate-400 font-bold max-w-sm text-sm">Hãy bổ sung hồ sơ nhà xe mới trong hệ thống quản lý.</p>
+
+                        {/* Summary Stats */}
+                        <div className="flex items-center gap-6 px-6 py-3 bg-[#EFF6FF] border border-[#BFDBFE]">
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm text-[#6B7280]" style={{ fontFamily: '"Roboto", sans-serif' }}>Số lượng DVVC:</span>
+                                <span className="text-lg font-semibold text-[#2563EB]" style={{ fontFamily: '"Roboto", sans-serif' }}>{filteredShippersCount}</span>
+                            </div>
+                            <div className="w-px h-8 bg-[#BFDBFE]"></div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm text-[#6B7280]" style={{ fontFamily: '"Roboto", sans-serif' }}>Đang hoạt động:</span>
+                                <span className="text-lg font-semibold text-[#2563EB]" style={{ fontFamily: '"Roboto", sans-serif' }}>{activeCount}</span>
+                            </div>
+                            <div className="w-px h-8 bg-[#BFDBFE]"></div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm text-[#6B7280]" style={{ fontFamily: '"Roboto", sans-serif' }}>Tạm ngưng:</span>
+                                <span className="text-lg font-semibold text-[#2563EB]" style={{ fontFamily: '"Roboto", sans-serif' }}>{suspendedCount}</span>
+                            </div>
+                        </div>
                     </div>
-                ) : (
-                    <div className="w-full overflow-x-auto custom-scrollbar">
-                        <table className="w-full border-collapse min-w-[1000px] text-left">
-                            <thead className="glass-header">
-                                <tr>
-                                    <th className="px-8 py-6 text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] text-center w-24">STT</th>
-                                    {visibleTableColumns.map(col => (
-                                        <th key={col.key} className="px-8 py-6 text-[10px] font-black text-slate-600 uppercase tracking-[0.2em]">
-                                            {col.label}
-                                        </th>
-                                    ))}
-                                    <th className="px-8 py-6 text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] text-center">Thao tác</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-50/50">
-                                {filteredShippers.map((shipper, index) => (
-                                    <tr key={shipper.id} className="group hover-lift transition-all duration-300 border-l-4 border-l-transparent hover:border-l-blue-500">
-                                        <td className="px-8 py-7 whitespace-nowrap text-center">
-                                            <span className="font-black text-slate-300 group-hover:text-blue-500 transition-colors text-lg">{index + 1}</span>
-                                        </td>
-                                        {isColumnVisible('name') && <td className="px-8 py-7">
-                                            <div className="flex items-center gap-4">
-                                                <div className="avatar-initials group-hover:scale-110 group-hover:rotate-6 transition-all duration-300 bg-gradient-to-tr from-slate-700 to-slate-900">
-                                                    {getInitials(shipper.name)}
-                                                </div>
-                                                <div>
-                                                    <div className="font-black text-black text-base group-hover:text-blue-600 transition-colors uppercase tracking-tight">{shipper.name}</div>
-                                                    <div className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-1.5 opacity-50">ID: {shipper.id.substring(0, 8)}</div>
-                                                </div>
-                                            </div>
-                                        </td>}
-                                        {isColumnVisible('type') && <td className="px-8 py-7 whitespace-nowrap">
-                                            <span className="text-sm font-bold text-slate-600 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100">
-                                                {SHIPPING_TYPES.find(t => t.id === shipper.shipping_type)?.label || shipper.shipping_type || '—'}
-                                            </span>
-                                        </td>}
-                                        {isColumnVisible('manager') && <td className="px-8 py-7 whitespace-nowrap font-bold text-slate-900">
-                                            {shipper.manager_name}
-                                        </td>}
-                                        {isColumnVisible('phone') && <td className="px-8 py-7 whitespace-nowrap">
-                                            <span className="font-black text-blue-600 bg-blue-50/50 px-3 py-1.5 rounded-xl border border-blue-100 group-hover:bg-white transition-all text-sm">
-                                                {shipper.phone}
-                                            </span>
-                                        </td>}
-                                        {isColumnVisible('address') && <td className="px-8 py-7 text-slate-900 font-bold text-sm leading-relaxed max-w-[250px] truncate" title={shipper.address}>
-                                            {shipper.address}
-                                        </td>}
-                                        {isColumnVisible('status') && <td className="px-8 py-7 whitespace-nowrap">
-                                            <span className={`px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border inline-flex items-center transition-all shadow-sm ${getStatusStyle(shipper.status)} ${shipper.status === 'Đang hoạt động' ? 'glow-emerald' : 'glow-amber'}`}>
-                                                {getStatusIcon(shipper.status)}
-                                                {shipper.status}
-                                            </span>
-                                        </td>}
-                                        <td className="px-8 py-7 text-center">
-                                            <div className="flex items-center justify-center gap-5 transition-opacity">
-                                                <button
-                                                    onClick={() => handleViewShipper(shipper)}
-                                                    className="text-slate-400 hover:text-cyan-600 transition-all outline-none"
-                                                    title="Xem chi tiết & Cước phí"
-                                                >
-                                                    <Eye className="w-5 h-5" />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleEditShipper(shipper)}
-                                                    className="text-slate-400 hover:text-slate-900 transition-all outline-none"
-                                                    title="Chỉnh sửa"
-                                                >
-                                                    <Edit className="w-5 h-5" />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDeleteShipper(shipper.id, shipper.name)}
-                                                    className="text-slate-400 hover:text-slate-900 transition-all outline-none"
-                                                    title="Xóa"
-                                                >
-                                                    <Trash2 className="w-5 h-5" />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
+
+                    {/* Filter Section */}
+                    <div className="mb-6 flex items-center gap-3 flex-wrap">
+                        {/* Trạng thái Dropdown */}
+                        <FilterDropdown
+                            label="Trạng thái"
+                            selectedCount={selectedStatuses.length}
+                            totalCount={SHIPPER_STATUSES.length}
+                            onSelectAll={() => {
+                                if (selectedStatuses.length === SHIPPER_STATUSES.length) {
+                                    setSelectedStatuses([]);
+                                } else {
+                                    setSelectedStatuses(SHIPPER_STATUSES.map(s => s.id));
+                                }
+                            }}
+                        >
+                            <div className="space-y-1 p-2">
+                                {SHIPPER_STATUSES.map(status => (
+                                    <label key={status.id} className="flex items-center gap-2 cursor-pointer hover:bg-[#F3F4F6] p-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedStatuses.includes(status.id)}
+                                            onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setSelectedStatuses([...selectedStatuses, status.id]);
+                                                } else {
+                                                    setSelectedStatuses(selectedStatuses.filter(id => id !== status.id));
+                                                }
+                                            }}
+                                            className="w-4 h-4 text-[#2563EB] border-[#D1D5DB] focus:ring-[#2563EB]"
+                                        />
+                                        <span className="text-sm text-[#374151]" style={{ fontFamily: '"Roboto", sans-serif' }}>{status.label}</span>
+                                    </label>
                                 ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-            </div>
+                            </div>
+                        </FilterDropdown>
 
-            {/* Stats Footer */}
-            {!loading && filteredShippers.length > 0 && (
-                <div className="p-8 bg-white glass flex items-center justify-between border-t border-slate-50 mt-8 rounded-[2rem] border hover-lift">
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">
-                        Đang hiển thị <span className="text-indigo-600 mx-1">{filteredShippers.length}</span> / {shippers.length} đơn vị vận chuyển
-                    </p>
-                    <div className="flex items-center gap-6">
-                        <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-500">
-                            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 glow-emerald" />
-                            Hoạt động: {shippers.filter(s => s.status === 'Đang hoạt động').length}
-                        </span>
-                        <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-500">
-                            <div className="w-2.5 h-2.5 rounded-full bg-amber-500 glow-amber" />
-                            Tạm dừng: {shippers.filter(s => s.status === 'Tạm ngưng').length}
-                        </span>
+                        {/* Loại hình Dropdown */}
+                        <FilterDropdown
+                            label="Loại hình"
+                            selectedCount={selectedTypes.length}
+                            totalCount={SHIPPING_TYPES.length}
+                            onSelectAll={() => {
+                                if (selectedTypes.length === SHIPPING_TYPES.length) {
+                                    setSelectedTypes([]);
+                                } else {
+                                    setSelectedTypes(SHIPPING_TYPES.map(t => t.id));
+                                }
+                            }}
+                        >
+                            <div className="space-y-1 p-2">
+                                {SHIPPING_TYPES.map(type => (
+                                    <label key={type.id} className="flex items-center gap-2 cursor-pointer hover:bg-[#F3F4F6] p-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedTypes.includes(type.id)}
+                                            onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setSelectedTypes([...selectedTypes, type.id]);
+                                                } else {
+                                                    setSelectedTypes(selectedTypes.filter(id => id !== type.id));
+                                                }
+                                            }}
+                                            className="w-4 h-4 text-[#2563EB] border-[#D1D5DB] focus:ring-[#2563EB]"
+                                        />
+                                        <span className="text-sm text-[#374151]" style={{ fontFamily: '"Roboto", sans-serif' }}>{type.label}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </FilterDropdown>
+
+                        {/* Người quản lý Dropdown */}
+                        <FilterDropdown
+                            label="Người quản lý"
+                            selectedCount={selectedManagers.length}
+                            totalCount={uniqueManagers.length}
+                            onSelectAll={() => {
+                                if (selectedManagers.length === uniqueManagers.length) {
+                                    setSelectedManagers([]);
+                                } else {
+                                    setSelectedManagers([...uniqueManagers]);
+                                }
+                            }}
+                        >
+                            <div className="space-y-1 p-2">
+                                {uniqueManagers.map(manager => (
+                                    <label key={manager} className="flex items-center gap-2 cursor-pointer hover:bg-[#F3F4F6] p-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedManagers.includes(manager)}
+                                            onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setSelectedManagers([...selectedManagers, manager]);
+                                                } else {
+                                                    setSelectedManagers(selectedManagers.filter(m => m !== manager));
+                                                }
+                                            }}
+                                            className="w-4 h-4 text-[#2563EB] border-[#D1D5DB] focus:ring-[#2563EB]"
+                                        />
+                                        <span className="text-sm text-[#374151] truncate" style={{ fontFamily: '"Roboto", sans-serif' }} title={manager}>{manager}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </FilterDropdown>
+                    </div>
+
+                    {/* Main Content Card */}
+                    <div className="bg-white border border-[#E5E7EB] shadow-sm">
+                        {/* Table Section */}
+                        <div className="w-full overflow-x-auto">
+                            <table className="w-full border-collapse">
+                                <thead className="bg-[#F9FAFB]">
+                                    <tr>
+                                        <th className="px-4 py-3.5 text-xs font-semibold text-[#374151] text-center uppercase tracking-wider w-16">STT</th>
+                                        {visibleTableColumns.map(col => (
+                                            <th key={col.key} className="px-4 py-3.5 text-xs font-semibold text-[#374151] text-left uppercase tracking-wider">
+                                                {col.label}
+                                            </th>
+                                        ))}
+                                        <th className="px-4 py-3.5 text-xs font-semibold text-[#374151] text-center uppercase tracking-wider">Thao tác</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-[#E5E7EB]">
+                                    {loading ? (
+                                        <tr>
+                                            <td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center">
+                                                <div className="flex flex-col items-center gap-4">
+                                                    <div className="w-8 h-8 border-4 border-[#2563EB] border-t-transparent rounded-full animate-spin"></div>
+                                                    <p className="text-[#6B7280] text-sm font-medium" style={{ fontFamily: '"Roboto", sans-serif' }}>Đang tải dữ liệu...</p>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ) : filteredShippers.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center">
+                                                <div className="flex flex-col items-center gap-4">
+                                                    <Truck className="w-12 h-12 text-[#D1D5DB]" />
+                                                    <p className="text-sm font-medium text-[#6B7280]" style={{ fontFamily: '"Roboto", sans-serif' }}>Không tìm thấy đơn vị vận chuyển nào</p>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ) : filteredShippers.map((shipper, index) => (
+                                        <tr key={shipper.id} className="hover:bg-[#F9FAFB] transition-colors">
+                                            <td className="px-4 py-4 text-center">
+                                                <span className="text-sm text-[#6B7280]" style={{ fontFamily: '"Roboto", sans-serif' }}>{index + 1}</span>
+                                            </td>
+                                            {isColumnVisible('name') && <td className="px-4 py-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-10 h-10 bg-gradient-to-tr from-[#374151] to-[#111827] text-white text-xs font-semibold flex items-center justify-center" style={{ fontFamily: '"Roboto", sans-serif' }}>
+                                                        {getInitials(shipper.name)}
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-sm font-medium text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>{shipper.name}</div>
+                                                        <div className="text-xs text-[#6B7280] mt-0.5" style={{ fontFamily: '"Roboto", sans-serif' }}>ID: {shipper.id.substring(0, 8)}</div>
+                                                    </div>
+                                                </div>
+                                            </td>}
+                                            {isColumnVisible('type') && <td className="px-4 py-4 text-sm text-[#374151] font-normal" style={{ fontFamily: '"Roboto", sans-serif' }}>
+                                                {getLabel(SHIPPING_TYPES, shipper.shipping_type)}
+                                            </td>}
+                                            {isColumnVisible('manager') && <td className="px-4 py-4 text-sm text-[#374151] font-normal" style={{ fontFamily: '"Roboto", sans-serif' }}>{shipper.manager_name}</td>}
+                                            {isColumnVisible('phone') && <td className="px-4 py-4">
+                                                <span className="text-sm font-medium text-[#2563EB]" style={{ fontFamily: '"Roboto", sans-serif' }}>{shipper.phone}</span>
+                                            </td>}
+                                            {isColumnVisible('address') && <td className="px-4 py-4 text-sm text-[#374151] font-normal" style={{ fontFamily: '"Roboto", sans-serif' }} title={shipper.address}>{shipper.address}</td>}
+                                            {isColumnVisible('status') && <td className="px-4 py-4">
+                                                <span 
+                                                    className="inline-flex items-center px-3 py-1.5 text-xs font-medium border"
+                                                    style={(() => {
+                                                        const colorMap = {
+                                                            'Đang hoạt động': { bg: '#D1FAE5', text: '#065F46', border: '#A7F3D0' },
+                                                            'Tạm ngưng': { bg: '#FEF3C7', text: '#92400E', border: '#FDE68A' },
+                                                            'Ngừng hợp tác': { bg: '#FEE2E2', text: '#991B1B', border: '#FECACA' }
+                                                        };
+                                                        const colors = colorMap[shipper.status] || { bg: '#F3F4F6', text: '#374151', border: '#E5E7EB' };
+                                                        return {
+                                                            backgroundColor: colors.bg,
+                                                            color: colors.text,
+                                                            borderColor: colors.border,
+                                                            fontFamily: '"Roboto", sans-serif'
+                                                        };
+                                                    })()}
+                                                >
+                                                    {getStatusIcon(shipper.status)}
+                                                    {shipper.status}
+                                                </span>
+                                            </td>}
+                                            <td className="px-4 py-4 text-center">
+                                                <div className="flex items-center justify-center gap-3">
+                                                    <button
+                                                        onClick={() => handleViewShipper(shipper)}
+                                                        className="text-[#9CA3AF] hover:text-[#2563EB] transition-colors p-1 hover:bg-[#EFF6FF]"
+                                                        title="Xem chi tiết"
+                                                    >
+                                                        <Eye className="w-4 h-4" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleEditShipper(shipper)}
+                                                        className="text-[#9CA3AF] hover:text-[#2563EB] transition-colors p-1 hover:bg-[#EFF6FF]"
+                                                        title="Chỉnh sửa"
+                                                    >
+                                                        <Edit className="w-4 h-4" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeleteShipper(shipper.id, shipper.name)}
+                                                        className="text-[#9CA3AF] hover:text-[#DC2626] transition-colors p-1 hover:bg-[#FEF2F2]"
+                                                        title="Xóa"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </>
+            ) : (
+                /* Statistics View */
+                <div className="space-y-6">
+                    {/* Summary Stats */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <div className="text-sm text-[#6B7280] mb-2" style={{ fontFamily: '"Roboto", sans-serif' }}>Tổng số DVVC</div>
+                            <div className="text-2xl font-semibold text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>{filteredShippersCount}</div>
+                        </div>
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <div className="text-sm text-[#6B7280] mb-2" style={{ fontFamily: '"Roboto", sans-serif' }}>Đang hoạt động</div>
+                            <div className="text-2xl font-semibold text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>{activeCount}</div>
+                        </div>
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <div className="text-sm text-[#6B7280] mb-2" style={{ fontFamily: '"Roboto", sans-serif' }}>Tạm ngưng</div>
+                            <div className="text-2xl font-semibold text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>{suspendedCount}</div>
+                        </div>
+                    </div>
+
+                    {/* Charts Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Status Chart */}
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <h3 className="text-lg font-semibold text-[#111827] mb-4" style={{ fontFamily: '"Roboto", sans-serif' }}>Phân bổ theo Trạng thái</h3>
+                            <div style={{ height: '300px' }}>
+                                <PieChartJS
+                                    data={{
+                                        labels: getStatusStats().map(item => item.name),
+                                        datasets: [{
+                                            data: getStatusStats().map(item => item.value),
+                                            backgroundColor: chartColors.slice(0, getStatusStats().length),
+                                            borderColor: '#fff',
+                                            borderWidth: 2
+                                        }]
+                                    }}
+                                    options={{
+                                        responsive: true,
+                                        maintainAspectRatio: false,
+                                        plugins: {
+                                            legend: {
+                                                position: 'bottom'
+                                            }
+                                        }
+                                    }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Type Chart */}
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <h3 className="text-lg font-semibold text-[#111827] mb-4" style={{ fontFamily: '"Roboto", sans-serif' }}>Phân bổ theo Loại hình</h3>
+                            <div style={{ height: '300px' }}>
+                                <PieChartJS
+                                    data={{
+                                        labels: getTypeStats().map(item => item.name.length > 20 ? item.name.substring(0, 20) + '...' : item.name),
+                                        datasets: [{
+                                            data: getTypeStats().map(item => item.value),
+                                            backgroundColor: chartColors.slice(0, getTypeStats().length),
+                                            borderColor: '#fff',
+                                            borderWidth: 2
+                                        }]
+                                    }}
+                                    options={{
+                                        responsive: true,
+                                        maintainAspectRatio: false,
+                                        plugins: {
+                                            legend: {
+                                                position: 'bottom'
+                                            }
+                                        }
+                                    }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Manager Chart */}
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <h3 className="text-lg font-semibold text-[#111827] mb-4" style={{ fontFamily: '"Roboto", sans-serif' }}>Top 10 Người quản lý</h3>
+                            <div style={{ height: '300px' }}>
+                                <BarChartJS
+                                    data={{
+                                        labels: getManagerStats().map(item => item.name.length > 20 ? item.name.substring(0, 20) + '...' : item.name),
+                                        datasets: [{
+                                            label: 'Số DVVC',
+                                            data: getManagerStats().map(item => item.value),
+                                            backgroundColor: chartColors[0],
+                                            borderColor: chartColors[0],
+                                            borderWidth: 1
+                                        }]
+                                    }}
+                                    options={{
+                                        responsive: true,
+                                        maintainAspectRatio: false,
+                                        indexAxis: 'y',
+                                        plugins: {
+                                            legend: {
+                                                display: false
+                                            }
+                                        },
+                                        scales: {
+                                            x: {
+                                                beginAtZero: true
+                                            }
+                                        }
+                                    }}
+                                />
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

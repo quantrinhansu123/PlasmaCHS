@@ -16,6 +16,8 @@ CREATE TABLE customers (
     current_machines INT DEFAULT 0, -- Số lượng máy hiện có
     borrowed_cylinders INT DEFAULT 0, -- Số vỏ bình đang mượn
     machines_in_use TEXT, -- Mã các máy đang sử dụng (Có thể lưu dạng JSON hoặc text phẩy)
+    tax_code VARCHAR(50), -- Mã số thuế
+    invoice_address TEXT, -- Địa chỉ xuất hoá đơn GTGT
     
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

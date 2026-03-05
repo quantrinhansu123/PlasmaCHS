@@ -1,0 +1,24 @@
+export const RECOVERY_STATUSES = [
+    { id: 'ALL', label: 'Tất cả', color: 'gray' },
+    { id: 'CHO_DUYET', label: 'Chờ duyệt', color: 'yellow' },
+    { id: 'HOAN_THANH', label: 'Hoàn thành', color: 'green' },
+    { id: 'HUY', label: 'Đã hủy', color: 'red' }
+];
+
+export const ITEM_CONDITIONS = [
+    { id: 'tot', label: 'Tốt' },
+    { id: 'hong', label: 'Hỏng' },
+    { id: 'meo', label: 'Méo / Móp' },
+    { id: 'khac', label: 'Khác' }
+];
+
+export const RECOVERY_TABLE_COLUMNS = [
+    { key: 'recovery_code', label: 'Mã phiếu' },
+    { key: 'recovery_date', label: 'Ngày thu hồi' },
+    { key: 'customer_id', label: 'Khách hàng' },
+    { key: 'order_id', label: 'Đơn hàng liên kết' },
+    { key: 'warehouse_id', label: 'Kho nhận' },
+    { key: 'driver_name', label: 'NV vận chuyển' },
+    { key: 'total_items', label: 'SL vỏ' },
+    { key: 'status', label: 'Trạng thái' }
+];

@@ -1,8 +1,12 @@
 import {
+    ChevronDown,
     Package,
-    Plus
+    Plus,
+    ScanLine,
+    Search,
+    X
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     CUSTOMER_CATEGORIES,
@@ -20,6 +24,32 @@ const CreateOrder = () => {
     const { role, user } = usePermissions();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [customersList, setCustomersList] = useState([]);
+    const [shippersList, setShippersList] = useState([]);
+
+    // Custom dropdown states
+    const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
+    const [customerSearchTerm, setCustomerSearchTerm] = useState('');
+    const customerDropdownRef = useRef(null);
+
+    // Close dropdown on outside click
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (customerDropdownRef.current && !customerDropdownRef.current.contains(event.target)) {
+                setIsCustomerDropdownOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+    const [showReasonModal, setShowReasonModal] = useState(false);
+    const [editReason, setEditReason] = useState('');
+    const [assignedCylinders, setAssignedCylinders] = useState([]);
+    const [isScannerOpen, setIsScannerOpen] = useState(false);
+    const [scanTargetIndex, setScanTargetIndex] = useState(-1);
+    const [scanCount, setScanCount] = useState(0);
+    const html5QrCodeRef = useRef(null);
+    const assignedCylindersRef = useRef(assignedCylinders);
+    useEffect(() => { assignedCylindersRef.current = assignedCylinders; }, [assignedCylinders]);
 
     const getNewOrderCode = () => Math.floor(1000 + Math.random() * 9000).toString();
 
@@ -32,13 +62,14 @@ const CreateOrder = () => {
         recipientAddress: '',
         recipientPhone: '',
         orderType: 'THUONG',
-        productType: 'BINH',
+        productType: 'BINH_4L',
         quantity: 0,
         unitPrice: 0,
         department: '',
         promotion: '',
         shipperId: '',
-        shippingFee: 0
+        shippingFee: 0,
+        note: ''
     };
 
     const initialFormState = editOrder ? {
@@ -57,7 +88,8 @@ const CreateOrder = () => {
         department: editOrder.department || '',
         promotion: editOrder.promotion_code || '',
         shipperId: editOrder.shipper_id || '',
-        shippingFee: editOrder.shipping_fee || 0
+        shippingFee: editOrder.shipping_fee || 0,
+        note: editOrder.note || ''
     } : defaultState;
 
     const [formData, setFormData] = useState(initialFormState);
@@ -100,15 +132,29 @@ const CreateOrder = () => {
     };
 
     const handleQuantityChange = (e) => {
-        const value = e.target.value.replace(/\D/g, ''); // Remove non-numeric characters
+        const value = e.target.value.replace(/\D/g, '');
 
         if (value === '') {
             setFormData({ ...formData, quantity: 0 });
+            setAssignedCylinders([]);
             return;
         }
 
         const parsedValue = parseInt(value, 10);
         setFormData({ ...formData, quantity: parsedValue });
+
+        // Only auto-resize for BINH product type
+        if (formData.productType.startsWith('BINH')) {
+            setAssignedCylinders(prev => {
+                const newArr = [...prev];
+                if (parsedValue > newArr.length) {
+                    for (let i = newArr.length; i < parsedValue; i++) newArr.push('');
+                } else {
+                    newArr.length = parsedValue;
+                }
+                return newArr;
+            });
+        }
     };
 
     const handleUnitPriceChange = (e) => {
@@ -131,20 +177,140 @@ const CreateOrder = () => {
 
     const calculatedTotalAmount = (formData.quantity || 0) * (formData.unitPrice || 0);
 
-    const handleCustomerChange = (e) => {
-        const cId = e.target.value;
-        const customer = customersList.find(c => c.id === cId);
-        if (customer) {
-            setFormData({
-                ...formData,
-                customerId: customer.id,
-                recipientName: customer.representative_name || customer.name || '',
-                recipientAddress: customer.shipping_address || customer.address || '',
-                recipientPhone: customer.phone || '',
-                customerCategory: customer.category || 'TM'
-            });
-        }
+    const handleCustomerSelect = (customer) => {
+        setFormData({
+            ...formData,
+            customerId: customer.id,
+            recipientName: customer.representative_name || customer.name || '',
+            recipientAddress: customer.shipping_address || customer.address || '',
+            recipientPhone: customer.phone || '',
+            customerCategory: customer.category || 'TM'
+        });
+        setIsCustomerDropdownOpen(false);
+        setCustomerSearchTerm('');
     };
+
+    const filteredCustomers = customersList.filter(c =>
+        c.name.toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
+        (c.phone && c.phone.includes(customerSearchTerm)) ||
+        (c.representative_name && c.representative_name.toLowerCase().includes(customerSearchTerm.toLowerCase()))
+    );
+
+    // Initialize assignedCylinders when editing
+    useEffect(() => {
+        if (editOrder?.assigned_cylinders) {
+            setAssignedCylinders(editOrder.assigned_cylinders);
+        }
+    }, [editOrder]);
+
+    const handleCylinderSerialChange = (index, value) => {
+        setAssignedCylinders(prev => {
+            const newArr = [...prev];
+            newArr[index] = value;
+            return newArr;
+        });
+    };
+
+    // Continuous barcode scanner for cylinder assignment
+    const lastScannedRef = useRef('');
+
+    const startCylinderScanner = useCallback(async (targetIndex) => {
+        // Stop previous scanner if any
+        if (html5QrCodeRef.current) {
+            try { await html5QrCodeRef.current.stop(); } catch { }
+            html5QrCodeRef.current = null;
+        }
+
+        setScanTargetIndex(targetIndex);
+        setScanCount(0);
+        lastScannedRef.current = '';
+        setIsScannerOpen(true);
+        const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
+
+        const formatsToSupport = [
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.CODE_39,
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.QR_CODE,
+        ];
+
+        let currentIdx = targetIndex;
+
+        setTimeout(async () => {
+            try {
+                const qr = new Html5Qrcode('order-barcode-reader', { formatsToSupport, verbose: false });
+                html5QrCodeRef.current = qr;
+                await qr.start(
+                    { facingMode: 'environment' },
+                    {
+                        fps: 10,
+                        qrbox: (w, h) => ({ width: Math.floor(w * 0.85), height: Math.floor(h * 0.35) }),
+                        disableFlip: false,
+                    },
+                    (decodedText) => {
+                        // Skip if same as last scanned (debounce)
+                        if (decodedText === lastScannedRef.current) return;
+                        lastScannedRef.current = decodedText;
+
+                        const currentArr = assignedCylindersRef.current;
+                        // Skip if already in the list
+                        if (currentArr.includes(decodedText)) return;
+
+                        // Fill the current target index
+                        setAssignedCylinders(prev => {
+                            const newArr = [...prev];
+                            newArr[currentIdx] = decodedText;
+                            return newArr;
+                        });
+                        setScanCount(prev => prev + 1);
+
+                        // Find next empty slot
+                        const updatedArr = [...currentArr];
+                        updatedArr[currentIdx] = decodedText;
+                        const nextEmpty = updatedArr.findIndex((s, i) => i > currentIdx && !s);
+                        const fallbackEmpty = updatedArr.findIndex((s) => !s);
+                        const nextIdx = nextEmpty !== -1 ? nextEmpty : fallbackEmpty;
+
+                        if (nextIdx !== -1 && nextIdx !== currentIdx) {
+                            currentIdx = nextIdx;
+                            setScanTargetIndex(nextIdx);
+                            // Reset last scanned after short delay to allow scanning same type
+                            setTimeout(() => { lastScannedRef.current = ''; }, 1500);
+                        } else {
+                            // All slots filled → auto close
+                            setTimeout(() => stopCylinderScanner(), 500);
+                        }
+                    },
+                    () => { }
+                );
+            } catch (err) {
+                console.error('Scanner error:', err);
+                alert('\u274c Kh\u00f4ng m\u1edf \u0111\u01b0\u1ee3c camera: ' + err);
+                setIsScannerOpen(false);
+            }
+        }, 300);
+    }, []);
+
+    // Find first empty slot and start scanning
+    const startScanAll = useCallback(() => {
+        const firstEmpty = assignedCylinders.findIndex(s => !s);
+        if (firstEmpty === -1) {
+            alert('\u0110\u00e3 g\u00e1n \u0111\u1ee7 m\u00e3 b\u00ecnh!');
+            return;
+        }
+        startCylinderScanner(firstEmpty);
+    }, [assignedCylinders, startCylinderScanner]);
+
+    const stopCylinderScanner = useCallback(async () => {
+        if (html5QrCodeRef.current) {
+            try { await html5QrCodeRef.current.stop(); } catch { }
+            html5QrCodeRef.current = null;
+        }
+        setIsScannerOpen(false);
+        setScanTargetIndex(-1);
+    }, []);
 
     const handleCreateOrder = async () => {
         if (!formData.customerId || !formData.recipientName || !formData.recipientAddress || !formData.recipientPhone || formData.quantity <= 0) {
@@ -152,14 +318,20 @@ const CreateOrder = () => {
             return;
         }
 
+        // If editing, require reason
+        if (editOrder && !editReason.trim()) {
+            setShowReasonModal(true);
+            return;
+        }
+
         setIsSubmitting(true);
         try {
             const customerName = customersList.find(c => c.id === formData.customerId)?.name || formData.customerName || '';
+            const currentUser = user?.name || user?.email || 'Hệ thống';
 
-            // Xac dinh trang thai va nguoi tao
             let initialStatus = 'CHO_DUYET';
             if (!editOrder && (role === 'admin' || role === 'thu_kho')) {
-                initialStatus = 'DA_DUYET'; // Admin, Thu Kho tao don -> Duyet luon (Thuan tien luong demo)
+                initialStatus = 'DA_DUYET';
             }
 
             const payload = {
@@ -180,23 +352,71 @@ const CreateOrder = () => {
                 promotion_code: formData.promotion,
                 shipper_id: formData.shipperId || null,
                 shipping_fee: formData.shippingFee || 0,
+                assigned_cylinders: formData.productType.startsWith('BINH') ? assignedCylinders.filter(Boolean) : null,
                 status: editOrder ? editOrder.status : initialStatus,
-                ordered_by: editOrder ? editOrder.ordered_by : (user?.name || user?.email || 'Hệ thống')
+                ordered_by: editOrder ? editOrder.ordered_by : currentUser
             };
 
             if (editOrder) {
+                // Detect changed fields
+                const changedFields = {};
+                const fieldMap = {
+                    customer_name: editOrder.customer_name,
+                    recipient_name: editOrder.recipient_name,
+                    recipient_address: editOrder.recipient_address,
+                    recipient_phone: editOrder.recipient_phone,
+                    quantity: editOrder.quantity,
+                    unit_price: editOrder.unit_price,
+                    total_amount: editOrder.total_amount,
+                    note: editOrder.note,
+                    order_type: editOrder.order_type,
+                    product_type: editOrder.product_type,
+                    department: editOrder.department,
+                    warehouse: editOrder.warehouse,
+                    promotion_code: editOrder.promotion_code,
+                    shipping_fee: editOrder.shipping_fee
+                };
+                Object.entries(fieldMap).forEach(([key, oldVal]) => {
+                    const newVal = payload[key];
+                    if (String(oldVal || '') !== String(newVal || '')) {
+                        changedFields[key] = { old: oldVal || '', new: newVal || '' };
+                    }
+                });
+
                 const { error } = await supabase
                     .from('orders')
                     .update(payload)
                     .eq('id', editOrder.id);
                 if (error) throw error;
+
+                // Log EDITED history
+                await supabase.from('order_history').insert([{
+                    order_id: editOrder.id,
+                    action: 'EDITED',
+                    changed_fields: Object.keys(changedFields).length > 0 ? changedFields : null,
+                    reason: editReason,
+                    created_by: currentUser
+                }]);
+
                 alert('🎉 Cập nhật đơn hàng thành công!');
                 navigate('/danh-sach-don-hang');
             } else {
-                const { error } = await supabase
+                const { data: inserted, error } = await supabase
                     .from('orders')
-                    .insert([payload]);
+                    .insert([payload])
+                    .select('id');
                 if (error) throw error;
+
+                // Log CREATED history
+                if (inserted && inserted[0]) {
+                    await supabase.from('order_history').insert([{
+                        order_id: inserted[0].id,
+                        action: 'CREATED',
+                        new_status: initialStatus,
+                        created_by: currentUser
+                    }]);
+                }
+
                 alert('🎉 Tạo đơn hàng thành công!');
                 resetForm();
             }
@@ -210,242 +430,412 @@ const CreateOrder = () => {
     };
 
     return (
-        <div className="p-4 md:p-8 max-w-[1200px] mx-auto font-sans min-h-screen noise-bg">
-            {/* Animated Blobs */}
-            <div className="blob blob-blue w-[400px] h-[400px] -top-20 -left-20 opacity-20"></div>
-            <div className="blob blob-indigo w-[300px] h-[300px] top-1/2 -right-20 opacity-20"></div>
-
-            {/* Main Content Card */}
-            <div className="bg-white/80 backdrop-blur-xl rounded-[1.5rem] md:rounded-[2rem] shadow-2xl shadow-blue-900/10 border border-white overflow-hidden relative z-10">
-                <div className="p-6 md:p-8 border-b border-blue-50 bg-gradient-to-r from-blue-600 to-indigo-700 text-white">
-                    <h3 className="text-lg md:text-xl font-bold flex items-center gap-2">
-                        <div className="w-8 h-8 bg-white/20 backdrop-blur-md rounded-lg flex items-center justify-center text-white shadow-inner">
-                            <Plus className="w-5 h-5" />
-                        </div>
-                        {editOrder ? 'Cập nhật đơn hàng' : 'Thông tin đơn hàng'}
-                    </h3>
-                    <p className="text-blue-100 text-xs md:text-sm mt-1 md:ml-10">Vui lòng điền đầy đủ các thông tin bắt buộc được đánh dấu (*)</p>
-                </div>
-
-                <div className="p-6 md:p-10 space-y-8 md:space-y-10">
-                    {/* Section 1: Thông tin định danh */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
-                        <div className="space-y-3">
-                            <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">1. Mã đơn hàng (Tự động)</label>
-                            <input value={formData.orderCode} disabled className="w-full px-5 py-4 bg-gray-100 border border-gray-200 rounded-2xl font-black text-gray-500 text-base cursor-not-allowed shadow-inner" />
-                        </div>
-                        <div className="space-y-3">
-                            <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">2. Loại khách hàng *</label>
-                            <select
-                                value={formData.customerCategory}
-                                onChange={(e) => setFormData({ ...formData, customerCategory: e.target.value })}
-                                className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 font-bold text-base transition-all shadow-sm"
-                            >
-                                {CUSTOMER_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-                            </select>
-                        </div>
-                        <div className="space-y-3">
-                            <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">3. Kho</label>
-                            <select
-                                value={formData.warehouse}
-                                onChange={(e) => setFormData({ ...formData, warehouse: e.target.value })}
-                                className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 font-bold text-base transition-all shadow-sm"
-                            >
-                                {WAREHOUSES.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
-                            </select>
-                        </div>
+        <>
+            <div className="p-4 md:p-8 max-w-[1200px] mx-auto min-h-screen bg-[#F8F9FA]" style={{ fontFamily: '"Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
+                {/* Main Content Card */}
+                <div className="bg-white shadow-sm border border-[#E5E7EB] overflow-hidden relative z-10">
+                    <div className="p-6 md:p-8 border-b border-[#E5E7EB] bg-[#2563EB] text-white">
+                        <h3 className="text-xl font-semibold flex items-center gap-3" style={{ fontFamily: '"Roboto", sans-serif' }}>
+                            <div className="w-8 h-8 bg-white/20 flex items-center justify-center text-white">
+                                <Plus className="w-5 h-5" />
+                            </div>
+                            {editOrder ? 'Cập nhật đơn hàng' : 'Thông tin đơn hàng'}
+                        </h3>
+                        <p className="text-blue-100 text-sm mt-2 ml-11" style={{ fontFamily: '"Roboto", sans-serif' }}>Vui lòng điền đầy đủ các thông tin bắt buộc được đánh dấu (*)</p>
                     </div>
 
-                    {/* Section 2: Thông tin khách hàng & Người nhận */}
-                    <div className="p-6 md:p-8 bg-blue-50/40 rounded-[1.5rem] md:rounded-[2.5rem] border border-blue-100 space-y-6 md:space-y-8">
-                        <div className="space-y-3">
-                            <label className="text-[11px] font-black text-blue-600 uppercase tracking-[0.2em] flex items-center gap-2 ml-1">
-                                <Package className="w-4 h-4" /> 4. Chọn Khách hàng *
-                            </label>
-                            <select
-                                value={formData.customerId}
-                                onChange={handleCustomerChange}
-                                className="w-full px-5 py-4 bg-white border border-blue-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 font-bold text-base shadow-md transition-all cursor-pointer"
-                            >
-                                <option value="">-- Chọn khách hàng trong hệ thống --</option>
-                                {customersList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                            </select>
-                        </div>
-
-                        <div className="grid grid-cols-2 md:grid-cols-2 gap-6 md:gap-8">
-                            <div className="space-y-3">
-                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">5. Tên người nhận *</label>
-                                <input
-                                    value={formData.recipientName}
-                                    onChange={(e) => setFormData({ ...formData, recipientName: e.target.value })}
-                                    placeholder="Hệ thống tự động hiển thị..."
-                                    className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 font-bold text-base shadow-sm transition-all"
-                                />
+                    <div className="p-6 md:p-10 space-y-8 md:space-y-10">
+                        {/* Section 1: Thông tin định danh */}
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
+                            <div className="space-y-2">
+                                <label className="text-xs font-medium text-[#374151] uppercase tracking-wide" style={{ fontFamily: '"Roboto", sans-serif' }}>1. Mã đơn hàng (Tự động)</label>
+                                <input value={formData.orderCode} disabled className="w-full px-4 py-3 bg-[#F3F4F6] border border-[#D1D5DB] font-medium text-[#6B7280] text-sm cursor-not-allowed" style={{ fontFamily: '"Roboto", sans-serif' }} />
                             </div>
-                            <div className="space-y-3">
-                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">7. SĐT người nhận *</label>
-                                <input
-                                    value={formData.recipientPhone}
-                                    onChange={(e) => setFormData({ ...formData, recipientPhone: e.target.value })}
-                                    placeholder="Ví dụ: 0399749111"
-                                    className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 font-bold text-base shadow-sm transition-all"
-                                />
-                            </div>
-                        </div>
-                        <div className="space-y-3">
-                            <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">6. Địa chỉ nhận *</label>
-                            <input
-                                value={formData.recipientAddress}
-                                onChange={(e) => setFormData({ ...formData, recipientAddress: e.target.value })}
-                                placeholder="Hệ thống tự động hiển thị..."
-                                className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 font-bold text-base shadow-sm transition-all"
-                            />
-                        </div>
-                    </div>
-
-                    {/* Section 3: Chi tiết đơn hàng & Hàng hóa */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-10">
-                        <div className="space-y-6 md:space-y-8">
-                            <div className="space-y-3">
-                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">8. Loại đơn hàng *</label>
+                            <div className="space-y-2">
+                                <label className="text-xs font-medium text-[#374151] uppercase tracking-wide" style={{ fontFamily: '"Roboto", sans-serif' }}>2. Loại khách hàng *</label>
                                 <select
-                                    value={formData.orderType}
-                                    onChange={(e) => setFormData({ ...formData, orderType: e.target.value })}
-                                    className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 font-bold text-base transition-all shadow-sm"
+                                    value={formData.customerCategory}
+                                    onChange={(e) => setFormData({ ...formData, customerCategory: e.target.value })}
+                                    className="w-full px-4 py-3 bg-white border border-[#D1D5DB] outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] font-medium text-sm transition-all"
+                                    style={{ fontFamily: '"Roboto", sans-serif' }}
                                 >
-                                    {ORDER_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                                    {CUSTOMER_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                                 </select>
                             </div>
-                            <div className="space-y-3">
-                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">9. Ghi chú</label>
-                                <textarea
-                                    rows="4"
-                                    value={formData.note}
-                                    onChange={(e) => setFormData({ ...formData, note: e.target.value })}
-                                    placeholder="Thông tin bổ sung để admin duyệt đơn..."
-                                    className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 font-medium text-base transition-all shadow-sm resize-none"
+                            <div className="space-y-2">
+                                <label className="text-xs font-medium text-[#374151] uppercase tracking-wide" style={{ fontFamily: '"Roboto", sans-serif' }}>3. Kho</label>
+                                <select
+                                    value={formData.warehouse}
+                                    onChange={(e) => setFormData({ ...formData, warehouse: e.target.value })}
+                                    className="w-full px-4 py-3 bg-white border border-[#D1D5DB] outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] font-medium text-sm transition-all"
+                                    style={{ fontFamily: '"Roboto", sans-serif' }}
+                                >
+                                    {WAREHOUSES.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* Section 2: Thông tin khách hàng & Người nhận */}
+                        <div className="p-6 md:p-8 bg-[#EFF6FF] border border-[#BFDBFE] space-y-6 md:space-y-8">
+                            <div className="space-y-2 relative" ref={customerDropdownRef}>
+                                <label className="text-xs font-medium text-[#2563EB] uppercase tracking-wide flex items-center gap-2" style={{ fontFamily: '"Roboto", sans-serif' }}>
+                                    <Package className="w-4 h-4" /> 4. Chọn Khách hàng *
+                                </label>
+
+                                {/* Custom Select Trigger */}
+                                <div
+                                    className="w-full px-4 py-3 bg-white border border-[#93C5FD] outline-none hover:border-[#2563EB] font-medium text-sm transition-all cursor-pointer flex justify-between items-center"
+                                    onClick={() => setIsCustomerDropdownOpen(!isCustomerDropdownOpen)}
+                                >
+                                    <span className={formData.customerId ? "text-[#111827]" : "text-gray-500"}>
+                                        {formData.customerId
+                                            ? customersList.find(c => c.id === formData.customerId)?.name
+                                            : '-- Chọn khách hàng trong hệ thống --'}
+                                    </span>
+                                    <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${isCustomerDropdownOpen ? 'rotate-180' : ''}`} />
+                                </div>
+
+                                {/* Custom Dropdown Menu */}
+                                {isCustomerDropdownOpen && (
+                                    <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-xl max-h-60 overflow-hidden flex flex-col">
+                                        <div className="p-2 border-b border-gray-100 flex items-center gap-2 bg-gray-50 sticky top-0">
+                                            <Search className="w-4 h-4 text-gray-400" />
+                                            <input
+                                                type="text"
+                                                className="w-full bg-transparent border-none outline-none text-sm placeholder-gray-400"
+                                                placeholder="Tìm tên KH, người đại diện hoặc SĐT..."
+                                                value={customerSearchTerm}
+                                                onChange={(e) => setCustomerSearchTerm(e.target.value)}
+                                                onClick={(e) => e.stopPropagation()}
+                                                autoFocus
+                                            />
+                                        </div>
+                                        <div className="overflow-y-auto custom-scrollbar flex-1">
+                                            {filteredCustomers.length > 0 ? (
+                                                filteredCustomers.map(customer => (
+                                                    <div
+                                                        key={customer.id}
+                                                        className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-50 last:border-none transition-colors"
+                                                        onClick={() => handleCustomerSelect(customer)}
+                                                    >
+                                                        <div className="font-medium text-sm text-gray-900">{customer.name}</div>
+                                                        <div className="text-xs text-gray-500 flex gap-2 mt-0.5">
+                                                            {customer.representative_name && <span>👤 {customer.representative_name}</span>}
+                                                            {customer.phone && <span>📞 {customer.phone}</span>}
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <div className="px-4 py-4 text-sm text-center text-gray-500 italic">
+                                                    Không tìm thấy khách hàng nào khớp.
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-2 gap-6 md:gap-8">
+                                <div className="space-y-2">
+                                    <label className="text-xs font-medium text-[#374151] uppercase tracking-wide" style={{ fontFamily: '"Roboto", sans-serif' }}>5. Tên người nhận *</label>
+                                    <input
+                                        value={formData.recipientName}
+                                        onChange={(e) => setFormData({ ...formData, recipientName: e.target.value })}
+                                        placeholder="Hệ thống tự động hiển thị..."
+                                        className="w-full px-4 py-3 bg-white border border-[#D1D5DB] outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] font-medium text-sm transition-all"
+                                        style={{ fontFamily: '"Roboto", sans-serif' }}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-xs font-medium text-[#374151] uppercase tracking-wide" style={{ fontFamily: '"Roboto", sans-serif' }}>7. SĐT người nhận *</label>
+                                    <input
+                                        value={formData.recipientPhone}
+                                        onChange={(e) => setFormData({ ...formData, recipientPhone: e.target.value })}
+                                        placeholder="Ví dụ: 0399749111"
+                                        className="w-full px-4 py-3 bg-white border border-[#D1D5DB] outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] font-medium text-sm transition-all"
+                                        style={{ fontFamily: '"Roboto", sans-serif' }}
+                                    />
+                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-xs font-medium text-[#374151] uppercase tracking-wide" style={{ fontFamily: '"Roboto", sans-serif' }}>6. Địa chỉ nhận *</label>
+                                <input
+                                    value={formData.recipientAddress}
+                                    onChange={(e) => setFormData({ ...formData, recipientAddress: e.target.value })}
+                                    placeholder="Hệ thống tự động hiển thị..."
+                                    className="w-full px-4 py-3 bg-white border border-[#D1D5DB] outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] font-medium text-sm transition-all"
+                                    style={{ fontFamily: '"Roboto", sans-serif' }}
                                 />
                             </div>
                         </div>
 
-                        <div className="space-y-6 md:space-y-8">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-8">
-                                <div className="space-y-3">
-                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">10. Hàng hóa *</label>
+                        {/* Section 3: Chi tiết đơn hàng & Hàng hóa */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-10">
+                            <div className="space-y-6 md:space-y-8">
+                                <div className="space-y-2">
+                                    <label className="text-xs font-medium text-[#374151] uppercase tracking-wide" style={{ fontFamily: '"Roboto", sans-serif' }}>8. Loại đơn hàng *</label>
                                     <select
-                                        value={formData.productType}
-                                        onChange={(e) => setFormData({ ...formData, productType: e.target.value })}
-                                        className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 font-bold text-base transition-all shadow-sm"
+                                        value={formData.orderType}
+                                        onChange={(e) => setFormData({ ...formData, orderType: e.target.value })}
+                                        className="w-full px-4 py-3 bg-white border border-[#D1D5DB] outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] font-medium text-sm transition-all"
+                                        style={{ fontFamily: '"Roboto", sans-serif' }}
                                     >
-                                        {PRODUCT_TYPES.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                                        {ORDER_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
                                     </select>
                                 </div>
-                                <div className="space-y-3">
-                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">11. Số lượng *</label>
-                                    <input
-                                        type="text"
-                                        value={formatNumber(formData.quantity)}
-                                        onChange={handleQuantityChange}
-                                        className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 font-black text-lg text-blue-700 transition-all shadow-sm"
+                                <div className="space-y-2">
+                                    <label className="text-xs font-medium text-[#374151] uppercase tracking-wide" style={{ fontFamily: '"Roboto", sans-serif' }}>9. Ghi chú</label>
+                                    <textarea
+                                        rows="4"
+                                        value={formData.note}
+                                        onChange={(e) => setFormData({ ...formData, note: e.target.value })}
+                                        placeholder="Thông tin bổ sung để admin duyệt đơn..."
+                                        className="w-full px-4 py-3 bg-white border border-[#D1D5DB] outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] font-normal text-sm transition-all resize-none"
+                                        style={{ fontFamily: '"Roboto", sans-serif' }}
                                     />
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-8">
-                                <div className="space-y-3">
-                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">11b. Đơn giá (VNĐ) *</label>
-                                    <input
-                                        type="text"
-                                        value={formatNumber(formData.unitPrice)}
-                                        onChange={handleUnitPriceChange}
-                                        className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-500 font-black text-lg text-emerald-700 transition-all shadow-sm"
-                                    />
-                                </div>
-                                <div className="space-y-3">
-                                    <label className="text-[11px] font-black text-emerald-600 uppercase tracking-[0.2em] ml-1">11c. Thành tiền (VNĐ)</label>
-                                    <input
-                                        type="text"
-                                        disabled
-                                        value={formatNumber(calculatedTotalAmount)}
-                                        className="w-full px-5 py-4 bg-emerald-50 border border-emerald-100 rounded-2xl font-black text-lg text-emerald-800 transition-all shadow-inner opacity-80 cursor-not-allowed"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="space-y-3">
-                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">12. Khoa sử dụng máy / Mã máy</label>
-                                <input
-                                    value={formData.department}
-                                    onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                                    placeholder="Ví dụ: Mã máy đang sử dụng"
-                                    className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 font-bold text-base transition-all shadow-sm"
-                                />
-                            </div>
-                            <div className="space-y-3">
-                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">13. Khuyến mãi (Áp dụng mã)</label>
-                                <select
-                                    value={formData.promotion}
-                                    onChange={(e) => setFormData({ ...formData, promotion: e.target.value })}
-                                    className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 font-bold text-base transition-all shadow-sm"
-                                >
-                                    <option value="">-- Không có mã khuyến mãi --</option>
-                                    <option value="KMB02">KMB02 - Ưu đãi bình mới</option>
-                                    <option value="KM_MAY_01">KM_MAY_01 - Giảm giá máy</option>
-                                </select>
-                            </div>
-
-                            <div className="pt-4 mt-4 border-t border-gray-100 space-y-6">
-                                <h4 className="text-[11px] font-black text-rose-500 uppercase tracking-[0.2em] ml-1">14. Phí Giao Hàng & Đơn vị VC</h4>
+                            <div className="space-y-6 md:space-y-8">
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-8">
-                                    <div className="space-y-3">
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-medium text-[#374151] uppercase tracking-wide" style={{ fontFamily: '"Roboto", sans-serif' }}>10. Hàng hóa *</label>
                                         <select
-                                            value={formData.shipperId}
-                                            onChange={(e) => setFormData({ ...formData, shipperId: e.target.value })}
-                                            className="w-full px-5 py-4 bg-white border border-rose-200 rounded-2xl outline-none focus:ring-4 focus:ring-rose-100 focus:border-rose-500 font-bold text-base transition-all shadow-sm"
+                                            value={formData.productType}
+                                            onChange={(e) => setFormData({ ...formData, productType: e.target.value })}
+                                            className="w-full px-4 py-3 bg-white border border-[#D1D5DB] outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] font-medium text-sm transition-all"
+                                            style={{ fontFamily: '"Roboto", sans-serif' }}
                                         >
-                                            <option value="">-- Chọn Đơn vị VC (Tuỳ chọn) --</option>
-                                            {shippersList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                            {PRODUCT_TYPES.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
                                         </select>
                                     </div>
-                                    <div className="space-y-3 relative">
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-medium text-[#374151] uppercase tracking-wide" style={{ fontFamily: '"Roboto", sans-serif' }}>11. Số lượng *</label>
                                         <input
                                             type="text"
-                                            value={formatNumber(formData.shippingFee)}
-                                            onChange={handleShippingFeeChange}
-                                            placeholder="Nhập cước phí..."
-                                            className="w-full px-5 py-4 pl-12 bg-white border border-rose-200 rounded-2xl outline-none focus:ring-4 focus:ring-rose-100 focus:border-rose-500 font-black text-lg text-rose-700 transition-all shadow-sm placeholder:text-rose-300 placeholder:font-medium"
+                                            value={formatNumber(formData.quantity)}
+                                            onChange={handleQuantityChange}
+                                            className="w-full px-4 py-3 bg-white border border-[#D1D5DB] outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] font-semibold text-base text-[#2563EB] transition-all"
+                                            style={{ fontFamily: '"Roboto", sans-serif' }}
                                         />
-                                        <span className="absolute left-5 top-[9px] text-rose-400 font-black">đ</span>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-8">
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-medium text-[#374151] uppercase tracking-wide" style={{ fontFamily: '"Roboto", sans-serif' }}>11b. Đơn giá (VNĐ) *</label>
+                                        <input
+                                            type="text"
+                                            value={formatNumber(formData.unitPrice)}
+                                            onChange={handleUnitPriceChange}
+                                            className="w-full px-4 py-3 bg-white border border-[#D1D5DB] outline-none focus:ring-2 focus:ring-[#10B981] focus:border-[#10B981] font-semibold text-base text-[#059669] transition-all"
+                                            style={{ fontFamily: '"Roboto", sans-serif' }}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-medium text-[#059669] uppercase tracking-wide" style={{ fontFamily: '"Roboto", sans-serif' }}>11c. Thành tiền (VNĐ)</label>
+                                        <input
+                                            type="text"
+                                            disabled
+                                            value={formatNumber(calculatedTotalAmount)}
+                                            className="w-full px-4 py-3 bg-[#D1FAE5] border border-[#A7F3D0] font-semibold text-base text-[#065F46] cursor-not-allowed"
+                                            style={{ fontFamily: '"Roboto", sans-serif' }}
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Dynamic Cylinder Serial Assignment */}
+                                {formData.productType.startsWith('BINH') && formData.quantity > 0 && (
+                                    <div className="mt-6 p-5 bg-[#EFF6FF] border border-[#BFDBFE] space-y-4">
+                                        <div className="flex items-center justify-between">
+                                            <h4 className="text-xs font-medium text-[#2563EB] uppercase tracking-wide flex items-center gap-2" style={{ fontFamily: '"Roboto", sans-serif' }}>
+                                                <ScanLine className="w-4 h-4" /> Gán mã bình ({assignedCylinders.filter(Boolean).length}/{formData.quantity})
+                                            </h4>
+                                            <button
+                                                type="button"
+                                                onClick={startScanAll}
+                                                className="px-3 py-1.5 bg-[#2563EB] text-white text-xs font-medium hover:bg-[#1D4ED8] transition-all flex items-center gap-1.5"
+                                            >
+                                                <ScanLine className="w-3.5 h-3.5" /> Quét tất cả
+                                            </button>
+                                        </div>
+                                        <div className="space-y-2">
+                                            {assignedCylinders.map((serial, idx) => (
+                                                <div key={idx} className="flex items-center gap-2">
+                                                    <span className="text-xs font-bold text-gray-400 w-6 text-right">{idx + 1}.</span>
+                                                    <input
+                                                        type="text"
+                                                        value={serial}
+                                                        onChange={(e) => handleCylinderSerialChange(idx, e.target.value)}
+                                                        placeholder={`Mã serial bình ${idx + 1}...`}
+                                                        className="flex-1 px-3 py-2.5 bg-white border border-[#D1D5DB] outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] font-medium text-sm transition-all"
+                                                        style={{ fontFamily: '"Roboto", sans-serif' }}
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => startCylinderScanner(idx)}
+                                                        className="px-3 py-2.5 bg-[#2563EB] text-white hover:bg-[#1D4ED8] transition-all flex items-center gap-1 text-xs font-medium"
+                                                        title="Quét barcode"
+                                                    >
+                                                        <ScanLine className="w-4 h-4" />
+                                                    </button>
+                                                    {serial && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleCylinderSerialChange(idx, '')}
+                                                            className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 transition-all"
+                                                            title="Xóa"
+                                                        >
+                                                            <X className="w-4 h-4" />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {formData.productType.startsWith('MAY') && (
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-medium text-[#374151] uppercase tracking-wide" style={{ fontFamily: '"Roboto", sans-serif' }}>12. Khoa sử dụng máy / Mã máy</label>
+                                        <input
+                                            value={formData.department}
+                                            onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                                            placeholder="Ví dụ: Máy PlasmaRosy PR-01"
+                                            className="w-full px-4 py-3 bg-white border border-[#D1D5DB] outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] font-medium text-sm transition-all"
+                                            style={{ fontFamily: '"Roboto", sans-serif' }}
+                                        />
+                                    </div>
+                                )}
+                                <div className="space-y-2">
+                                    <label className="text-xs font-medium text-[#374151] uppercase tracking-wide" style={{ fontFamily: '"Roboto", sans-serif' }}>13. Khuyến mãi (Áp dụng mã)</label>
+                                    <select
+                                        value={formData.promotion}
+                                        onChange={(e) => setFormData({ ...formData, promotion: e.target.value })}
+                                        className="w-full px-4 py-3 bg-white border border-[#D1D5DB] outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] font-medium text-sm transition-all"
+                                        style={{ fontFamily: '"Roboto", sans-serif' }}
+                                    >
+                                        <option value="">-- Không có mã khuyến mãi --</option>
+                                        <option value="KMB02">KMB02 - Ưu đãi bình mới</option>
+                                        <option value="KM_MAY_01">KM_MAY_01 - Giảm giá máy</option>
+                                    </select>
+                                </div>
+
+                                <div className="pt-4 mt-4 border-t border-[#E5E7EB] space-y-6">
+                                    <h4 className="text-xs font-medium text-[#DC2626] uppercase tracking-wide" style={{ fontFamily: '"Roboto", sans-serif' }}>14. Phí Giao Hàng & Đơn vị VC</h4>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-8">
+                                        <div className="space-y-2">
+                                            <select
+                                                value={formData.shipperId}
+                                                onChange={(e) => setFormData({ ...formData, shipperId: e.target.value })}
+                                                className="w-full px-4 py-3 bg-white border border-[#FCA5A5] outline-none focus:ring-2 focus:ring-[#DC2626] focus:border-[#DC2626] font-medium text-sm transition-all"
+                                                style={{ fontFamily: '"Roboto", sans-serif' }}
+                                            >
+                                                <option value="">-- Chọn Đơn vị VC (Tuỳ chọn) --</option>
+                                                {shippersList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="space-y-2 relative">
+                                            <input
+                                                type="text"
+                                                value={formatNumber(formData.shippingFee)}
+                                                onChange={handleShippingFeeChange}
+                                                placeholder="Nhập cước phí..."
+                                                className="w-full px-4 py-3 pl-10 bg-white border border-[#FCA5A5] outline-none focus:ring-2 focus:ring-[#DC2626] focus:border-[#DC2626] font-semibold text-base text-[#DC2626] transition-all placeholder:text-[#FCA5A5] placeholder:font-normal"
+                                                style={{ fontFamily: '"Roboto", sans-serif' }}
+                                            />
+                                            <span className="absolute left-4 top-[11px] text-[#F87171] font-medium text-sm">đ</span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                </div>
 
-                <div className="p-6 md:p-10 bg-gray-50 border-t border-gray-100 flex flex-col md:flex-row items-center justify-between gap-6">
-                    <p className="text-sm text-gray-400 font-medium italic w-full text-center md:text-left">* Vui lòng kiểm tra kỹ thông tin trước khi nhấn Xác nhận.</p>
-                    <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
-                        <button
-                            onClick={resetForm}
-                            className="w-full sm:w-auto px-6 md:px-10 py-4 md:py-5 bg-white border border-gray-200 text-gray-500 font-bold hover:bg-gray-100 rounded-2xl transition-all shadow-sm"
-                        >
-                            Hủy bỏ
-                        </button>
-                        <button
-                            onClick={handleCreateOrder}
-                            disabled={isSubmitting}
-                            className={`w-full sm:w-auto px-10 md:px-16 py-4 md:py-5 text-white font-black text-lg rounded-2xl shadow-2xl transition-all ${isSubmitting
-                                ? 'bg-gray-400 cursor-not-allowed shadow-none'
-                                : 'bg-gradient-to-r from-blue-600 to-indigo-700 shadow-blue-200 hover:scale-[1.02] active:scale-95'
-                                }`}
-                        >
-                            {isSubmitting ? 'Đang lưu đơn...' : editOrder ? 'Xác nhận cập nhật' : 'Xác nhận tạo đơn hàng'}
-                        </button>
+                    <div className="p-6 md:p-10 bg-[#F9FAFB] border-t border-[#E5E7EB] flex flex-col md:flex-row items-center justify-between gap-6">
+                        <p className="text-sm text-[#6B7280] font-normal w-full text-center md:text-left" style={{ fontFamily: '"Roboto", sans-serif' }}>* Vui lòng kiểm tra kỹ thông tin trước khi nhấn Xác nhận.</p>
+                        <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
+                            <button
+                                onClick={() => navigate('/danh-sach-don-hang')}
+                                className="w-full sm:w-auto px-8 py-3 bg-white border border-[#D1D5DB] text-[#374151] font-medium hover:bg-[#F3F4F6] transition-all"
+                                style={{ fontFamily: '"Roboto", sans-serif' }}
+                            >
+                                Hủy bỏ
+                            </button>
+                            <button
+                                onClick={handleCreateOrder}
+                                disabled={isSubmitting}
+                                className={`w-full sm:w-auto px-10 py-3 text-white font-medium text-base transition-all ${isSubmitting
+                                    ? 'bg-[#9CA3AF] cursor-not-allowed'
+                                    : 'bg-[#2563EB] hover:bg-[#1D4ED8]'
+                                    }`}
+                                style={{ fontFamily: '"Roboto", sans-serif' }}
+                            >
+                                {isSubmitting ? 'Đang lưu đơn...' : editOrder ? 'Xác nhận cập nhật' : 'Xác nhận tạo đơn hàng'}
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
+
+            {showReasonModal && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4">
+                        <h3 className="text-lg font-black text-gray-900">📝 Lý do chỉnh sửa</h3>
+                        <p className="text-sm text-gray-500 font-medium">Vui lòng nhập lý do chỉnh sửa đơn hàng để lưu lịch sử.</p>
+                        <textarea
+                            rows="3"
+                            value={editReason}
+                            onChange={(e) => setEditReason(e.target.value)}
+                            placeholder="Ví dụ: Khách yêu cầu tăng số lượng..."
+                            className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 font-medium text-sm resize-none"
+                            autoFocus
+                        />
+                        <div className="flex gap-3 justify-end">
+                            <button
+                                onClick={() => setShowReasonModal(false)}
+                                className="px-5 py-2.5 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm hover:bg-gray-200 transition-colors"
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                onClick={() => {
+                                    if (!editReason.trim()) {
+                                        alert('Vui lòng nhập lý do!');
+                                        return;
+                                    }
+                                    setShowReasonModal(false);
+                                    handleCreateOrder();
+                                }}
+                                className="px-5 py-2.5 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors"
+                            >
+                                Xác nhận & Lưu
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Barcode Scanner Modal for Cylinder Assignment */}
+            {isScannerOpen && (
+                <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+                        <div className="p-4 flex items-center justify-between bg-gray-50 border-b">
+                            <div className="flex items-center gap-2">
+                                <ScanLine className="w-5 h-5 text-blue-600" />
+                                <span className="font-bold text-gray-800">Quét liên tục</span>
+                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">{scanCount} đã quét → bình #{scanTargetIndex + 1}</span>
+                            </div>
+                            <button onClick={stopCylinderScanner} className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-500 transition-colors">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div id="order-barcode-reader" className="w-full" />
+                        <p className="text-center text-sm text-gray-500 p-3 font-medium">Quét xong tự nhảy sang bình tiếp theo — Đóng khi đủ</p>
+                    </div>
+                </div>
+            )}
+        </>
     );
 };
 

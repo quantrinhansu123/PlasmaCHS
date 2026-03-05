@@ -10,8 +10,8 @@ export const RECEIPT_STATUSES = [
 
 export const ITEM_TYPES = [
     { id: 'MAY', label: 'Máy' },
-    { id: 'BINH', label: 'Bình khí' },
-    { id: 'VAT_TU', label: 'Vật tư / Phụ kiện' },
+    { id: 'BINH', label: 'Bình' },
+    { id: 'BINH_CO_KHI', label: 'Bình có khí' },
 ];
 
 export const ITEM_UNITS = [

@@ -15,6 +15,9 @@ CREATE TABLE app_promotions (
     start_date DATE NOT NULL,                              -- Ngày bắt đầu hiệu lực
     end_date DATE NOT NULL,                                -- Ngày kết thúc hiệu lực
     customer_type VARCHAR(20) NOT NULL,                    -- Đối tượng áp dụng (VD: 'TM', 'ĐL', 'Khác')
+    target_mode VARCHAR(20) NOT NULL DEFAULT 'ALL',        -- ALL / CATEGORY / SPECIFIC
+    target_categories JSONB DEFAULT '[]',                  -- Mảng loại KH: ["BV","TM","PK","NG"]
+    target_customer_ids JSONB DEFAULT '[]',                -- Mảng UUID KH chỉ định
     is_active BOOLEAN DEFAULT true,                        -- Trạng thái Kích hoạt/Vô hiệu hóa
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()

@@ -15,6 +15,7 @@ CREATE TABLE customer_transactions (
     transaction_date DATE NOT NULL DEFAULT CURRENT_DATE, -- Ngày thực hiện giao dịch
     payment_method VARCHAR(50) NOT NULL, -- CHUYEN_KHOAN, TIEN_MAT, KHAC
     note TEXT, -- Ghi chú (VD: Thanh toán tiền hàng lô T03)
+    bill_image_url TEXT, -- URL ảnh bill/hóa đơn (lưu trên Supabase Storage)
     
     created_by VARCHAR(255), -- User thực hiện (Kế toán/Sale)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,

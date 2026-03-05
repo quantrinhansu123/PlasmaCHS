@@ -1,32 +1,54 @@
-import { ActivitySquare, Hash, Save, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { ActivitySquare, Camera, Hash, Save, ScanLine, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     CYLINDER_STATUSES,
     CYLINDER_VOLUMES,
     GAS_TYPES,
     HANDLE_TYPES,
-    MACHINE_TYPES,
     VALVE_TYPES
 } from '../../constants/machineConstants';
+import { WAREHOUSES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
 
 export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
     const isEdit = !!cylinder;
     const [isLoading, setIsLoading] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
+    const [isScannerOpen, setIsScannerOpen] = useState(false);
+    const html5QrCodeRef = useRef(null);
 
     const defaultState = {
         serial_number: '',
         status: 'sẵn sàng',
-        net_weight: '',
+        net_weight: '8',
         category: 'BV',
         volume: 'bình 4L/ CGA870',
         gas_type: 'AirMAC',
         valve_type: 'Van Messer/Phi 6/ CB Trắng',
-        handle_type: 'Có quai'
+        handle_type: 'Có quai',
+        customer_id: '',
+        warehouse_id: 'HN'
     };
 
     const [formData, setFormData] = useState(defaultState);
+    const [customersList, setCustomersList] = useState([]);
+
+    useEffect(() => {
+        const fetchCustomers = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('customers')
+                    .select('id, name')
+                    .order('name');
+                if (!error && data) {
+                    setCustomersList(data);
+                }
+            } catch (err) {
+                console.error('Error fetching customers:', err);
+            }
+        };
+        fetchCustomers();
+    }, []);
 
     useEffect(() => {
         if (isEdit) {
@@ -38,7 +60,9 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                 volume: cylinder.volume || 'bình 4L/ CGA870',
                 gas_type: cylinder.gas_type || 'AirMAC',
                 valve_type: cylinder.valve_type || 'Van Messer/Phi 6/ CB Trắng',
-                handle_type: cylinder.handle_type || 'Có quai'
+                handle_type: cylinder.handle_type || 'Có quai',
+                customer_id: cylinder.customer_id || '',
+                warehouse_id: cylinder.warehouse_id || 'HN'
             });
         }
     }, [cylinder, isEdit]);
@@ -63,6 +87,44 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
         return parts.join(',');
     };
 
+    // Barcode scanner
+    const startScanner = useCallback(async () => {
+        setIsScannerOpen(true);
+        const { Html5Qrcode } = await import('html5-qrcode');
+        setTimeout(async () => {
+            try {
+                const qr = new Html5Qrcode('modal-barcode-reader');
+                html5QrCodeRef.current = qr;
+                await qr.start(
+                    { facingMode: 'environment' },
+                    { fps: 10, qrbox: { width: 280, height: 120 }, aspectRatio: 1.5 },
+                    (decodedText) => {
+                        setFormData(prev => ({ ...prev, serial_number: decodedText }));
+                        qr.stop().catch(() => { });
+                        html5QrCodeRef.current = null;
+                        setIsScannerOpen(false);
+                    },
+                    () => { }
+                );
+            } catch (err) {
+                alert('❌ Không mở được camera: ' + err);
+                setIsScannerOpen(false);
+            }
+        }, 100);
+    }, []);
+
+    const stopScanner = useCallback(async () => {
+        if (html5QrCodeRef.current) {
+            try { await html5QrCodeRef.current.stop(); } catch { }
+            html5QrCodeRef.current = null;
+        }
+        setIsScannerOpen(false);
+    }, []);
+
+    useEffect(() => {
+        return () => { if (html5QrCodeRef.current) html5QrCodeRef.current.stop().catch(() => { }); };
+    }, []);
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setErrorMsg('');
@@ -77,6 +139,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
         try {
             const payload = { ...formData, updated_at: new Date().toISOString() };
             if (!payload.net_weight) delete payload.net_weight;
+            payload.customer_id = payload.customer_id || null;
 
             if (isEdit) {
                 const { error } = await supabase
@@ -142,6 +205,26 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
 
                     <form id="cylinderForm" onSubmit={handleSubmit} className="space-y-8">
 
+                        {/* Scanner Overlay */}
+                        {isScannerOpen && (
+                            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[300] flex flex-col items-center justify-center p-4">
+                                <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden">
+                                    <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                                        <h3 className="font-black text-gray-800 flex items-center gap-2">
+                                            <ScanLine className="w-5 h-5 text-teal-600" /> Quét Barcode
+                                        </h3>
+                                        <button type="button" onClick={stopScanner} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+                                            <X className="w-5 h-5 text-gray-500" />
+                                        </button>
+                                    </div>
+                                    <div id="modal-barcode-reader" className="w-full"></div>
+                                    <div className="px-6 py-4 text-center">
+                                        <p className="text-sm text-gray-500 font-medium">Hướng camera vào barcode</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Section 1: Thông tin cơ bản */}
                         <div>
                             <h4 className="flex items-center gap-2 text-sm font-black text-teal-800 uppercase tracking-widest mb-4 border-b border-slate-100 pb-2">
@@ -150,15 +233,25 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div className="md:col-span-1">
                                     <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Mã Serial RFID *</label>
-                                    <input
-                                        type="text"
-                                        name="serial_number"
-                                        value={formData.serial_number}
-                                        onChange={handleChange}
-                                        placeholder="Ví dụ: QR04116"
-                                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-4 focus:ring-teal-100 focus:border-teal-500 outline-none transition-all font-bold text-slate-900"
-                                        required
-                                    />
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            name="serial_number"
+                                            value={formData.serial_number}
+                                            onChange={handleChange}
+                                            placeholder="Ví dụ: QR04116"
+                                            className="flex-1 px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-4 focus:ring-teal-100 focus:border-teal-500 outline-none transition-all font-bold text-slate-900"
+                                            required
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={startScanner}
+                                            className="px-3 py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl flex items-center gap-1 transition-all shadow-sm"
+                                            title="Quét Barcode"
+                                        >
+                                            <Camera className="w-4 h-4" />
+                                        </button>
+                                    </div>
                                 </div>
                                 <div>
                                     <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Trạng thái</label>
@@ -179,7 +272,31 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                                         onChange={handleChange}
                                         className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-4 focus:ring-teal-100 focus:border-teal-500 outline-none transition-all font-bold text-slate-700 cursor-pointer"
                                     >
-                                        {MACHINE_TYPES.filter(t => t.id === 'BV' || t.id === 'TM').map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                                        <option value="BV">Bệnh viện (BV)</option>
+                                        <option value="TM">Thẩm mỹ viện (TM)</option>
+                                    </select>
+                                </div>
+                                <div className="md:col-span-1">
+                                    <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Khách hàng</label>
+                                    <select
+                                        name="customer_id"
+                                        value={formData.customer_id || ''}
+                                        onChange={handleChange}
+                                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-4 focus:ring-teal-100 focus:border-teal-500 outline-none transition-all font-bold text-slate-700 cursor-pointer"
+                                    >
+                                        <option value="">-- Trống (Thuộc kho) --</option>
+                                        {customersList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                    </select>
+                                </div>
+                                <div className="md:col-span-1">
+                                    <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Kho *</label>
+                                    <select
+                                        name="warehouse_id"
+                                        value={formData.warehouse_id || 'HN'}
+                                        onChange={handleChange}
+                                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-4 focus:ring-teal-100 focus:border-teal-500 outline-none transition-all font-bold text-slate-700 cursor-pointer"
+                                    >
+                                        {WAREHOUSES.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
                                     </select>
                                 </div>
                             </div>

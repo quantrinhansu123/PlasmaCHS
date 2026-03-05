@@ -1,7 +1,23 @@
 import {
+    Chart as ChartJS,
+    CategoryScale,
+    LinearScale,
+    BarElement,
+    ArcElement,
+    PointElement,
+    LineElement,
+    Title,
+    Tooltip as ChartTooltip,
+    Legend as ChartLegend
+} from 'chart.js';
+import { Bar as BarChartJS, Pie as PieChartJS, Line as LineChartJS } from 'react-chartjs-2';
+import {
     Building2,
+    ChevronDown,
     Edit,
     Eye,
+    Filter,
+    Plus,
     Search,
     Trash2
 } from 'lucide-react';
@@ -13,6 +29,19 @@ import SupplierFormModal from '../components/Suppliers/SupplierFormModal';
 import useColumnVisibility from '../hooks/useColumnVisibility';
 import { supabase } from '../supabase/config';
 
+// Register Chart.js components
+ChartJS.register(
+    CategoryScale,
+    LinearScale,
+    BarElement,
+    ArcElement,
+    PointElement,
+    LineElement,
+    Title,
+    ChartTooltip,
+    ChartLegend
+);
+
 const TABLE_COLUMNS = [
     { key: 'info', label: 'Thông tin đối tác' },
     { key: 'phone', label: 'Số điện thoại' },
@@ -21,6 +50,7 @@ const TABLE_COLUMNS = [
 
 const Suppliers = () => {
     const navigate = useNavigate();
+    const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
     const [searchTerm, setSearchTerm] = useState('');
     const [suppliers, setSuppliers] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -52,11 +82,22 @@ const Suppliers = () => {
         }
     };
 
-    const filteredSuppliers = suppliers.filter(supplier =>
-        supplier.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        supplier.phone.includes(searchTerm) ||
-        supplier.address.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const formatNumber = (num) => {
+        if (!num) return '0';
+        return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    };
+
+    const filteredSuppliers = suppliers.filter(supplier => {
+        const search = searchTerm.toLowerCase();
+        return (
+            supplier.name?.toLowerCase().includes(search) ||
+            supplier.phone?.includes(search) ||
+            supplier.address?.toLowerCase().includes(search)
+        );
+    });
+
+    // Calculate totals
+    const filteredSuppliersCount = filteredSuppliers.length;
 
     const handleDeleteSupplier = async (id, name) => {
         if (!window.confirm(`Bạn có chắc chắn muốn xóa đối tác "${name}" không?`)) {
@@ -97,134 +138,263 @@ const Suppliers = () => {
         setIsFormModalOpen(false);
     };
 
+    // Calculate statistics data for charts
+    const getTopSuppliers = () => {
+        // Since suppliers table is simple, we'll just show all suppliers sorted by name
+        return filteredSuppliers
+            .map(s => ({ name: s.name, value: 1 }))
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .slice(0, 10);
+    };
+
+    const getSuppliersByFirstLetter = () => {
+        const stats = {};
+        filteredSuppliers.forEach(supplier => {
+            const firstLetter = supplier.name?.charAt(0).toUpperCase() || 'Khác';
+            stats[firstLetter] = (stats[firstLetter] || 0) + 1;
+        });
+        return Object.entries(stats)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+    };
+
+    // Chart colors
+    const chartColors = [
+        '#2563EB', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
+        '#06B6D4', '#F97316', '#84CC16', '#EC4899', '#6366F1'
+    ];
+
     return (
-        <div className="p-4 md:p-8 max-w-[1600px] mx-auto font-sans bg-[#F8FAFC] min-h-screen noise-bg">
-            {/* Decorative Background Blobs */}
-            <div className="blob blob-blue w-[500px] h-[500px] -top-20 -left-20 opacity-20"></div>
-            <div className="blob blob-indigo w-[400px] h-[400px] top-1/2 -right-20 opacity-10"></div>
-            <div className="blob blob-cyan w-[300px] h-[300px] bottom-10 left-1/4 opacity-10"></div>
-
-            {/* Header Section */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
-                <div className="hover-lift">
-                    <h1 className="text-4xl font-black text-slate-800 tracking-tight flex items-center gap-4">
-                        <div className="w-14 h-14 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-100 transition-transform hover:rotate-3 duration-300">
-                            <Building2 className="w-8 h-8" />
-                        </div>
-                        Nhà cung cấp
-                    </h1>
-                    <p className="text-slate-400 mt-2 font-bold uppercase tracking-widest text-[10px]">Quản lý các đối tác cung cấp vật tư</p>
-                </div>
-
-
+        <div className="p-6 bg-[#F8F9FA] min-h-screen" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
+            {/* Navigation Tabs */}
+            <div className="flex items-center gap-1 mb-8 border-b border-[#E5E7EB]">
+                <button
+                    onClick={() => setActiveView('list')}
+                    className={`px-6 py-3 text-sm font-semibold tracking-wide transition-colors ${
+                        activeView === 'list' 
+                            ? 'text-[#2563EB] border-b-2 border-[#2563EB]' 
+                            : 'text-[#6B7280] hover:text-[#374151]'
+                    }`}
+                    style={activeView === 'list' ? { color: '#2563EB', borderBottomColor: '#2563EB' } : { color: '#6B7280' }}
+                >
+                    Danh sách
+                </button>
+                <button
+                    onClick={() => setActiveView('stats')}
+                    className={`px-6 py-3 text-sm font-semibold tracking-wide transition-colors ${
+                        activeView === 'stats' 
+                            ? 'text-[#2563EB] border-b-2 border-[#2563EB]' 
+                            : 'text-[#6B7280] hover:text-[#374151]'
+                    }`}
+                    style={activeView === 'stats' ? { color: '#2563EB', borderBottomColor: '#2563EB' } : { color: '#6B7280' }}
+                >
+                    Thống kê
+                </button>
             </div>
 
-            {/* Filters Section */}
-            <div className="bg-white p-8 rounded-[2.5rem] shadow-premium border border-slate-50 mb-10 glass relative z-20">
-                <div className="flex items-center gap-4">
-                    <div className="flex-1 relative group">
-                        <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
-                        <input
-                            type="text"
-                            placeholder="Tìm kiếm theo Tên, SĐT, Địa chỉ..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full pl-14 pr-6 py-4 bg-slate-50/50 border border-transparent focus:bg-white focus:border-blue-100 rounded-2xl outline-none focus:ring-4 focus:ring-blue-50 font-bold text-slate-600 transition-all shadow-inner"
-                        />
+            {activeView === 'list' ? (
+                <>
+                    {/* Header with Add Button */}
+                    <div className="flex items-center justify-between mb-6">
+                        <h1 className="text-2xl font-semibold text-[#111827] tracking-tight" style={{ color: '#111827' }}>Danh sách nhà cung cấp</h1>
+                        <button
+                            onClick={handleCreateNew}
+                            className="flex items-center gap-2 px-5 py-2.5 text-white font-medium text-sm transition-all duration-200 shadow-sm hover:shadow-md"
+                            style={{ backgroundColor: '#2563EB' }}
+                            onMouseEnter={(e) => e.target.style.backgroundColor = '#1D4ED8'}
+                            onMouseLeave={(e) => e.target.style.backgroundColor = '#2563EB'}
+                        >
+                            <Plus className="w-4 h-4" />
+                            Thêm
+                        </button>
                     </div>
-                    <ColumnToggle columns={TABLE_COLUMNS} visibleColumns={visibleColumns} onToggle={toggleColumn} onReset={resetColumns} visibleCount={visibleCount} totalCount={totalCount} />
-                </div>
-            </div>
 
-            {/* Table Section */}
-            <div className="bg-white rounded-[2.5rem] shadow-premium border border-slate-50 overflow-hidden glass">
-                {loading ? (
-                    <div className="flex flex-col justify-center items-center h-80 space-y-6">
-                        <div className="w-14 h-14 border-4 border-blue-50 border-t-blue-600 rounded-full animate-spin"></div>
-                        <p className="text-slate-400 font-black animate-pulse tracking-widest text-[10px] uppercase">Đang tải danh sách nhà cung cấp...</p>
-                    </div>
-                ) : filteredSuppliers.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-28 px-4 text-center">
-                        <div className="w-24 h-24 bg-slate-50 rounded-[2.5rem] flex items-center justify-center mb-8">
-                            <Building2 className="w-12 h-12 text-slate-200" />
+                    {/* Search Bar and Summary Stats - Same Row */}
+                    <div className="mb-6 flex items-center gap-4">
+                        {/* Search Bar */}
+                        <div className="flex-1 relative">
+                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#9CA3AF]" />
+                            <input
+                                type="text"
+                                placeholder="Tìm theo tên, SĐT, địa chỉ..."
+                                className="w-full pl-12 pr-4 py-3 border border-[#D1D5DB] focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] bg-white text-[#111827] placeholder-[#9CA3AF] text-sm transition-all"
+                                style={{ fontFamily: '"Roboto", sans-serif' }}
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
                         </div>
-                        <h3 className="text-2xl font-black text-slate-800 mb-2 tracking-tight">Chưa có nhà cung cấp nào</h3>
-                        <p className="text-slate-400 font-medium max-w-sm">Hồ sơ đối tác của bạn sẽ xuất hiện tại đây sau khi được khởi tạo.</p>
+
+                        {/* Summary Stats */}
+                        <div className="flex items-center gap-6 px-6 py-3 bg-[#EFF6FF] border border-[#BFDBFE]">
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm text-[#6B7280]" style={{ fontFamily: '"Roboto", sans-serif' }}>Tổng số NCC:</span>
+                                <span className="text-lg font-semibold text-[#2563EB]" style={{ fontFamily: '"Roboto", sans-serif' }}>{filteredSuppliersCount}</span>
+                            </div>
+                        </div>
                     </div>
-                ) : (
-                    <div className="w-full overflow-x-auto">
-                        <table className="w-full border-collapse min-w-[1000px] text-left">
-                            <thead className="glass-header">
-                                <tr>
-                                    <th className="px-8 py-6 text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] text-center w-24">STT</th>
-                                    {visibleTableColumns.map(col => (
-                                        <th key={col.key} className="px-8 py-6 text-[10px] font-black text-slate-600 uppercase tracking-[0.2em]">
-                                            {col.label}
-                                        </th>
-                                    ))}
-                                    <th className="px-8 py-6 text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] text-center">Thao tác</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-50/50">
-                                {filteredSuppliers.map((supplier, index) => (
-                                    <tr key={supplier.id} className="hover:bg-blue-50/20 transition-all duration-300 group">
-                                        <td className="px-8 py-7 whitespace-nowrap text-center">
-                                            <span className="font-black text-slate-200 group-hover:text-blue-500 transition-colors duration-300 text-lg">{index + 1}</span>
-                                        </td>
-                                        {isColumnVisible('info') && <td className="px-8 py-7">
-                                            <div className="font-black text-slate-800 text-base group-hover:text-blue-600 transition-colors">{supplier.name}</div>
-                                            <div className="text-[10px] text-slate-300 font-black uppercase tracking-widest mt-1.5 flex items-center gap-2">
-                                                <div className="w-1.5 h-1.5 rounded-full bg-slate-200" />
-                                                ID: {supplier.id.substring(0, 8)}
-                                            </div>
-                                        </td>}
-                                        {isColumnVisible('phone') && <td className="px-8 py-7 whitespace-nowrap">
-                                            <span className="font-black text-slate-800 bg-slate-50 px-4 py-2 rounded-xl border border-slate-100 group-hover:bg-white group-hover:shadow-sm transition-all">
-                                                {supplier.phone}
-                                            </span>
-                                        </td>}
-                                        {isColumnVisible('address') && <td className="px-8 py-7 text-sm font-bold text-slate-500 leading-relaxed max-w-xs">
-                                            {supplier.address}
-                                        </td>}
-                                        <td className="px-8 py-7 text-center">
-                                            <div className="flex items-center justify-center gap-1 transition-opacity">
-                                                <button
-                                                    onClick={() => handleViewSupplier(supplier)}
-                                                    className="text-slate-400 hover:text-blue-500 transition-all outline-none"
-                                                    title="Xem chi tiết"
-                                                >
-                                                    <Eye className="w-5 h-5" />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleEditSupplier(supplier)}
-                                                    className="text-slate-400 hover:text-indigo-500 transition-all outline-none"
-                                                    title="Chỉnh sửa"
-                                                >
-                                                    <Edit className="w-5 h-5" />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDeleteSupplier(supplier.id, supplier.name)}
-                                                    className="text-slate-400 hover:text-rose-500 transition-all outline-none"
-                                                    title="Xóa"
-                                                >
-                                                    <Trash2 className="w-5 h-5" />
-                                                </button>
-                                            </div>
-                                        </td>
+
+                    {/* Main Content Card */}
+                    <div className="bg-white border border-[#E5E7EB] shadow-sm">
+                        {/* Table Section */}
+                        <div className="w-full overflow-x-auto">
+                            <table className="w-full border-collapse">
+                                <thead className="bg-[#F9FAFB]">
+                                    <tr>
+                                        <th className="px-4 py-3.5 text-xs font-semibold text-[#374151] text-center uppercase tracking-wider w-16">STT</th>
+                                        {visibleTableColumns.map(col => (
+                                            <th key={col.key} className="px-4 py-3.5 text-xs font-semibold text-[#374151] text-left uppercase tracking-wider">
+                                                {col.label}
+                                            </th>
+                                        ))}
+                                        <th className="px-4 py-3.5 text-xs font-semibold text-[#374151] text-center uppercase tracking-wider">Thao tác</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody className="divide-y divide-[#E5E7EB]">
+                                    {loading ? (
+                                        <tr>
+                                            <td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center">
+                                                <div className="flex flex-col items-center gap-4">
+                                                    <div className="w-8 h-8 border-4 border-[#2563EB] border-t-transparent rounded-full animate-spin"></div>
+                                                    <p className="text-[#6B7280] text-sm font-medium" style={{ fontFamily: '"Roboto", sans-serif' }}>Đang tải dữ liệu...</p>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ) : filteredSuppliers.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center">
+                                                <div className="flex flex-col items-center gap-4">
+                                                    <Building2 className="w-12 h-12 text-[#D1D5DB]" />
+                                                    <p className="text-sm font-medium text-[#6B7280]" style={{ fontFamily: '"Roboto", sans-serif' }}>Không tìm thấy nhà cung cấp nào</p>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ) : filteredSuppliers.map((supplier, index) => (
+                                        <tr key={supplier.id} className="hover:bg-[#F9FAFB] transition-colors">
+                                            <td className="px-4 py-4 text-center">
+                                                <span className="text-sm text-[#6B7280]" style={{ fontFamily: '"Roboto", sans-serif' }}>{index + 1}</span>
+                                            </td>
+                                            {isColumnVisible('info') && <td className="px-4 py-4">
+                                                <div>
+                                                    <div className="text-sm font-medium text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>{supplier.name}</div>
+                                                    <div className="text-xs text-[#6B7280] mt-1" style={{ fontFamily: '"Roboto", sans-serif' }}>ID: {supplier.id.substring(0, 8)}</div>
+                                                </div>
+                                            </td>}
+                                            {isColumnVisible('phone') && <td className="px-4 py-4">
+                                                <span className="text-sm font-medium text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>{supplier.phone}</span>
+                                            </td>}
+                                            {isColumnVisible('address') && <td className="px-4 py-4 text-sm text-[#374151] font-normal" style={{ fontFamily: '"Roboto", sans-serif' }}>{supplier.address}</td>}
+                                            <td className="px-4 py-4 text-center">
+                                                <div className="flex items-center justify-center gap-3">
+                                                    <button
+                                                        onClick={() => handleViewSupplier(supplier)}
+                                                        className="text-[#9CA3AF] hover:text-[#2563EB] transition-colors p-1 hover:bg-[#EFF6FF]"
+                                                        title="Xem chi tiết"
+                                                    >
+                                                        <Eye className="w-4 h-4" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleEditSupplier(supplier)}
+                                                        className="text-[#9CA3AF] hover:text-[#2563EB] transition-colors p-1 hover:bg-[#EFF6FF]"
+                                                        title="Chỉnh sửa"
+                                                    >
+                                                        <Edit className="w-4 h-4" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeleteSupplier(supplier.id, supplier.name)}
+                                                        className="text-[#9CA3AF] hover:text-[#DC2626] transition-colors p-1 hover:bg-[#FEF2F2]"
+                                                        title="Xóa"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-                )}
-            </div>
+                </>
+            ) : (
+                /* Statistics View */
+                <div className="space-y-6">
+                    {/* Summary Stats */}
+                    <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <div className="text-sm text-[#6B7280] mb-2" style={{ fontFamily: '"Roboto", sans-serif' }}>Tổng số nhà cung cấp</div>
+                            <div className="text-2xl font-semibold text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>{filteredSuppliersCount}</div>
+                        </div>
+                    </div>
 
-            {/* Stats Footer */}
-            {!loading && filteredSuppliers.length > 0 && (
-                <div className="mt-8 flex flex-wrap gap-4 items-center justify-between text-[10px] font-black text-slate-400 px-6 uppercase tracking-[0.15em]">
-                    <p>
-                        Hiển thị <span className="text-blue-600 ml-1">{filteredSuppliers.length}</span> / {suppliers.length} đối tác hệ thống
-                    </p>
+                    {/* Charts Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Top Suppliers Chart */}
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <h3 className="text-lg font-semibold text-[#111827] mb-4" style={{ fontFamily: '"Roboto", sans-serif' }}>Danh sách Nhà cung cấp</h3>
+                            <div style={{ height: '300px' }}>
+                                <BarChartJS
+                                    data={{
+                                        labels: getTopSuppliers().map(item => item.name.length > 20 ? item.name.substring(0, 20) + '...' : item.name),
+                                        datasets: [{
+                                            label: 'Số lượng',
+                                            data: getTopSuppliers().map(item => item.value),
+                                            backgroundColor: chartColors[0],
+                                            borderColor: chartColors[0],
+                                            borderWidth: 1
+                                        }]
+                                    }}
+                                    options={{
+                                        responsive: true,
+                                        maintainAspectRatio: false,
+                                        indexAxis: 'y',
+                                        plugins: {
+                                            legend: {
+                                                display: false
+                                            }
+                                        },
+                                        scales: {
+                                            x: {
+                                                beginAtZero: true
+                                            }
+                                        }
+                                    }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Suppliers by First Letter Chart */}
+                        <div className="bg-white p-6 border border-[#E5E7EB]">
+                            <h3 className="text-lg font-semibold text-[#111827] mb-4" style={{ fontFamily: '"Roboto", sans-serif' }}>Phân bổ theo Chữ cái đầu</h3>
+                            <div style={{ height: '300px' }}>
+                                <BarChartJS
+                                    data={{
+                                        labels: getSuppliersByFirstLetter().map(item => item.name),
+                                        datasets: [{
+                                            label: 'Số lượng',
+                                            data: getSuppliersByFirstLetter().map(item => item.value),
+                                            backgroundColor: chartColors[1],
+                                            borderColor: chartColors[1],
+                                            borderWidth: 1
+                                        }]
+                                    }}
+                                    options={{
+                                        responsive: true,
+                                        maintainAspectRatio: false,
+                                        plugins: {
+                                            legend: {
+                                                display: false
+                                            }
+                                        },
+                                        scales: {
+                                            y: {
+                                                beginAtZero: true
+                                            }
+                                        }
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    </div>
                 </div>
             )}
 

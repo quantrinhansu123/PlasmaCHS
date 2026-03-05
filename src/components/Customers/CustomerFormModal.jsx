@@ -1,4 +1,4 @@
-import { Hash, MapPin, Phone, Save, User, X } from 'lucide-react';
+import { Building, Hash, MapPin, Phone, Receipt, Save, User, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../../supabase/config';
 
@@ -6,6 +6,24 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
     const isEdit = !!customer;
     const [isLoading, setIsLoading] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
+    const [staffList, setStaffList] = useState([]);
+    const [agencySuggestions, setAgencySuggestions] = useState([]);
+
+    useEffect(() => {
+        const loadStaff = async () => {
+            const { data } = await supabase.from('app_users').select('id, name, role').order('name');
+            if (data) setStaffList(data);
+        };
+        const loadAgencies = async () => {
+            const { data } = await supabase.from('customers').select('agency_name').not('agency_name', 'is', null).neq('agency_name', '');
+            if (data) {
+                const unique = [...new Set(data.map(d => d.agency_name).filter(Boolean))];
+                setAgencySuggestions(unique);
+            }
+        };
+        loadStaff();
+        loadAgencies();
+    }, []);
 
     const [formData, setFormData] = useState({
         code: '',
@@ -15,7 +33,14 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
         address: '',
         legal_rep: '',
         warehouse_id: warehouses && warehouses.length > 0 ? warehouses[0].id : '',
-        care_by: ''
+        care_by: '',
+        agency_name: '',
+        managed_by: '',
+        contact_info: '',
+        business_group: '',
+        tax_code: '',
+        invoice_company_name: '',
+        invoice_address: ''
     });
 
     useEffect(() => {
@@ -28,7 +53,14 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                 address: customer.address || '',
                 legal_rep: customer.legal_rep || '',
                 warehouse_id: customer.warehouse_id || (warehouses && warehouses.length > 0 ? warehouses[0].id : ''),
-                care_by: customer.care_by || ''
+                care_by: customer.care_by || '',
+                agency_name: customer.agency_name || '',
+                managed_by: customer.managed_by || '',
+                contact_info: customer.contact_info || '',
+                business_group: customer.business_group || '',
+                tax_code: customer.tax_code || '',
+                invoice_company_name: customer.invoice_company_name || '',
+                invoice_address: customer.invoice_address || ''
             });
         } else {
             // Auto generate CODE
@@ -200,6 +232,17 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                         required
                                     />
                                 </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Thông tin người liên hệ phụ</label>
+                                    <input
+                                        type="text"
+                                        name="contact_info"
+                                        value={formData.contact_info}
+                                        onChange={handleChange}
+                                        placeholder="Tên, chức vụ người liên hệ phụ..."
+                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-medium text-gray-900"
+                                    />
+                                </div>
                             </div>
                         </div>
 
@@ -251,14 +294,98 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">NV Kinh Doanh phụ trách chăm sóc</label>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Nhóm Kinh Doanh</label>
                                     <input
                                         type="text"
+                                        name="business_group"
+                                        value={formData.business_group}
+                                        onChange={handleChange}
+                                        placeholder="Ví dụ: Nhóm KD Miền Bắc..."
+                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-medium text-gray-900"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">NV Kinh Doanh phụ trách chăm sóc</label>
+                                    <select
                                         name="care_by"
                                         value={formData.care_by}
                                         onChange={handleChange}
-                                        placeholder="Quản lý bằng Tên NV hoặc Mã..."
-                                        className="w-full px-4 py-3 bg-orange-50/50 border border-orange-100 rounded-xl focus:ring-4 focus:ring-orange-100 focus:border-orange-500 outline-none transition-all font-bold text-orange-900"
+                                        className="w-full px-4 py-3 bg-orange-50/50 border border-orange-100 rounded-xl focus:ring-4 focus:ring-orange-100 focus:border-orange-500 outline-none transition-all font-bold text-orange-900 cursor-pointer"
+                                    >
+                                        <option value="">-- Chọn NVKD --</option>
+                                        {staffList.map(u => <option key={u.id} value={u.name}>{u.name}{u.role ? ` (${u.role})` : ''}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Đại lý (nơi quản lý KH)</label>
+                                    <input
+                                        type="text"
+                                        name="agency_name"
+                                        value={formData.agency_name}
+                                        onChange={handleChange}
+                                        placeholder="Gõ tên đại lý..."
+                                        list="modal-agency-suggestions"
+                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-medium text-gray-900"
+                                    />
+                                    <datalist id="modal-agency-suggestions">
+                                        {agencySuggestions.map((a, i) => <option key={i} value={a} />)}
+                                    </datalist>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Đại lý phụ trách (NVKD)</label>
+                                    <select
+                                        name="managed_by"
+                                        value={formData.managed_by}
+                                        onChange={handleChange}
+                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-bold text-gray-900 cursor-pointer"
+                                    >
+                                        <option value="">-- Chọn NVKD phụ trách --</option>
+                                        {staffList.map(u => <option key={u.id} value={u.name}>{u.name}{u.role ? ` (${u.role})` : ''}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Section 3: Thông tin xuất hoá đơn */}
+                        <div>
+                            <h4 className="flex items-center gap-2 text-sm font-black text-gray-800 uppercase tracking-widest mb-4 border-b border-gray-100 pb-2">
+                                <Receipt className="w-4 h-4" /> THÔNG TIN XUẤT HOÁ ĐƠN
+                            </h4>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Mã số thuế</label>
+                                    <div className="relative">
+                                        <Building className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                        <input
+                                            type="text"
+                                            name="tax_code"
+                                            value={formData.tax_code}
+                                            onChange={handleChange}
+                                            placeholder="VD: 0101234567"
+                                            className="w-full pl-9 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-bold text-gray-900"
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Tên công ty (trên hoá đơn)</label>
+                                    <input
+                                        type="text"
+                                        name="invoice_company_name"
+                                        value={formData.invoice_company_name}
+                                        onChange={handleChange}
+                                        placeholder="Tên công ty ghi trên hoá đơn..."
+                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-bold text-gray-900"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Địa chỉ xuất hoá đơn</label>
+                                    <input
+                                        type="text"
+                                        name="invoice_address"
+                                        value={formData.invoice_address}
+                                        onChange={handleChange}
+                                        placeholder="Địa chỉ ghi trên hoá đơn GTGT..."
+                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-medium text-gray-900"
                                     />
                                 </div>
                             </div>

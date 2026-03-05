@@ -9,6 +9,8 @@ import ScrollToTop from './components/ScrollToTop';
 
 import CreateCustomer from './pages/CreateCustomer';
 import CreateCylinder from './pages/CreateCylinder';
+import CreateCylinderRecovery from './pages/CreateCylinderRecovery';
+import CreateGoodsIssue from './pages/CreateGoodsIssue';
 import CreateGoodsReceipt from './pages/CreateGoodsReceipt';
 import CreateMachine from './pages/CreateMachine';
 import CreateMaterial from './pages/CreateMaterial';
@@ -20,7 +22,9 @@ import CreateSupplier from './pages/CreateSupplier';
 import CreateUser from './pages/CreateUser';
 import CreateWarehouse from './pages/CreateWarehouse';
 import Customers from './pages/Customers';
+import CylinderRecoveries from './pages/CylinderRecoveries';
 import Cylinders from './pages/Cylinders';
+import GoodsIssues from './pages/GoodsIssues';
 import GoodsReceipts from './pages/GoodsReceipts';
 import Home from './pages/Home';
 import Machines from './pages/Machines';
@@ -121,9 +125,29 @@ function App() {
                   <GoodsReceipts />
                 </ProtectedRoute>
               } />
+              <Route path="/xuat-kho" element={
+                <ProtectedRoute>
+                  <GoodsIssues />
+                </ProtectedRoute>
+              } />
               <Route path="/tao-phieu-nhap" element={
                 <ProtectedRoute>
                   <CreateGoodsReceipt />
+                </ProtectedRoute>
+              } />
+              <Route path="/tao-phieu-xuat" element={
+                <ProtectedRoute>
+                  <CreateGoodsIssue />
+                </ProtectedRoute>
+              } />
+              <Route path="/thu-hoi-vo" element={
+                <ProtectedRoute>
+                  <CylinderRecoveries />
+                </ProtectedRoute>
+              } />
+              <Route path="/tao-phieu-thu-hoi" element={
+                <ProtectedRoute>
+                  <CreateCylinderRecovery />
                 </ProtectedRoute>
               } />
               <Route path="/nha-cung-cap" element={

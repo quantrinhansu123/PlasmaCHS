@@ -25,11 +25,14 @@ export const CUSTOMER_CATEGORIES = [
     { id: 'TM', label: 'Thẩm mỹ viện' },
     { id: 'PK', label: 'Phòng khám' },
     { id: 'NG', label: 'Khách ngoại giao' },
+    { id: 'SP', label: 'Spa / Khác' },
 ];
 
 export const PRODUCT_TYPES = [
-    { id: 'MAY', label: 'Máy' },
-    { id: 'BINH', label: 'Bình' },
+    { id: 'BINH_4L', label: 'Bình 4L' },
+    { id: 'BINH_8L', label: 'Bình 8L' },
+    { id: 'MAY_ROSY', label: 'Máy PlasmaRosy' },
+    { id: 'MAY_MED', label: 'Máy PlasmaMed-BV' },
 ];
 
 export const ORDER_STATUSES = [

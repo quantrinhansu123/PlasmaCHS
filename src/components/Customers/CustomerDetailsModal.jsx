@@ -6,9 +6,11 @@ import {
     DollarSign,
     FileText,
     History,
+    ImageIcon,
     MapPin,
     Package,
     Phone,
+    Upload,
     UserCircle,
     X
 } from 'lucide-react';
@@ -29,6 +31,8 @@ export default function CustomerDetailsModal({ customer, onClose }) {
     const [paymentMethod, setPaymentMethod] = useState('CHUYEN_KHOAN');
     const [paymentNote, setPaymentNote] = useState('');
     const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+    const [billImageFile, setBillImageFile] = useState(null);
+    const [previewImage, setPreviewImage] = useState(null);
 
     const [stats, setStats] = useState({
         totalOrderValue: 0,
@@ -128,12 +132,24 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                 customer_id: customer.id,
                 customer_name: customer.name,
                 amount: amountNum,
-                transaction_type: 'THU', // Thu tiền từ khách hàng
+                transaction_type: 'THU',
                 transaction_date: paymentDate,
                 payment_method: paymentMethod,
                 note: paymentNote,
                 created_by: 'Kế toán'
             };
+
+            // Upload bill image if provided
+            if (billImageFile) {
+                const fileName = `bill_${nextCode}_${Date.now()}.${billImageFile.name.split('.').pop()}`;
+                const { error: uploadError } = await supabase.storage
+                    .from('bill-images')
+                    .upload(fileName, billImageFile);
+                if (!uploadError) {
+                    const { data: urlData } = supabase.storage.from('bill-images').getPublicUrl(fileName);
+                    payload.bill_image_url = urlData.publicUrl;
+                }
+            }
 
             const { error } = await supabase.from('customer_transactions').insert([payload]);
             if (error) throw error;
@@ -142,6 +158,7 @@ export default function CustomerDetailsModal({ customer, onClose }) {
             setShowPaymentForm(false);
             setPaymentAmount('');
             setPaymentNote('');
+            setBillImageFile(null);
             fetchCustomerData(); // refresh data
         } catch (error) {
             console.error('Lỗi khi lập phiếu thu:', error);
@@ -327,6 +344,21 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                                             />
                                                         </div>
                                                     </div>
+                                                    <div className="space-y-2">
+                                                        <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Ảnh Bill / Hóa đơn</label>
+                                                        <label className="flex items-center gap-3 px-5 py-3.5 bg-white border border-dashed border-slate-300 rounded-xl cursor-pointer hover:border-violet-400 hover:bg-violet-50/30 transition-all">
+                                                            <Upload className="w-5 h-5 text-slate-400" />
+                                                            <span className="font-bold text-sm text-slate-500">
+                                                                {billImageFile ? billImageFile.name : 'Chọn ảnh bill...'}
+                                                            </span>
+                                                            <input
+                                                                type="file"
+                                                                accept="image/*"
+                                                                className="hidden"
+                                                                onChange={(e) => setBillImageFile(e.target.files[0] || null)}
+                                                            />
+                                                        </label>
+                                                    </div>
                                                     <div className="flex justify-end pt-2">
                                                         <button
                                                             type="submit"
@@ -410,6 +442,7 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                                     <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Hình thức</th>
                                                     <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-right">Số tiền</th>
                                                     <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Người lập</th>
+                                                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-center">Bill</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-50">
@@ -427,6 +460,18 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                                         <td className="px-6 py-4 text-sm font-bold text-slate-600">{tx.payment_method}</td>
                                                         <td className="px-6 py-4 text-sm font-black text-slate-900 text-right">{formatCurrency(tx.amount)}</td>
                                                         <td className="px-6 py-4 text-sm font-bold text-slate-500">{tx.created_by || '—'}</td>
+                                                        <td className="px-6 py-4 text-center">
+                                                            {tx.bill_image_url ? (
+                                                                <button
+                                                                    onClick={() => setPreviewImage(tx.bill_image_url)}
+                                                                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-violet-50 text-violet-600 rounded-lg hover:bg-violet-100 transition-colors text-xs font-bold"
+                                                                >
+                                                                    <ImageIcon className="w-3.5 h-3.5" /> Xem
+                                                                </button>
+                                                            ) : (
+                                                                <span className="text-slate-300 text-xs">—</span>
+                                                            )}
+                                                        </td>
                                                     </tr>
                                                 ))}
                                             </tbody>
@@ -438,6 +483,29 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                         </div>
                     )}
                 </div>
+
+                {/* Image Lightbox */}
+                {previewImage && (
+                    <div
+                        onClick={() => setPreviewImage(null)}
+                        className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-8 cursor-pointer"
+                    >
+                        <div className="relative max-w-3xl max-h-[85vh]">
+                            <button
+                                onClick={() => setPreviewImage(null)}
+                                className="absolute -top-3 -right-3 p-2 bg-white rounded-full shadow-lg hover:bg-red-50 transition-colors z-10"
+                            >
+                                <X className="w-5 h-5 text-slate-600" />
+                            </button>
+                            <img
+                                src={previewImage}
+                                alt="Bill"
+                                className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl"
+                                onClick={(e) => e.stopPropagation()}
+                            />
+                        </div>
+                    </div>
+                )}
 
             </div>
         </div>

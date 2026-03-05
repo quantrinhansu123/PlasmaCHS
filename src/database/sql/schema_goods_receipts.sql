@@ -31,6 +31,7 @@ CREATE TABLE goods_receipt_items (
     item_type VARCHAR(50) NOT NULL,        -- MAY / BINH / VAT_TU
     item_name VARCHAR(255) NOT NULL,       -- Tên hàng hóa
     serial_number VARCHAR(100),            -- Mã serial (nếu có)
+    item_status VARCHAR(50),               -- Trạng thái (Sẵn sàng, Kiểm tra...)
     quantity INTEGER NOT NULL DEFAULT 1,   -- Số lượng
     unit VARCHAR(50) NOT NULL DEFAULT 'cái', -- Đơn vị
     unit_price NUMERIC(15, 2) NOT NULL DEFAULT 0, -- Đơn giá nhập

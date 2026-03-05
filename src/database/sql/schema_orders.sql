@@ -60,7 +60,7 @@ ALTER TABLE orders ADD CONSTRAINT check_order_status CHECK (
 
 -- Constraint for customer categories
 ALTER TABLE orders ADD CONSTRAINT check_customer_category CHECK (
-    customer_category IN ('BV', 'TM', 'PK', 'NG')
+    customer_category IN ('BV', 'TM', 'PK', 'NG', 'SP')
 );
 
 -- Constraint for warehouses
@@ -70,10 +70,10 @@ ALTER TABLE orders ADD CONSTRAINT check_warehouse CHECK (
 
 -- Constraint for product types
 ALTER TABLE orders ADD CONSTRAINT check_product_type CHECK (
-    product_type IN ('BINH', 'MAY')
+    product_type IN ('BINH', 'MAY', 'MAY_ROSY', 'MAY_MED', 'BINH_4L', 'BINH_8L')
 );
 
 -- Comments for clarity
 COMMENT ON TABLE orders IS 'Bảng danh sách đơn hàng PlasmaVN';
 COMMENT ON COLUMN orders.order_code IS 'Mã đơn hàng số (ví dụ: 804)';
-COMMENT ON COLUMN orders.customer_category IS 'Loại khách: BV (Bệnh viện), TM (Thẩm mỹ), PK (Phòng khám), NG (Ngoại giao)';
+COMMENT ON COLUMN orders.customer_category IS 'Loại khách: BV (Bệnh viện), TM (Thẩm mỹ), PK (Phòng khám), NG (Ngoại giao), SP (Spa / Khác)';

@@ -7,6 +7,10 @@ import {
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ITEM_TYPES, ITEM_UNITS } from '../constants/goodsReceiptConstants';
+import {
+    CYLINDER_STATUSES,
+    MACHINE_STATUSES
+} from '../constants/machineConstants';
 import { WAREHOUSES } from '../constants/orderConstants';
 import { supabase } from '../supabase/config';
 
@@ -14,6 +18,7 @@ const CreateGoodsReceipt = () => {
     const navigate = useNavigate();
     const { state } = useLocation();
     const editReceipt = state?.receipt;
+    const isReadOnly = editReceipt && editReceipt.status !== 'CHO_DUYET';
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [suppliers, setSuppliers] = useState([]);
 
@@ -21,6 +26,7 @@ const CreateGoodsReceipt = () => {
         item_type: 'MAY',
         item_name: '',
         serial_number: '',
+        item_status: '',
         quantity: 1,
         unit: 'cái',
         unit_price: 0,
@@ -164,6 +170,7 @@ const CreateGoodsReceipt = () => {
                 item_type: item.item_type,
                 item_name: item.item_name,
                 serial_number: item.serial_number,
+                item_status: item.item_status,
                 quantity: item.quantity,
                 unit: item.unit,
                 unit_price: item.unit_price,
@@ -227,10 +234,11 @@ const CreateGoodsReceipt = () => {
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Nhà cung cấp *</label>
                                 <select
                                     value={formData.supplier_name}
+                                    disabled={isReadOnly}
                                     onChange={(e) => setFormData({ ...formData, supplier_name: e.target.value })}
-                                    className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-500 font-bold text-base shadow-sm cursor-pointer text-gray-900 transition-all"
+                                    className={`w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 font-bold text-base shadow-sm transition-all ${isReadOnly ? 'cursor-not-allowed bg-gray-50' : 'cursor-pointer'}`}
                                 >
-                                    <option value="">-- Chọn NCC --</option>
+                                    <option value="">-- Chọn nhà cung cấp --</option>
                                     {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
                                 </select>
                             </div>
@@ -238,8 +246,9 @@ const CreateGoodsReceipt = () => {
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Kho nhận hàng *</label>
                                 <select
                                     value={formData.warehouse_id}
+                                    disabled={isReadOnly}
                                     onChange={(e) => setFormData({ ...formData, warehouse_id: e.target.value })}
-                                    className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-500 font-bold text-base shadow-sm cursor-pointer text-gray-900 transition-all"
+                                    className={`w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 font-bold text-base shadow-sm transition-all ${isReadOnly ? 'cursor-not-allowed bg-gray-50' : 'cursor-pointer'}`}
                                 >
                                     {WAREHOUSES.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
                                 </select>
@@ -251,14 +260,15 @@ const CreateGoodsReceipt = () => {
                                 <input
                                     type="date"
                                     value={formData.receipt_date}
+                                    disabled={isReadOnly}
                                     onChange={(e) => setFormData({ ...formData, receipt_date: e.target.value })}
-                                    className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-500 font-bold text-base shadow-sm transition-all"
-                                />
-                            </div>
+                                    className={`w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 font-bold text-base shadow-sm transition-all ${isReadOnly ? 'cursor-not-allowed bg-gray-50' : ''}`}
+                                />        </div>
                             <div className="space-y-2">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Người nhận hàng</label>
                                 <input
                                     value={formData.received_by}
+                                    disabled={isReadOnly}
                                     onChange={(e) => setFormData({ ...formData, received_by: e.target.value })}
                                     placeholder="Tên thủ kho / người nhận..."
                                     className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-500 font-bold shadow-sm transition-all"
@@ -296,9 +306,10 @@ const CreateGoodsReceipt = () => {
                                 <thead>
                                     <tr className="bg-gray-50/80">
                                         <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-center w-12">#</th>
-                                        <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-left">Loại</th>
+                                        <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-left w-36">Loại</th>
                                         <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-left">Tên hàng hóa *</th>
                                         <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-left">Serial / Mã</th>
+                                        <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-left w-40">Trạng thái</th>
                                         <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-center w-24">SL</th>
                                         <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-left w-28 whitespace-nowrap">ĐVT</th>
                                         <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] text-right w-36 whitespace-nowrap">Đơn giá (VNĐ)</th>
@@ -314,8 +325,9 @@ const CreateGoodsReceipt = () => {
                                             <td className="px-4 py-3">
                                                 <select
                                                     value={item.item_type}
+                                                    disabled={isReadOnly}
                                                     onChange={(e) => updateItem(idx, 'item_type', e.target.value)}
-                                                    className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 cursor-pointer"
+                                                    className={`w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 ${isReadOnly ? 'cursor-not-allowed bg-gray-50' : 'cursor-pointer'}`}
                                                 >
                                                     {ITEM_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
                                                 </select>
@@ -335,6 +347,21 @@ const CreateGoodsReceipt = () => {
                                                     placeholder="Serial..."
                                                     className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
                                                 />
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <select
+                                                    value={item.item_status}
+                                                    disabled={isReadOnly}
+                                                    onChange={(e) => updateItem(idx, 'item_status', e.target.value)}
+                                                    className={`w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 ${isReadOnly ? 'cursor-not-allowed bg-gray-50' : 'cursor-pointer'}`}
+                                                >
+                                                    <option value="">-- Chọn --</option>
+                                                    {item.item_type === 'MAY' ? (
+                                                        MACHINE_STATUSES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)
+                                                    ) : (item.item_type === 'BINH' || item.item_type === 'BINH_CO_KHI') ? (
+                                                        CYLINDER_STATUSES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)
+                                                    ) : null}
+                                                </select>
                                             </td>
                                             <td className="px-4 py-3">
                                                 <input

@@ -1,17 +1,19 @@
 import {
     ActivitySquare,
-    CheckCircle2
+    Camera,
+    CheckCircle2,
+    X
 } from 'lucide-react';
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     CYLINDER_STATUSES,
     CYLINDER_VOLUMES,
     GAS_TYPES,
     HANDLE_TYPES,
-    MACHINE_TYPES,
     VALVE_TYPES
 } from '../constants/machineConstants';
+import { WAREHOUSES } from '../constants/orderConstants';
 import { supabase } from '../supabase/config';
 
 const CreateCylinder = () => {
@@ -19,20 +21,97 @@ const CreateCylinder = () => {
     const { state } = useLocation();
     const editCylinder = state?.cylinder;
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isScannerOpen, setIsScannerOpen] = useState(false);
+    const scannerRef = useRef(null);
+    const html5QrCodeRef = useRef(null);
 
     const defaultState = {
         serial_number: '',
         status: 'sẵn sàng',
-        net_weight: '',
+        net_weight: '8',
         category: 'BV',
         volume: 'bình 4L/ CGA870',
         gas_type: 'AirMAC',
         valve_type: 'Van Messer/Phi 6/ CB Trắng',
-        handle_type: 'Có quai'
+        handle_type: 'Có quai',
+        customer_id: '',
+        warehouse_id: 'HN'
     };
 
     const initialFormState = editCylinder || defaultState;
     const [formData, setFormData] = useState(initialFormState);
+    const [customersList, setCustomersList] = useState([]);
+
+    useEffect(() => {
+        const fetchCustomers = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('customers')
+                    .select('id, name')
+                    .order('name');
+                if (!error && data) {
+                    setCustomersList(data);
+                }
+            } catch (err) {
+                console.error('Error fetching customers:', err);
+            }
+        };
+        fetchCustomers();
+    }, []);
+
+    // Cleanup scanner on unmount
+    useEffect(() => {
+        return () => {
+            if (html5QrCodeRef.current) {
+                html5QrCodeRef.current.stop().catch(() => { });
+            }
+        };
+    }, []);
+
+    const startScanner = useCallback(async () => {
+        setIsScannerOpen(true);
+        // Dynamic import to avoid SSR issues
+        const { Html5Qrcode } = await import('html5-qrcode');
+
+        // Wait for DOM element to be rendered
+        setTimeout(async () => {
+            try {
+                const html5QrCode = new Html5Qrcode("barcode-reader");
+                html5QrCodeRef.current = html5QrCode;
+
+                await html5QrCode.start(
+                    { facingMode: "environment" }, // Camera sau  
+                    {
+                        fps: 10,
+                        qrbox: { width: 280, height: 120 },
+                        aspectRatio: 1.5
+                    },
+                    (decodedText) => {
+                        // Quét thành công
+                        setFormData(prev => ({ ...prev, serial_number: decodedText }));
+                        stopScanner();
+                    },
+                    () => { } // Ignore scan errors (continuous scanning)
+                );
+            } catch (err) {
+                console.error('Camera error:', err);
+                alert('❌ Không thể mở camera. Vui lòng kiểm tra quyền truy cập camera.');
+                setIsScannerOpen(false);
+            }
+        }, 100);
+    }, []);
+
+    const stopScanner = useCallback(async () => {
+        if (html5QrCodeRef.current) {
+            try {
+                await html5QrCodeRef.current.stop();
+                html5QrCodeRef.current = null;
+            } catch (e) {
+                // Ignore
+            }
+        }
+        setIsScannerOpen(false);
+    }, []);
 
     const handleCreateCylinder = async () => {
         if (!formData.serial_number) {
@@ -46,7 +125,6 @@ const CreateCylinder = () => {
             if (!payload.net_weight) delete payload.net_weight;
 
             if (editCylinder) {
-                // Remove readonly/system fields before update to prevent errors
                 delete payload.id;
                 delete payload.created_at;
                 delete payload.updated_at;
@@ -91,14 +169,10 @@ const CreateCylinder = () => {
     };
 
     const handleNumericChange = (field, value) => {
-        // Convert from Vietnamese display format (1.000,50) to standard float (1000.50)
         let raw = value.replace(/\./g, '').replace(/,/g, '.');
         raw = raw.replace(/[^0-9.]/g, '');
-
-        // Ensure only one decimal point
         const dots = raw.split('.');
         if (dots.length > 2) raw = dots[0] + '.' + dots.slice(1).join('');
-
         setFormData(prev => ({ ...prev, [field]: raw }));
     };
 
@@ -115,6 +189,26 @@ const CreateCylinder = () => {
                 </h1>
             </div>
 
+            {/* Barcode Scanner Overlay */}
+            {isScannerOpen && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex flex-col items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                            <h3 className="font-black text-gray-800 flex items-center gap-2">
+                                <Camera className="w-5 h-5 text-teal-600" /> Quét Barcode
+                            </h3>
+                            <button onClick={stopScanner} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+                                <X className="w-5 h-5 text-gray-500" />
+                            </button>
+                        </div>
+                        <div id="barcode-reader" ref={scannerRef} className="w-full"></div>
+                        <div className="px-6 py-4 text-center">
+                            <p className="text-sm text-gray-500 font-medium">Hướng camera vào mã barcode trên vỏ bình</p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div className="bg-white/80 backdrop-blur-xl rounded-[1.5rem] md:rounded-[2.5rem] shadow-2xl shadow-teal-900/10 border border-white overflow-hidden relative z-10">
                 <div className="p-6 md:p-10 space-y-10 md:space-y-12">
                     {/* Section 1: Thông tin cơ sở */}
@@ -124,15 +218,39 @@ const CreateCylinder = () => {
                             <h3 className="text-base md:text-lg font-bold text-gray-800 uppercase tracking-tight">Thông tin cơ sở vỏ bình</h3>
                         </div>
                         <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
+                            {/* Serial RFID + Barcode Scanner */}
                             <div className="space-y-2 lg:col-span-2">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Serial RFID *</label>
+                                <div className="flex gap-2">
+                                    <input
+                                        value={formData.serial_number}
+                                        onChange={(e) => setFormData({ ...formData, serial_number: e.target.value })}
+                                        placeholder="Quét hoặc nhập mã barcode..."
+                                        className="flex-1 px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-teal-100 focus:border-teal-500 font-bold text-base shadow-sm transition-all"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={startScanner}
+                                        className="px-5 py-4 bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-700 rounded-2xl font-bold transition-all flex items-center gap-2 shrink-0"
+                                        title="Quét barcode bằng camera"
+                                    >
+                                        <Camera className="w-5 h-5" />
+                                        <span className="hidden sm:inline text-sm">Quét</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Mã bình (khắc trên vỏ) */}
+                            <div className="space-y-2 lg:col-span-2">
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Mã bình (khắc trên vỏ)</label>
                                 <input
-                                    value={formData.serial_number}
-                                    onChange={(e) => setFormData({ ...formData, serial_number: e.target.value })}
-                                    placeholder="QR04116"
+                                    value={formData.cylinder_code || ''}
+                                    onChange={(e) => setFormData({ ...formData, cylinder_code: e.target.value })}
+                                    placeholder="Mã khắc vật lý trên thân bình..."
                                     className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-teal-100 focus:border-teal-500 font-bold text-base shadow-sm transition-all"
                                 />
                             </div>
+
                             <div className="space-y-2">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Trạng thái *</label>
                                 <select
@@ -150,7 +268,29 @@ const CreateCylinder = () => {
                                     onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                                     className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-teal-100 focus:border-teal-500 font-bold text-base shadow-sm cursor-pointer text-gray-900"
                                 >
-                                    {MACHINE_TYPES.filter(t => t.id === 'BV' || t.id === 'TM').map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                                    <option value="BV">BV</option>
+                                    <option value="TM">TM</option>
+                                </select>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Khách hàng</label>
+                                <select
+                                    value={formData.customer_id || ''}
+                                    onChange={(e) => setFormData({ ...formData, customer_id: e.target.value })}
+                                    className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-teal-100 focus:border-teal-500 font-bold text-base shadow-sm cursor-pointer text-gray-900"
+                                >
+                                    <option value="">-- Trống (Thuộc kho) --</option>
+                                    {customersList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                </select>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Kho *</label>
+                                <select
+                                    value={formData.warehouse_id || 'HN'}
+                                    onChange={(e) => setFormData({ ...formData, warehouse_id: e.target.value })}
+                                    className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-teal-100 focus:border-teal-500 font-bold text-base shadow-sm cursor-pointer text-gray-900"
+                                >
+                                    {WAREHOUSES.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
                                 </select>
                             </div>
                         </div>
@@ -169,7 +309,7 @@ const CreateCylinder = () => {
                                     type="text"
                                     value={formatNumber(formData.net_weight)}
                                     onChange={(e) => handleNumericChange('net_weight', e.target.value)}
-                                    placeholder="Ví dụ: 12,5"
+                                    placeholder="8"
                                     className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-teal-100 focus:border-teal-500 font-bold shadow-sm"
                                 />
                             </div>

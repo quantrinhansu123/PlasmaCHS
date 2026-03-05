@@ -1,10 +1,16 @@
 import {
     Activity,
     ActivitySquare,
+    Building2,
+    ChevronDown,
+    ChevronUp,
     LogIn,
     LogOut,
     MapPin,
     Package,
+    Truck,
+    Users,
+    Warehouse,
     X
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -13,27 +19,110 @@ import { supabase } from '../../supabase/config';
 export default function CylinderDetailsModal({ cylinder, onClose }) {
     const [loading, setLoading] = useState(true);
     const [orders, setOrders] = useState([]);
+    const [timeline, setTimeline] = useState([]);
+    const [showFullTimeline, setShowFullTimeline] = useState(false);
+    const [qcData, setQcData] = useState(null);
 
     useEffect(() => {
         if (!cylinder) return;
-        fetchCylinderHistory();
+        fetchAllHistory();
     }, [cylinder]);
 
-    const fetchCylinderHistory = async () => {
+    const fetchAllHistory = async () => {
         setLoading(true);
         try {
-            // Lấy các Đơn hàng (Orders) có đề cập đến Serial Bình này
-            const { data, error } = await supabase
+            // 1. Orders (giao cho khách / thu hồi)
+            const { data: orderData } = await supabase
                 .from('orders')
                 .select('*')
                 .contains('assigned_cylinders', [cylinder.serial_number])
                 .order('created_at', { ascending: false });
 
-            if (error) throw error;
-            setOrders(data || []);
+            setOrders(orderData || []);
+
+            // 2. Goods Receipts (nhập từ NCC về kho)
+            const { data: receiptItems } = await supabase
+                .from('goods_receipt_items')
+                .select('*, goods_receipts!inner(receipt_code, supplier_name, warehouse_id, receipt_date, status)')
+                .eq('serial_number', cylinder.serial_number);
+
+            // 3. Goods Issues (xuất trả về NCC)
+            const { data: issueItems } = await supabase
+                .from('goods_issue_items')
+                .select('*, goods_issues!inner(issue_code, supplier_id, warehouse_id, issue_date, status)')
+                .eq('item_code', cylinder.serial_number);
+
+            // 4. QC Data
+            const { data: qcDataRes, error: qcError } = await supabase
+                .from('cylinder_qc_records')
+                .select('*')
+                .eq('serial_number', cylinder.serial_number)
+                .single();
+
+            // Ignore 406 (Not Found) or 42P01 (Table not found)
+            if (qcDataRes) {
+                setQcData(qcDataRes);
+            } else {
+                setQcData(null);
+            }
+
+            // Build unified timeline
+            const events = [];
+
+            // From orders
+            (orderData || []).forEach(o => {
+                const type = o.order_type?.toLowerCase() || '';
+                const isOutgoing = type.includes('thuê') || type.includes('bán') || type.includes('giao');
+                events.push({
+                    date: o.created_at,
+                    type: isOutgoing ? 'GIAO_KHACH' : 'THU_HOI',
+                    label: isOutgoing ? 'Giao cho khách' : 'Thu hồi về kho',
+                    location: o.customer_name || 'Khách hàng',
+                    code: o.order_code,
+                    status: o.status,
+                    icon: isOutgoing ? 'outgoing' : 'incoming',
+                    color: isOutgoing ? 'rose' : 'teal',
+                    source: 'order'
+                });
+            });
+
+            // From goods receipts
+            (receiptItems || []).forEach(ri => {
+                const r = ri.goods_receipts;
+                events.push({
+                    date: r.receipt_date || ri.created_at,
+                    type: 'NHAP_KHO',
+                    label: 'Nhập kho từ NCC',
+                    location: `Kho ${r.warehouse_id} ← ${r.supplier_name}`,
+                    code: r.receipt_code,
+                    status: r.status,
+                    icon: 'warehouse',
+                    color: 'emerald',
+                    source: 'receipt'
+                });
+            });
+
+            // From goods issues
+            (issueItems || []).forEach(ii => {
+                const gi = ii.goods_issues;
+                events.push({
+                    date: gi.issue_date || ii.created_at,
+                    type: 'TRA_NCC',
+                    label: 'Trả về NCC',
+                    location: `Kho ${gi.warehouse_id} → NCC`,
+                    code: gi.issue_code,
+                    status: gi.status,
+                    icon: 'supplier',
+                    color: 'amber',
+                    source: 'issue'
+                });
+            });
+
+            // Sort by date descending (newest first)
+            events.sort((a, b) => new Date(b.date) - new Date(a.date));
+            setTimeline(events);
         } catch (error) {
-            console.error('Error fetching cylinder history:', error);
-            alert('Lỗi tải dữ liệu lịch sử bình khí!');
+            console.error('Error fetching cylinder lifecycle:', error);
         } finally {
             setLoading(false);
         }
@@ -45,18 +134,42 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
     };
 
     const getStatusStyle = (status) => {
-        if (['DA_DUYET', 'HOAN_THANH'].includes(status)) {
-            return 'bg-emerald-50 text-emerald-600 border-emerald-200';
-        }
-        if (['HUY_DON', 'DOI_SOAT_THAT_BAI'].includes(status)) {
-            return 'bg-rose-50 text-rose-600 border-rose-200';
-        }
+        if (['DA_DUYET', 'HOAN_THANH'].includes(status)) return 'bg-emerald-50 text-emerald-600 border-emerald-200';
+        if (['HUY_DON', 'DOI_SOAT_THAT_BAI', 'HUY'].includes(status)) return 'bg-rose-50 text-rose-600 border-rose-200';
         return 'bg-amber-50 text-amber-600 border-amber-200';
     };
 
+    const getEventIcon = (iconType) => {
+        switch (iconType) {
+            case 'outgoing': return <Users className="w-4 h-4" />;
+            case 'incoming': return <LogIn className="w-4 h-4" />;
+            case 'warehouse': return <Warehouse className="w-4 h-4" />;
+            case 'supplier': return <Building2 className="w-4 h-4" />;
+            default: return <MapPin className="w-4 h-4" />;
+        }
+    };
+
+    const getColorClasses = (color) => ({
+        dot: `bg-${color}-500`,
+        bg: `bg-${color}-50`,
+        text: `text-${color}-600`,
+        border: `border-${color}-200`,
+        line: `bg-${color}-200`
+    });
+
+    // Colors that work with Tailwind JIT
+    const colorMap = {
+        rose: { dot: 'bg-rose-500', bg: 'bg-rose-50', text: 'text-rose-600', border: 'border-rose-200', iconBg: 'bg-rose-100' },
+        teal: { dot: 'bg-teal-500', bg: 'bg-teal-50', text: 'text-teal-600', border: 'border-teal-200', iconBg: 'bg-teal-100' },
+        emerald: { dot: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-600', border: 'border-emerald-200', iconBg: 'bg-emerald-100' },
+        amber: { dot: 'bg-amber-500', bg: 'bg-amber-50', text: 'text-amber-600', border: 'border-amber-200', iconBg: 'bg-amber-100' }
+    };
+
+    const displayedTimeline = showFullTimeline ? timeline : timeline.slice(0, 3);
+
     return (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
-            <div className="bg-slate-50 rounded-[2rem] shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col h-[80vh] mt-12">
+            <div className="bg-slate-50 rounded-[2rem] shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col h-[85vh] mt-12">
 
                 {/* Header Profile */}
                 <div className="bg-white px-8 py-6 border-b border-slate-200 shrink-0 relative overflow-hidden">
@@ -85,93 +198,218 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                             <X className="w-6 h-6" />
                         </button>
                     </div>
-
-                    <div className="flex items-center gap-12 mt-8 border-b border-slate-200 relative z-10">
-                        <div className="pb-4 px-2 text-sm font-black uppercase tracking-wider border-b-2 text-rose-600 border-rose-600">
-                            <div className="flex items-center gap-2">
-                                <LogOut className="w-4 h-4" /> Lịch sử Giao Đi / Thuê
-                                <span className="bg-rose-100 text-rose-600 py-0.5 px-2 rounded-full text-[10px] ml-1">
-                                    {orders.filter(o => o.order_type.toLowerCase().includes('thuê') || o.order_type.toLowerCase().includes('bán') || o.order_type.toLowerCase().includes('giao')).length}
-                                </span>
-                            </div>
-                        </div>
-                        <div className="pb-4 px-2 text-sm font-black uppercase tracking-wider border-b-2 text-teal-600 border-teal-600">
-                            <div className="flex items-center gap-2">
-                                <LogIn className="w-4 h-4" /> Lịch sử Thu Hồi / Nhập về
-                                <span className="bg-teal-100 text-teal-600 py-0.5 px-2 rounded-full text-[10px] ml-1">
-                                    {orders.filter(o => o.order_type.toLowerCase().includes('thu hồi') || o.order_type.toLowerCase().includes('trả') || o.order_type.toLowerCase().includes('nhập')).length}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
                 </div>
 
-                {/* Body Details - Split View */}
-                <div className="flex-1 overflow-hidden relative flex flex-col md:flex-row bg-[#F8FAFC]">
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto custom-scrollbar">
                     {loading ? (
-                        <div className="flex flex-col flex-1 items-center justify-center h-40 space-y-4">
+                        <div className="flex flex-col flex-1 items-center justify-center h-40 space-y-4 py-16">
                             <div className="w-10 h-10 border-4 border-teal-100 border-t-teal-600 rounded-full animate-spin"></div>
                             <p className="text-sm font-bold text-slate-400 animate-pulse">Đang tải lịch sử luân chuyển...</p>
                         </div>
                     ) : (
                         <>
-                            {/* Cột 1: Thuê / Giao đi */}
-                            <div className="flex-1 p-6 overflow-y-auto border-r border-slate-200 custom-scrollbar">
-                                <h3 className="text-sm font-black text-rose-600 uppercase tracking-widest mb-4 flex items-center gap-2"><LogOut className="w-4 h-4" /> Đơn Giao Bình / Cho Thuê</h3>
-                                <div className="space-y-4">
-                                    {orders.filter(o => o.order_type.toLowerCase().includes('thuê') || o.order_type.toLowerCase().includes('bán') || o.order_type.toLowerCase().includes('giao')).length === 0 ? (
-                                        <div className="p-10 text-center flex flex-col items-center border border-dashed border-slate-200 rounded-3xl bg-white">
-                                            <Package className="w-10 h-10 text-slate-200 mb-3" />
-                                            <p className="text-slate-400 font-bold text-sm">Chưa có giao dịch xuất vỏ</p>
-                                        </div>
-                                    ) : (
-                                        orders.filter(o => o.order_type.toLowerCase().includes('thuê') || o.order_type.toLowerCase().includes('bán') || o.order_type.toLowerCase().includes('giao')).map(o => (
-                                            <div key={o.id} className="bg-white p-5 rounded-2xl border border-rose-100 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
-                                                <div className="absolute top-0 left-0 w-1 h-full bg-rose-400"></div>
-                                                <div className="flex justify-between items-start mb-3">
-                                                    <div>
-                                                        <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-1 rounded-md uppercase tracking-wider">{o.order_code}</span>
-                                                        <div className="text-[10px] font-bold text-slate-400 mt-2">{formatDate(o.created_at)}</div>
-                                                    </div>
-                                                    <span className={`px-2 py-0.5 text-[9px] font-black tracking-widest uppercase rounded flex items-center gap-1 ${getStatusStyle(o.status)}`}>
-                                                        {o.status}
-                                                    </span>
-                                                </div>
-                                                <h4 className="font-black text-slate-800 text-base mb-1">{o.customer_name}</h4>
-                                                <p className="text-xs font-bold text-rose-500 uppercase tracking-wider">{o.order_type}</p>
+                            {/* QC Metadata Section */}
+                            {qcData && (
+                                <div className="px-8 pt-6 pb-2">
+                                    <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest flex items-center gap-2 mb-4">
+                                        <Activity className="w-4 h-4 text-emerald-500" />
+                                        Thông số kỹ thuật (Kiểm định)
+                                    </h3>
+                                    <div className="bg-emerald-50/50 border border-emerald-100 rounded-2xl p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                                        <div className="flex flex-col gap-3">
+                                            <div>
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Trọng lượng vỏ</p>
+                                                <p className="font-black text-emerald-700">{qcData.empty_weight} kg</p>
                                             </div>
-                                        ))
+                                            <div>
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Chất liệu</p>
+                                                <p className="font-black text-slate-700 text-xs">{qcData.material || '—'}</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-col gap-3">
+                                            <div>
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Dung tích</p>
+                                                <p className="font-black text-emerald-700">{qcData.water_capacity} L</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Thời gian giữ áp</p>
+                                                <p className="font-black text-slate-700 text-xs">{qcData.hold_time || '—'}</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-col gap-3">
+                                            <div>
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Lô / Mẫu</p>
+                                                <p className="font-black text-slate-700 text-sm">
+                                                    {qcData.batch_no || '—'}<br />
+                                                    <span className="text-[10px] font-semibold text-slate-500">{qcData.product_type}</span>
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Áp suất Test</p>
+                                                <p className="font-black text-slate-700 text-xs">{qcData.test_pressure || '—'}</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-col justify-between">
+                                            <div>
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Kết luận kiểm định</p>
+                                                <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-xs font-black inline-block mt-1">
+                                                    {qcData.conclusion || 'OK'}
+                                                </span>
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 mt-3">Tiêu chuẩn</p>
+                                                <p className="font-black text-slate-700 text-xs">{qcData.standard || '—'}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Timeline Section - Vòng đời bình */}
+                            <div className="px-8 pt-6 pb-4">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
+                                        <Truck className="w-4 h-4 text-slate-400" />
+                                        Vòng đời — {timeline.length} sự kiện
+                                    </h3>
+                                    {timeline.length > 3 && (
+                                        <button
+                                            onClick={() => setShowFullTimeline(!showFullTimeline)}
+                                            className="flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-all"
+                                        >
+                                            {showFullTimeline ? (
+                                                <><ChevronUp className="w-3.5 h-3.5" /> Thu gọn</>
+                                            ) : (
+                                                <><ChevronDown className="w-3.5 h-3.5" /> Xem tất cả ({timeline.length})</>
+                                            )}
+                                        </button>
                                     )}
                                 </div>
+
+                                {timeline.length === 0 ? (
+                                    <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-white">
+                                        <Package className="w-10 h-10 text-slate-200 mx-auto mb-3" />
+                                        <p className="text-slate-400 font-bold text-sm">Chưa có lịch sử luân chuyển nào</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-0 relative">
+                                        {/* Vertical line */}
+                                        <div className="absolute left-[19px] top-2 bottom-2 w-0.5 bg-slate-200"></div>
+
+                                        {displayedTimeline.map((event, idx) => {
+                                            const c = colorMap[event.color] || colorMap.teal;
+                                            return (
+                                                <div key={idx} className="flex items-start gap-4 relative group">
+                                                    {/* Dot */}
+                                                    <div className={`w-10 h-10 rounded-xl ${c.iconBg} ${c.text} flex items-center justify-center shrink-0 z-10 shadow-sm border ${c.border}`}>
+                                                        {getEventIcon(event.icon)}
+                                                    </div>
+
+                                                    {/* Content */}
+                                                    <div className={`flex-1 pb-5 ${idx === displayedTimeline.length - 1 ? '' : ''}`}>
+                                                        <div className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
+                                                            <div className="flex items-center justify-between mb-1">
+                                                                <span className={`text-xs font-black uppercase tracking-wider ${c.text}`}>{event.label}</span>
+                                                                <span className="text-[10px] font-bold text-slate-400">{formatDate(event.date)}</span>
+                                                            </div>
+                                                            <h4 className="font-bold text-slate-800 text-sm mb-1">{event.location}</h4>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-[10px] font-black text-slate-400 bg-slate-50 px-2 py-0.5 rounded">{event.code}</span>
+                                                                <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border ${getStatusStyle(event.status)}`}>{event.status}</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+
+                                        {!showFullTimeline && timeline.length > 3 && (
+                                            <div className="flex items-center gap-4 pl-10 pt-1">
+                                                <p className="text-xs font-bold text-slate-400 italic">
+                                                    ...và {timeline.length - 3} sự kiện trước đó
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
 
-                            {/* Cột 2: Thu hồi / Trả */}
-                            <div className="flex-1 p-6 overflow-y-auto custom-scrollbar">
-                                <h3 className="text-sm font-black text-teal-600 uppercase tracking-widest mb-4 flex items-center gap-2"><LogIn className="w-4 h-4" /> Đơn Nhập Bình Về Kho</h3>
-                                <div className="space-y-4">
-                                    {orders.filter(o => o.order_type.toLowerCase().includes('thu hồi') || o.order_type.toLowerCase().includes('trả') || o.order_type.toLowerCase().includes('nhập')).length === 0 ? (
-                                        <div className="p-10 text-center flex flex-col items-center border border-dashed border-slate-200 rounded-3xl bg-white">
-                                            <Package className="w-10 h-10 text-slate-200 mb-3" />
-                                            <p className="text-slate-400 font-bold text-sm">Chưa có giao dịch thu hồi</p>
-                                        </div>
-                                    ) : (
-                                        orders.filter(o => o.order_type.toLowerCase().includes('thu hồi') || o.order_type.toLowerCase().includes('trả') || o.order_type.toLowerCase().includes('nhập')).map(o => (
-                                            <div key={o.id} className="bg-white p-5 rounded-2xl border border-teal-100 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
-                                                <div className="absolute top-0 left-0 w-1 h-full bg-teal-400"></div>
-                                                <div className="flex justify-between items-start mb-3">
-                                                    <div>
-                                                        <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-1 rounded-md uppercase tracking-wider">{o.order_code}</span>
-                                                        <div className="text-[10px] font-bold text-slate-400 mt-2">{formatDate(o.created_at)}</div>
-                                                    </div>
-                                                    <span className={`px-2 py-0.5 text-[9px] font-black tracking-widest uppercase rounded flex items-center gap-1 ${getStatusStyle(o.status)}`}>
-                                                        {o.status}
-                                                    </span>
-                                                </div>
-                                                <h4 className="font-black text-slate-800 text-base mb-1">{o.customer_name}</h4>
-                                                <p className="text-xs font-bold text-teal-500 uppercase tracking-wider">{o.order_type}</p>
+                            {/* Divider */}
+                            <div className="mx-8 border-t border-slate-200"></div>
+
+                            {/* Legacy 2-column view */}
+                            <div className="flex flex-col md:flex-row bg-[#F8FAFC]">
+                                {/* Cột 1: Thuê / Giao đi */}
+                                <div className="flex-1 p-6 overflow-y-auto border-r border-slate-200">
+                                    <h3 className="text-sm font-black text-rose-600 uppercase tracking-widest mb-4 flex items-center gap-2"><LogOut className="w-4 h-4" /> Đơn Giao Bình / Cho Thuê</h3>
+                                    <div className="space-y-4">
+                                        {orders.filter(o => {
+                                            const t = o.order_type?.toLowerCase() || '';
+                                            return t.includes('thuê') || t.includes('bán') || t.includes('giao');
+                                        }).length === 0 ? (
+                                            <div className="p-10 text-center flex flex-col items-center border border-dashed border-slate-200 rounded-3xl bg-white">
+                                                <Package className="w-10 h-10 text-slate-200 mb-3" />
+                                                <p className="text-slate-400 font-bold text-sm">Chưa có giao dịch xuất vỏ</p>
                                             </div>
-                                        ))
-                                    )}
+                                        ) : (
+                                            orders.filter(o => {
+                                                const t = o.order_type?.toLowerCase() || '';
+                                                return t.includes('thuê') || t.includes('bán') || t.includes('giao');
+                                            }).map(o => (
+                                                <div key={o.id} className="bg-white p-5 rounded-2xl border border-rose-100 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
+                                                    <div className="absolute top-0 left-0 w-1 h-full bg-rose-400"></div>
+                                                    <div className="flex justify-between items-start mb-3">
+                                                        <div>
+                                                            <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-1 rounded-md uppercase tracking-wider">{o.order_code}</span>
+                                                            <div className="text-[10px] font-bold text-slate-400 mt-2">{formatDate(o.created_at)}</div>
+                                                        </div>
+                                                        <span className={`px-2 py-0.5 text-[9px] font-black tracking-widest uppercase rounded flex items-center gap-1 ${getStatusStyle(o.status)}`}>
+                                                            {o.status}
+                                                        </span>
+                                                    </div>
+                                                    <h4 className="font-black text-slate-800 text-base mb-1">{o.customer_name}</h4>
+                                                    <p className="text-xs font-bold text-rose-500 uppercase tracking-wider">{o.order_type}</p>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Cột 2: Thu hồi / Trả */}
+                                <div className="flex-1 p-6 overflow-y-auto">
+                                    <h3 className="text-sm font-black text-teal-600 uppercase tracking-widest mb-4 flex items-center gap-2"><LogIn className="w-4 h-4" /> Đơn Nhập Bình Về Kho</h3>
+                                    <div className="space-y-4">
+                                        {orders.filter(o => {
+                                            const t = o.order_type?.toLowerCase() || '';
+                                            return t.includes('thu hồi') || t.includes('trả') || t.includes('nhập');
+                                        }).length === 0 ? (
+                                            <div className="p-10 text-center flex flex-col items-center border border-dashed border-slate-200 rounded-3xl bg-white">
+                                                <Package className="w-10 h-10 text-slate-200 mb-3" />
+                                                <p className="text-slate-400 font-bold text-sm">Chưa có giao dịch thu hồi</p>
+                                            </div>
+                                        ) : (
+                                            orders.filter(o => {
+                                                const t = o.order_type?.toLowerCase() || '';
+                                                return t.includes('thu hồi') || t.includes('trả') || t.includes('nhập');
+                                            }).map(o => (
+                                                <div key={o.id} className="bg-white p-5 rounded-2xl border border-teal-100 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
+                                                    <div className="absolute top-0 left-0 w-1 h-full bg-teal-400"></div>
+                                                    <div className="flex justify-between items-start mb-3">
+                                                        <div>
+                                                            <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-1 rounded-md uppercase tracking-wider">{o.order_code}</span>
+                                                            <div className="text-[10px] font-bold text-slate-400 mt-2">{formatDate(o.created_at)}</div>
+                                                        </div>
+                                                        <span className={`px-2 py-0.5 text-[9px] font-black tracking-widest uppercase rounded flex items-center gap-1 ${getStatusStyle(o.status)}`}>
+                                                            {o.status}
+                                                        </span>
+                                                    </div>
+                                                    <h4 className="font-black text-slate-800 text-base mb-1">{o.customer_name}</h4>
+                                                    <p className="text-xs font-bold text-teal-500 uppercase tracking-wider">{o.order_type}</p>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         </>

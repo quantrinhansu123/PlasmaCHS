@@ -23,10 +23,33 @@ const CreateCustomer = () => {
         contact_info: '',
         warehouse_id: 'HN',
         business_group: '',
-        care_by: ''
+        care_by: '',
+        agency_name: '',
+        managed_by: '',
+        tax_code: '',
+        invoice_company_name: '',
+        invoice_address: ''
     };
 
     const [formData, setFormData] = useState(initialFormState);
+    const [staffList, setStaffList] = useState([]);
+    const [agencySuggestions, setAgencySuggestions] = useState([]);
+
+    useEffect(() => {
+        const loadStaff = async () => {
+            const { data } = await supabase.from('app_users').select('id, name, role').order('name');
+            if (data) setStaffList(data);
+        };
+        const loadAgencies = async () => {
+            const { data } = await supabase.from('customers').select('agency_name').not('agency_name', 'is', null).neq('agency_name', '');
+            if (data) {
+                const unique = [...new Set(data.map(d => d.agency_name).filter(Boolean))];
+                setAgencySuggestions(unique);
+            }
+        };
+        loadStaff();
+        loadAgencies();
+    }, []);
 
     // Auto generate Customer Code on mount
     useEffect(() => {
@@ -208,10 +231,69 @@ const CreateCustomer = () => {
                         </div>
                         <div className="space-y-3">
                             <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">10. NVKD Chăm sóc</label>
-                            <input
-                                value={formData.care_by}
+                            <select
+                                value={formData.care_by || ''}
                                 onChange={(e) => setFormData({ ...formData, care_by: e.target.value })}
-                                placeholder="Gõ tên hoặc mã NV..."
+                                className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-pink-100 focus:border-pink-500 font-bold text-base transition-all shadow-sm text-gray-900 cursor-pointer"
+                            >
+                                <option value="">-- Chọn NVKD --</option>
+                                {staffList.map(u => <option key={u.id} value={u.name}>{u.name}{u.role ? ` (${u.role})` : ''}</option>)}
+                            </select>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-2 gap-6 md:gap-10 mt-6">
+                            <div className="space-y-3">
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">11. Đại lý (nơi quản lý KH)</label>
+                                <input
+                                    value={formData.agency_name || ''}
+                                    onChange={(e) => setFormData({ ...formData, agency_name: e.target.value })}
+                                    placeholder="Gõ tên đại lý..."
+                                    list="agency-suggestions"
+                                    className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-pink-100 focus:border-pink-500 font-bold text-base transition-all shadow-sm text-gray-900"
+                                />
+                                <datalist id="agency-suggestions">
+                                    {agencySuggestions.map((a, i) => <option key={i} value={a} />)}
+                                </datalist>
+                            </div>
+                            <div className="space-y-3">
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">12. Đại lý phụ trách (NVKD)</label>
+                                <select
+                                    value={formData.managed_by || ''}
+                                    onChange={(e) => setFormData({ ...formData, managed_by: e.target.value })}
+                                    className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-pink-100 focus:border-pink-500 font-bold text-base transition-all shadow-sm text-gray-900 cursor-pointer"
+                                >
+                                    <option value="">-- Chọn NVKD phụ trách --</option>
+                                    {staffList.map(u => <option key={u.id} value={u.name}>{u.name}{u.role ? ` (${u.role})` : ''}</option>)}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Section 4: Thông tin xuất hoá đơn */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-10">
+                        <div className="space-y-3">
+                            <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">13. Mã số thuế</label>
+                            <input
+                                value={formData.tax_code}
+                                onChange={(e) => setFormData({ ...formData, tax_code: e.target.value })}
+                                placeholder="VD: 0101234567"
+                                className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-pink-100 focus:border-pink-500 font-bold text-base transition-all shadow-sm text-gray-900"
+                            />
+                        </div>
+                        <div className="space-y-3">
+                            <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">14. Tên công ty (trên hoá đơn)</label>
+                            <input
+                                value={formData.invoice_company_name}
+                                onChange={(e) => setFormData({ ...formData, invoice_company_name: e.target.value })}
+                                placeholder="Tên công ty ghi trên hoá đơn..."
+                                className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-pink-100 focus:border-pink-500 font-bold text-base transition-all shadow-sm text-gray-900"
+                            />
+                        </div>
+                        <div className="space-y-3">
+                            <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">15. Địa chỉ xuất hoá đơn</label>
+                            <input
+                                value={formData.invoice_address}
+                                onChange={(e) => setFormData({ ...formData, invoice_address: e.target.value })}
+                                placeholder="Địa chỉ ghi trên hoá đơn GTGT..."
                                 className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-pink-100 focus:border-pink-500 font-bold text-base transition-all shadow-sm text-gray-900"
                             />
                         </div>

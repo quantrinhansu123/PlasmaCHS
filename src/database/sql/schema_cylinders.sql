@@ -21,6 +21,7 @@ CREATE TABLE cylinders (
     
     -- Additional tracking fields
     customer_name VARCHAR(255), -- Tên khách hàng (Nếu bình đang giao cho KH hoặc status='thuộc khách hàng')
+    cylinder_code VARCHAR(100) UNIQUE, -- Mã bình khắc trên vỏ (mã vật lý)
     
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
