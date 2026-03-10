@@ -8,7 +8,6 @@ import {
     MACHINE_TYPES,
     VALVE_TYPES
 } from '../../constants/machineConstants';
-import { WAREHOUSES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
 
 export default function MachineFormModal({ machine, onClose, onSuccess }) {
@@ -31,6 +30,29 @@ export default function MachineFormModal({ machine, onClose, onSuccess }) {
     };
 
     const [formData, setFormData] = useState(defaultState);
+    const [warehousesList, setWarehousesList] = useState([]);
+
+    useEffect(() => {
+        const fetchWarehouses = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('warehouses')
+                    .select('id, name')
+                    .eq('status', 'Đang hoạt động')
+                    .order('name');
+                if (!error && data) {
+                    setWarehousesList(data);
+                    // Default to first warehouse if creating new
+                    if (!isEdit && data.length > 0 && !formData.warehouse) {
+                        setFormData(prev => ({ ...prev, warehouse: data[0].id }));
+                    }
+                }
+            } catch (err) {
+                console.error('Error fetching warehouses:', err);
+            }
+        };
+        fetchWarehouses();
+    }, [isEdit]);
 
     useEffect(() => {
         if (isEdit) {
@@ -181,12 +203,12 @@ export default function MachineFormModal({ machine, onClose, onSuccess }) {
                                     <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Kho quản lý</label>
                                     <select
                                         name="warehouse"
-                                        value={formData.warehouse}
+                                        value={formData.warehouse || ''}
                                         onChange={handleChange}
                                         className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all font-bold text-slate-700 cursor-pointer"
                                     >
                                         <option value="">-- Chưa xác định --</option>
-                                        {WAREHOUSES.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
+                                        {warehousesList.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                                     </select>
                                 </div>
                             </div>

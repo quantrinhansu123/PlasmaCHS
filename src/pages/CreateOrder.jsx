@@ -11,8 +11,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import {
     CUSTOMER_CATEGORIES,
     ORDER_TYPES,
-    PRODUCT_TYPES,
-    WAREHOUSES
+    PRODUCT_TYPES
 } from '../constants/orderConstants';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
@@ -26,6 +25,7 @@ const CreateOrder = () => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [customersList, setCustomersList] = useState([]);
     const [shippersList, setShippersList] = useState([]);
+    const [warehousesList, setWarehousesList] = useState([]);
 
     // Custom dropdown states
     const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
@@ -121,8 +121,19 @@ const CreateOrder = () => {
             const { data } = await supabase.from('shippers').select('id, name');
             if (data) setShippersList(data);
         };
+        const fetchWarehouses = async () => {
+            const { data } = await supabase.from('warehouses').select('id, name').eq('status', 'Đang hoạt động').order('name');
+            if (data) {
+                setWarehousesList(data);
+                // Set default warehouse if not editing
+                if (!editOrder && data.length > 0 && !formData.warehouse) {
+                    setFormData(prev => ({ ...prev, warehouse: data[0].id }));
+                }
+            }
+        };
         fetchCustomers();
         fetchShippers();
+        fetchWarehouses();
     }, [editOrder]);
 
     const formatNumber = (val) => {
@@ -476,7 +487,8 @@ const CreateOrder = () => {
                                     className="w-full px-4 py-3 bg-white border border-[#D1D5DB] outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] font-medium text-sm transition-all"
                                     style={{ fontFamily: '"Roboto", sans-serif' }}
                                 >
-                                    {WAREHOUSES.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
+                                    <option value="">-- Chọn kho --</option>
+                                    {warehousesList.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                                 </select>
                             </div>
                         </div>

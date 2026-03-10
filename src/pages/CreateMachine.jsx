@@ -2,7 +2,7 @@ import {
     CheckCircle2,
     MonitorIcon
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     CYLINDER_VOLUMES,
@@ -12,7 +12,6 @@ import {
     MACHINE_TYPES,
     VALVE_TYPES
 } from '../constants/machineConstants';
-import { WAREHOUSES } from '../constants/orderConstants';
 import { supabase } from '../supabase/config';
 
 const CreateMachine = () => {
@@ -20,6 +19,7 @@ const CreateMachine = () => {
     const { state } = useLocation();
     const editMachine = state?.machine;
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [warehousesList, setWarehousesList] = useState([]);
 
     const defaultState = {
         serial_number: '',
@@ -37,6 +37,28 @@ const CreateMachine = () => {
 
     const initialFormState = editMachine || defaultState;
     const [formData, setFormData] = useState(initialFormState);
+
+    useEffect(() => {
+        const fetchWarehouses = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('warehouses')
+                    .select('id, name')
+                    .eq('status', 'Đang hoạt động')
+                    .order('name');
+                if (!error && data) {
+                    setWarehousesList(data);
+                    // If not editing and we have warehouses, set default to first one
+                    if (!editMachine && data.length > 0) {
+                        setFormData(prev => ({ ...prev, warehouse: data[0].id }));
+                    }
+                }
+            } catch (err) {
+                console.error('Error fetching warehouses:', err);
+            }
+        };
+        fetchWarehouses();
+    }, [editMachine]);
 
     const handleSerialChange = (e) => {
         const val = e.target.value;
@@ -153,7 +175,7 @@ const CreateMachine = () => {
                                     className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 font-bold text-base shadow-sm cursor-pointer"
                                 >
                                     <option value="">-- Chưa xác định --</option>
-                                    {WAREHOUSES.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
+                                    {warehousesList.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                                 </select>
                             </div>
                         </div>

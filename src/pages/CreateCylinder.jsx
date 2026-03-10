@@ -13,7 +13,6 @@ import {
     HANDLE_TYPES,
     VALVE_TYPES
 } from '../constants/machineConstants';
-import { WAREHOUSES } from '../constants/orderConstants';
 import { supabase } from '../supabase/config';
 import { patchIOSVideoPlaysinline } from '../utils/scannerHelper';
 
@@ -42,23 +41,37 @@ const CreateCylinder = () => {
     const initialFormState = editCylinder || defaultState;
     const [formData, setFormData] = useState(initialFormState);
     const [customersList, setCustomersList] = useState([]);
+    const [warehousesList, setWarehousesList] = useState([]);
 
     useEffect(() => {
-        const fetchCustomers = async () => {
+        const fetchData = async () => {
             try {
-                const { data, error } = await supabase
+                // Fetch Customers
+                const { data: customers } = await supabase
                     .from('customers')
                     .select('id, name')
                     .order('name');
-                if (!error && data) {
-                    setCustomersList(data);
+                if (customers) setCustomersList(customers);
+
+                // Fetch Warehouses
+                const { data: warehouses } = await supabase
+                    .from('warehouses')
+                    .select('id, name')
+                    .eq('status', 'Đang hoạt động')
+                    .order('name');
+                if (warehouses) {
+                    setWarehousesList(warehouses);
+                    // If not editing and we have warehouses, set default to first one
+                    if (!editCylinder && warehouses.length > 0) {
+                        setFormData(prev => ({ ...prev, warehouse_id: warehouses[0].id }));
+                    }
                 }
             } catch (err) {
-                console.error('Error fetching customers:', err);
+                console.error('Error fetching data:', err);
             }
         };
-        fetchCustomers();
-    }, []);
+        fetchData();
+    }, [editCylinder]);
 
     // Cleanup scanner on unmount
     useEffect(() => {
@@ -301,11 +314,12 @@ const CreateCylinder = () => {
                             <div className="space-y-2">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Kho *</label>
                                 <select
-                                    value={formData.warehouse_id || 'HN'}
+                                    value={formData.warehouse_id || ''}
                                     onChange={(e) => setFormData({ ...formData, warehouse_id: e.target.value })}
                                     className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-teal-100 focus:border-teal-500 font-bold text-base shadow-sm cursor-pointer text-gray-900"
                                 >
-                                    {WAREHOUSES.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
+                                    <option value="">-- Chọn kho quản lý --</option>
+                                    {warehousesList.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                                 </select>
                             </div>
                         </div>

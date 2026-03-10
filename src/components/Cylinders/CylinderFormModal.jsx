@@ -7,7 +7,6 @@ import {
     HANDLE_TYPES,
     VALVE_TYPES
 } from '../../constants/machineConstants';
-import { WAREHOUSES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
 import { patchIOSVideoPlaysinline } from '../../utils/scannerHelper';
 
@@ -33,6 +32,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
 
     const [formData, setFormData] = useState(defaultState);
     const [customersList, setCustomersList] = useState([]);
+    const [warehousesList, setWarehousesList] = useState([]);
 
     useEffect(() => {
         const fetchCustomers = async () => {
@@ -48,8 +48,29 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                 console.error('Error fetching customers:', err);
             }
         };
+
+        const fetchWarehouses = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('warehouses')
+                    .select('id, name')
+                    .eq('status', 'Đang hoạt động')
+                    .order('name');
+                if (!error && data) {
+                    setWarehousesList(data);
+                    // Default to first warehouse if not editing
+                    if (!isEdit && data.length > 0 && !formData.warehouse_id) {
+                        setFormData(prev => ({ ...prev, warehouse_id: data[0].id }));
+                    }
+                }
+            } catch (err) {
+                console.error('Error fetching warehouses:', err);
+            }
+        };
+
         fetchCustomers();
-    }, []);
+        fetchWarehouses();
+    }, [isEdit]);
 
     useEffect(() => {
         if (isEdit) {
@@ -312,11 +333,12 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                                     <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Kho *</label>
                                     <select
                                         name="warehouse_id"
-                                        value={formData.warehouse_id || 'HN'}
+                                        value={formData.warehouse_id || ''}
                                         onChange={handleChange}
                                         className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-4 focus:ring-teal-100 focus:border-teal-500 outline-none transition-all font-bold text-slate-700 cursor-pointer"
                                     >
-                                        {WAREHOUSES.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
+                                        <option value="">-- Chọn kho --</option>
+                                        {warehousesList.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                                     </select>
                                 </div>
                             </div>

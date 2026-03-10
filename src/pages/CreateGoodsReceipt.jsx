@@ -11,7 +11,6 @@ import {
     CYLINDER_STATUSES,
     MACHINE_STATUSES
 } from '../constants/machineConstants';
-import { WAREHOUSES } from '../constants/orderConstants';
 import { supabase } from '../supabase/config';
 
 const CreateGoodsReceipt = () => {
@@ -21,6 +20,7 @@ const CreateGoodsReceipt = () => {
     const isReadOnly = editReceipt && editReceipt.status !== 'CHO_DUYET';
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [suppliers, setSuppliers] = useState([]);
+    const [warehousesList, setWarehousesList] = useState([]);
 
     const emptyItem = {
         item_type: 'MAY',
@@ -99,11 +99,28 @@ const CreateGoodsReceipt = () => {
                 const { data } = await supabase.from('suppliers').select('id, name').order('name');
                 if (data) setSuppliers(data);
             } catch (err) {
-                console.error('Error loading suppliers:', err);
+                console.error('Error fetching suppliers:', err);
             }
         };
+
+        const loadWarehouses = async () => {
+            try {
+                const { data } = await supabase.from('warehouses').select('id, name').eq('status', 'Đang hoạt động').order('name');
+                if (data) {
+                    setWarehousesList(data);
+                    // Default to first warehouse if creating new
+                    if (!editReceipt && data.length > 0 && !formData.warehouse_id) {
+                        setFormData(prev => ({ ...prev, warehouse_id: data[0].id }));
+                    }
+                }
+            } catch (err) {
+                console.error('Error fetching warehouses:', err);
+            }
+        };
+
         loadSuppliers();
-    }, []);
+        loadWarehouses();
+    }, [editReceipt]);
 
     const addItem = () => {
         setItems(prev => [...prev, { ...emptyItem }]);
@@ -245,12 +262,13 @@ const CreateGoodsReceipt = () => {
                             <div className="space-y-2">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Kho nhận hàng *</label>
                                 <select
-                                    value={formData.warehouse_id}
                                     disabled={isReadOnly}
+                                    value={formData.warehouse_id}
                                     onChange={(e) => setFormData({ ...formData, warehouse_id: e.target.value })}
                                     className={`w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 font-bold text-base shadow-sm transition-all ${isReadOnly ? 'cursor-not-allowed bg-gray-50' : 'cursor-pointer'}`}
                                 >
-                                    {WAREHOUSES.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
+                                    <option value="">-- Chọn kho nhập --</option>
+                                    {warehousesList.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                                 </select>
                             </div>
                         </div>
