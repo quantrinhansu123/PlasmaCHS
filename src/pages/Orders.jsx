@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import MachineHandoverPrintTemplate from '../components/MachineHandoverPrintTemplate';
 import OrderPrintTemplate from '../components/OrderPrintTemplate';
@@ -993,12 +994,15 @@ const Orders = () => {
                         />
                     )}
 
-                    {/* Hidden Print Template */}
-                    <div className="print-only-content">
-                        {ordersToPrint && <OrderPrintTemplate orders={ordersToPrint} />}
-                        {ordersToPrint && handoverToPrint && <div className="page-break" />}
-                        {handoverToPrint && <MachineHandoverPrintTemplate orders={handoverToPrint} />}
-                    </div>
+                    {/* Hidden Print Template — rendered via Portal directly under <body> to bypass #root hiding */}
+                    {ordersToPrint && createPortal(
+                        <div className="print-only-content">
+                            <OrderPrintTemplate orders={ordersToPrint} />
+                            {handoverToPrint && <div className="page-break" />}
+                            {handoverToPrint && <MachineHandoverPrintTemplate orders={handoverToPrint} />}
+                        </div>,
+                        document.body
+                    )}
                 </>
             ) : (
                 /* Statistics View */

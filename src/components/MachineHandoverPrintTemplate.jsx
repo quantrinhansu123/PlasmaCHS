@@ -181,10 +181,7 @@ const HandoverItem = ({ order }) => {
         machineCode: order.department || '',
     });
 
-    // Pad to minimum 4 rows
-    while (rows.length < 4) {
-        rows.push({ tt: '', content: '', qty: '', status: '', machineCode: '' });
-    }
+
 
     return (
         <div className="order-print-page" style={S.page}>

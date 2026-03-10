@@ -316,10 +316,7 @@ const OrderItem = ({ order }) => {
         });
     }
 
-    // Pad to minimum 5 rows
-    while (rows.length < 5) {
-        rows.push({ stt: '', name: '', code: '', unit: '', qtyReq: '', qtyAct: '', price: '', total: '' });
-    }
+
 
     const totalQty = isBinh && serials.length > 0 ? serials.length : (order.quantity || 0);
     const totalAmount = order.total_amount || totalQty * (order.unit_price || 0);

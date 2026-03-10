@@ -303,10 +303,7 @@ const ReceiptItem = ({ receipt, items }) => {
         total: item.unit_price && item.quantity ? item.unit_price * item.quantity : '',
     }));
 
-    // Pad to minimum 5 rows
-    while (rows.length < 5) {
-        rows.push({ stt: '', name: '', code: '', unit: '', qtyReq: '', qtyAct: '', price: '', total: '' });
-    }
+
 
     const totalQty = items.reduce((sum, i) => sum + (i.quantity || 0), 0);
     const totalAmount = receipt.total_amount || items.reduce((sum, i) => sum + ((i.unit_price || 0) * (i.quantity || 0)), 0);
