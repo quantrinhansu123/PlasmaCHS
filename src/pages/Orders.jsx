@@ -11,9 +11,15 @@ import {
     Title
 } from 'chart.js';
 import {
+    CheckCircle,
     ChevronDown,
+    ChevronLeft,
+    ChevronRight,
+    Clock,
     Edit,
     Filter,
+    List,
+    BarChart2,
     MapPin,
     Package,
     Phone,
@@ -21,16 +27,20 @@ import {
     Printer,
     Search,
     Trash2,
-    User
+    User,
+    X
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
+import { clsx } from 'clsx';
 import MachineHandoverPrintTemplate from '../components/MachineHandoverPrintTemplate';
 import OrderPrintTemplate from '../components/OrderPrintTemplate';
 import OrderFormModal from '../components/Orders/OrderFormModal';
 import OrderStatusUpdater from '../components/Orders/OrderStatusUpdater';
+import FilterDropdown from '../components/ui/FilterDropdown';
+import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import {
     CUSTOMER_CATEGORIES,
     ORDER_STATUSES,
@@ -88,6 +98,20 @@ const Orders = () => {
     const [selectedStatuses, setSelectedStatuses] = useState([]);
     const [uniqueCustomers, setUniqueCustomers] = useState([]);
 
+    // Mobile filter sheet state
+    const [showMobileFilter, setShowMobileFilter] = useState(false);
+    const [mobileFilterClosing, setMobileFilterClosing] = useState(false);
+    const [pendingStatuses, setPendingStatuses] = useState([]);
+    const [pendingCustomerCategories, setPendingCustomerCategories] = useState([]);
+    const [pendingOrderTypes, setPendingOrderTypes] = useState([]);
+    const [pendingProductTypes, setPendingProductTypes] = useState([]);
+    const [pendingCustomers, setPendingCustomers] = useState([]);
+
+    // Dropdown state
+    const [activeDropdown, setActiveDropdown] = useState(null);
+    const [filterSearch, setFilterSearch] = useState('');
+    const dropdownRef = useRef(null);
+
     useEffect(() => {
         fetchOrders();
         fetchWarehouses();
@@ -98,6 +122,45 @@ const Orders = () => {
         const customers = [...new Set(orders.map(o => o.customer_name).filter(Boolean))];
         setUniqueCustomers(customers);
     }, [orders]);
+
+    // Mobile filter handlers
+    const closeMobileFilter = () => {
+        setMobileFilterClosing(true);
+        setTimeout(() => {
+            setShowMobileFilter(false);
+            setMobileFilterClosing(false);
+        }, 280);
+    };
+
+    const openMobileFilter = () => {
+        setPendingStatuses(selectedStatuses);
+        setPendingCustomerCategories(selectedCustomerCategories);
+        setPendingOrderTypes(selectedOrderTypes);
+        setPendingProductTypes(selectedProductTypes);
+        setPendingCustomers(selectedCustomers);
+        setShowMobileFilter(true);
+    };
+
+    const applyMobileFilter = () => {
+        setSelectedStatuses(pendingStatuses);
+        setSelectedCustomerCategories(pendingCustomerCategories);
+        setSelectedOrderTypes(pendingOrderTypes);
+        setSelectedProductTypes(pendingProductTypes);
+        setSelectedCustomers(pendingCustomers);
+        closeMobileFilter();
+    };
+
+    // Dropdown handlers
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+                setActiveDropdown(null);
+                setFilterSearch('');
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
     const fetchOrders = async () => {
         setIsLoading(true);
@@ -172,60 +235,46 @@ const Orders = () => {
     };
 
     const getLabel = (list, id) => {
-        return list.find(item => item.id === id)?.label || id;
+        const matched = list.find(item => item.id === id);
+        return matched?.label || matched?.name || id;
     };
 
-    // Filter Dropdown Component
-    const FilterDropdown = ({ label, selectedCount, totalCount, onSelectAll, children }) => {
-        const [isOpen, setIsOpen] = useState(false);
+    const hasActiveFilters = selectedStatuses.length > 0 || selectedCustomerCategories.length > 0 || 
+        selectedOrderTypes.length > 0 || selectedProductTypes.length > 0 || selectedCustomers.length > 0;
 
-        return (
-            <div className="relative">
-                <button
-                    onClick={() => setIsOpen(!isOpen)}
-                    className="flex items-center gap-2 px-4 py-2.5 border border-[#D1D5DB] bg-white text-sm font-medium text-[#374151] hover:bg-[#F9FAFB] transition-all"
-                    style={{ fontFamily: '"Roboto", sans-serif' }}
-                >
-                    <Filter className="w-4 h-4" />
-                    <span>{label}</span>
-                    {selectedCount > 0 && (
-                        <span className="px-2 py-0.5 bg-[#2563EB] text-white text-xs rounded-full">
-                            {selectedCount}
-                        </span>
-                    )}
-                    <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                </button>
-                {isOpen && (
-                    <>
-                        <div
-                            className="fixed inset-0 z-10"
-                            onClick={() => setIsOpen(false)}
-                        ></div>
-                        <div className="absolute top-full left-0 mt-1 bg-white border border-[#E5E7EB] shadow-lg z-20 min-w-[250px] max-h-80">
-                            <div className="p-3 border-b border-[#E5E7EB] flex items-center justify-between bg-[#F9FAFB]">
-                                <span className="text-sm font-medium text-[#374151]" style={{ fontFamily: '"Roboto", sans-serif' }}>
-                                    {selectedCount > 0 ? `Đã chọn ${selectedCount}/${totalCount}` : `Chọn ${label.toLowerCase()}`}
-                                </span>
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        onSelectAll();
-                                    }}
-                                    className="text-xs text-[#2563EB] hover:text-[#1D4ED8] font-medium"
-                                    style={{ fontFamily: '"Roboto", sans-serif' }}
-                                >
-                                    {selectedCount === totalCount ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
-                                </button>
-                            </div>
-                            <div className="overflow-y-auto max-h-64">
-                                {children}
-                            </div>
-                        </div>
-                    </>
-                )}
-            </div>
-        );
-    };
+    const totalActiveFilters = selectedStatuses.length + selectedCustomerCategories.length + 
+        selectedOrderTypes.length + selectedProductTypes.length + selectedCustomers.length;
+
+    // Filter options for the modern FilterDropdown
+    const statusOptions = ORDER_STATUSES.filter(s => s.id !== 'ALL').map(s => ({
+        id: s.id,
+        label: s.label,
+        count: orders.filter(o => o.status === s.id).length
+    }));
+
+    const categoryOptions = CUSTOMER_CATEGORIES.map(c => ({
+        id: c.id,
+        label: c.label,
+        count: orders.filter(o => o.customer_category === c.id).length
+    }));
+
+    const orderTypeOptions = ORDER_TYPES.map(t => ({
+        id: t.id,
+        label: t.label,
+        count: orders.filter(o => o.order_type === t.id).length
+    }));
+
+    const productTypeOptions = PRODUCT_TYPES.map(p => ({
+        id: p.id,
+        label: p.label,
+        count: orders.filter(o => o.product_type === p.id).length
+    }));
+
+    const customerOptions = uniqueCustomers.map(c => ({
+        id: c,
+        label: c,
+        count: orders.filter(o => o.customer_name === c).length
+    }));
 
     const handlePrint = (order) => {
         setOrdersToPrint(order);
@@ -381,878 +430,1186 @@ const Orders = () => {
     ];
 
     return (
-        <div className="p-6 bg-[#F8F9FA] min-h-screen" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
-            {/* Navigation Tabs */}
-            <div className="flex items-center gap-1 mb-8 border-b border-[#E5E7EB]">
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col -mt-2 min-h-0 px-3 md:px-6">
+            {/* Top Sidebar Style Tabs */}
+            <div className="flex items-center gap-1 mb-4 mt-6">
                 <button
                     onClick={() => setActiveView('list')}
-                    className={`px-6 py-3 text-sm font-semibold tracking-wide transition-colors ${activeView === 'list'
-                        ? 'text-[#2563EB] border-b-2 border-[#2563EB]'
-                        : 'text-[#6B7280] hover:text-[#374151]'
-                        }`}
-                    style={activeView === 'list' ? { color: '#2563EB', borderBottomColor: '#2563EB' } : { color: '#6B7280' }}
+                    className={clsx(
+                        "flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-bold transition-all",
+                        activeView === 'list'
+                            ? "bg-white text-primary shadow-sm ring-1 ring-border"
+                            : "text-muted-foreground hover:text-foreground"
+                    )}
                 >
+                    <List size={14} />
                     Danh sách
                 </button>
                 <button
                     onClick={() => setActiveView('stats')}
-                    className={`px-6 py-3 text-sm font-semibold tracking-wide transition-colors ${activeView === 'stats'
-                        ? 'text-[#2563EB] border-b-2 border-[#2563EB]'
-                        : 'text-[#6B7280] hover:text-[#374151]'
-                        }`}
-                    style={activeView === 'stats' ? { color: '#2563EB', borderBottomColor: '#2563EB' } : { color: '#6B7280' }}
+                    className={clsx(
+                        "flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-bold transition-all",
+                        activeView === 'stats'
+                            ? "bg-white text-primary shadow-sm ring-1 ring-border"
+                            : "text-muted-foreground hover:text-foreground"
+                    )}
                 >
+                    <BarChart2 size={14} />
                     Thống kê
                 </button>
             </div>
 
-            {activeView === 'list' ? (
-                <>
-                    {/* Header with Add Button */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
-                        <h1 className="text-xl sm:text-2xl font-black text-[#111827] tracking-tight">Danh sách đơn hàng</h1>
+            {activeView === 'list' && (
+                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full">
+                        {/* ── MOBILE TOOLBAR ── */}
+                        <div className="md:hidden flex items-center gap-2 p-3 border-b border-border">
+                    <button
+                        onClick={() => navigate(-1)}
+                        className="p-2 rounded-xl border border-border bg-white text-muted-foreground shrink-0"
+                    >
+                        <ChevronLeft size={18} />
+                    </button>
+                    <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15} />
+                        <input
+                            type="text"
+                            placeholder="Tìm kiếm . . ."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="w-full pl-9 pr-8 py-2 bg-muted/20 border border-border/80 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
+                        />
+                        {searchTerm && (
+                            <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                                <X size={14} />
+                            </button>
+                        )}
+                    </div>
+                    <button
+                        onClick={openMobileFilter}
+                        className={clsx(
+                            'relative p-2 rounded-xl border shrink-0 transition-all',
+                            hasActiveFilters ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-white text-muted-foreground',
+                        )}
+                    >
+                        <Filter size={18} />
+                        {hasActiveFilters && (
+                            <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-white text-[9px] font-bold flex items-center justify-center">
+                                {totalActiveFilters}
+                            </span>
+                        )}
+                    </button>
+                    <button
+                        onClick={() => navigate('/tao-don-hang')}
+                        className="p-2 rounded-xl bg-primary text-white shrink-0 shadow-md shadow-primary/20"
+                    >
+                        <Plus size={18} />
+                    </button>
+                </div>
+
+                {/* ── MOBILE CARD LIST ── */}
+                <div className="md:hidden flex-1 overflow-y-auto p-3 flex flex-col gap-3">
+                    {isLoading ? (
+                        <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
+                    ) : filteredOrders.length === 0 ? (
+                        <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy kết quả phù hợp</div>
+                    ) : (
+                        filteredOrders.map((order) => {
+                            const status = getStatusConfig(order.status);
+                            return (
+                                <div key={order.id} className="bg-white border border-border rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow">
+                                    <div className="flex justify-between items-start mb-3">
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20"
+                                                checked={selectedIds.includes(order.id)}
+                                                onChange={() => toggleSelect(order.id)}
+                                            />
+                                            <span className="text-[13px] font-bold text-foreground">{order.order_code}</span>
+                                        </div>
+                                        <span
+                                            className={clsx(
+                                                "px-2 py-1 rounded-full text-[10px] font-bold uppercase",
+                                                status.color === 'blue' && "bg-blue-100 text-blue-700",
+                                                status.color === 'yellow' && "bg-yellow-100 text-yellow-700",
+                                                status.color === 'orange' && "bg-orange-100 text-orange-700",
+                                                status.color === 'green' && "bg-green-100 text-green-700",
+                                                status.color === 'red' && "bg-red-100 text-red-700",
+                                                status.color === 'gray' && "bg-gray-100 text-gray-700",
+                                                !status.color && "bg-gray-100 text-gray-700"
+                                            )}
+                                        >
+                                            {status.label}
+                                        </span>
+                                    </div>
+
+                                    <div className="mb-3">
+                                        <h3 className="text-[14px] font-bold text-foreground leading-snug">{order.customer_name}</h3>
+                                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+                                            <span className="text-[11px] font-bold text-muted-foreground uppercase">{getLabel(CUSTOMER_CATEGORIES, order.customer_category)}</span>
+                                            <span className="text-[11px] font-medium text-muted-foreground">{order.created_at ? new Date(order.created_at).toLocaleDateString('vi-VN') : '---'}</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-y-2 text-xs mb-3">
+                                        <div className="space-y-1">
+                                            <p className="text-muted-foreground font-medium flex items-center gap-1.5">
+                                                <Package className="w-3.5 h-3.5 text-primary" />
+                                                {getLabel(PRODUCT_TYPES, order.product_type)}
+                                            </p>
+                                            <p className="text-foreground font-bold ml-5">SL: {formatNumber(order.quantity)}</p>
+                                        </div>
+                                        <div className="space-y-1 pl-2 border-l border-border">
+                                            <p className="text-muted-foreground font-medium flex items-center gap-1.5">
+                                                <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
+                                                Kho: {getLabel(warehousesList, order.warehouse)}
+                                            </p>
+                                            <p className="text-muted-foreground font-medium flex items-center gap-1.5">
+                                                <Filter className="w-3.5 h-3.5 text-muted-foreground" />
+                                                Loại: {getLabel(ORDER_TYPES, order.order_type)}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {(order.recipient_name || order.recipient_phone) && (
+                                        <div className="bg-muted/20 rounded-lg p-2.5 space-y-1 border border-border mb-3">
+                                            <p className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1">Người nhận</p>
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <User className="w-3.5 h-3.5 text-muted-foreground" />
+                                                    <span className="text-xs font-bold text-foreground">{order.recipient_name}</span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5 text-muted-foreground">
+                                                    <Phone className="w-3 h-3" />
+                                                    <span className="text-[11px] font-medium">{order.recipient_phone}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="flex items-center justify-between pt-3 border-t border-border">
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] font-bold text-muted-foreground uppercase leading-none mb-1">Thành tiền</span>
+                                            <span className="text-[14px] font-bold text-primary">
+                                                {formatNumber(order.total_amount || (order.quantity || 0) * (order.unit_price || 0))} <small className="text-[10px]">đ</small>
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => { setSelectedOrder(order); setIsActionModalOpen(true); }}
+                                                className="p-2 text-muted-foreground hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                                                title="Thao tác đơn hàng"
+                                            >
+                                                <Package className="w-4 h-4" />
+                                            </button>
+                                            <button
+                                                onClick={() => handlePrint(order)}
+                                                className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                                            >
+                                                <Printer className="w-4 h-4" />
+                                            </button>
+                                            <button
+                                                onClick={() => handleEditOrder(order)}
+                                                className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                                            >
+                                                <Edit className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+
+                {selectedIds.length > 0 && (
+                    <button
+                        onClick={handleBulkPrint}
+                        className="md:hidden fixed right-4 bottom-4 z-[95] flex items-center gap-2 rounded-xl bg-primary text-white shadow-lg shadow-primary/30 border border-primary/20"
+                    >
+                        <Printer size={16} />
+                        In {selectedIds.length} phiếu
+                    </button>
+                )}
+
+                {/* Mobile pagination */}
+                <div className="md:hidden px-4 py-3 border-t border-border flex items-center justify-between bg-muted/5">
+                    <span className="text-[12px] text-muted-foreground font-medium">
+                        {filteredOrders.length > 0 ? `1–${filteredOrders.length}` : '0'}/Tổng {filteredOrders.length}
+                    </span>
+                    <div className="flex items-center gap-1">
+                        <select className="bg-white border border-border rounded-lg px-2 py-1 focus:outline-none text-[11px] font-bold shadow-sm">
+                            <option>20 / trang</option>
+                            <option>50 / trang</option>
+                        </select>
+                        <button className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-20" disabled><ChevronLeft size={15} /></button>
+                        <div className="w-7 h-7 rounded-lg bg-primary text-white flex items-center justify-center text-[11px] font-bold">1</div>
+                        <button className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-20" disabled><ChevronRight size={15} /></button>
+                    </div>
+                </div>
+
+                {/* ── DESKTOP TOOLBAR ── */}
+                <div className="hidden md:block p-4 space-y-4">
+                    <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2 flex-1">
+                            <button
+                                onClick={() => navigate(-1)}
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground text-[12px] font-bold transition-all bg-white shadow-sm shrink-0"
+                            >
+                                <ChevronLeft size={16} />
+                                Quay lại
+                            </button>
+                            <div className="relative flex-1">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
+                                <input
+                                    type="text"
+                                    placeholder="Tìm kiếm . . ."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="w-full pl-10 pr-8 py-1.5 bg-muted/20 border border-border/80 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
+                                />
+                                {searchTerm && (
+                                    <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                                        <X size={14} />
+                                    </button>
+                                )}
+                            </div>
+                        </div>
                         <div className="flex items-center gap-2">
                             {selectedIds.length > 0 && (
                                 <button
                                     onClick={handleBulkPrint}
-                                    className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-white border border-[#D1D5DB] text-[#374151] rounded-xl font-bold text-xs sm:text-sm shadow-sm hover:bg-[#F9FAFB]"
+                                    className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-border bg-white text-muted-foreground text-[13px] font-bold hover:bg-muted/20 shadow-sm transition-all"
                                 >
-                                    <Printer className="w-4 h-4" />
+                                    <Printer size={16} />
                                     In {selectedIds.length} phiếu
                                 </button>
                             )}
                             <button
                                 onClick={() => navigate('/tao-don-hang')}
-                                className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-[#2563EB] text-white rounded-xl font-bold text-sm shadow-lg hover:bg-[#1D4ED8] transition-all"
+                                className="flex items-center gap-2 px-6 py-1.5 rounded-xl bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all"
                             >
-                                <Plus className="w-4 h-4" />
-                                <span>Tạo mới</span>
+                                <Plus size={18} />
+                                Thêm
                             </button>
                         </div>
                     </div>
 
-                    <div className="mb-6 flex flex-col lg:flex-row lg:items-center gap-4">
-                        {/* Search Bar */}
-                        <div className="flex-1 relative">
-                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#9CA3AF]" />
-                            <input
-                                type="text"
-                                placeholder="Tìm theo tên, mã đơn, SĐT..."
-                                className="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-50 focus:border-blue-500 text-sm font-medium transition-all"
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                            />
-                        </div>
-
-                        {/* Summary Stats */}
-                        <div className="flex items-center justify-around sm:justify-start gap-4 sm:gap-6 px-4 py-3 bg-blue-50/50 border border-blue-100 rounded-xl">
-                            <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 text-center sm:text-left">
-                                <span className="text-[10px] sm:text-xs font-black text-slate-500 uppercase tracking-widest">Đơn hàng</span>
-                                <span className="text-sm sm:text-lg font-black text-blue-600 leading-none">{filteredOrdersCount}</span>
-                            </div>
-                            <div className="hidden sm:block w-px h-8 bg-blue-200/50"></div>
-                            <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 text-center sm:text-left border-l border-blue-100 sm:border-none pl-4 sm:pl-0">
-                                <span className="text-[10px] sm:text-xs font-black text-slate-500 uppercase tracking-widest">Tổng tiền</span>
-                                <span className="text-sm sm:text-lg font-black text-blue-600 leading-none">{formatNumber(totalAmount)} đ</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Filter Section */}
-                    <div className="mb-6 flex items-center gap-3 flex-wrap">
-                        {/* Trạng thái Dropdown */}
-                        <FilterDropdown
-                            label="Trạng thái"
-                            selectedCount={selectedStatuses.length}
-                            totalCount={ORDER_STATUSES.filter(s => s.id !== 'ALL').length}
-                            onSelectAll={() => {
-                                const allStatuses = ORDER_STATUSES.filter(s => s.id !== 'ALL').map(s => s.id);
-                                if (selectedStatuses.length === allStatuses.length) {
-                                    setSelectedStatuses([]);
-                                } else {
-                                    setSelectedStatuses([...allStatuses]);
-                                }
-                            }}
-                        >
-                            <div className="space-y-1 p-2">
-                                {ORDER_STATUSES.filter(s => s.id !== 'ALL').map(status => (
-                                    <label key={status.id} className="flex items-center gap-2 cursor-pointer hover:bg-[#F3F4F6] p-2 rounded">
-                                        <input
-                                            type="checkbox"
-                                            checked={selectedStatuses.includes(status.id)}
-                                            onChange={(e) => {
-                                                if (e.target.checked) {
-                                                    setSelectedStatuses([...selectedStatuses, status.id]);
-                                                } else {
-                                                    setSelectedStatuses(selectedStatuses.filter(id => id !== status.id));
-                                                }
-                                            }}
-                                            className="w-4 h-4 text-[#2563EB] border-[#D1D5DB] rounded focus:ring-[#2563EB]"
-                                        />
-                                        <span className="text-sm text-[#374151]" style={{ fontFamily: '"Roboto", sans-serif' }}>{status.label}</span>
-                                    </label>
-                                ))}
-                            </div>
-                        </FilterDropdown>
-
-                        {/* Loại khách Dropdown */}
-                        <FilterDropdown
-                            label="Loại khách"
-                            selectedCount={selectedCustomerCategories.length}
-                            totalCount={CUSTOMER_CATEGORIES.length}
-                            onSelectAll={() => {
-                                if (selectedCustomerCategories.length === CUSTOMER_CATEGORIES.length) {
-                                    setSelectedCustomerCategories([]);
-                                } else {
-                                    setSelectedCustomerCategories(CUSTOMER_CATEGORIES.map(c => c.id));
-                                }
-                            }}
-                        >
-                            <div className="space-y-1 p-2">
-                                {CUSTOMER_CATEGORIES.map(cat => (
-                                    <label key={cat.id} className="flex items-center gap-2 cursor-pointer hover:bg-[#F3F4F6] p-2 rounded">
-                                        <input
-                                            type="checkbox"
-                                            checked={selectedCustomerCategories.includes(cat.id)}
-                                            onChange={(e) => {
-                                                if (e.target.checked) {
-                                                    setSelectedCustomerCategories([...selectedCustomerCategories, cat.id]);
-                                                } else {
-                                                    setSelectedCustomerCategories(selectedCustomerCategories.filter(id => id !== cat.id));
-                                                }
-                                            }}
-                                            className="w-4 h-4 text-[#2563EB] border-[#D1D5DB] rounded focus:ring-[#2563EB]"
-                                        />
-                                        <span className="text-sm text-[#374151]" style={{ fontFamily: '"Roboto", sans-serif' }}>{cat.label}</span>
-                                    </label>
-                                ))}
-                            </div>
-                        </FilterDropdown>
-
-                        {/* Loại đơn Dropdown */}
-                        <FilterDropdown
-                            label="Loại đơn"
-                            selectedCount={selectedOrderTypes.length}
-                            totalCount={ORDER_TYPES.length}
-                            onSelectAll={() => {
-                                if (selectedOrderTypes.length === ORDER_TYPES.length) {
-                                    setSelectedOrderTypes([]);
-                                } else {
-                                    setSelectedOrderTypes(ORDER_TYPES.map(t => t.id));
-                                }
-                            }}
-                        >
-                            <div className="space-y-1 p-2">
-                                {ORDER_TYPES.map(type => (
-                                    <label key={type.id} className="flex items-center gap-2 cursor-pointer hover:bg-[#F3F4F6] p-2 rounded">
-                                        <input
-                                            type="checkbox"
-                                            checked={selectedOrderTypes.includes(type.id)}
-                                            onChange={(e) => {
-                                                if (e.target.checked) {
-                                                    setSelectedOrderTypes([...selectedOrderTypes, type.id]);
-                                                } else {
-                                                    setSelectedOrderTypes(selectedOrderTypes.filter(id => id !== type.id));
-                                                }
-                                            }}
-                                            className="w-4 h-4 text-[#2563EB] border-[#D1D5DB] rounded focus:ring-[#2563EB]"
-                                        />
-                                        <span className="text-sm text-[#374151]" style={{ fontFamily: '"Roboto", sans-serif' }}>{type.label}</span>
-                                    </label>
-                                ))}
-                            </div>
-                        </FilterDropdown>
-
-                        {/* Hàng hóa Dropdown */}
-                        <FilterDropdown
-                            label="Hàng hóa"
-                            selectedCount={selectedProductTypes.length}
-                            totalCount={PRODUCT_TYPES.length}
-                            onSelectAll={() => {
-                                if (selectedProductTypes.length === PRODUCT_TYPES.length) {
-                                    setSelectedProductTypes([]);
-                                } else {
-                                    setSelectedProductTypes(PRODUCT_TYPES.map(p => p.id));
-                                }
-                            }}
-                        >
-                            <div className="space-y-1 p-2">
-                                {PRODUCT_TYPES.map(product => (
-                                    <label key={product.id} className="flex items-center gap-2 cursor-pointer hover:bg-[#F3F4F6] p-2 rounded">
-                                        <input
-                                            type="checkbox"
-                                            checked={selectedProductTypes.includes(product.id)}
-                                            onChange={(e) => {
-                                                if (e.target.checked) {
-                                                    setSelectedProductTypes([...selectedProductTypes, product.id]);
-                                                } else {
-                                                    setSelectedProductTypes(selectedProductTypes.filter(id => id !== product.id));
-                                                }
-                                            }}
-                                            className="w-4 h-4 text-[#2563EB] border-[#D1D5DB] rounded focus:ring-[#2563EB]"
-                                        />
-                                        <span className="text-sm text-[#374151]" style={{ fontFamily: '"Roboto", sans-serif' }}>{product.label}</span>
-                                    </label>
-                                ))}
-                            </div>
-                        </FilterDropdown>
-
-                        {/* Khách hàng Dropdown */}
-                        <FilterDropdown
-                            label="Khách hàng"
-                            selectedCount={selectedCustomers.length}
-                            totalCount={uniqueCustomers.length}
-                            onSelectAll={() => {
-                                if (selectedCustomers.length === uniqueCustomers.length) {
-                                    setSelectedCustomers([]);
-                                } else {
-                                    setSelectedCustomers([...uniqueCustomers]);
-                                }
-                            }}
-                        >
-                            <div className="space-y-1 p-2">
-                                {uniqueCustomers.map(customer => (
-                                    <label key={customer} className="flex items-center gap-2 cursor-pointer hover:bg-[#F3F4F6] p-2 rounded">
-                                        <input
-                                            type="checkbox"
-                                            checked={selectedCustomers.includes(customer)}
-                                            onChange={(e) => {
-                                                if (e.target.checked) {
-                                                    setSelectedCustomers([...selectedCustomers, customer]);
-                                                } else {
-                                                    setSelectedCustomers(selectedCustomers.filter(c => c !== customer));
-                                                }
-                                            }}
-                                            className="w-4 h-4 text-[#2563EB] border-[#D1D5DB] rounded focus:ring-[#2563EB]"
-                                        />
-                                        <span className="text-sm text-[#374151] truncate" style={{ fontFamily: '"Roboto", sans-serif' }} title={customer}>{customer}</span>
-                                    </label>
-                                ))}
-                            </div>
-                        </FilterDropdown>
-                    </div>
-
-
-                    {/* Main Content Card */}
-                    <div className="bg-white rounded-lg border border-[#E5E7EB] shadow-sm overflow-hidden">
-                        {/* Mobile Card List (Visible only on mobile) */}
-                        <div className="md:hidden divide-y divide-[#E5E7EB]">
-                            {isLoading ? (
-                                <div className="px-4 py-16 text-center">
-                                    <div className="flex flex-col items-center gap-4">
-                                        <div className="w-8 h-8 border-4 border-[#2563EB] border-t-transparent rounded-full animate-spin"></div>
-                                        <p className="text-[#6B7280] text-sm font-medium">Đang tải dữ liệu...</p>
-                                    </div>
-                                </div>
-                            ) : filteredOrders.length === 0 ? (
-                                <div className="px-4 py-16 text-center">
-                                    <div className="flex flex-col items-center gap-4">
-                                        <Package className="w-12 h-12 text-[#D1D5DB]" />
-                                        <p className="text-sm font-medium text-[#6B7280]">Không tìm thấy đơn hàng nào</p>
-                                    </div>
-                                </div>
-                            ) : (
-                                filteredOrders.map((order) => {
-                                    const status = getStatusConfig(order.status);
-                                    return (
-                                        <div key={order.id} className="p-4 bg-white hover:bg-gray-50 active:bg-gray-100 transition-colors">
-                                            <div className="flex justify-between items-start mb-2">
-                                                <div className="flex items-center gap-2">
-                                                    <input
-                                                        type="checkbox"
-                                                        className="w-5 h-5 rounded border-[#D1D5DB] text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
-                                                        checked={selectedIds.includes(order.id)}
-                                                        onChange={() => toggleSelect(order.id)}
-                                                    />
-                                                    <span className="text-sm font-bold text-[#111827]">{order.order_code}</span>
-                                                </div>
-                                                <span
-                                                    className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-bold border uppercase"
-                                                    style={(() => {
-                                                        const colorMap = {
-                                                            'blue': { bg: '#E0E7FF', text: '#4338CA', border: '#C7D2FE' },
-                                                            'yellow': { bg: '#FEF3C7', text: '#92400E', border: '#FDE68A' },
-                                                            'orange': { bg: '#FFEDD5', text: '#C2410C', border: '#FED7AA' },
-                                                            'indigo': { bg: '#E0E7FF', text: '#4338CA', border: '#C7D2FE' },
-                                                            'purple': { bg: '#F3E8FF', text: '#7C3AED', border: '#E9D5FF' },
-                                                            'cyan': { bg: '#CFFAFE', text: '#0E7490', border: '#A5F3FC' },
-                                                            'red': { bg: '#FEE2E2', text: '#991B1B', border: '#FECACA' },
-                                                            'green': { bg: '#D1FAE5', text: '#065F46', border: '#A7F3D0' },
-                                                            'gray': { bg: '#F3F4F6', text: '#374151', border: '#E5E7EB' }
-                                                        };
-                                                        const colors = colorMap[status.color] || colorMap['gray'];
-                                                        return {
-                                                            backgroundColor: colors.bg,
-                                                            color: colors.text,
-                                                            borderColor: colors.border
-                                                        };
-                                                    })()}
-                                                >
-                                                    {status.label}
-                                                </span>
-                                            </div>
-
-                                            <div className="space-y-3 ml-7">
-                                                <div>
-                                                    <h3 className="text-base font-bold text-[#111827] leading-snug">{order.customer_name}</h3>
-                                                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
-                                                        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">{getLabel(CUSTOMER_CATEGORIES, order.customer_category)}</span>
-                                                        <span className="text-[11px] font-medium text-slate-400">{order.created_at ? new Date(order.created_at).toLocaleDateString('vi-VN') : '---'}</span>
-                                                    </div>
-                                                </div>
-
-                                                <div className="grid grid-cols-2 gap-y-2 text-xs">
-                                                    <div className="space-y-1">
-                                                        <p className="text-[#6B7280] font-medium flex items-center gap-1.5">
-                                                            <Package className="w-3.5 h-3.5 text-blue-500" />
-                                                            {getLabel(PRODUCT_TYPES, order.product_type)}
-                                                        </p>
-                                                        <p className="text-[#111827] font-bold ml-5">SL: {formatNumber(order.quantity)}</p>
-                                                    </div>
-                                                    <div className="space-y-1 pl-2 border-l border-slate-100">
-                                                        <p className="text-[#6B7280] font-medium flex items-center gap-1.5">
-                                                            <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                                                            Kho: {getLabel(warehousesList, order.warehouse)}
-                                                        </p>
-                                                        <p className="text-[#6B7280] font-medium flex items-center gap-1.5">
-                                                            <Filter className="w-3.5 h-3.5 text-slate-400" />
-                                                            Loại: {getLabel(ORDER_TYPES, order.order_type)}
-                                                        </p>
-                                                    </div>
-                                                </div>
-
-                                                {(order.recipient_name || order.recipient_phone) && (
-                                                    <div className="bg-slate-50/80 rounded-lg p-2.5 space-y-1 border border-slate-100/50">
-                                                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Người nhận</p>
-                                                        <div className="flex items-center justify-between">
-                                                            <div className="flex items-center gap-2">
-                                                                <User className="w-3.5 h-3.5 text-slate-400" />
-                                                                <span className="text-xs font-bold text-slate-700">{order.recipient_name}</span>
-                                                            </div>
-                                                            <div className="flex items-center gap-1.5 text-slate-500">
-                                                                <Phone className="w-3 h-3" />
-                                                                <span className="text-[11px] font-medium">{order.recipient_phone}</span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                )}
-
-                                                {order.product_type?.startsWith('MAY') && order.department && (
-                                                    <div className="flex items-center gap-2 text-xs">
-                                                        <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-100 rounded font-bold uppercase tracking-wider text-[10px]">Mã máy</span>
-                                                        <span className="font-bold text-slate-700">{order.department}</span>
-                                                    </div>
-                                                )}
-
-                                                {order.assigned_cylinders && order.assigned_cylinders.length > 0 && (
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {order.assigned_cylinders.slice(0, 4).map((serial, idx) => (
-                                                            <span key={idx} className="px-2 py-0.5 bg-white border border-slate-200 text-slate-600 rounded text-[10px] font-mono font-bold shadow-sm">
-                                                                {serial}
-                                                            </span>
-                                                        ))}
-                                                        {order.assigned_cylinders.length > 4 && (
-                                                            <span className="text-[10px] font-bold text-blue-600 self-center">+{order.assigned_cylinders.length - 4} nữa</span>
-                                                        )}
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            <div className="flex items-center justify-between mt-5 pt-4 border-t border-slate-50 ml-7">
-                                                <div className="flex flex-col">
-                                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Thành tiền</span>
-                                                    <span className="text-base font-black text-[#2563EB]">
-                                                        {formatNumber(order.total_amount || (order.quantity || 0) * (order.unit_price || 0))} <small className="text-[10px] font-bold">đ</small>
-                                                    </span>
-                                                </div>
-                                                <div className="flex items-center gap-4">
-                                                    <button
-                                                        onClick={() => { setSelectedOrder(order); setIsActionModalOpen(true); }}
-                                                        className="p-2 text-[#9CA3AF] hover:text-[#10B981] active:bg-emerald-50 rounded-lg transition-colors border border-transparent active:border-emerald-100"
-                                                        title="Thao tác đơn hàng"
-                                                    >
-                                                        <Package className="w-5 h-5" />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handlePrint(order)}
-                                                        className="p-2 text-[#9CA3AF] hover:text-[#2563EB] active:bg-blue-50 rounded-lg transition-colors border border-transparent active:border-blue-100"
-                                                    >
-                                                        <Printer className="w-5 h-5" />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleEditOrder(order)}
-                                                        className="p-2 text-[#9CA3AF] hover:text-[#2563EB] active:bg-blue-50 rounded-lg transition-colors border border-transparent active:border-blue-100"
-                                                    >
-                                                        <Edit className="w-5 h-5" />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleDeleteOrder(order.id, order.order_code)}
-                                                        className="p-2 text-[#9CA3AF] hover:text-[#DC2626] active:bg-red-50 rounded-lg transition-colors border border-transparent active:border-red-100"
-                                                    >
-                                                        <Trash2 className="w-5 h-5" />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })
+                    {/* Secondary Filters */}
+                    <div className="flex flex-wrap items-center gap-2" ref={dropdownRef}>
+                        <div className="relative">
+                            <button
+                                onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
+                                className={clsx(
+                                    "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
+                                    activeDropdown === 'status' || selectedStatuses.length > 0
+                                        ? "border-primary bg-primary/5 text-primary"
+                                        : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                )}
+                            >
+                                <Filter size={14} />
+                                Trạng thái
+                                {selectedStatuses.length > 0 && (
+                                    <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        {selectedStatuses.length}
+                                    </span>
+                                )}
+                                <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'status' ? "rotate-180" : "")} />
+                            </button>
+                            {activeDropdown === 'status' && (
+                                <FilterDropdown
+                                    options={statusOptions}
+                                    selected={selectedStatuses}
+                                    setSelected={setSelectedStatuses}
+                                    filterSearch={filterSearch}
+                                    setFilterSearch={setFilterSearch}
+                                />
                             )}
                         </div>
 
-                        {/* Desktop Table View (Hidden on mobile) */}
-                        <div className="hidden md:block w-full overflow-x-auto">
-                            <table className="w-full border-collapse">
-                                <thead className="bg-[#F9FAFB]">
-                                    <tr>
-                                        <th className="px-4 py-3.5 w-10">
+                        <div className="relative">
+                            <button
+                                onClick={() => setActiveDropdown(activeDropdown === 'categories' ? null : 'categories')}
+                                className={clsx(
+                                    "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
+                                    activeDropdown === 'categories' || selectedCustomerCategories.length > 0
+                                        ? "border-primary bg-primary/5 text-primary"
+                                        : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                )}
+                            >
+                                <User size={14} />
+                                Loại khách
+                                {selectedCustomerCategories.length > 0 && (
+                                    <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        {selectedCustomerCategories.length}
+                                    </span>
+                                )}
+                                <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'categories' ? "rotate-180" : "")} />
+                            </button>
+                            {activeDropdown === 'categories' && (
+                                <FilterDropdown
+                                    options={categoryOptions}
+                                    selected={selectedCustomerCategories}
+                                    setSelected={setSelectedCustomerCategories}
+                                    filterSearch={filterSearch}
+                                    setFilterSearch={setFilterSearch}
+                                />
+                            )}
+                        </div>
+
+                        <div className="relative">
+                            <button
+                                onClick={() => setActiveDropdown(activeDropdown === 'orderTypes' ? null : 'orderTypes')}
+                                className={clsx(
+                                    "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
+                                    activeDropdown === 'orderTypes' || selectedOrderTypes.length > 0
+                                        ? "border-primary bg-primary/5 text-primary"
+                                        : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                )}
+                            >
+                                <Package size={14} />
+                                Loại đơn
+                                {selectedOrderTypes.length > 0 && (
+                                    <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        {selectedOrderTypes.length}
+                                    </span>
+                                )}
+                                <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'orderTypes' ? "rotate-180" : "")} />
+                            </button>
+                            {activeDropdown === 'orderTypes' && (
+                                <FilterDropdown
+                                    options={orderTypeOptions}
+                                    selected={selectedOrderTypes}
+                                    setSelected={setSelectedOrderTypes}
+                                    filterSearch={filterSearch}
+                                    setFilterSearch={setFilterSearch}
+                                />
+                            )}
+                        </div>
+
+                        <div className="relative">
+                            <button
+                                onClick={() => setActiveDropdown(activeDropdown === 'productTypes' ? null : 'productTypes')}
+                                className={clsx(
+                                    "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
+                                    activeDropdown === 'productTypes' || selectedProductTypes.length > 0
+                                        ? "border-primary bg-primary/5 text-primary"
+                                        : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                )}
+                            >
+                                <Package size={14} />
+                                Hàng hóa
+                                {selectedProductTypes.length > 0 && (
+                                    <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        {selectedProductTypes.length}
+                                    </span>
+                                )}
+                                <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'productTypes' ? "rotate-180" : "")} />
+                            </button>
+                            {activeDropdown === 'productTypes' && (
+                                <FilterDropdown
+                                    options={productTypeOptions}
+                                    selected={selectedProductTypes}
+                                    setSelected={setSelectedProductTypes}
+                                    filterSearch={filterSearch}
+                                    setFilterSearch={setFilterSearch}
+                                />
+                            )}
+                        </div>
+
+                        <div className="relative">
+                            <button
+                                onClick={() => setActiveDropdown(activeDropdown === 'customers' ? null : 'customers')}
+                                className={clsx(
+                                    "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
+                                    activeDropdown === 'customers' || selectedCustomers.length > 0
+                                        ? "border-primary bg-primary/5 text-primary"
+                                        : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                )}
+                            >
+                                <User size={14} />
+                                Khách hàng
+                                {selectedCustomers.length > 0 && (
+                                    <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        {selectedCustomers.length}
+                                    </span>
+                                )}
+                                <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'customers' ? "rotate-180" : "")} />
+                            </button>
+                            {activeDropdown === 'customers' && (
+                                <FilterDropdown
+                                    options={customerOptions}
+                                    selected={selectedCustomers}
+                                    setSelected={setSelectedCustomers}
+                                    filterSearch={filterSearch}
+                                    setFilterSearch={setFilterSearch}
+                                />
+                            )}
+                        </div>
+
+                        {hasActiveFilters && (
+                            <button
+                                onClick={() => {
+                                    setSelectedStatuses([]);
+                                    setSelectedCustomerCategories([]);
+                                    setSelectedOrderTypes([]);
+                                    setSelectedProductTypes([]);
+                                    setSelectedCustomers([]);
+                                }}
+                                className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-red-300 text-red-500 text-[12px] font-bold hover:bg-red-50 transition-all"
+                            >
+                                <X size={14} />
+                                Xóa bộ lọc
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* Table Content Area */}
+                <div className="hidden md:block flex-1 overflow-x-auto border-t border-border">
+                    <table className="w-full border-collapse">
+                        <thead className="bg-muted/20">
+                            <tr>
+                                <th className="px-4 py-3.5 w-10">
+                                    <div className="flex items-center justify-center">
+                                        <input
+                                            type="checkbox"
+                                            className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20"
+                                            checked={selectedIds.length === filteredOrders.length && filteredOrders.length > 0}
+                                            onChange={toggleSelectAll}
+                                        />
+                                    </div>
+                                </th>
+                                {visibleTableColumns.map(col => (
+                                    <th key={col.key} className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide">
+                                        {col.label}
+                                    </th>
+                                ))}
+                                <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide">Thao tác</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                            {isLoading ? (
+                                <tr>
+                                    <td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center text-muted-foreground">
+                                        Đang tải dữ liệu...
+                                    </td>
+                                </tr>
+                            ) : filteredOrders.length === 0 ? (
+                                <tr>
+                                    <td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center text-muted-foreground">
+                                        Không tìm thấy đơn hàng nào
+                                    </td>
+                                </tr>
+                            ) : filteredOrders.map((order) => {
+                                const status = getStatusConfig(order.status);
+                                return (
+                                    <tr key={order.id} className="hover:bg-muted/10 transition-colors">
+                                        <td className="px-4 py-4">
                                             <div className="flex items-center justify-center">
                                                 <input
                                                     type="checkbox"
-                                                    className="w-4 h-4 rounded border-[#D1D5DB] text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
-                                                    checked={selectedIds.length === filteredOrders.length && filteredOrders.length > 0}
-                                                    onChange={toggleSelectAll}
+                                                    className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20"
+                                                    checked={selectedIds.includes(order.id)}
+                                                    onChange={() => toggleSelect(order.id)}
                                                 />
                                             </div>
-                                        </th>
-                                        {visibleTableColumns.map(col => (
-                                            <th key={col.key} className="px-4 py-3.5 text-xs font-semibold text-[#374151] text-left uppercase tracking-wider">
-                                                {col.label}
-                                            </th>
-                                        ))}
-                                        <th className="px-4 py-3.5 text-xs font-semibold text-[#374151] text-center uppercase tracking-wider">Thao tác</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-[#E5E7EB]">
-                                    {isLoading ? (
-                                        <tr>
-                                            <td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center">
-                                                <div className="flex flex-col items-center gap-4">
-                                                    <div className="w-8 h-8 border-4 border-[#2563EB] border-t-transparent rounded-full animate-spin"></div>
-                                                    <p className="text-[#6B7280] text-sm font-medium">Đang tải dữ liệu...</p>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ) : filteredOrders.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center">
-                                                <div className="flex flex-col items-center gap-4">
-                                                    <Package className="w-12 h-12 text-[#D1D5DB]" />
-                                                    <p className="text-sm font-medium text-[#6B7280]">Không tìm thấy đơn hàng nào</p>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ) : filteredOrders.map((order) => {
-                                        const status = getStatusConfig(order.status);
-                                        return (
-                                            <tr key={order.id} className="hover:bg-[#F9FAFB] transition-colors">
-                                                <td className="px-4 py-4">
-                                                    <div className="flex items-center justify-center">
-                                                        <input
-                                                            type="checkbox"
-                                                            className="w-4 h-4 rounded border-[#D1D5DB] text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
-                                                            checked={selectedIds.includes(order.id)}
-                                                            onChange={() => toggleSelect(order.id)}
-                                                        />
-                                                    </div>
-                                                </td>
-                                                {isColumnVisible('code') && <td className="px-4 py-4 whitespace-nowrap">
-                                                    <span className="text-sm font-medium text-[#111827]">
-                                                        {order.order_code}
-                                                    </span>
-                                                </td>}
-                                                {isColumnVisible('category') && <td className="px-4 py-4 text-sm text-[#374151] font-normal">{getLabel(CUSTOMER_CATEGORIES, order.customer_category)}</td>}
-                                                {isColumnVisible('customer') && <td className="px-4 py-4">
-                                                    <span className="text-sm font-medium text-[#111827]">{order.customer_name}</span>
-                                                </td>}
-                                                {isColumnVisible('recipient') && <td className="px-4 py-4">
-                                                    <span className="text-sm text-[#374151] font-normal">{order.recipient_name}</span>
-                                                </td>}
-                                                {isColumnVisible('type') && <td className="px-4 py-4 text-sm text-[#374151] font-normal">{getLabel(ORDER_TYPES, order.order_type)}</td>}
-                                                {isColumnVisible('product') && <td className="px-4 py-4 text-sm text-[#374151] font-normal">{getLabel(PRODUCT_TYPES, order.product_type)}</td>}
-                                                {isColumnVisible('quantity') && <td className="px-4 py-4">
-                                                    <span className="text-sm font-semibold text-[#111827]">{formatNumber(order.quantity)}</span>
-                                                </td>}
-                                                {isColumnVisible('department') && <td className="px-4 py-4 text-sm text-[#374151] font-normal">{order.department || '—'}</td>}
-                                                {isColumnVisible('cylinders') && <td className="px-4 py-4 text-sm">
-                                                    {order.assigned_cylinders && order.assigned_cylinders.length > 0 ? (
-                                                        <div className="flex flex-wrap gap-1.5 max-w-[220px]">
-                                                            {order.assigned_cylinders.slice(0, 3).map((serial, idx) => (
-                                                                <span key={idx} className="px-2.5 py-1 bg-[#F3F4F6] text-[#374151] rounded-md text-xs font-medium border border-[#E5E7EB]">
-                                                                    {serial}
-                                                                </span>
-                                                            ))}
-                                                            {order.assigned_cylinders.length > 3 && (
-                                                                <button
-                                                                    onClick={() => setSerialsModalOrder(order)}
-                                                                    className="px-2.5 py-1 bg-[#DBEAFE] text-[#2563EB] hover:bg-[#BFDBFE] rounded-md text-xs font-medium transition-colors border border-[#BFDBFE]"
-                                                                    title="Bấm để xem danh sách đầy đủ"
-                                                                >
-                                                                    +{order.assigned_cylinders.length - 3}
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    ) : (
-                                                        <span className="text-[#9CA3AF]">—</span>
+                                        </td>
+                                        {isColumnVisible('code') && <td className="px-4 py-4 whitespace-nowrap">
+                                            <span className="text-[13px] font-medium text-foreground">
+                                                {order.order_code}
+                                            </span>
+                                        </td>}
+                                        {isColumnVisible('category') && <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">{getLabel(CUSTOMER_CATEGORIES, order.customer_category)}</td>}
+                                        {isColumnVisible('customer') && <td className="px-4 py-4">
+                                            <span className="text-[13px] font-medium text-foreground">{order.customer_name}</span>
+                                        </td>}
+                                        {isColumnVisible('recipient') && <td className="px-4 py-4">
+                                            <span className="text-[13px] text-muted-foreground font-normal">{order.recipient_name}</span>
+                                        </td>}
+                                        {isColumnVisible('type') && <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">{getLabel(ORDER_TYPES, order.order_type)}</td>}
+                                        {isColumnVisible('product') && <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">{getLabel(PRODUCT_TYPES, order.product_type)}</td>}
+                                        {isColumnVisible('quantity') && <td className="px-4 py-4">
+                                            <span className="text-[13px] font-semibold text-foreground">{formatNumber(order.quantity)}</span>
+                                        </td>}
+                                        {isColumnVisible('department') && <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">{order.department || '—'}</td>}
+                                        {isColumnVisible('cylinders') && <td className="px-4 py-4 text-[13px]">
+                                            {order.assigned_cylinders && order.assigned_cylinders.length > 0 ? (
+                                                <div className="flex flex-wrap gap-1.5 max-w-[220px]">
+                                                    {order.assigned_cylinders.slice(0, 3).map((serial, idx) => (
+                                                        <span key={idx} className="px-2.5 py-1 bg-muted/30 text-muted-foreground rounded-md text-xs font-medium border border-border">
+                                                            {serial}
+                                                        </span>
+                                                    ))}
+                                                    {order.assigned_cylinders.length > 3 && (
+                                                        <button
+                                                            onClick={() => setSerialsModalOrder(order)}
+                                                            className="inline-flex items-center justify-center min-w-[42px] px-2.5 py-1 rounded-full text-xs font-bold bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-colors"
+                                                            title="Bấm để xem danh sách đầy đủ"
+                                                        >
+                                                            +{order.assigned_cylinders.length - 3}
+                                                        </button>
                                                     )}
-                                                </td>}
-                                                {isColumnVisible('status') && <td className="px-4 py-4">
-                                                    <span
-                                                        className="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium border"
-                                                        style={(() => {
-                                                            const colorMap = {
-                                                                'blue': { bg: '#E0E7FF', text: '#4338CA', border: '#C7D2FE' },
-                                                                'yellow': { bg: '#FEF3C7', text: '#92400E', border: '#FDE68A' },
-                                                                'orange': { bg: '#FFEDD5', text: '#C2410C', border: '#FED7AA' },
-                                                                'indigo': { bg: '#E0E7FF', text: '#4338CA', border: '#C7D2FE' },
-                                                                'purple': { bg: '#F3E8FF', text: '#7C3AED', border: '#E9D5FF' },
-                                                                'cyan': { bg: '#CFFAFE', text: '#0E7490', border: '#A5F3FC' },
-                                                                'red': { bg: '#FEE2E2', text: '#991B1B', border: '#FECACA' },
-                                                                'green': { bg: '#D1FAE5', text: '#065F46', border: '#A7F3D0' },
-                                                                'gray': { bg: '#F3F4F6', text: '#374151', border: '#E5E7EB' }
-                                                            };
-                                                            const colors = colorMap[status.color] || colorMap['gray'];
-                                                            return {
-                                                                backgroundColor: colors.bg,
-                                                                color: colors.text,
-                                                                borderColor: colors.border
-                                                            };
-                                                        })()}
-                                                    >
-                                                        {status.label}
-                                                    </span>
-                                                </td>}
-                                                {isColumnVisible('date') && <td className="px-4 py-4 text-sm text-[#6B7280] font-normal">
-                                                    {order.created_at ? new Date(order.created_at).toLocaleDateString('vi-VN') : '---'}
-                                                </td>}
-                                                <td className="px-4 py-4 text-center">
-                                                    <div className="flex items-center justify-center gap-3">
-                                                        <button
-                                                            onClick={() => { setSelectedOrder(order); setIsActionModalOpen(true); }}
-                                                            className="text-[#9CA3AF] hover:text-[#10B981] transition-colors p-1 rounded hover:bg-[#ECFDF5]"
-                                                            title="Thao tác đơn hàng"
-                                                        >
-                                                            <Package className="w-4 h-4" />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handlePrint(order)}
-                                                            className="text-[#9CA3AF] hover:text-[#2563EB] transition-colors p-1 rounded hover:bg-[#EFF6FF]"
-                                                            title={order.product_type?.startsWith('MAY') ? 'In phiếu xuất kho + biên bản bàn giao máy' : 'In phiếu xuất kho'}
-                                                        >
-                                                            <Printer className="w-4 h-4" />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleEditOrder(order)}
-                                                            className="text-[#9CA3AF] hover:text-[#2563EB] transition-colors p-1 rounded hover:bg-[#EFF6FF]"
-                                                            title="Chỉnh sửa"
-                                                        >
-                                                            <Edit className="w-4 h-4" />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleDeleteOrder(order.id, order.order_code)}
-                                                            className="text-[#9CA3AF] hover:text-[#DC2626] transition-colors p-1 rounded hover:bg-[#FEF2F2]"
-                                                            title="Xóa"
-                                                        >
-                                                            <Trash2 className="w-4 h-4" />
-                                                        </button>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    {/* ACTION MODAL */}
-                    {isActionModalOpen && (
-                        <OrderStatusUpdater
-                            order={selectedOrder}
-                            userRole={role}
-                            onClose={() => setIsActionModalOpen(false)}
-                            onUpdateSuccess={() => {
-                                fetchOrders();
-                                setIsActionModalOpen(false);
-                            }}
-                        />
-                    )}
-
-                    {/* SERIALS VIEW MODAL */}
-                    {serialsModalOrder && (
-                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
-                            <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-sm overflow-hidden flex flex-col max-h-[80vh]">
-                                <div className="p-6 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50/50">
-                                    <div>
-                                        <h3 className="text-lg font-black text-slate-900">Mã Serial Vỏ Bình</h3>
-                                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">Đơn {serialsModalOrder.order_code}</p>
-                                    </div>
-                                    <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 shrink-0">
-                                        <Package className="w-5 h-5" />
-                                    </div>
-                                </div>
-                                <div className="p-6 overflow-y-auto">
-                                    <div className="grid grid-cols-2 gap-3">
-                                        {serialsModalOrder.assigned_cylinders.map((serial, idx) => (
-                                            <div key={idx} className="bg-white border border-slate-200 shadow-sm rounded-xl px-3 py-2 text-center text-sm font-bold text-slate-700 font-mono">
-                                                {serial}
+                                                </div>
+                                            ) : (
+                                                <span className="text-muted-foreground">—</span>
+                                            )}
+                                        </td>}
+                                        {isColumnVisible('status') && <td className="px-4 py-4">
+                                            <span
+                                                className={clsx(
+                                                    "inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium",
+                                                    status.color === 'blue' && "bg-blue-100 text-blue-700",
+                                                    status.color === 'yellow' && "bg-yellow-100 text-yellow-700",
+                                                    status.color === 'orange' && "bg-orange-100 text-orange-700",
+                                                    status.color === 'green' && "bg-green-100 text-green-700",
+                                                    status.color === 'red' && "bg-red-100 text-red-700",
+                                                    status.color === 'gray' && "bg-gray-100 text-gray-700",
+                                                    !status.color && "bg-gray-100 text-gray-700"
+                                                )}
+                                            >
+                                                {status.label}
+                                            </span>
+                                        </td>}
+                                        {isColumnVisible('date') && <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">
+                                            {order.created_at ? new Date(order.created_at).toLocaleDateString('vi-VN') : '---'}
+                                        </td>}
+                                        <td className="px-4 py-4 text-center">
+                                            <div className="flex items-center justify-center gap-3">
+                                                <button
+                                                    onClick={() => { setSelectedOrder(order); setIsActionModalOpen(true); }}
+                                                    className="text-muted-foreground hover:text-green-600 transition-colors p-1 rounded hover:bg-green-50"
+                                                    title="Thao tác đơn hàng"
+                                                >
+                                                    <Package className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => handlePrint(order)}
+                                                    className="text-muted-foreground hover:text-primary transition-colors p-1 rounded hover:bg-primary/10"
+                                                    title={order.product_type?.startsWith('MAY') ? 'In phiếu xuất kho + biên bản bàn giao máy' : 'In phiếu xuất kho'}
+                                                >
+                                                    <Printer className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleEditOrder(order)}
+                                                    className="text-muted-foreground hover:text-primary transition-colors p-1 rounded hover:bg-primary/10"
+                                                    title="Chỉnh sửa"
+                                                >
+                                                    <Edit className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteOrder(order.id, order.order_code)}
+                                                    className="text-muted-foreground hover:text-red-600 transition-colors p-1 rounded hover:bg-red-50"
+                                                    title="Xóa"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
                                             </div>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div className="p-4 bg-slate-50 border-t border-slate-100 mt-auto shrink-0">
-                                    <button
-                                        onClick={() => setSerialsModalOrder(null)}
-                                        className="w-full py-3 text-slate-600 font-bold text-sm bg-white hover:bg-slate-100 transition-colors rounded-xl border border-slate-200 shadow-sm"
-                                    >
-                                        Đóng lại
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
 
-                    {/* Form Modal */}
-                    {isFormModalOpen && (
-                        <OrderFormModal
-                            order={orderToEdit}
-                            onClose={() => setIsFormModalOpen(false)}
-                            onSuccess={handleFormSubmitSuccess}
-                        />
-                    )}
-
-                    {/* Hidden Print Template — rendered via Portal directly under <body> to bypass #root hiding */}
-                    {ordersToPrint && createPortal(
-                        <div className="print-only-content">
-                            <OrderPrintTemplate orders={ordersToPrint} warehousesList={warehousesList} />
-                            {handoverToPrint && <div className="page-break" />}
-                            {handoverToPrint && <MachineHandoverPrintTemplate orders={handoverToPrint} />}
-                        </div>,
-                        document.body
-                    )}
-                </>
-            ) : (
-                /* Statistics View */
-                <div className="space-y-6">
-                    {/* Summary Stats */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="bg-white p-6 border border-[#E5E7EB]">
-                            <div className="text-sm text-[#6B7280] mb-2" style={{ fontFamily: '"Roboto", sans-serif' }}>Tổng số đơn hàng</div>
-                            <div className="text-2xl font-semibold text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>{filteredOrdersCount}</div>
-                        </div>
-                        <div className="bg-white p-6 border border-[#E5E7EB]">
-                            <div className="text-sm text-[#6B7280] mb-2" style={{ fontFamily: '"Roboto", sans-serif' }}>Tổng tiền</div>
-                            <div className="text-2xl font-semibold text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>{formatNumber(totalAmount)} đ</div>
-                        </div>
-                        <div className="bg-white p-6 border border-[#E5E7EB]">
-                            <div className="text-sm text-[#6B7280] mb-2" style={{ fontFamily: '"Roboto", sans-serif' }}>Đơn hàng trung bình</div>
-                            <div className="text-2xl font-semibold text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>
-                                {filteredOrdersCount > 0 ? formatNumber(Math.round(totalAmount / filteredOrdersCount)) : 0} đ
-                            </div>
+                {/* Footer / Pagination */}
+                <div className="hidden md:flex px-4 py-4 border-t border-border items-center justify-between bg-muted/5">
+                    <div className="flex items-center gap-3 text-[12px] text-muted-foreground font-medium">
+                        <span>{filteredOrders.length > 0 ? `1–${filteredOrders.length}` : '0'}/Tổng {filteredOrders.length}</span>
+                        <div className="flex items-center gap-1 ml-2">
+                            <span className="text-[11px] font-bold">│</span>
+                            <span className="text-primary font-bold">{formatNumber(totalAmount)} đ</span>
                         </div>
                     </div>
+                    <div className="flex items-center gap-1">
+                        <button className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-20" disabled>
+                            <ChevronLeft size={16} />
+                            <ChevronLeft size={16} className="-ml-2.5" />
+                        </button>
+                        <button className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-20" disabled>
+                            <ChevronLeft size={16} />
+                        </button>
+                        <div className="w-8 h-8 rounded-lg bg-primary text-white flex items-center justify-center text-[12px] font-bold shadow-md shadow-primary/25">1</div>
+                        <button className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-20" disabled>
+                            <ChevronRight size={16} />
+                        </button>
+                        <button className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-20" disabled>
+                            <ChevronRight size={16} />
+                            <ChevronRight size={16} className="-ml-2.5" />
+                        </button>
+                    </div>
+                </div>
+            </div>
+            )}
 
-                    {/* Charts Grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {/* Status Chart */}
-                        <div className="bg-white p-6 border border-[#E5E7EB]">
-                            <h3 className="text-lg font-semibold text-[#111827] mb-4" style={{ fontFamily: '"Roboto", sans-serif' }}>Phân bổ theo Trạng thái</h3>
-                            <div style={{ height: '300px' }}>
-                                <PieChartJS
-                                    data={{
-                                        labels: getStatusStats().map(item => item.name),
-                                        datasets: [{
-                                            data: getStatusStats().map(item => item.value),
-                                            backgroundColor: chartColors.slice(0, getStatusStats().length),
-                                            borderColor: '#fff',
-                                            borderWidth: 2
-                                        }]
-                                    }}
-                                    options={{
-                                        responsive: true,
-                                        maintainAspectRatio: false,
-                                        plugins: {
-                                            legend: {
-                                                position: 'bottom'
-                                            }
-                                        }
-                                    }}
-                                />
+            {activeView === 'stats' && (
+                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full">
+                    <div className="space-y-0">
+                        {/* Mobile Header */}
+                        <div className="md:hidden flex items-center gap-2 p-3 border-b border-border">
+                            <button
+                                onClick={() => navigate(-1)}
+                                className="p-2 rounded-xl border border-border bg-white text-muted-foreground shrink-0"
+                            >
+                                <ChevronLeft size={18} />
+                            </button>
+                            <h2 className="text-base font-bold text-foreground flex-1 text-center">Thống kê</h2>
+                            <button
+                                onClick={openMobileFilter}
+                                className={clsx(
+                                    'relative p-2 rounded-xl border shrink-0 transition-all',
+                                    hasActiveFilters ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-white text-muted-foreground',
+                                )}
+                            >
+                                <Filter size={18} />
+                                {hasActiveFilters && (
+                                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-white text-[9px] font-bold flex items-center justify-center">
+                                        {totalActiveFilters}
+                                    </span>
+                                )}
+                            </button>
+                        </div>
+
+                        {/* Desktop Header */}
+                        <div className="hidden md:block p-4 border-b border-border" ref={dropdownRef}>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    onClick={() => navigate(-1)}
+                                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground text-[12px] font-bold transition-all bg-white shadow-sm shrink-0"
+                                >
+                                    <ChevronLeft size={16} />
+                                    Quay lại
+                                </button>
+
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
+                                        className={clsx(
+                                            "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
+                                            activeDropdown === 'status' || selectedStatuses.length > 0
+                                                ? "border-primary bg-primary/5 text-primary"
+                                                : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                        )}
+                                    >
+                                        <Filter size={14} />
+                                        Trạng thái
+                                        {selectedStatuses.length > 0 && (
+                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                                {selectedStatuses.length}
+                                            </span>
+                                        )}
+                                        <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'status' ? "rotate-180" : "")} />
+                                    </button>
+                                    {activeDropdown === 'status' && (
+                                        <FilterDropdown
+                                            options={statusOptions}
+                                            selected={selectedStatuses}
+                                            setSelected={setSelectedStatuses}
+                                            filterSearch={filterSearch}
+                                            setFilterSearch={setFilterSearch}
+                                        />
+                                    )}
+                                </div>
+
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setActiveDropdown(activeDropdown === 'categories' ? null : 'categories')}
+                                        className={clsx(
+                                            "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
+                                            activeDropdown === 'categories' || selectedCustomerCategories.length > 0
+                                                ? "border-primary bg-primary/5 text-primary"
+                                                : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                        )}
+                                    >
+                                        <User size={14} />
+                                        Loại khách
+                                        {selectedCustomerCategories.length > 0 && (
+                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                                {selectedCustomerCategories.length}
+                                            </span>
+                                        )}
+                                        <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'categories' ? "rotate-180" : "")} />
+                                    </button>
+                                    {activeDropdown === 'categories' && (
+                                        <FilterDropdown
+                                            options={categoryOptions}
+                                            selected={selectedCustomerCategories}
+                                            setSelected={setSelectedCustomerCategories}
+                                            filterSearch={filterSearch}
+                                            setFilterSearch={setFilterSearch}
+                                        />
+                                    )}
+                                </div>
+
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setActiveDropdown(activeDropdown === 'orderTypes' ? null : 'orderTypes')}
+                                        className={clsx(
+                                            "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
+                                            activeDropdown === 'orderTypes' || selectedOrderTypes.length > 0
+                                                ? "border-primary bg-primary/5 text-primary"
+                                                : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                        )}
+                                    >
+                                        <Package size={14} />
+                                        Loại đơn
+                                        {selectedOrderTypes.length > 0 && (
+                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                                {selectedOrderTypes.length}
+                                            </span>
+                                        )}
+                                        <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'orderTypes' ? "rotate-180" : "")} />
+                                    </button>
+                                    {activeDropdown === 'orderTypes' && (
+                                        <FilterDropdown
+                                            options={orderTypeOptions}
+                                            selected={selectedOrderTypes}
+                                            setSelected={setSelectedOrderTypes}
+                                            filterSearch={filterSearch}
+                                            setFilterSearch={setFilterSearch}
+                                        />
+                                    )}
+                                </div>
+
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setActiveDropdown(activeDropdown === 'productTypes' ? null : 'productTypes')}
+                                        className={clsx(
+                                            "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
+                                            activeDropdown === 'productTypes' || selectedProductTypes.length > 0
+                                                ? "border-primary bg-primary/5 text-primary"
+                                                : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                        )}
+                                    >
+                                        <Package size={14} />
+                                        Hàng hóa
+                                        {selectedProductTypes.length > 0 && (
+                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                                {selectedProductTypes.length}
+                                            </span>
+                                        )}
+                                        <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'productTypes' ? "rotate-180" : "")} />
+                                    </button>
+                                    {activeDropdown === 'productTypes' && (
+                                        <FilterDropdown
+                                            options={productTypeOptions}
+                                            selected={selectedProductTypes}
+                                            setSelected={setSelectedProductTypes}
+                                            filterSearch={filterSearch}
+                                            setFilterSearch={setFilterSearch}
+                                        />
+                                    )}
+                                </div>
+
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setActiveDropdown(activeDropdown === 'customers' ? null : 'customers')}
+                                        className={clsx(
+                                            "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
+                                            activeDropdown === 'customers' || selectedCustomers.length > 0
+                                                ? "border-primary bg-primary/5 text-primary"
+                                                : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                        )}
+                                    >
+                                        <User size={14} />
+                                        Khách hàng
+                                        {selectedCustomers.length > 0 && (
+                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                                {selectedCustomers.length}
+                                            </span>
+                                        )}
+                                        <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'customers' ? "rotate-180" : "")} />
+                                    </button>
+                                    {activeDropdown === 'customers' && (
+                                        <FilterDropdown
+                                            options={customerOptions}
+                                            selected={selectedCustomers}
+                                            setSelected={setSelectedCustomers}
+                                            filterSearch={filterSearch}
+                                            setFilterSearch={setFilterSearch}
+                                        />
+                                    )}
+                                </div>
+
+                                {hasActiveFilters && (
+                                    <button
+                                        onClick={() => {
+                                            setSelectedStatuses([]);
+                                            setSelectedCustomerCategories([]);
+                                            setSelectedOrderTypes([]);
+                                            setSelectedProductTypes([]);
+                                            setSelectedCustomers([]);
+                                        }}
+                                        className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-red-300 text-red-500 text-[12px] font-bold hover:bg-red-50 transition-all"
+                                    >
+                                        <X size={14} />
+                                        Xóa bộ lọc
+                                    </button>
+                                )}
                             </div>
                         </div>
 
-                        {/* Category Chart */}
-                        <div className="bg-white p-6 border border-[#E5E7EB]">
-                            <h3 className="text-lg font-semibold text-[#111827] mb-4" style={{ fontFamily: '"Roboto", sans-serif' }}>Phân bổ theo Loại khách</h3>
-                            <div style={{ height: '300px' }}>
-                                <PieChartJS
-                                    data={{
-                                        labels: getCategoryStats().map(item => item.name),
-                                        datasets: [{
-                                            data: getCategoryStats().map(item => item.value),
-                                            backgroundColor: chartColors.slice(0, getCategoryStats().length),
-                                            borderColor: '#fff',
-                                            borderWidth: 2
-                                        }]
-                                    }}
-                                    options={{
-                                        responsive: true,
-                                        maintainAspectRatio: false,
-                                        plugins: {
-                                            legend: {
-                                                position: 'bottom'
-                                            }
-                                        }
-                                    }}
-                                />
+                        <div className="px-3 md:px-4 pt-4 md:pt-5 pb-5 md:pb-6 space-y-5">
+                        {/* Stats Cards */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div className="bg-blue-50 rounded-2xl p-5 shadow-sm">
+                                <div className="flex items-center justify-start gap-4">
+                                    <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center shrink-0">
+                                        <Package className="w-6 h-6 text-blue-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-[11px] font-semibold text-blue-600 uppercase tracking-wider">Tổng số đơn hàng</p>
+                                        <p className="text-3xl font-bold text-blue-900 mt-1">{formatNumber(filteredOrdersCount)}</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="bg-green-50 rounded-2xl p-5 shadow-sm">
+                                <div className="flex items-center justify-start gap-4">
+                                    <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center shrink-0">
+                                        <CheckCircle className="w-6 h-6 text-green-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-[11px] font-semibold text-green-600 uppercase tracking-wider">Tổng tiền</p>
+                                        <p className="text-3xl font-bold text-green-900 mt-1">
+                                            {formatNumber(filteredOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0))}đ
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="bg-orange-50 rounded-2xl p-5 shadow-sm">
+                                <div className="flex items-center justify-start gap-4">
+                                    <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center shrink-0">
+                                        <BarChart2 className="w-6 h-6 text-orange-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-[11px] font-semibold text-orange-600 uppercase tracking-wider">Đơn hàng trung bình</p>
+                                        <p className="text-3xl font-bold text-orange-900 mt-1">
+                                            {formatNumber(filteredOrdersCount > 0 ? Math.round(filteredOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0) / filteredOrdersCount) : 0)}đ
+                                        </p>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
-                        {/* Order Type Chart */}
-                        <div className="bg-white p-6 border border-[#E5E7EB]">
-                            <h3 className="text-lg font-semibold text-[#111827] mb-4" style={{ fontFamily: '"Roboto", sans-serif' }}>Phân bổ theo Loại đơn</h3>
-                            <div style={{ height: '300px' }}>
-                                <BarChartJS
-                                    data={{
-                                        labels: getOrderTypeStats().map(item => item.name),
-                                        datasets: [{
-                                            label: 'Số lượng',
-                                            data: getOrderTypeStats().map(item => item.value),
-                                            backgroundColor: chartColors[0],
-                                            borderColor: chartColors[0],
-                                            borderWidth: 1
-                                        }]
-                                    }}
-                                    options={{
-                                        responsive: true,
-                                        maintainAspectRatio: false,
-                                        plugins: {
-                                            legend: {
-                                                display: false
+                        {/* Charts Section */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+                                <h3 className="text-lg font-bold text-foreground mb-4">Thống kê theo trạng thái</h3>
+                                <div style={{ height: '300px' }}>
+                                    <PieChartJS
+                                        data={{
+                                            labels: getStatusStats().map(item => item.name),
+                                            datasets: [{
+                                                data: getStatusStats().map(item => item.value),
+                                                backgroundColor: chartColors.slice(0, getStatusStats().length),
+                                                borderColor: '#fff',
+                                                borderWidth: 2
+                                            }]
+                                        }}
+                                        options={{
+                                            responsive: true,
+                                            maintainAspectRatio: false,
+                                            plugins: {
+                                                legend: {
+                                                    position: 'bottom'
+                                                }
                                             }
-                                        },
-                                        scales: {
-                                            y: {
-                                                beginAtZero: true
-                                            }
-                                        }
-                                    }}
-                                />
+                                        }}
+                                    />
+                                </div>
                             </div>
-                        </div>
 
-                        {/* Product Type Chart */}
-                        <div className="bg-white p-6 border border-[#E5E7EB]">
-                            <h3 className="text-lg font-semibold text-[#111827] mb-4" style={{ fontFamily: '"Roboto", sans-serif' }}>Phân bổ theo Hàng hóa</h3>
-                            <div style={{ height: '300px' }}>
-                                <BarChartJS
-                                    data={{
-                                        labels: getProductTypeStats().map(item => item.name),
-                                        datasets: [{
-                                            label: 'Số lượng',
-                                            data: getProductTypeStats().map(item => item.value),
-                                            backgroundColor: chartColors[1],
-                                            borderColor: chartColors[1],
-                                            borderWidth: 1
-                                        }]
-                                    }}
-                                    options={{
-                                        responsive: true,
-                                        maintainAspectRatio: false,
-                                        plugins: {
-                                            legend: {
-                                                display: false
+                            <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+                                <h3 className="text-lg font-bold text-foreground mb-4">Phân bổ theo Loại khách</h3>
+                                <div style={{ height: '300px' }}>
+                                    <PieChartJS
+                                        data={{
+                                            labels: getCategoryStats().map(item => item.name),
+                                            datasets: [{
+                                                data: getCategoryStats().map(item => item.value),
+                                                backgroundColor: chartColors.slice(0, getCategoryStats().length),
+                                                borderColor: '#fff',
+                                                borderWidth: 2
+                                            }]
+                                        }}
+                                        options={{
+                                            responsive: true,
+                                            maintainAspectRatio: false,
+                                            plugins: {
+                                                legend: {
+                                                    position: 'bottom'
+                                                }
                                             }
-                                        },
-                                        scales: {
-                                            y: {
-                                                beginAtZero: true
-                                            }
-                                        }
-                                    }}
-                                />
+                                        }}
+                                    />
+                                </div>
                             </div>
-                        </div>
 
-                        {/* Top Customers Chart */}
-                        <div className="bg-white p-6 border border-[#E5E7EB]">
-                            <h3 className="text-lg font-semibold text-[#111827] mb-4" style={{ fontFamily: '"Roboto", sans-serif' }}>Top 10 Khách hàng</h3>
-                            <div style={{ height: '300px' }}>
-                                <BarChartJS
-                                    data={{
-                                        labels: getCustomerStats().map(item => item.name.length > 20 ? item.name.substring(0, 20) + '...' : item.name),
-                                        datasets: [{
-                                            label: 'Số đơn',
-                                            data: getCustomerStats().map(item => item.value),
-                                            backgroundColor: chartColors[2],
-                                            borderColor: chartColors[2],
-                                            borderWidth: 1
-                                        }]
-                                    }}
-                                    options={{
-                                        responsive: true,
-                                        maintainAspectRatio: false,
-                                        indexAxis: 'y',
-                                        plugins: {
-                                            legend: {
-                                                display: false
-                                            }
-                                        },
-                                        scales: {
-                                            x: {
-                                                beginAtZero: true
-                                            }
-                                        }
-                                    }}
-                                />
-                            </div>
-                        </div>
-
-                        {/* Revenue by Status Chart */}
-                        <div className="bg-white p-6 border border-[#E5E7EB]">
-                            <h3 className="text-lg font-semibold text-[#111827] mb-4" style={{ fontFamily: '"Roboto", sans-serif' }}>Doanh thu theo Trạng thái</h3>
-                            <div style={{ height: '300px' }}>
-                                <BarChartJS
-                                    data={{
-                                        labels: getRevenueByStatus().map(item => item.name),
-                                        datasets: [{
-                                            label: 'Doanh thu (VNĐ)',
-                                            data: getRevenueByStatus().map(item => item.value),
-                                            backgroundColor: chartColors[3],
-                                            borderColor: chartColors[3],
-                                            borderWidth: 1
-                                        }]
-                                    }}
-                                    options={{
-                                        responsive: true,
-                                        maintainAspectRatio: false,
-                                        plugins: {
-                                            legend: {
-                                                display: false
+                            <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+                                <h3 className="text-lg font-bold text-foreground mb-4">Phân bổ theo Loại đơn</h3>
+                                <div style={{ height: '300px' }}>
+                                    <BarChartJS
+                                        data={{
+                                            labels: getOrderTypeStats().map(item => item.name),
+                                            datasets: [{
+                                                label: 'Số lượng',
+                                                data: getOrderTypeStats().map(item => item.value),
+                                                backgroundColor: chartColors[0],
+                                                borderColor: chartColors[0],
+                                                borderWidth: 1
+                                            }]
+                                        }}
+                                        options={{
+                                            responsive: true,
+                                            maintainAspectRatio: false,
+                                            plugins: {
+                                                legend: {
+                                                    display: false
+                                                }
                                             },
-                                            tooltip: {
-                                                callbacks: {
-                                                    label: function (context) {
-                                                        return formatNumber(context.parsed.y) + ' đ';
-                                                    }
+                                            scales: {
+                                                y: {
+                                                    beginAtZero: true
                                                 }
                                             }
-                                        },
-                                        scales: {
-                                            y: {
-                                                beginAtZero: true,
-                                                ticks: {
-                                                    callback: function (value) {
-                                                        return formatNumber(value);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }}
-                                />
+                                        }}
+                                    />
+                                </div>
                             </div>
+
+                            <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+                                <h3 className="text-lg font-bold text-foreground mb-4">Phân bổ theo Hàng hóa</h3>
+                                <div style={{ height: '300px' }}>
+                                    <BarChartJS
+                                        data={{
+                                            labels: getProductTypeStats().map(item => item.name),
+                                            datasets: [{
+                                                label: 'Số lượng',
+                                                data: getProductTypeStats().map(item => item.value),
+                                                backgroundColor: chartColors[1],
+                                                borderColor: chartColors[1],
+                                                borderWidth: 1
+                                            }]
+                                        }}
+                                        options={{
+                                            responsive: true,
+                                            maintainAspectRatio: false,
+                                            plugins: {
+                                                legend: {
+                                                    display: false
+                                                }
+                                            },
+                                            scales: {
+                                                y: {
+                                                    beginAtZero: true
+                                                }
+                                            }
+                                        }}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+                                <h3 className="text-lg font-bold text-foreground mb-4">Top 10 Khách hàng</h3>
+                                <div style={{ height: '300px' }}>
+                                    <BarChartJS
+                                        data={{
+                                            labels: getCustomerStats().map(item => item.name.length > 20 ? item.name.substring(0, 20) + '...' : item.name),
+                                            datasets: [{
+                                                label: 'Số đơn',
+                                                data: getCustomerStats().map(item => item.value),
+                                                backgroundColor: chartColors[2],
+                                                borderColor: chartColors[2],
+                                                borderWidth: 1
+                                            }]
+                                        }}
+                                        options={{
+                                            responsive: true,
+                                            maintainAspectRatio: false,
+                                            indexAxis: 'y',
+                                            plugins: {
+                                                legend: {
+                                                    display: false
+                                                }
+                                            },
+                                            scales: {
+                                                x: {
+                                                    beginAtZero: true
+                                                }
+                                            }
+                                        }}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+                                <h3 className="text-lg font-bold text-foreground mb-4">Doanh thu theo Trạng thái</h3>
+                                <div style={{ height: '300px' }}>
+                                    <BarChartJS
+                                        data={{
+                                            labels: getRevenueByStatus().map(item => item.name),
+                                            datasets: [{
+                                                label: 'Doanh thu (VNĐ)',
+                                                data: getRevenueByStatus().map(item => item.value),
+                                                backgroundColor: chartColors[3],
+                                                borderColor: chartColors[3],
+                                                borderWidth: 1
+                                            }]
+                                        }}
+                                        options={{
+                                            responsive: true,
+                                            maintainAspectRatio: false,
+                                            plugins: {
+                                                legend: {
+                                                    display: false
+                                                },
+                                                tooltip: {
+                                                    callbacks: {
+                                                        label: function (context) {
+                                                            return formatNumber(context.parsed.y) + ' đ';
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            scales: {
+                                                y: {
+                                                    beginAtZero: true,
+                                                    ticks: {
+                                                        callback: function (value) {
+                                                            return formatNumber(value);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                        </div>
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* ── MOBILE FILTER BOTTOM SHEET ── */}
+            {showMobileFilter && (
+                <MobileFilterSheet
+                    isOpen={showMobileFilter}
+                    isClosing={mobileFilterClosing}
+                    onClose={closeMobileFilter}
+                    onApply={applyMobileFilter}
+                    sections={[
+                        {
+                            id: 'status',
+                            label: 'Trạng thái',
+                            icon: <Filter size={16} />,
+                            options: statusOptions,
+                            selectedValues: pendingStatuses,
+                            onSelectionChange: setPendingStatuses,
+                        },
+                        {
+                            id: 'categories',
+                            label: 'Loại khách',
+                            icon: <User size={16} />,
+                            options: categoryOptions,
+                            selectedValues: pendingCustomerCategories,
+                            onSelectionChange: setPendingCustomerCategories,
+                        },
+                        {
+                            id: 'orderTypes',
+                            label: 'Loại đơn',
+                            icon: <Package size={16} />,
+                            options: orderTypeOptions,
+                            selectedValues: pendingOrderTypes,
+                            onSelectionChange: setPendingOrderTypes,
+                        },
+                        {
+                            id: 'productTypes',
+                            label: 'Hàng hóa',
+                            icon: <Package size={16} />,
+                            options: productTypeOptions,
+                            selectedValues: pendingProductTypes,
+                            onSelectionChange: setPendingProductTypes,
+                        },
+                        {
+                            id: 'customers',
+                            label: 'Khách hàng',
+                            icon: <User size={16} />,
+                            options: customerOptions,
+                            selectedValues: pendingCustomers,
+                            onSelectionChange: setPendingCustomers,
+                        },
+                    ]}
+                />
+            )}
+
+            {/* ACTION MODAL */}
+            {isActionModalOpen && (
+                <OrderStatusUpdater
+                    order={selectedOrder}
+                    userRole={role}
+                    onClose={() => setIsActionModalOpen(false)}
+                    onUpdateSuccess={() => {
+                        fetchOrders();
+                        setIsActionModalOpen(false);
+                    }}
+                />
+            )}
+
+            {/* SERIALS VIEW MODAL */}
+            {serialsModalOrder && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-sm overflow-hidden flex flex-col max-h-[80vh]">
+                        <div className="p-6 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50/50">
+                            <div>
+                                <h3 className="text-lg font-black text-slate-900">Mã Serial Vỏ Bình</h3>
+                                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">Đơn {serialsModalOrder.order_code}</p>
+                            </div>
+                            <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 shrink-0">
+                                <Package className="w-5 h-5" />
+                            </div>
+                        </div>
+                        <div className="p-6 overflow-y-auto">
+                            <div className="grid grid-cols-2 gap-3">
+                                {serialsModalOrder.assigned_cylinders.map((serial, idx) => (
+                                    <div key={idx} className="bg-white border border-slate-200 shadow-sm rounded-xl px-3 py-2 text-center text-sm font-bold text-slate-700 font-mono">
+                                        {serial}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="p-4 bg-slate-50 border-t border-slate-100 mt-auto shrink-0">
+                            <button
+                                onClick={() => setSerialsModalOrder(null)}
+                                className="w-full py-3 text-slate-600 font-bold text-sm bg-white hover:bg-slate-100 transition-colors rounded-xl border border-slate-200 shadow-sm"
+                            >
+                                Đóng lại
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Form Modal */}
+            {isFormModalOpen && (
+                <OrderFormModal
+                    order={orderToEdit}
+                    onClose={() => setIsFormModalOpen(false)}
+                    onSuccess={handleFormSubmitSuccess}
+                />
+            )}
+
+            {/* Hidden Print Template — rendered via Portal directly under <body> to bypass #root hiding */}
+            {ordersToPrint && createPortal(
+                <div className="print-only-content">
+                    <OrderPrintTemplate orders={ordersToPrint} warehousesList={warehousesList} />
+                    {handoverToPrint && <div className="page-break" />}
+                    {handoverToPrint && <MachineHandoverPrintTemplate orders={handoverToPrint} />}
+                </div>,
+                document.body
             )}
         </div>
     );
