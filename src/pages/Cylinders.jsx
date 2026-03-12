@@ -48,6 +48,7 @@ const TABLE_COLUMNS = [
     { key: 'serial_number', label: 'Mã RFID (Serial)' },
     { key: 'volume', label: 'Thể tích / Loại bình' },
     { key: 'customer_name', label: 'Tên Khách Hàng / Vị trí' },
+    { key: 'warehouse', label: 'Kho Quản Lý' },
     { key: 'status', label: 'Trạng Thái' },
 ];
 
@@ -70,8 +71,10 @@ const Cylinders = () => {
     const [selectedVolumes, setSelectedVolumes] = useState([]);
     const [selectedCustomers, setSelectedCustomers] = useState([]);
     const [selectedCategories, setSelectedCategories] = useState([]);
+    const [selectedWarehouses, setSelectedWarehouses] = useState([]);
     const [uniqueCustomers, setUniqueCustomers] = useState([]);
     const [uniqueVolumes, setUniqueVolumes] = useState([]);
+    const [uniqueWarehouses, setUniqueWarehouses] = useState([]);
 
     useEffect(() => {
         fetchCylinders();
@@ -81,8 +84,10 @@ const Cylinders = () => {
         // Extract unique values for filters
         const customers = [...new Set(cylinders.map(c => c.customer_name).filter(Boolean))];
         const volumes = [...new Set(cylinders.map(c => c.volume).filter(Boolean))];
+        const warehouses = [...new Set(cylinders.map(c => c.warehouses?.name).filter(Boolean))];
         setUniqueCustomers(customers);
         setUniqueVolumes(volumes);
+        setUniqueWarehouses(warehouses);
     }, [cylinders]);
 
     const fetchCylinders = async () => {
@@ -90,7 +95,7 @@ const Cylinders = () => {
         try {
             const { data, error } = await supabase
                 .from('cylinders')
-                .select('*')
+                .select('*, warehouses(name)')
                 .order('created_at', { ascending: false });
 
             // Ignore missing table error during setup
@@ -289,12 +294,16 @@ const Cylinders = () => {
         const matchesCustomer = selectedCustomers.length === 0 ||
             selectedCustomers.includes(c.customer_name);
 
+        // Filter by warehouse
+        const matchesWarehouse = selectedWarehouses.length === 0 ||
+            selectedWarehouses.includes(c.warehouses?.name);
+
         // Filter by category
         const matchesCategory = selectedCategories.length === 0 ||
             selectedCategories.includes(c.category);
 
         return matchesSearch && matchesStatus && matchesVolume &&
-            matchesCustomer && matchesCategory;
+            matchesCustomer && matchesWarehouse && matchesCategory;
     });
 
     // Calculate totals
@@ -486,6 +495,40 @@ const Cylinders = () => {
                             </div>
                         </FilterDropdown>
 
+                        {/* Kho Dropdown */}
+                        <FilterDropdown
+                            label="Kho"
+                            selectedCount={selectedWarehouses.length}
+                            totalCount={uniqueWarehouses.length}
+                            onSelectAll={() => {
+                                if (selectedWarehouses.length === uniqueWarehouses.length) {
+                                    setSelectedWarehouses([]);
+                                } else {
+                                    setSelectedWarehouses([...uniqueWarehouses]);
+                                }
+                            }}
+                        >
+                            <div className="space-y-1 p-2">
+                                {uniqueWarehouses.map(warehouse => (
+                                    <label key={warehouse} className="flex items-center gap-2 cursor-pointer hover:bg-[#F3F4F6] p-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedWarehouses.includes(warehouse)}
+                                            onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setSelectedWarehouses([...selectedWarehouses, warehouse]);
+                                                } else {
+                                                    setSelectedWarehouses(selectedWarehouses.filter(w => w !== warehouse));
+                                                }
+                                            }}
+                                            className="w-4 h-4 text-[#2563EB] border-[#D1D5DB] focus:ring-[#2563EB]"
+                                        />
+                                        <span className="text-sm text-[#374151] truncate" style={{ fontFamily: '"Roboto", sans-serif' }} title={warehouse}>{warehouse}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </FilterDropdown>
+
                         {/* Category Dropdown */}
                         <FilterDropdown
                             label="Phân loại"
@@ -578,8 +621,11 @@ const Cylinders = () => {
                                                 <p className="text-xs text-slate-700 font-medium">{c.category || '—'}</p>
                                             </div>
                                             <div className="col-span-2">
-                                                <span className="text-[9px] font-bold text-slate-400 uppercase">Khách hàng</span>
-                                                <p className="text-xs text-slate-700 font-medium">{c.customer_name || 'Vỏ bình tại kho'}</p>
+                                                <span className="text-[9px] font-bold text-slate-400 uppercase">Khách hàng / Vị trí</span>
+                                                <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap">
+                                                    {c.customer_name ? `🏢 ${c.customer_name}` : '🏠 Vỏ bình tại kho'}
+                                                    {c.warehouses?.name && `\n📍 ${c.warehouses.name}`}
+                                                </p>
                                             </div>
                                         </div>
 
@@ -648,6 +694,11 @@ const Cylinders = () => {
                                             {isColumnVisible('customer_name') && <td className="px-4 py-4">
                                                 <span className="text-sm font-medium text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>
                                                     {c.customer_name || 'Vỏ bình tại kho'}
+                                                </span>
+                                            </td>}
+                                            {isColumnVisible('warehouse') && <td className="px-4 py-4">
+                                                <span className="text-sm font-medium text-[#111827]" style={{ fontFamily: '"Roboto", sans-serif' }}>
+                                                    {c.warehouses?.name || '—'}
                                                 </span>
                                             </td>}
                                             {isColumnVisible('status') && <td className="px-4 py-4">
