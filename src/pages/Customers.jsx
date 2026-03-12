@@ -85,6 +85,7 @@ const Customers = () => {
         { id: 'TM', label: 'Thẩm mỹ viện' },
         { id: 'PK', label: 'Phòng khám' },
         { id: 'NG', label: 'Khách ngoại giao' },
+        { id: 'SP', label: 'Spa / Khác' },
     ];
 
     const visibleTableColumns = TABLE_COLUMNS_DEF.filter(col => isColumnVisible(col.key));

@@ -161,7 +161,7 @@ const CreateCustomer = () => {
                                 onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                                 className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-pink-100 focus:border-pink-500 font-bold text-base shadow-sm transition-all text-gray-900 cursor-pointer"
                             >
-                                {CUSTOMER_CATEGORIES.filter(c => c.id === 'BV' || c.id === 'TM').map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                                {CUSTOMER_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                             </select>
                         </div>
                         <div className="space-y-3">

@@ -171,17 +171,17 @@ const CreateMachine = () => {
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
                             <div className="space-y-2">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Serial (Mã máy) *</label>
-                                <div className="flex gap-2">
+                                <div className="relative flex items-center">
                                     <input
                                         value={formData.serial_number}
                                         onChange={handleSerialChange}
                                         placeholder="PLT-25D1-50-TM"
-                                        className="flex-1 px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 font-bold text-base shadow-sm transition-all"
+                                        className="w-full pl-5 pr-14 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 font-bold text-base shadow-sm transition-all"
                                     />
                                     <button
                                         type="button"
                                         onClick={startScanner}
-                                        className="px-4 py-4 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-700 transition-all flex items-center gap-1.5 shadow-sm"
+                                        className="absolute right-2 p-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all flex items-center gap-1.5 shadow-sm"
                                         title="Quét barcode"
                                     >
                                         <ScanLine className="w-5 h-5" />

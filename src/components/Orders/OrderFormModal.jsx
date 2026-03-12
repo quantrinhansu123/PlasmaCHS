@@ -144,11 +144,13 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
         setCustomerSearchTerm('');
     };
 
-    const filteredCustomers = customers.filter(c =>
-        c.name.toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
-        (c.phone && c.phone.includes(customerSearchTerm)) ||
-        (c.recipient && c.recipient.toLowerCase().includes(customerSearchTerm.toLowerCase()))
-    );
+    const filteredCustomers = customers.filter(c => {
+        const categoryMatch = c.category === formData.customerCategory || (!c.category && formData.customerCategory === 'BV'); // fallback if c.category is missing
+        const searchMatch = c.name.toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
+            (c.phone && c.phone.includes(customerSearchTerm)) ||
+            (c.recipient && c.recipient.toLowerCase().includes(customerSearchTerm.toLowerCase()));
+        return categoryMatch && searchMatch;
+    });
 
     const handleQuantityChange = (e) => {
         const value = e.target.value.replace(/\D/g, '');

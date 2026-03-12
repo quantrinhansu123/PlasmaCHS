@@ -32,7 +32,7 @@ const BarcodeScanner = ({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 bg-black/90 flex flex-col backdrop-blur-sm">
+        <div className="fixed inset-0 z-[999] bg-black/90 flex flex-col backdrop-blur-sm">
             {/* Header */}
             <div className="bg-black/50 p-4 flex items-center justify-between text-white border-b border-white/10">
                 <div className="flex items-center gap-3">
