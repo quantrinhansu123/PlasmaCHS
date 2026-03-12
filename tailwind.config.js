@@ -9,7 +9,7 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Arial', 'Helvetica', 'sans-serif'],
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
       screens: {
         'xs': '480px',

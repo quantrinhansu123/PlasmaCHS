@@ -944,7 +944,8 @@ const Orders = () => {
                                                     {order.assigned_cylinders.length > 3 && (
                                                         <button
                                                             onClick={() => setSerialsModalOrder(order)}
-                                                            className="inline-flex items-center justify-center min-w-[42px] px-2.5 py-1 rounded-full text-xs font-bold bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-colors"
+                                                            type="button"
+                                                            className="!h-auto !px-2.5 !py-1 !rounded-full !text-xs !font-semibold inline-flex items-center justify-center min-w-[40px] bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-colors"
                                                             title="Bấm để xem danh sách đầy đủ"
                                                         >
                                                             +{order.assigned_cylinders.length - 3}
