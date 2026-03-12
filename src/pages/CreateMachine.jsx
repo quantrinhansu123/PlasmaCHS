@@ -16,7 +16,7 @@ import {
 } from '../constants/machineConstants';
 import { supabase } from '../supabase/config';
 import { patchIOSVideoPlaysinline } from '../utils/scannerHelper';
-import { SCANNER_CONFIG } from '../utils/barcodeFormats';
+import BarcodeScanner from '../components/Common/BarcodeScanner';
 
 const CreateMachine = () => {
     const navigate = useNavigate();
@@ -25,7 +25,6 @@ const CreateMachine = () => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [warehousesList, setWarehousesList] = useState([]);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
-    const html5QrCodeRef = useRef(null);
 
     const defaultState = {
         serial_number: '',
@@ -122,70 +121,32 @@ const CreateMachine = () => {
         setFormData(initialFormState);
     };
 
-    const startScanner = useCallback(async () => {
-        if (html5QrCodeRef.current) {
-            try { await html5QrCodeRef.current.stop(); } catch { }
-            html5QrCodeRef.current = null;
-        }
-        setIsScannerOpen(true);
-        const { Html5Qrcode } = await import('html5-qrcode');
-        setTimeout(async () => {
-            try {
-                const qr = new Html5Qrcode('machine-barcode-reader', SCANNER_CONFIG);
-                html5QrCodeRef.current = qr;
-                patchIOSVideoPlaysinline('machine-barcode-reader');
-                await qr.start(
-                    { facingMode: 'environment' },
-                    {
-                        fps: 15,
-                        qrbox: (w, h) => ({ width: Math.floor(w * 0.85), height: Math.floor(h * 0.4) }),
-                        disableFlip: false,
-                    },
-                    (decodedText) => {
-                        setFormData(prev => ({
-                            ...prev,
-                            serial_number: decodedText,
-                            machine_account: decodedText
-                        }));
-                        stopScanner();
-                    },
-                    () => { }
-                );
-            } catch (err) {
-                console.error('Scanner error:', err);
-                alert('📷 Thiết bị không có camera hoặc chưa cấp quyền.\nVui lòng dùng điện thoại để quét mã, hoặc nhập mã thủ công.');
-                setIsScannerOpen(false);
-            }
-        }, 300);
+    const handleScanSuccess = useCallback((decodedText) => {
+        setFormData(prev => ({
+            ...prev,
+            serial_number: decodedText,
+            machine_account: decodedText
+        }));
+        setIsScannerOpen(false);
     }, []);
 
-    const stopScanner = useCallback(async () => {
-        if (html5QrCodeRef.current) {
-            try { await html5QrCodeRef.current.stop(); } catch { }
-            html5QrCodeRef.current = null;
-        }
+    const startScanner = useCallback(() => {
+        setIsScannerOpen(true);
+    }, []);
+
+    const stopScanner = useCallback(() => {
         setIsScannerOpen(false);
     }, []);
 
     return (
         <>
-            {/* Barcode Scanner Overlay */}
-            {isScannerOpen && (
-                <div className="fixed inset-0 bg-black/90 z-[200] flex flex-col">
-                    <div className="flex items-center justify-between p-4 bg-gray-900/80">
-                        <div className="flex items-center gap-2">
-                            <ScanLine className="w-5 h-5 text-indigo-400" />
-                            <span className="font-bold text-white text-sm">Quét mã Serial máy</span>
-                        </div>
-                        <button onClick={stopScanner} className="p-2 bg-white/10 rounded-full text-white hover:bg-white/20">
-                            <X className="w-5 h-5" />
-                        </button>
-                    </div>
-                    <div className="flex-1 flex items-center justify-center">
-                        <div id="machine-barcode-reader" className="w-full max-w-lg" />
-                    </div>
-                </div>
-            )}
+            {/* 3-Tier Barcode Scanner Component */}
+            <BarcodeScanner 
+                isOpen={isScannerOpen}
+                onClose={stopScanner}
+                onScanSuccess={handleScanSuccess}
+                title="Quét mã Serial máy"
+            />
             <div className="p-4 md:p-8 max-w-[1400px] mx-auto font-sans min-h-screen noise-bg">
             {/* Animated Blobs */}
             <div className="blob blob-violet w-[400px] h-[400px] -top-20 -left-20 opacity-20"></div>

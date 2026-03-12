@@ -15,7 +15,7 @@ import {
 } from '../constants/machineConstants';
 import { supabase } from '../supabase/config';
 import { patchIOSVideoPlaysinline } from '../utils/scannerHelper';
-import { SCANNER_CONFIG } from '../utils/barcodeFormats';
+import BarcodeScanner from '../components/Common/BarcodeScanner';
 
 const CreateCylinder = () => {
     const navigate = useNavigate();
@@ -23,8 +23,6 @@ const CreateCylinder = () => {
     const editCylinder = state?.cylinder;
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
-    const scannerRef = useRef(null);
-    const html5QrCodeRef = useRef(null);
 
     const defaultState = {
         serial_number: '',
@@ -74,60 +72,16 @@ const CreateCylinder = () => {
         fetchData();
     }, [editCylinder]);
 
-    // Cleanup scanner on unmount
-    useEffect(() => {
-        return () => {
-            if (html5QrCodeRef.current) {
-                html5QrCodeRef.current.stop().catch(() => { });
-            }
-        };
+    const handleScanSuccess = useCallback((decodedText) => {
+        setFormData(prev => ({ ...prev, serial_number: decodedText }));
+        setIsScannerOpen(false);
     }, []);
 
-    const startScanner = useCallback(async () => {
+    const startScanner = useCallback(() => {
         setIsScannerOpen(true);
-        // Dynamic import to avoid SSR issues
-        const { Html5Qrcode } = await import('html5-qrcode');
-
-        // Wait for DOM element to be rendered (longer delay for mobile)
-        setTimeout(async () => {
-            try {
-                const html5QrCode = new Html5Qrcode("barcode-reader", SCANNER_CONFIG);
-                html5QrCodeRef.current = html5QrCode;
-
-                patchIOSVideoPlaysinline('barcode-reader');
-                await html5QrCode.start(
-                    { facingMode: "environment" },
-                    {
-                        fps: 20,
-                        qrbox: (viewfinderWidth, viewfinderHeight) => ({
-                            width: Math.floor(viewfinderWidth * 0.9),
-                            height: Math.floor(viewfinderHeight * 0.4)
-                        }),
-                        disableFlip: false,
-                    },
-                    (decodedText) => {
-                        setFormData(prev => ({ ...prev, serial_number: decodedText }));
-                        stopScanner();
-                    },
-                    () => { }
-                );
-            } catch (err) {
-                console.error('Camera error:', err);
-                alert('❌ Không thể mở camera. Vui lòng kiểm tra quyền truy cập camera.');
-                setIsScannerOpen(false);
-            }
-        }, 400);
     }, []);
 
-    const stopScanner = useCallback(async () => {
-        if (html5QrCodeRef.current) {
-            try {
-                await html5QrCodeRef.current.stop();
-                html5QrCodeRef.current = null;
-            } catch (e) {
-                // Ignore
-            }
-        }
+    const stopScanner = useCallback(() => {
         setIsScannerOpen(false);
     }, []);
 
@@ -207,25 +161,12 @@ const CreateCylinder = () => {
                 </h1>
             </div>
 
-            {/* Barcode Scanner Overlay */}
-            {isScannerOpen && (
-                <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[200] flex flex-col">
-                    <div className="flex flex-col h-full md:h-auto md:max-h-[90vh] md:max-w-lg md:w-full md:m-auto md:rounded-3xl md:shadow-2xl bg-black md:bg-white overflow-hidden">
-                        <div className="flex items-center justify-between px-4 py-3 md:px-6 md:py-4 bg-black/50 md:bg-white border-b border-white/10 md:border-gray-100 shrink-0">
-                            <h3 className="font-black text-white md:text-gray-800 flex items-center gap-2 text-sm md:text-base">
-                                <Camera className="w-5 h-5 text-teal-400 md:text-teal-600" /> Quét Barcode
-                            </h3>
-                            <button onClick={stopScanner} className="p-2 hover:bg-white/10 md:hover:bg-gray-100 rounded-xl transition-colors">
-                                <X className="w-5 h-5 text-white md:text-gray-500" />
-                            </button>
-                        </div>
-                        <div id="barcode-reader" ref={scannerRef} className="flex-1 w-full min-h-0"></div>
-                        <div className="px-4 py-3 md:px-6 md:py-4 text-center bg-black/50 md:bg-white shrink-0">
-                            <p className="text-xs md:text-sm text-gray-400 md:text-gray-500 font-medium">Hướng camera vào mã barcode trên vỏ bình</p>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <BarcodeScanner 
+                isOpen={isScannerOpen}
+                onClose={stopScanner}
+                onScanSuccess={handleScanSuccess}
+                title="Quét mã Serial RFID bình"
+            />
 
             <div className="bg-white/80 backdrop-blur-xl rounded-[1.5rem] md:rounded-[2.5rem] shadow-2xl shadow-teal-900/10 border border-white overflow-hidden relative z-10">
                 <div className="p-6 md:p-10 space-y-10 md:space-y-12">

@@ -13,7 +13,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { ITEM_CONDITIONS } from '../constants/recoveryConstants';
 import { supabase } from '../supabase/config';
 import { patchIOSVideoPlaysinline } from '../utils/scannerHelper';
-import { SCANNER_CONFIG } from '../utils/barcodeFormats';
+import BarcodeScanner from '../components/Common/BarcodeScanner';
 
 
 const CreateCylinderRecovery = () => {
@@ -24,7 +24,6 @@ const CreateCylinderRecovery = () => {
     const [customers, setCustomers] = useState([]);
     const [customerOrders, setCustomerOrders] = useState([]);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
-    const html5QrCodeRef = useRef(null);
     const photoInputRef = useRef(null);
     const [photoUrls, setPhotoUrls] = useState([]);
     const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -133,60 +132,23 @@ const CreateCylinderRecovery = () => {
     };
 
     // Barcode scanner optimized for 1D barcodes (mã vạch)
-    const startScanner = useCallback(async () => {
-        // Ensure previous scanner is fully stopped
-        if (html5QrCodeRef.current) {
-            try { await html5QrCodeRef.current.stop(); } catch { }
-            html5QrCodeRef.current = null;
+    const handleScanSuccess = useCallback((decodedText) => {
+        const currentItems = itemsRef.current;
+        if (currentItems.some(i => i.serial_number === decodedText)) {
+            return;
         }
-
-        setIsScannerOpen(true);
-        const { Html5Qrcode } = await import('html5-qrcode');
-
-        setTimeout(async () => {
-            try {
-                const qr = new Html5Qrcode("recovery-barcode-reader", SCANNER_CONFIG);
-                html5QrCodeRef.current = qr;
-                patchIOSVideoPlaysinline('recovery-barcode-reader');
-                await qr.start(
-                    { facingMode: "environment" },
-                    {
-                        fps: 20,
-                        // Wide & short box optimized for horizontal 1D barcodes
-                        qrbox: (viewfinderWidth, viewfinderHeight) => ({
-                            width: Math.floor(viewfinderWidth * 0.85),
-                            height: Math.floor(viewfinderHeight * 0.35)
-                        }),
-                        disableFlip: false,
-                    },
-                    (decodedText) => {
-                        const currentItems = itemsRef.current;
-                        if (currentItems.some(i => i.serial_number === decodedText)) {
-                            return;
-                        }
-                        setItems(prev => [...prev, { _id: Date.now(), serial_number: decodedText, condition: 'tot', note: '' }]);
-                    },
-                    () => { }
-                );
-            } catch (err) {
-                console.error('Scanner error:', err);
-                alert('📷 Thiết bị không có camera hoặc chưa cấp quyền.\nVui lòng dùng điện thoại để quét mã, hoặc nhập mã thủ công.');
-                setIsScannerOpen(false);
-            }
-        }, 300);
+        setItems(prev => [...prev, { _id: Date.now(), serial_number: decodedText, condition: 'tot', note: '' }]);
     }, []);
 
-    const stopScanner = useCallback(async () => {
-        if (html5QrCodeRef.current) {
-            try { await html5QrCodeRef.current.stop(); } catch { }
-            html5QrCodeRef.current = null;
-        }
+    const startScanner = useCallback(() => {
+        setIsScannerOpen(true);
+    }, []);
+
+    const stopScanner = useCallback(() => {
         setIsScannerOpen(false);
     }, []);
 
-    useEffect(() => {
-        return () => { if (html5QrCodeRef.current) html5QrCodeRef.current.stop().catch(() => { }); };
-    }, []);
+    // Clean up photo memory
 
     // Photo capture
     const handlePhotoCapture = async (e) => {
@@ -346,32 +308,12 @@ const CreateCylinderRecovery = () => {
                 </div>
             </div>
 
-            {/* Barcode Scanner Overlay */}
-            {isScannerOpen && (
-                <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[200] flex flex-col">
-                    {/* Mobile: fullscreen | Desktop: centered card */}
-                    <div className="flex flex-col h-full md:h-auto md:max-h-[90vh] md:max-w-lg md:w-full md:m-auto md:rounded-3xl md:shadow-2xl bg-black md:bg-white overflow-hidden">
-                        {/* Header */}
-                        <div className="flex items-center justify-between px-4 py-3 md:px-6 md:py-4 bg-black/50 md:bg-white border-b border-white/10 md:border-gray-100 shrink-0">
-                            <h3 className="font-black text-white md:text-gray-800 flex items-center gap-2 text-sm md:text-base">
-                                <ScanLine className="w-5 h-5 text-blue-400 md:text-blue-600" /> Quét liên tục
-                            </h3>
-                            <div className="flex items-center gap-2 md:gap-3">
-                                <span className="text-xs md:text-sm font-bold text-green-400 md:text-green-600 bg-green-900/30 md:bg-green-50 px-2.5 md:px-3 py-1 rounded-lg">{items.length} đã quét</span>
-                                <button onClick={stopScanner} className="p-2 hover:bg-white/10 md:hover:bg-gray-100 rounded-xl transition-colors">
-                                    <X className="w-5 h-5 text-white md:text-gray-500" />
-                                </button>
-                            </div>
-                        </div>
-                        {/* Camera viewfinder - takes all available space on mobile */}
-                        <div id="recovery-barcode-reader" className="flex-1 w-full min-h-0"></div>
-                        {/* Footer */}
-                        <div className="px-4 py-3 md:px-6 md:py-4 text-center bg-black/50 md:bg-white shrink-0">
-                            <p className="text-xs md:text-sm text-gray-400 md:text-gray-500 font-medium">Hướng camera vào barcode — quét xong tự thêm vào danh sách</p>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <BarcodeScanner 
+                isOpen={isScannerOpen}
+                onClose={stopScanner}
+                onScanSuccess={handleScanSuccess}
+                title={`Quét liên tục (${items.length} đã quét)`}
+            />
 
             <form onSubmit={handleSubmit} className="space-y-6 md:space-y-8 relative z-10">
                 {/* 1. Thông tin phiếu */}

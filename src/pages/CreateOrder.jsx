@@ -16,7 +16,7 @@ import {
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 import { patchIOSVideoPlaysinline } from '../utils/scannerHelper';
-import { SCANNER_CONFIG } from '../utils/barcodeFormats';
+import BarcodeScanner from '../components/Common/BarcodeScanner';
 
 const CreateOrder = () => {
     const navigate = useNavigate();
@@ -49,7 +49,6 @@ const CreateOrder = () => {
     const [isScannerOpen, setIsScannerOpen] = useState(false);
     const [scanTargetIndex, setScanTargetIndex] = useState(-1);
     const [scanCount, setScanCount] = useState(0);
-    const html5QrCodeRef = useRef(null);
     const assignedCylindersRef = useRef(assignedCylinders);
     useEffect(() => { assignedCylindersRef.current = assignedCylinders; }, [assignedCylinders]);
 
@@ -229,78 +228,44 @@ const CreateOrder = () => {
         });
     };
 
-    // Continuous barcode scanner for cylinder assignment
-    const lastScannedRef = useRef('');
+    // Handle the scanning event coming from the new 3-tier generic Barcode Scanner
+    // that uses Native/ZXing behind the scenes
+    const handleScanSuccess = useCallback((decodedText) => {
+        const currentArr = assignedCylindersRef.current;
+        const currentIdx = scanTargetIndex;
+        
+        // Skip if already in the list
+        if (currentArr.includes(decodedText)) return;
 
-    const startCylinderScanner = useCallback(async (targetIndex) => {
-        // Stop previous scanner if any
-        if (html5QrCodeRef.current) {
-            try { await html5QrCodeRef.current.stop(); } catch { }
-            html5QrCodeRef.current = null;
+        // Fill the current target index
+        setAssignedCylinders(prev => {
+            const newArr = [...prev];
+            newArr[currentIdx] = decodedText;
+            return newArr;
+        });
+        setScanCount(prev => prev + 1);
+
+        // Find next empty slot
+        const updatedArr = [...currentArr];
+        updatedArr[currentIdx] = decodedText;
+        const nextEmpty = updatedArr.findIndex((s, i) => i > currentIdx && !s);
+        const fallbackEmpty = updatedArr.findIndex((s) => !s);
+        const nextIdx = nextEmpty !== -1 ? nextEmpty : fallbackEmpty;
+
+        if (nextIdx !== -1 && nextIdx !== currentIdx) {
+            // Found a next empty slot, keep scanner open and move target index
+            setScanTargetIndex(nextIdx);
+        } else {
+            // All slots filled
+            stopCylinderScanner();
+            alert('Đã gán đủ mã bình!');
         }
+    }, [scanTargetIndex]);
 
+    const startCylinderScanner = useCallback((targetIndex) => {
         setScanTargetIndex(targetIndex);
         setScanCount(0);
-        lastScannedRef.current = '';
         setIsScannerOpen(true);
-        const { Html5Qrcode } = await import('html5-qrcode');
-
-        let currentIdx = targetIndex;
-
-        setTimeout(async () => {
-            try {
-                const qr = new Html5Qrcode('order-barcode-reader', SCANNER_CONFIG);
-                html5QrCodeRef.current = qr;
-                patchIOSVideoPlaysinline('order-barcode-reader');
-                await qr.start(
-                    { facingMode: 'environment' },
-                    {
-                        fps: 20,
-                        qrbox: (w, h) => ({ width: Math.floor(w * 0.9), height: Math.floor(h * 0.4) }),
-                        disableFlip: false,
-                    },
-                    (decodedText) => {
-                        // Skip if same as last scanned (debounce)
-                        if (decodedText === lastScannedRef.current) return;
-                        lastScannedRef.current = decodedText;
-
-                        const currentArr = assignedCylindersRef.current;
-                        // Skip if already in the list
-                        if (currentArr.includes(decodedText)) return;
-
-                        // Fill the current target index
-                        setAssignedCylinders(prev => {
-                            const newArr = [...prev];
-                            newArr[currentIdx] = decodedText;
-                            return newArr;
-                        });
-                        setScanCount(prev => prev + 1);
-
-                        // Find next empty slot
-                        const updatedArr = [...currentArr];
-                        updatedArr[currentIdx] = decodedText;
-                        const nextEmpty = updatedArr.findIndex((s, i) => i > currentIdx && !s);
-                        const fallbackEmpty = updatedArr.findIndex((s) => !s);
-                        const nextIdx = nextEmpty !== -1 ? nextEmpty : fallbackEmpty;
-
-                        if (nextIdx !== -1 && nextIdx !== currentIdx) {
-                            currentIdx = nextIdx;
-                            setScanTargetIndex(nextIdx);
-                            // Reset last scanned after short delay to allow scanning same type
-                            setTimeout(() => { lastScannedRef.current = ''; }, 1500);
-                        } else {
-                            // All slots filled → auto close
-                            setTimeout(() => stopCylinderScanner(), 500);
-                        }
-                    },
-                    () => { }
-                );
-            } catch (err) {
-                console.error('Scanner error:', err);
-                alert('📷 Thiết bị không có camera hoặc chưa cấp quyền.\nVui lòng dùng điện thoại để quét mã, hoặc nhập mã thủ công.');
-                setIsScannerOpen(false);
-            }
-        }, 300);
     }, []);
 
     // Find first empty slot and start scanning
@@ -313,11 +278,7 @@ const CreateOrder = () => {
         startCylinderScanner(firstEmpty);
     }, [assignedCylinders, startCylinderScanner]);
 
-    const stopCylinderScanner = useCallback(async () => {
-        if (html5QrCodeRef.current) {
-            try { await html5QrCodeRef.current.stop(); } catch { }
-            html5QrCodeRef.current = null;
-        }
+    const stopCylinderScanner = useCallback(() => {
         setIsScannerOpen(false);
         setScanTargetIndex(-1);
     }, []);
@@ -827,25 +788,13 @@ const CreateOrder = () => {
                 </div>
             )}
 
-            {/* Barcode Scanner Modal for Cylinder Assignment */}
-            {isScannerOpen && (
-                <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[200] flex flex-col">
-                    <div className="flex flex-col h-full md:h-auto md:max-h-[90vh] md:max-w-lg md:w-full md:m-auto md:rounded-2xl md:shadow-2xl bg-black md:bg-white overflow-hidden">
-                        <div className="flex items-center justify-between px-4 py-3 md:p-4 bg-black/50 md:bg-gray-50 border-b border-white/10 md:border-gray-200 shrink-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                                <ScanLine className="w-5 h-5 text-blue-400 md:text-blue-600" />
-                                <span className="font-bold text-white md:text-gray-800 text-sm">Quét liên tục</span>
-                                <span className="text-[10px] md:text-xs bg-blue-500/30 md:bg-blue-100 text-blue-300 md:text-blue-700 px-2 py-0.5 rounded-full font-bold">{scanCount} đã quét → bình #{scanTargetIndex + 1}</span>
-                            </div>
-                            <button onClick={stopCylinderScanner} className="p-2 hover:bg-white/10 md:hover:bg-red-50 rounded-lg text-white md:text-gray-400 md:hover:text-red-500 transition-colors">
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-                        <div id="order-barcode-reader" className="flex-1 w-full min-h-0" />
-                        <p className="text-center text-xs md:text-sm text-gray-400 md:text-gray-500 px-4 py-3 md:p-3 font-medium bg-black/50 md:bg-white shrink-0">Quét xong tự nhảy sang bình tiếp theo — Đóng khi đủ</p>
-                    </div>
-                </div>
-            )}
+            {/* 3-Tier Barcode Scanner UI Component */}
+            <BarcodeScanner 
+                isOpen={isScannerOpen}
+                onClose={stopCylinderScanner}
+                onScanSuccess={handleScanSuccess}
+                title={`Quét liên tục (#${scanTargetIndex + 1}) - Đã quét: ${scanCount}`}
+            />
         </>
     );
 };
