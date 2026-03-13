@@ -1,11 +1,14 @@
 import {
+    Camera,
     CheckCircle2,
     PackagePlus,
     Plus,
-    Trash2
+    Trash2,
+    X
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import BarcodeScanner from '../components/Common/BarcodeScanner';
 import { ITEM_TYPES, ITEM_UNITS } from '../constants/goodsReceiptConstants';
 import {
     CYLINDER_STATUSES,
@@ -22,6 +25,7 @@ const CreateGoodsReceipt = () => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [suppliers, setSuppliers] = useState([]);
     const [warehousesList, setWarehousesList] = useState([]);
+    const [scannerIndex, setScannerIndex] = useState(null);
 
     const emptyItem = {
         item_type: 'MAY',
@@ -142,6 +146,17 @@ const CreateGoodsReceipt = () => {
         setItems(prev => prev.map((item, i) => i === index ? { ...item, [field]: value } : item));
     };
 
+    const handleScanSuccess = useCallback((decodedText) => {
+        if (scannerIndex !== null) {
+            updateItem(scannerIndex, 'serial_number', decodedText);
+            setScannerIndex(null);
+        }
+    }, [scannerIndex]);
+
+    const stopScanner = useCallback(() => {
+        setScannerIndex(null);
+    }, []);
+
     const handleSubmit = async () => {
         if (!formData.supplier_name) {
             alert('Vui lòng chọn nhà cung cấp');
@@ -236,6 +251,13 @@ const CreateGoodsReceipt = () => {
                     {editReceipt ? 'Cập nhật phiếu nhập kho' : 'Tạo phiếu nhập kho'}
                 </h1>
             </div>
+
+            <BarcodeScanner 
+                isOpen={scannerIndex !== null}
+                onClose={stopScanner}
+                onScanSuccess={handleScanSuccess}
+                title="Quét mã Serial / Barcode"
+            />
 
             <div className="bg-white/80 backdrop-blur-xl rounded-[1.5rem] md:rounded-[2.5rem] shadow-2xl shadow-emerald-900/10 border border-white overflow-hidden relative z-10">
                 <div className="p-6 md:p-10 space-y-10 md:space-y-12">
@@ -412,14 +434,35 @@ const CreateGoodsReceipt = () => {
 
                                         {/* Row 1/Col 2: Identity & Quantities */}
                                         <div className="md:col-span-4 space-y-4">
-                                            <div className="space-y-1.5">
+                                            <div className="space-y-1.5 flex flex-col">
                                                 <label className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-wider">Serial / Mã (Nếu có)</label>
-                                                <input
-                                                    value={item.serial_number}
-                                                    onChange={(e) => updateItem(idx, 'serial_number', e.target.value)}
-                                                    placeholder="Nhập serial hoặc mã quản lý..."
-                                                    className="w-full px-4 py-3 bg-gray-50/50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 transition-all"
-                                                />
+                                                <div className="flex gap-2 w-full">
+                                                    <div className="relative flex-1 min-w-0">
+                                                        <input
+                                                            value={item.serial_number}
+                                                            onChange={(e) => updateItem(idx, 'serial_number', e.target.value)}
+                                                            placeholder="Nhập serial hoặc mã quản lý..."
+                                                            className="w-full px-4 py-3 bg-gray-50/50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 transition-all pr-10"
+                                                        />
+                                                        {item.serial_number && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => updateItem(idx, 'serial_number', '')}
+                                                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                                            >
+                                                                <X className="w-4 h-4" />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setScannerIndex(idx)}
+                                                        className="px-3 py-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 rounded-xl font-bold transition-all flex items-center justify-center shrink-0 w-[46px] h-[46px]"
+                                                        title="Quét barcode bằng camera"
+                                                    >
+                                                        <Camera className="w-5 h-5 flex-shrink-0" />
+                                                    </button>
+                                                </div>
                                             </div>
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div className="space-y-1.5">

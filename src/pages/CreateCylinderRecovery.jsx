@@ -44,6 +44,9 @@ const CreateCylinderRecovery = () => {
     const itemsRef = useRef(items);
     useEffect(() => { itemsRef.current = items; }, [items]);
 
+    const formDataRef = useRef(formData);
+    useEffect(() => { formDataRef.current = formData; }, [formData]);
+
     const [warehousesList, setWarehousesList] = useState([]);
 
     useEffect(() => {
@@ -132,13 +135,53 @@ const CreateCylinderRecovery = () => {
     };
 
     // Barcode scanner optimized for 1D barcodes (mã vạch)
-    const handleScanSuccess = useCallback((decodedText) => {
+    const handleScanSuccess = useCallback(async (decodedText) => {
         const currentItems = itemsRef.current;
         if (currentItems.some(i => i.serial_number === decodedText)) {
             return;
         }
+        
+        // Add to items list
         setItems(prev => [...prev, { _id: Date.now(), serial_number: decodedText, condition: 'tot', note: '' }]);
-    }, []);
+
+        // AUTO-FETCH: If customer is not yet selected, try to find owner
+        const currentFormData = formDataRef.current;
+        if (!currentFormData.customer_id) {
+            try {
+                // 1. Get cylinder status/owner
+                const { data: cylData } = await supabase
+                    .from('cylinders')
+                    .select('customer_name')
+                    .eq('serial_number', decodedText)
+                    .maybeSingle();
+
+                if (cylData?.customer_name) {
+                    // 2. Map name to customer ID (using local customers list loaded at start)
+                    const matchedCustomer = customers.find(c => c.name === cylData.customer_name);
+                    
+                    if (matchedCustomer) {
+                        setFormData(prev => ({ ...prev, customer_id: matchedCustomer.id }));
+                        
+                        // 3. Find most recent relative order
+                        const { data: orderData } = await supabase
+                            .from('orders')
+                            .select('id')
+                            .eq('customer_name', cylData.customer_name)
+                            .contains('assigned_cylinders', [decodedText])
+                            .order('created_at', { ascending: false })
+                            .limit(1)
+                            .maybeSingle();
+                        
+                        if (orderData) {
+                            setFormData(prev => ({ ...prev, order_id: orderData.id }));
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error('Auto-fetch failed:', err);
+            }
+        }
+    }, [customers]);
 
     const startScanner = useCallback(() => {
         setIsScannerOpen(true);
