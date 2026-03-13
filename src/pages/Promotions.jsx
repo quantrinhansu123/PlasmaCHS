@@ -22,6 +22,7 @@ import {
     List,
     Plus,
     Search,
+    SlidersHorizontal,
     Tag,
     Trash2,
     X
@@ -31,6 +32,7 @@ import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 import PromotionFormModal from '../components/Promotions/PromotionFormModal';
+import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import { supabase } from '../supabase/config';
@@ -85,6 +87,41 @@ const Promotions = () => {
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [filterSearch, setFilterSearch] = useState('');
     const dropdownRef = useRef(null);
+    const columnPickerRef = useRef(null);
+
+    const defaultColOrder = TABLE_COLUMNS_DEF.map(col => col.key);
+    const columnDefs = TABLE_COLUMNS_DEF.reduce((acc, col) => {
+        acc[col.key] = { label: col.label };
+        return acc;
+    }, {});
+    const [columnOrder, setColumnOrder] = useState(() => {
+        try {
+            const saved = JSON.parse(localStorage.getItem('columns_promotions_order') || 'null');
+            if (Array.isArray(saved) && saved.length > 0) {
+                const valid = saved.filter(key => defaultColOrder.includes(key));
+                const missing = defaultColOrder.filter(key => !valid.includes(key));
+                return [...valid, ...missing];
+            }
+        } catch { }
+        return defaultColOrder;
+    });
+    const [visibleColumns, setVisibleColumns] = useState(() => {
+        try {
+            const saved = JSON.parse(localStorage.getItem('columns_promotions') || 'null');
+            if (Array.isArray(saved) && saved.length > 0) {
+                return saved.filter(key => defaultColOrder.includes(key));
+            }
+        } catch { }
+        return defaultColOrder;
+    });
+    const [showColumnPicker, setShowColumnPicker] = useState(false);
+    const visibleTableColumns = columnOrder
+        .filter(key => visibleColumns.includes(key))
+        .map(key => TABLE_COLUMNS_DEF.find(col => col.key === key))
+        .filter(Boolean);
+    const isColumnVisible = (key) => visibleColumns.includes(key);
+    const visibleCount = visibleColumns.length;
+    const totalCount = defaultColOrder.length;
 
     useEffect(() => {
         fetchPromotions();
@@ -95,10 +132,21 @@ const Promotions = () => {
             if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
                 setActiveDropdown(null);
             }
+            if (columnPickerRef.current && !columnPickerRef.current.contains(event.target)) {
+                setShowColumnPicker(false);
+            }
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
+
+    useEffect(() => {
+        localStorage.setItem('columns_promotions', JSON.stringify(visibleColumns));
+    }, [visibleColumns]);
+
+    useEffect(() => {
+        localStorage.setItem('columns_promotions_order', JSON.stringify(columnOrder));
+    }, [columnOrder]);
 
     const fetchPromotions = async () => {
         setIsLoading(true);
@@ -427,16 +475,43 @@ const Promotions = () => {
                                     )}
                                 </div>
                             </div>
-                            <button
-                                onClick={() => {
-                                    setSelectedPromo(null);
-                                    setIsFormModalOpen(true);
-                                }}
-                                className="flex items-center gap-2 px-6 py-1.5 rounded-xl bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all"
-                            >
-                                <Plus size={18} />
-                                Thêm
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <div className="relative" ref={columnPickerRef}>
+                                    <button
+                                        onClick={() => setShowColumnPicker(prev => !prev)}
+                                        className={clsx(
+                                            'flex items-center gap-2 px-4 py-1.5 rounded-xl border text-[13px] font-bold transition-all bg-white shadow-sm',
+                                            showColumnPicker
+                                                ? 'border-primary bg-primary/5 text-primary'
+                                                : 'border-border text-muted-foreground hover:bg-muted/20'
+                                        )}
+                                    >
+                                        <SlidersHorizontal size={16} />
+                                        Cột ({visibleCount}/{totalCount})
+                                    </button>
+                                    {showColumnPicker && (
+                                        <ColumnPicker
+                                            columnOrder={columnOrder}
+                                            setColumnOrder={setColumnOrder}
+                                            visibleColumns={visibleColumns}
+                                            setVisibleColumns={setVisibleColumns}
+                                            defaultColOrder={defaultColOrder}
+                                            columnDefs={columnDefs}
+                                        />
+                                    )}
+                                </div>
+
+                                <button
+                                    onClick={() => {
+                                        setSelectedPromo(null);
+                                        setIsFormModalOpen(true);
+                                    }}
+                                    className="flex items-center gap-2 px-6 py-1.5 rounded-xl bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all"
+                                >
+                                    <Plus size={18} />
+                                    Thêm
+                                </button>
+                            </div>
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2" ref={dropdownRef}>
@@ -546,7 +621,7 @@ const Promotions = () => {
                         <table className="w-full border-collapse">
                             <thead className="bg-muted/20">
                                 <tr>
-                                    {TABLE_COLUMNS_DEF.map(col => (
+                                    {visibleTableColumns.map(col => (
                                         <th key={col.key} className={clsx('px-4 py-3.5 text-[12px] font-bold text-muted-foreground uppercase tracking-wide', col.key === 'content' || col.key === 'status' || col.key === 'active' ? 'text-center' : 'text-left')}>
                                             {col.label}
                                         </th>
@@ -557,13 +632,13 @@ const Promotions = () => {
                             <tbody className="divide-y divide-border">
                                 {isLoading ? (
                                     <tr>
-                                        <td colSpan={TABLE_COLUMNS_DEF.length + 1} className="px-4 py-16 text-center text-muted-foreground">
+                                        <td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center text-muted-foreground">
                                             Đang tải dữ liệu...
                                         </td>
                                     </tr>
                                 ) : filteredPromotions.length === 0 ? (
                                     <tr>
-                                        <td colSpan={TABLE_COLUMNS_DEF.length + 1} className="px-4 py-16 text-center text-muted-foreground">
+                                        <td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center text-muted-foreground">
                                             Không tìm thấy khuyến mãi nào
                                         </td>
                                     </tr>
@@ -571,19 +646,23 @@ const Promotions = () => {
                                     const status = getPromoStatus(promo);
                                     return (
                                         <tr key={promo.id} className="hover:bg-muted/20 transition-colors">
-                                            <td className="px-4 py-4 text-sm font-semibold text-foreground">{promo.code}</td>
-                                            <td className="px-4 py-4 text-sm font-semibold text-foreground text-center">+ {promo.free_cylinders || 0} bình khí</td>
-                                            <td className="px-4 py-4 text-sm text-muted-foreground">{formatDate(promo.start_date)} — {formatDate(promo.end_date)}</td>
-                                            <td className="px-4 py-4 text-sm text-muted-foreground">{promo.customer_type || '—'}</td>
-                                            <td className="px-4 py-4 text-center">
-                                                <span className={clsx('px-2.5 py-1 rounded-full text-[11px] font-bold border', status.style)}>{status.label}</span>
-                                            </td>
-                                            <td className="px-4 py-4 text-center">
-                                                <label className="relative inline-flex items-center cursor-pointer">
-                                                    <input type="checkbox" className="sr-only peer" checked={promo.is_active} onChange={() => handleToggleActive(promo.id, promo.is_active)} />
-                                                    <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:border-border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                                                </label>
-                                            </td>
+                                            {isColumnVisible('code') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{promo.code}</td>}
+                                            {isColumnVisible('content') && <td className="px-4 py-4 text-sm font-semibold text-foreground text-center">+ {promo.free_cylinders || 0} bình khí</td>}
+                                            {isColumnVisible('period') && <td className="px-4 py-4 text-sm text-muted-foreground">{formatDate(promo.start_date)} — {formatDate(promo.end_date)}</td>}
+                                            {isColumnVisible('target') && <td className="px-4 py-4 text-sm text-muted-foreground">{promo.customer_type || '—'}</td>}
+                                            {isColumnVisible('status') && (
+                                                <td className="px-4 py-4 text-center">
+                                                    <span className={clsx('px-2.5 py-1 rounded-full text-[11px] font-bold border', status.style)}>{status.label}</span>
+                                                </td>
+                                            )}
+                                            {isColumnVisible('active') && (
+                                                <td className="px-4 py-4 text-center">
+                                                    <label className="relative inline-flex items-center cursor-pointer">
+                                                        <input type="checkbox" className="sr-only peer" checked={promo.is_active} onChange={() => handleToggleActive(promo.id, promo.is_active)} />
+                                                        <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:border-border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                                                    </label>
+                                                </td>
+                                            )}
                                             <td className="px-4 py-4 text-center">
                                                 <div className="flex items-center justify-center gap-3">
                                                     <button onClick={() => handleEditPromo(promo)} className="text-muted-foreground hover:text-primary transition-colors p-1" title="Chỉnh sửa">

@@ -22,6 +22,7 @@ import {
     List,
     Plus,
     Search,
+    SlidersHorizontal,
     Trash2,
     User,
     Warehouse,
@@ -34,10 +35,10 @@ import { clsx } from 'clsx';
 import CylinderDetailsModal from '../components/Cylinders/CylinderDetailsModal';
 import CylinderFormModal from '../components/Cylinders/CylinderFormModal';
 import CylinderQCDialog from '../components/Cylinders/CylinderQCDialog';
+import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import { CYLINDER_STATUSES } from '../constants/machineConstants';
-import useColumnVisibility from '../hooks/useColumnVisibility';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 
@@ -98,9 +99,41 @@ const Cylinders = () => {
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [filterSearch, setFilterSearch] = useState('');
     const dropdownRef = useRef(null);
+    const columnPickerRef = useRef(null);
 
-    const { isColumnVisible } = useColumnVisibility('columns_cylinders', TABLE_COLUMNS);
-    const visibleTableColumns = TABLE_COLUMNS.filter(col => isColumnVisible(col.key));
+    const defaultColOrder = TABLE_COLUMNS.map(col => col.key);
+    const columnDefs = TABLE_COLUMNS.reduce((acc, col) => {
+        acc[col.key] = { label: col.label };
+        return acc;
+    }, {});
+    const [columnOrder, setColumnOrder] = useState(() => {
+        try {
+            const saved = JSON.parse(localStorage.getItem('columns_cylinders_order') || 'null');
+            if (Array.isArray(saved) && saved.length > 0) {
+                const valid = saved.filter(key => defaultColOrder.includes(key));
+                const missing = defaultColOrder.filter(key => !valid.includes(key));
+                return [...valid, ...missing];
+            }
+        } catch { }
+        return defaultColOrder;
+    });
+    const [visibleColumns, setVisibleColumns] = useState(() => {
+        try {
+            const saved = JSON.parse(localStorage.getItem('columns_cylinders') || 'null');
+            if (Array.isArray(saved) && saved.length > 0) {
+                return saved.filter(key => defaultColOrder.includes(key));
+            }
+        } catch { }
+        return defaultColOrder;
+    });
+    const [showColumnPicker, setShowColumnPicker] = useState(false);
+    const visibleTableColumns = columnOrder
+        .filter(key => visibleColumns.includes(key))
+        .map(key => TABLE_COLUMNS.find(col => col.key === key))
+        .filter(Boolean);
+    const isColumnVisible = (key) => visibleColumns.includes(key);
+    const visibleCount = visibleColumns.length;
+    const totalCount = defaultColOrder.length;
 
     useEffect(() => {
         fetchCylinders();
@@ -120,10 +153,21 @@ const Cylinders = () => {
             if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
                 setActiveDropdown(null);
             }
+            if (columnPickerRef.current && !columnPickerRef.current.contains(event.target)) {
+                setShowColumnPicker(false);
+            }
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
+
+    useEffect(() => {
+        localStorage.setItem('columns_cylinders', JSON.stringify(visibleColumns));
+    }, [visibleColumns]);
+
+    useEffect(() => {
+        localStorage.setItem('columns_cylinders_order', JSON.stringify(columnOrder));
+    }, [columnOrder]);
 
     const closeMobileFilter = () => {
         setMobileFilterClosing(true);
@@ -503,16 +547,43 @@ const Cylinders = () => {
                                     )}
                                 </div>
                             </div>
-                            <button
-                                onClick={() => {
-                                    setSelectedCylinder(null);
-                                    setIsFormModalOpen(true);
-                                }}
-                                className="flex items-center gap-2 px-6 py-1.5 rounded-xl bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all"
-                            >
-                                <Plus size={18} />
-                                Thêm
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <div className="relative" ref={columnPickerRef}>
+                                    <button
+                                        onClick={() => setShowColumnPicker(prev => !prev)}
+                                        className={clsx(
+                                            'flex items-center gap-2 px-4 py-1.5 rounded-xl border text-[13px] font-bold transition-all bg-white shadow-sm',
+                                            showColumnPicker
+                                                ? 'border-primary bg-primary/5 text-primary'
+                                                : 'border-border text-muted-foreground hover:bg-muted/20'
+                                        )}
+                                    >
+                                        <SlidersHorizontal size={16} />
+                                        Cột ({visibleCount}/{totalCount})
+                                    </button>
+                                    {showColumnPicker && (
+                                        <ColumnPicker
+                                            columnOrder={columnOrder}
+                                            setColumnOrder={setColumnOrder}
+                                            visibleColumns={visibleColumns}
+                                            setVisibleColumns={setVisibleColumns}
+                                            defaultColOrder={defaultColOrder}
+                                            columnDefs={columnDefs}
+                                        />
+                                    )}
+                                </div>
+
+                                <button
+                                    onClick={() => {
+                                        setSelectedCylinder(null);
+                                        setIsFormModalOpen(true);
+                                    }}
+                                    className="flex items-center gap-2 px-6 py-1.5 rounded-xl bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all"
+                                >
+                                    <Plus size={18} />
+                                    Thêm
+                                </button>
+                            </div>
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2" ref={dropdownRef}>

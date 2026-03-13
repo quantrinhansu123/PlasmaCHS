@@ -21,6 +21,7 @@ import {
     PackageOpen,
     Plus,
     Search,
+    SlidersHorizontal,
     Trash2,
     X
 } from 'lucide-react';
@@ -29,6 +30,7 @@ import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 import MaterialFormModal from '../components/Materials/MaterialFormModal';
+import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import { MATERIAL_CATEGORIES } from '../constants/materialConstants';
@@ -65,6 +67,30 @@ const Materials = () => {
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [filterSearch, setFilterSearch] = useState('');
     const dropdownRef = useRef(null);
+    const columnPickerRef = useRef(null);
+    const [showColumnPicker, setShowColumnPicker] = useState(false);
+
+    const baseMaterialColOrder = ['name', 'extra_number', 'extra_text'];
+    const [columnOrder, setColumnOrder] = useState(() => {
+        try {
+            const saved = JSON.parse(localStorage.getItem('columns_materials_order') || 'null');
+            if (Array.isArray(saved) && saved.length > 0) {
+                const valid = saved.filter(key => baseMaterialColOrder.includes(key));
+                const missing = baseMaterialColOrder.filter(key => !valid.includes(key));
+                return [...valid, ...missing];
+            }
+        } catch { }
+        return baseMaterialColOrder;
+    });
+    const [visibleColumns, setVisibleColumns] = useState(() => {
+        try {
+            const saved = JSON.parse(localStorage.getItem('columns_materials') || 'null');
+            if (Array.isArray(saved) && saved.length > 0) {
+                return saved.filter(key => baseMaterialColOrder.includes(key));
+            }
+        } catch { }
+        return baseMaterialColOrder;
+    });
 
     useEffect(() => {
         fetchMaterials();
@@ -79,10 +105,21 @@ const Materials = () => {
             if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
                 setActiveDropdown(null);
             }
+            if (columnPickerRef.current && !columnPickerRef.current.contains(event.target)) {
+                setShowColumnPicker(false);
+            }
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
+
+    useEffect(() => {
+        localStorage.setItem('columns_materials', JSON.stringify(visibleColumns));
+    }, [visibleColumns]);
+
+    useEffect(() => {
+        localStorage.setItem('columns_materials_order', JSON.stringify(columnOrder));
+    }, [columnOrder]);
 
     const fetchMaterials = async () => {
         setIsLoading(true);
@@ -172,6 +209,45 @@ const Materials = () => {
     };
 
     const currentCategoryDef = MATERIAL_CATEGORIES.find(category => category.id === categoryFilter) || MATERIAL_CATEGORIES[0];
+    const tableColumnsDef = [
+        { key: 'name', label: currentCategoryDef.nameLabel || 'Tên vật tư' },
+        ...(currentCategoryDef.hasNumberField ? [{ key: 'extra_number', label: currentCategoryDef.numberFieldLabel }] : []),
+        ...(currentCategoryDef.hasTextField ? [{ key: 'extra_text', label: currentCategoryDef.textFieldLabel }] : []),
+    ];
+    const availableColumnKeys = tableColumnsDef.map(col => col.key);
+    const columnDefs = tableColumnsDef.reduce((acc, col) => {
+        acc[col.key] = { label: col.label };
+        return acc;
+    }, {});
+    const visibleTableColumns = columnOrder
+        .filter(key => availableColumnKeys.includes(key) && visibleColumns.includes(key))
+        .map(key => tableColumnsDef.find(col => col.key === key))
+        .filter(Boolean);
+    const isColumnVisible = (key) => availableColumnKeys.includes(key) && visibleColumns.includes(key);
+
+    useEffect(() => {
+        setColumnOrder(prev => {
+            const valid = prev.filter(key => availableColumnKeys.includes(key));
+            const missing = availableColumnKeys.filter(key => !valid.includes(key));
+            const next = [...valid, ...missing];
+            if (next.length === prev.length && next.every((key, idx) => key === prev[idx])) {
+                return prev;
+            }
+            return next;
+        });
+
+        setVisibleColumns(prev => {
+            const valid = prev.filter(key => availableColumnKeys.includes(key));
+            const next = valid.length > 0 ? valid : availableColumnKeys;
+            if (next.length === prev.length && next.every((key, idx) => key === prev[idx])) {
+                return prev;
+            }
+            return next;
+        });
+    }, [categoryFilter]);
+
+    const visibleCount = visibleTableColumns.length;
+    const totalCount = tableColumnsDef.length;
 
     const filteredMaterials = materials.filter(material => {
         const search = searchTerm.toLowerCase();
@@ -364,16 +440,53 @@ const Materials = () => {
                                     )}
                                 </div>
                             </div>
-                            <button
-                                onClick={() => {
-                                    setSelectedMaterial(null);
-                                    setIsFormModalOpen(true);
-                                }}
-                                className="flex items-center gap-2 px-6 py-1.5 rounded-xl bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all"
-                            >
-                                <Plus size={18} />
-                                Thêm
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <div className="relative" ref={columnPickerRef}>
+                                    <button
+                                        onClick={() => setShowColumnPicker(prev => !prev)}
+                                        className={clsx(
+                                            'flex items-center gap-2 px-4 py-1.5 rounded-xl border text-[13px] font-bold transition-all bg-white shadow-sm',
+                                            showColumnPicker
+                                                ? 'border-primary bg-primary/5 text-primary'
+                                                : 'border-border text-muted-foreground hover:bg-muted/20'
+                                        )}
+                                    >
+                                        <SlidersHorizontal size={16} />
+                                        Cột ({visibleCount}/{totalCount})
+                                    </button>
+                                    {showColumnPicker && (
+                                        <ColumnPicker
+                                            columnOrder={columnOrder}
+                                            setColumnOrder={setColumnOrder}
+                                            visibleColumns={availableColumnKeys.filter(key => visibleColumns.includes(key))}
+                                            setVisibleColumns={(next) => {
+                                                if (typeof next === 'function') {
+                                                    setVisibleColumns(prev => {
+                                                        const current = availableColumnKeys.filter(key => prev.includes(key));
+                                                        const updated = next(current);
+                                                        return baseMaterialColOrder.filter(key => updated.includes(key) || (!availableColumnKeys.includes(key) && prev.includes(key)));
+                                                    });
+                                                    return;
+                                                }
+                                                setVisibleColumns(prev => baseMaterialColOrder.filter(key => next.includes(key) || (!availableColumnKeys.includes(key) && prev.includes(key))));
+                                            }}
+                                            defaultColOrder={availableColumnKeys}
+                                            columnDefs={columnDefs}
+                                        />
+                                    )}
+                                </div>
+
+                                <button
+                                    onClick={() => {
+                                        setSelectedMaterial(null);
+                                        setIsFormModalOpen(true);
+                                    }}
+                                    className="flex items-center gap-2 px-6 py-1.5 rounded-xl bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all"
+                                >
+                                    <Plus size={18} />
+                                    Thêm
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -381,42 +494,40 @@ const Materials = () => {
                         <table className="w-full border-collapse">
                             <thead className="bg-muted/20">
                                 <tr>
-                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide">
-                                        {currentCategoryDef.nameLabel || 'Tên vật tư'}
-                                    </th>
-                                    {currentCategoryDef.hasNumberField && (
-                                        <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide">
-                                            {currentCategoryDef.numberFieldLabel}
+                                    {visibleTableColumns.map(col => (
+                                        <th
+                                            key={col.key}
+                                            className={clsx(
+                                                'px-4 py-3.5 text-[12px] font-bold text-muted-foreground uppercase tracking-wide',
+                                                col.key === 'extra_number' ? 'text-center' : 'text-left'
+                                            )}
+                                        >
+                                            {col.label}
                                         </th>
-                                    )}
-                                    {currentCategoryDef.hasTextField && (
-                                        <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide">
-                                            {currentCategoryDef.textFieldLabel}
-                                        </th>
-                                    )}
+                                    ))}
                                     <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide">Thao tác</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-border">
                                 {isLoading ? (
                                     <tr>
-                                        <td colSpan={3 + (currentCategoryDef.hasNumberField ? 1 : 0)} className="px-4 py-16 text-center text-muted-foreground">
+                                        <td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center text-muted-foreground">
                                             Đang tải dữ liệu...
                                         </td>
                                     </tr>
                                 ) : filteredMaterials.length === 0 ? (
                                     <tr>
-                                        <td colSpan={3 + (currentCategoryDef.hasNumberField ? 1 : 0)} className="px-4 py-16 text-center text-muted-foreground">
+                                        <td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center text-muted-foreground">
                                             Không tìm thấy vật tư nào
                                         </td>
                                     </tr>
                                 ) : filteredMaterials.map((material) => (
                                     <tr key={material.id} className="hover:bg-muted/20 transition-colors">
-                                        <td className="px-4 py-4 text-sm font-semibold text-foreground">{material.name || '—'}</td>
-                                        {currentCategoryDef.hasNumberField && (
+                                        {isColumnVisible('name') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{material.name || '—'}</td>}
+                                        {isColumnVisible('extra_number') && (
                                             <td className="px-4 py-4 text-sm font-semibold text-foreground text-center">{material.extra_number || '—'}</td>
                                         )}
-                                        {currentCategoryDef.hasTextField && (
+                                        {isColumnVisible('extra_text') && (
                                             <td className="px-4 py-4 text-sm text-muted-foreground">{material.extra_text || '—'}</td>
                                         )}
                                         <td className="px-4 py-4 text-center">

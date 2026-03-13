@@ -23,6 +23,7 @@ import {
     Phone,
     Plus,
     Search,
+    SlidersHorizontal,
     Trash2,
     User,
     Users,
@@ -34,9 +35,9 @@ import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 import CustomerDetailsModal from '../components/Customers/CustomerDetailsModal';
 import CustomerFormModal from '../components/Customers/CustomerFormModal';
+import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
-import useColumnVisibility from '../hooks/useColumnVisibility';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 
@@ -79,6 +80,7 @@ const Customers = () => {
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [filterSearch, setFilterSearch] = useState('');
     const dropdownRef = useRef(null);
+    const columnPickerRef = useRef(null);
 
     const TABLE_COLUMNS_DEF = [
         { key: 'code', label: 'Mã khách hàng' },
@@ -103,8 +105,39 @@ const Customers = () => {
         { id: 'SP', label: 'Spa / Khác' },
     ];
 
-    const { isColumnVisible } = useColumnVisibility('columns_customers', TABLE_COLUMNS_DEF);
-    const visibleTableColumns = TABLE_COLUMNS_DEF.filter(col => isColumnVisible(col.key));
+    const defaultColOrder = TABLE_COLUMNS_DEF.map(col => col.key);
+    const columnDefs = TABLE_COLUMNS_DEF.reduce((acc, col) => {
+        acc[col.key] = { label: col.label };
+        return acc;
+    }, {});
+    const [columnOrder, setColumnOrder] = useState(() => {
+        try {
+            const saved = JSON.parse(localStorage.getItem('columns_customers_order') || 'null');
+            if (Array.isArray(saved) && saved.length > 0) {
+                const valid = saved.filter(key => defaultColOrder.includes(key));
+                const missing = defaultColOrder.filter(key => !valid.includes(key));
+                return [...valid, ...missing];
+            }
+        } catch { }
+        return defaultColOrder;
+    });
+    const [visibleColumns, setVisibleColumns] = useState(() => {
+        try {
+            const saved = JSON.parse(localStorage.getItem('columns_customers') || 'null');
+            if (Array.isArray(saved) && saved.length > 0) {
+                return saved.filter(key => defaultColOrder.includes(key));
+            }
+        } catch { }
+        return defaultColOrder;
+    });
+    const [showColumnPicker, setShowColumnPicker] = useState(false);
+    const visibleTableColumns = columnOrder
+        .filter(key => visibleColumns.includes(key))
+        .map(key => TABLE_COLUMNS_DEF.find(col => col.key === key))
+        .filter(Boolean);
+    const isColumnVisible = (key) => visibleColumns.includes(key);
+    const visibleCount = visibleColumns.length;
+    const totalCount = defaultColOrder.length;
 
     useEffect(() => {
         fetchCustomers();
@@ -123,10 +156,21 @@ const Customers = () => {
             if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
                 setActiveDropdown(null);
             }
+            if (columnPickerRef.current && !columnPickerRef.current.contains(event.target)) {
+                setShowColumnPicker(false);
+            }
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
+
+    useEffect(() => {
+        localStorage.setItem('columns_customers', JSON.stringify(visibleColumns));
+    }, [visibleColumns]);
+
+    useEffect(() => {
+        localStorage.setItem('columns_customers_order', JSON.stringify(columnOrder));
+    }, [columnOrder]);
 
     const closeMobileFilter = () => {
         setMobileFilterClosing(true);
@@ -502,16 +546,43 @@ const Customers = () => {
                                     )}
                                 </div>
                             </div>
-                            <button
-                                onClick={() => {
-                                    setSelectedCustomer(null);
-                                    setIsFormModalOpen(true);
-                                }}
-                                className="flex items-center gap-2 px-6 py-1.5 rounded-xl bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all"
-                            >
-                                <Plus size={18} />
-                                Thêm
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <div className="relative" ref={columnPickerRef}>
+                                    <button
+                                        onClick={() => setShowColumnPicker(prev => !prev)}
+                                        className={clsx(
+                                            'flex items-center gap-2 px-4 py-1.5 rounded-xl border text-[13px] font-bold transition-all bg-white shadow-sm',
+                                            showColumnPicker
+                                                ? 'border-primary bg-primary/5 text-primary'
+                                                : 'border-border text-muted-foreground hover:bg-muted/20'
+                                        )}
+                                    >
+                                        <SlidersHorizontal size={16} />
+                                        Cột ({visibleCount}/{totalCount})
+                                    </button>
+                                    {showColumnPicker && (
+                                        <ColumnPicker
+                                            columnOrder={columnOrder}
+                                            setColumnOrder={setColumnOrder}
+                                            visibleColumns={visibleColumns}
+                                            setVisibleColumns={setVisibleColumns}
+                                            defaultColOrder={defaultColOrder}
+                                            columnDefs={columnDefs}
+                                        />
+                                    )}
+                                </div>
+
+                                <button
+                                    onClick={() => {
+                                        setSelectedCustomer(null);
+                                        setIsFormModalOpen(true);
+                                    }}
+                                    className="flex items-center gap-2 px-6 py-1.5 rounded-xl bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all"
+                                >
+                                    <Plus size={18} />
+                                    Thêm
+                                </button>
+                            </div>
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2" ref={dropdownRef}>
