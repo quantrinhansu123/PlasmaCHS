@@ -293,9 +293,59 @@ const Materials = () => {
 
     const hasActiveFilters = selectedCategories.length > 0;
 
+    const getFilterButtonClass = (filterKey, isActive) => {
+        if (!isActive) return 'border-border bg-white text-muted-foreground hover:text-foreground';
+
+        switch (filterKey) {
+            case 'categories':
+                return 'border-violet-200 bg-violet-50 text-violet-700';
+            default:
+                return 'border-primary/30 bg-primary/10 text-primary';
+        }
+    };
+
+    const getFilterCountBadgeClass = (filterKey) => {
+        switch (filterKey) {
+            case 'categories':
+                return 'bg-violet-600 text-white';
+            default:
+                return 'bg-primary text-white';
+        }
+    };
+
+    const getFilterIconClass = (filterKey, isActive) => {
+        switch (filterKey) {
+            case 'categories':
+                return isActive ? 'text-violet-700' : 'text-violet-600';
+            default:
+                return isActive ? 'text-primary' : 'text-muted-foreground';
+        }
+    };
+
+    const getCategoryBadgeClass = (categoryId) => clsx(
+        'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border',
+        categoryId === 'VT' && 'bg-blue-50 text-blue-700 border-blue-200',
+        categoryId === 'PK' && 'bg-emerald-50 text-emerald-700 border-emerald-200',
+        categoryId === 'LK' && 'bg-amber-50 text-amber-700 border-amber-200',
+        categoryId === 'TB' && 'bg-violet-50 text-violet-700 border-violet-200',
+        !['VT', 'PK', 'LK', 'TB'].includes(categoryId) && 'bg-primary/5 text-primary border-primary/20'
+    );
+
+    const getRowStyle = (categoryId) => clsx(
+        'hover:bg-primary/5',
+        categoryId === 'VT' && 'hover:bg-blue-50/60',
+        categoryId === 'PK' && 'hover:bg-emerald-50/60',
+        categoryId === 'LK' && 'hover:bg-amber-50/60',
+        categoryId === 'TB' && 'hover:bg-violet-50/60'
+    );
+
+    const getNameCellClass = (categoryId) => clsx(
+        'px-4 py-4 text-sm font-semibold text-foreground border-r border-primary/20'
+    );
+
     return (
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col -mt-2 min-h-0 px-3 md:px-6">
-            <div className="flex items-center gap-1 mb-4 mt-6">
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5">
+            <div className="flex items-center gap-1 mb-3 mt-1">
                 <button
                     onClick={() => setActiveView('list')}
                     className={clsx(
@@ -357,7 +407,7 @@ const Materials = () => {
                         </button>
                     </div>
 
-                    <div className="p-3 md:p-4 border-b border-border">
+                    <div className="p-3 border-b border-border md:hidden">
                         <div className="relative w-full md:w-72">
                             <select
                                 value={categoryFilter}
@@ -379,18 +429,16 @@ const Materials = () => {
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy kết quả phù hợp</div>
                         ) : (
                             filteredMaterials.map((material) => (
-                                <div key={material.id} className="rounded-2xl border border-border bg-white shadow-sm p-4">
+                                <div key={material.id} className="rounded-2xl border border-primary/20 bg-gradient-to-br from-white to-primary/[0.03] shadow-sm p-4">
                                     <div className="flex items-start justify-between gap-2 mb-2">
                                         <div>
                                             <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Vật tư</p>
                                             <h3 className="text-[15px] font-bold text-foreground leading-tight mt-0.5">{material.name}</h3>
                                         </div>
-                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border border-primary/20 text-primary bg-primary/5">
-                                            {currentCategoryDef.label}
-                                        </span>
+                                        <span className={getCategoryBadgeClass(material.category || categoryFilter)}>{currentCategoryDef.label}</span>
                                     </div>
 
-                                    <div className="space-y-1.5 mb-3">
+                                    <div className="space-y-1.5 mb-3 rounded-xl border border-border/60 bg-muted/10 px-3 py-2.5">
                                         {currentCategoryDef.hasNumberField && (
                                             <div className="text-[12px] text-muted-foreground">
                                                 <span className="font-semibold text-foreground/90">{currentCategoryDef.numberFieldLabel}:</span> {material.extra_number || '—'}
@@ -405,8 +453,8 @@ const Materials = () => {
 
                                     <div className="flex items-center justify-end pt-2 border-t border-border/70">
                                         <div className="flex items-center gap-3">
-                                            <button onClick={() => handleEditMaterial(material)} className="text-muted-foreground hover:text-primary transition-colors"><Edit size={18} /></button>
-                                            <button onClick={() => handleDeleteMaterial(material.id, material.name)} className="text-muted-foreground hover:text-red-500 transition-colors"><Trash2 size={18} /></button>
+                                            <button onClick={() => handleEditMaterial(material)} className="text-blue-500 hover:text-blue-700 transition-colors"><Edit size={18} /></button>
+                                            <button onClick={() => handleDeleteMaterial(material.id, material.name)} className="text-rose-500 hover:text-rose-700 transition-colors"><Trash2 size={18} /></button>
                                         </div>
                                     </div>
                                 </div>
@@ -414,30 +462,44 @@ const Materials = () => {
                         )}
                     </div>
 
-                    <div className="hidden md:block p-4 space-y-4">
-                        <div className="flex items-center justify-between gap-4">
-                            <div className="flex items-center gap-2 flex-1">
-                                <button
-                                    onClick={() => navigate(-1)}
-                                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground text-[12px] font-bold transition-all bg-white shadow-sm shrink-0"
-                                >
-                                    <ChevronLeft size={16} />
-                                    Quay lại
-                                </button>
-                                <div className="relative flex-1">
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
-                                    <input
-                                        type="text"
-                                        placeholder="Tìm kiếm . . ."
-                                        value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="w-full pl-10 pr-8 py-1.5 bg-muted/20 border border-border/80 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
-                                    />
-                                    {searchTerm && (
-                                        <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                                            <X size={14} />
-                                        </button>
-                                    )}
+                    <div className="hidden md:block p-4 border-b border-border">
+                        <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1 space-y-2.5">
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => navigate(-1)}
+                                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground text-[12px] font-bold transition-all bg-white shadow-sm shrink-0"
+                                    >
+                                        <ChevronLeft size={16} />
+                                        Quay lại
+                                    </button>
+                                    <div className="relative flex-1">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
+                                        <input
+                                            type="text"
+                                            placeholder="Tìm kiếm . . ."
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                            className="w-full pl-10 pr-8 py-1.5 bg-muted/20 border border-border/80 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
+                                        />
+                                        {searchTerm && (
+                                            <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                                                <X size={14} />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="relative w-72">
+                                    <select
+                                        value={categoryFilter}
+                                        onChange={(e) => setCategoryFilter(e.target.value)}
+                                        className="w-full pl-4 pr-10 py-2 bg-white border border-border rounded-xl text-[13px] font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all appearance-none"
+                                    >
+                                        {MATERIAL_CATEGORIES.map(category => (
+                                            <option key={category.id} value={category.id}>{category.label}</option>
+                                        ))}
+                                    </select>
+                                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
@@ -490,9 +552,9 @@ const Materials = () => {
                         </div>
                     </div>
 
-                    <div className="hidden md:block flex-1 overflow-x-auto border-t border-border">
+                    <div className="hidden md:block flex-1 overflow-x-auto border-t border-primary/20">
                         <table className="w-full border-collapse">
-                            <thead className="bg-muted/20">
+                            <thead className="bg-primary/5">
                                 <tr>
                                     {visibleTableColumns.map(col => (
                                         <th
@@ -505,10 +567,10 @@ const Materials = () => {
                                             {col.label}
                                         </th>
                                     ))}
-                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide">Thao tác</th>
+                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide border-l border-primary/20">Thao tác</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-border">
+                            <tbody className="divide-y divide-primary/10">
                                 {isLoading ? (
                                     <tr>
                                         <td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center text-muted-foreground">
@@ -522,20 +584,20 @@ const Materials = () => {
                                         </td>
                                     </tr>
                                 ) : filteredMaterials.map((material) => (
-                                    <tr key={material.id} className="hover:bg-muted/20 transition-colors">
-                                        {isColumnVisible('name') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{material.name || '—'}</td>}
+                                    <tr key={material.id} className={getRowStyle(material.category || categoryFilter)}>
+                                        {isColumnVisible('name') && <td className={getNameCellClass(material.category || categoryFilter)}>{material.name || '—'}</td>}
                                         {isColumnVisible('extra_number') && (
                                             <td className="px-4 py-4 text-sm font-semibold text-foreground text-center">{material.extra_number || '—'}</td>
                                         )}
                                         {isColumnVisible('extra_text') && (
                                             <td className="px-4 py-4 text-sm text-muted-foreground">{material.extra_text || '—'}</td>
                                         )}
-                                        <td className="px-4 py-4 text-center">
+                                        <td className="px-4 py-4 text-center border-l border-primary/20">
                                             <div className="flex items-center justify-center gap-3">
-                                                <button onClick={() => handleEditMaterial(material)} className="text-muted-foreground hover:text-primary transition-colors p-1" title="Chỉnh sửa">
+                                                <button onClick={() => handleEditMaterial(material)} className="text-blue-500 hover:text-blue-700 transition-colors p-1" title="Chỉnh sửa">
                                                     <Edit className="w-4 h-4" />
                                                 </button>
-                                                <button onClick={() => handleDeleteMaterial(material.id, material.name)} className="text-muted-foreground hover:text-red-500 transition-colors p-1" title="Xóa">
+                                                <button onClick={() => handleDeleteMaterial(material.id, material.name)} className="text-rose-500 hover:text-rose-700 transition-colors p-1" title="Xóa">
                                                     <Trash2 className="w-4 h-4" />
                                                 </button>
                                             </div>
@@ -590,12 +652,15 @@ const Materials = () => {
                                 onClick={openMobileFilter}
                                 className={clsx(
                                     'relative p-2 rounded-xl border shrink-0 transition-all',
-                                    hasActiveFilters ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-white text-muted-foreground',
+                                    hasActiveFilters ? getFilterButtonClass('categories', true) : getFilterButtonClass('categories', false),
                                 )}
                             >
-                                <Filter size={18} />
+                                <Filter size={18} className={getFilterIconClass('categories', hasActiveFilters)} />
                                 {hasActiveFilters && (
-                                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-white text-[9px] font-bold flex items-center justify-center">
+                                    <span className={clsx(
+                                        'absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center',
+                                        getFilterCountBadgeClass('categories')
+                                    )}>
                                         {selectedCategories.length}
                                     </span>
                                 )}
@@ -617,15 +682,16 @@ const Materials = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'categories' ? null : 'categories')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'categories' || selectedCategories.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('categories', activeDropdown === 'categories' || selectedCategories.length > 0)
                                         )}
                                     >
-                                        <PackageOpen size={14} />
+                                        <PackageOpen
+                                            size={14}
+                                            className={getFilterIconClass('categories', activeDropdown === 'categories' || selectedCategories.length > 0)}
+                                        />
                                         Phân loại
                                         {selectedCategories.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('categories'))}>
                                                 {selectedCategories.length}
                                             </span>
                                         )}
@@ -732,7 +798,7 @@ const Materials = () => {
                         {
                             id: 'categories',
                             label: 'Phân loại',
-                            icon: <PackageOpen size={16} />,
+                            icon: <PackageOpen size={16} className="text-violet-600" />,
                             options: categoryOptions,
                             selectedValues: pendingCategories,
                             onSelectionChange: setPendingCategories,

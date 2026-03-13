@@ -19,6 +19,7 @@
 body {
   margin: 0;
   font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-weight: 600;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -53,7 +54,7 @@ th {
 /* Table data cells - consistent 14px readable text, not bold, single line */
 td {
   font-size: 14px !important;
-  font-weight: normal !important;
+  font-weight: 600 !important;
   color: #000000 !important;
   white-space: nowrap !important;
 }
@@ -64,7 +65,7 @@ td div,
 td p,
 td a {
   font-size: inherit !important;
-  font-weight: normal !important;
+  font-weight: 600 !important;
   white-space: nowrap !important;
 }
 
@@ -155,28 +156,37 @@ h3,
 h4,
 h5,
 h6 {
-  font-weight: 500 !important;
-  /* Medium instead of Bold */
+  font-weight: 600 !important;
 }
 
 .font-black,
 .font-bold,
 .font-semibold,
 .font-medium {
-  font-weight: 400 !important;
-  /* Force all to normal weight */
+  font-weight: 600 !important;
 }
 
 /* Ensure body text is never too heavy and always black */
 body,
 p,
-span:not(.text-white),
-div:not(.text-white),
+span:not(.text-white):not([class*="text-"]),
+div:not(.text-white):not([class*="text-"]),
 th,
 td,
-a:not(.text-white) {
-  font-weight: 400 !important;
+a:not(.text-white):not([class*="text-"]) {
+  font-weight: 600 !important;
   color: #000000 !important;
+}
+
+/* Secondary descriptions should stay lighter for hierarchy */
+[class*="text-muted-foreground"] {
+  font-weight: 400 !important;
+}
+
+/* Placeholder text should be light */
+input::placeholder,
+textarea::placeholder {
+  font-weight: 400 !important;
 }
 
 /* Specific Legibility for "Create/Add" forms - Labels and Headers */
@@ -203,9 +213,6 @@ h6,
   letter-spacing: 0.05em !important;
   /* Reduce excessive spacing for clarity */
 }
-
-
-
 
 @layer utilities {
   .shadow-soft {

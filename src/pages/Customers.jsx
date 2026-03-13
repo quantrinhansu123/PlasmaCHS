@@ -232,6 +232,86 @@ const Customers = () => {
         return list.find(item => item.id === id)?.label || id;
     };
 
+    const getFilterButtonClass = (filterKey, isActive) => {
+        if (!isActive) {
+            return 'border-border bg-white text-muted-foreground hover:text-foreground';
+        }
+
+        switch (filterKey) {
+            case 'categories':
+                return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+            case 'managedBy':
+                return 'border-violet-200 bg-violet-50 text-violet-700';
+            case 'careBy':
+                return 'border-cyan-200 bg-cyan-50 text-cyan-700';
+            default:
+                return 'border-primary bg-primary/5 text-primary';
+        }
+    };
+
+    const getFilterCountBadgeClass = (filterKey) => {
+        switch (filterKey) {
+            case 'categories':
+                return 'bg-emerald-600 text-white';
+            case 'managedBy':
+                return 'bg-violet-600 text-white';
+            case 'careBy':
+                return 'bg-cyan-600 text-white';
+            default:
+                return 'bg-primary text-white';
+        }
+    };
+
+    const getFilterIconClass = (filterKey, isActive) => {
+        switch (filterKey) {
+            case 'categories':
+                return isActive ? 'text-emerald-700' : 'text-emerald-500';
+            case 'managedBy':
+                return isActive ? 'text-violet-700' : 'text-violet-500';
+            case 'careBy':
+                return isActive ? 'text-cyan-700' : 'text-cyan-500';
+            default:
+                return isActive ? 'text-primary' : 'text-primary/80';
+        }
+    };
+
+    const getCategoryBadgeClass = (categoryId) => clsx(
+        'inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border',
+        categoryId === 'BV' && 'bg-blue-50 text-blue-700 border-blue-200',
+        categoryId === 'TM' && 'bg-pink-50 text-pink-700 border-pink-200',
+        categoryId === 'PK' && 'bg-emerald-50 text-emerald-700 border-emerald-200',
+        categoryId === 'NG' && 'bg-violet-50 text-violet-700 border-violet-200',
+        categoryId === 'SP' && 'bg-amber-50 text-amber-700 border-amber-200',
+        !categoryId && 'bg-muted text-muted-foreground border-border'
+    );
+
+    const getRowStyle = (categoryId) => {
+        switch (categoryId) {
+            case 'BV':
+                return 'hover:bg-blue-50/60';
+            case 'TM':
+                return 'hover:bg-pink-50/60';
+            case 'PK':
+                return 'hover:bg-emerald-50/60';
+            case 'NG':
+                return 'hover:bg-violet-50/60';
+            case 'SP':
+                return 'hover:bg-amber-50/60';
+            default:
+                return 'hover:bg-primary/5';
+        }
+    };
+
+    const getCodeCellClass = (categoryId) => clsx(
+        'px-4 py-4 whitespace-nowrap text-sm font-semibold text-foreground border-r border-primary/20 border-l-4',
+        categoryId === 'BV' && 'border-l-blue-400',
+        categoryId === 'TM' && 'border-l-pink-400',
+        categoryId === 'PK' && 'border-l-emerald-400',
+        categoryId === 'NG' && 'border-l-violet-400',
+        categoryId === 'SP' && 'border-l-amber-400',
+        !categoryId && 'border-l-transparent'
+    );
+
     const filteredCustomers = customers.filter(c => {
         const search = searchTerm.toLowerCase();
         const matchesSearch = (
@@ -383,8 +463,8 @@ const Customers = () => {
     };
 
     return (
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col -mt-2 min-h-0 px-3 md:px-6">
-            <div className="flex items-center gap-1 mb-4 mt-6">
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5">
+            <div className="flex items-center gap-1 mb-3 mt-1">
                 <button
                     onClick={() => setActiveView('list')}
                     className={clsx(
@@ -467,13 +547,13 @@ const Customers = () => {
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy kết quả phù hợp</div>
                         ) : (
                             filteredCustomers.map((c) => (
-                                <div key={c.id} className="rounded-2xl border border-border bg-white shadow-sm p-4">
+                                <div key={c.id} className="rounded-2xl border border-primary/15 bg-white shadow-sm p-4">
                                     <div className="flex items-start justify-between gap-2 mb-2">
                                         <div>
                                             <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">{c.code}</p>
                                             <h3 className="text-[15px] font-bold text-foreground leading-tight mt-0.5">{c.name}</h3>
                                         </div>
-                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border border-primary/20 text-primary bg-primary/5">
+                                        <span className={getCategoryBadgeClass(c.category)}>
                                             {getLabel(CUSTOMER_CATEGORIES, c.category)}
                                         </span>
                                     </div>
@@ -489,7 +569,7 @@ const Customers = () => {
                                         </div>
                                     </div>
 
-                                    <div className="grid grid-cols-3 gap-2 rounded-xl bg-muted/30 border border-border/60 p-2.5 mb-3">
+                                    <div className="grid grid-cols-3 gap-2 rounded-xl bg-muted/10 border border-border/60 p-2.5 mb-3">
                                         <div className="text-center">
                                             <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Số vỏ</p>
                                             <p className="text-[13px] font-bold text-foreground">{formatNumber(c.current_cylinders || 0)}</p>
@@ -510,9 +590,9 @@ const Customers = () => {
                                             <span>{c.managed_by || '—'}</span>
                                         </div>
                                         <div className="flex items-center gap-3">
-                                            <button onClick={() => handleViewCustomer(c)} className="text-muted-foreground hover:text-primary transition-colors"><Eye size={18} /></button>
-                                            <button onClick={() => handleEditCustomer(c)} className="text-muted-foreground hover:text-primary transition-colors"><Edit size={18} /></button>
-                                            <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="text-muted-foreground hover:text-red-500 transition-colors"><Trash2 size={18} /></button>
+                                            <button onClick={() => handleViewCustomer(c)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg"><Eye size={16} /></button>
+                                            <button onClick={() => handleEditCustomer(c)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
+                                            <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg"><Trash2 size={16} /></button>
                                         </div>
                                     </div>
                                 </div>
@@ -591,15 +671,13 @@ const Customers = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'categories' ? null : 'categories')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'categories' || selectedCategories.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('categories', activeDropdown === 'categories' || selectedCategories.length > 0)
                                     )}
                                 >
-                                    <Users size={14} />
+                                    <Users size={14} className={getFilterIconClass('categories', activeDropdown === 'categories' || selectedCategories.length > 0)} />
                                     Loại khách
                                     {selectedCategories.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('categories'))}>
                                             {selectedCategories.length}
                                         </span>
                                     )}
@@ -621,15 +699,13 @@ const Customers = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'managedBy' ? null : 'managedBy')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'managedBy' || selectedManagedBy.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('managedBy', activeDropdown === 'managedBy' || selectedManagedBy.length > 0)
                                     )}
                                 >
-                                    <User size={14} />
+                                    <User size={14} className={getFilterIconClass('managedBy', activeDropdown === 'managedBy' || selectedManagedBy.length > 0)} />
                                     NV phụ trách
                                     {selectedManagedBy.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('managedBy'))}>
                                             {selectedManagedBy.length}
                                         </span>
                                     )}
@@ -651,15 +727,13 @@ const Customers = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'careBy' ? null : 'careBy')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'careBy' || selectedCareBy.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('careBy', activeDropdown === 'careBy' || selectedCareBy.length > 0)
                                     )}
                                 >
-                                    <User size={14} />
+                                    <User size={14} className={getFilterIconClass('careBy', activeDropdown === 'careBy' || selectedCareBy.length > 0)} />
                                     KD chăm sóc
                                     {selectedCareBy.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('careBy'))}>
                                             {selectedCareBy.length}
                                         </span>
                                     )}
@@ -688,19 +762,25 @@ const Customers = () => {
                         </div>
                     </div>
 
-                    <div className="hidden md:block flex-1 overflow-x-auto border-t border-border">
+                    <div className="hidden md:block flex-1 overflow-x-auto bg-white">
                         <table className="w-full border-collapse">
-                            <thead className="bg-muted/20">
+                            <thead className="bg-primary/5">
                                 <tr>
                                     {visibleTableColumns.map(col => (
-                                        <th key={col.key} className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide">
+                                        <th
+                                            key={col.key}
+                                            className={clsx(
+                                                'px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide',
+                                                col.key === 'code' && 'border-l border-r border-primary/30'
+                                            )}
+                                        >
                                             {col.label}
                                         </th>
                                     ))}
-                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide">Thao tác</th>
+                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide border-l border-r border-primary/30">Thao tác</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-border">
+                            <tbody className="divide-y divide-primary/10">
                                 {isLoading ? (
                                     <tr>
                                         <td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center text-muted-foreground">
@@ -714,29 +794,29 @@ const Customers = () => {
                                         </td>
                                     </tr>
                                 ) : filteredCustomers.map((c) => (
-                                    <tr key={c.id} className="hover:bg-muted/20 transition-colors">
-                                        {isColumnVisible('code') && <td className="px-4 py-4 whitespace-nowrap text-sm font-semibold text-foreground">{c.code}</td>}
+                                    <tr key={c.id} className={getRowStyle(c.category)}>
+                                        {isColumnVisible('code') && <td className={getCodeCellClass(c.category)}>{c.code}</td>}
                                         {isColumnVisible('name') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{c.name}</td>}
                                         {isColumnVisible('phone') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.phone || '—'}</td>}
                                         {isColumnVisible('address') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.address || '—'}</td>}
                                         {isColumnVisible('legal_rep') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.legal_rep || '—'}</td>}
                                         {isColumnVisible('managed_by') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.managed_by || '—'}</td>}
-                                        {isColumnVisible('category') && <td className="px-4 py-4 text-sm text-muted-foreground">{getLabel(CUSTOMER_CATEGORIES, c.category)}</td>}
+                                        {isColumnVisible('category') && <td className="px-4 py-4 text-sm text-muted-foreground"><span className={getCategoryBadgeClass(c.category)}>{getLabel(CUSTOMER_CATEGORIES, c.category)}</span></td>}
                                         {isColumnVisible('current_cylinders') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.current_cylinders || 0)}</td>}
                                         {isColumnVisible('current_machines') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.current_machines || 0)}</td>}
                                         {isColumnVisible('borrowed_cylinders') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.borrowed_cylinders || 0)}</td>}
                                         {isColumnVisible('machines_in_use') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.machines_in_use || '—'}</td>}
                                         {isColumnVisible('care_by') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.care_by || '—'}</td>}
-                                        <td className="px-4 py-4 text-center">
+                                        <td className="px-4 py-4 text-center border-l border-r border-primary/20">
                                             <div className="flex items-center justify-center gap-3">
-                                                <button onClick={() => handleViewCustomer(c)} className="text-muted-foreground hover:text-primary transition-colors p-1" title="Xem chi tiết">
+                                                <button onClick={() => handleViewCustomer(c)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="Xem chi tiết">
                                                     <Eye className="w-4 h-4" />
                                                 </button>
-                                                <button onClick={() => handleEditCustomer(c)} className="text-muted-foreground hover:text-primary transition-colors p-1" title="Chỉnh sửa">
+                                                <button onClick={() => handleEditCustomer(c)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
                                                     <Edit className="w-4 h-4" />
                                                 </button>
                                                 {(role === 'admin' || role === 'manager') && (
-                                                    <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="text-muted-foreground hover:text-red-500 transition-colors p-1" title="Xóa">
+                                                    <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>
                                                 )}
@@ -821,15 +901,13 @@ const Customers = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'categories' ? null : 'categories')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'categories' || selectedCategories.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('categories', activeDropdown === 'categories' || selectedCategories.length > 0)
                                         )}
                                     >
-                                        <Users size={14} />
+                                        <Users size={14} className={getFilterIconClass('categories', activeDropdown === 'categories' || selectedCategories.length > 0)} />
                                         Loại khách
                                         {selectedCategories.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('categories'))}>
                                                 {selectedCategories.length}
                                             </span>
                                         )}
@@ -851,15 +929,13 @@ const Customers = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'managedBy' ? null : 'managedBy')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'managedBy' || selectedManagedBy.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('managedBy', activeDropdown === 'managedBy' || selectedManagedBy.length > 0)
                                         )}
                                     >
-                                        <User size={14} />
+                                        <User size={14} className={getFilterIconClass('managedBy', activeDropdown === 'managedBy' || selectedManagedBy.length > 0)} />
                                         NV phụ trách
                                         {selectedManagedBy.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('managedBy'))}>
                                                 {selectedManagedBy.length}
                                             </span>
                                         )}
@@ -881,15 +957,13 @@ const Customers = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'careBy' ? null : 'careBy')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'careBy' || selectedCareBy.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('careBy', activeDropdown === 'careBy' || selectedCareBy.length > 0)
                                         )}
                                     >
-                                        <User size={14} />
+                                        <User size={14} className={getFilterIconClass('careBy', activeDropdown === 'careBy' || selectedCareBy.length > 0)} />
                                         KD chăm sóc
                                         {selectedCareBy.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('careBy'))}>
                                                 {selectedCareBy.length}
                                             </span>
                                         )}
@@ -1089,7 +1163,7 @@ const Customers = () => {
                         {
                             id: 'categories',
                             label: 'Loại khách',
-                            icon: <Users size={16} />,
+                            icon: <Users size={16} className="text-emerald-600" />,
                             options: categoryOptions,
                             selectedValues: pendingCategories,
                             onSelectionChange: setPendingCategories,
@@ -1097,7 +1171,7 @@ const Customers = () => {
                         {
                             id: 'managedBy',
                             label: 'Nhân viên phụ trách',
-                            icon: <User size={16} />,
+                            icon: <User size={16} className="text-violet-600" />,
                             options: managedByOptions,
                             selectedValues: pendingManagedBy,
                             onSelectionChange: setPendingManagedBy,
@@ -1105,7 +1179,7 @@ const Customers = () => {
                         {
                             id: 'careBy',
                             label: 'KD chăm sóc',
-                            icon: <User size={16} />,
+                            icon: <User size={16} className="text-cyan-600" />,
                             options: careByOptions,
                             selectedValues: pendingCareBy,
                             onSelectionChange: setPendingCareBy,

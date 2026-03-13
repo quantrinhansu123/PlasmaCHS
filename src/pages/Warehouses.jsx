@@ -299,18 +299,76 @@ const Warehouses = () => {
         setSelectedManagers([]);
     };
 
-    const getStatusStyle = (status) => {
-        switch (status) {
-            case 'Đang hoạt động': return 'bg-emerald-50 text-emerald-600 border-emerald-100 group-hover:bg-white';
-            case 'Tạm ngưng': return 'bg-amber-50 text-amber-600 border-amber-100 group-hover:bg-white';
-            case 'Đóng cửa': return 'bg-rose-50 text-rose-500 border-rose-100 group-hover:bg-white';
-            default: return 'bg-slate-50 text-slate-500 border-slate-100 group-hover:bg-white';
+    const getFilterButtonClass = (filterKey, isActive) => {
+        if (!isActive) {
+            return 'border-border bg-white text-muted-foreground hover:text-foreground';
+        }
+
+        switch (filterKey) {
+            case 'statuses':
+                return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+            case 'managers':
+                return 'border-cyan-200 bg-cyan-50 text-cyan-700';
+            default:
+                return 'border-primary bg-primary/5 text-primary';
         }
     };
 
+    const getFilterCountBadgeClass = (filterKey) => {
+        switch (filterKey) {
+            case 'statuses':
+                return 'bg-emerald-600 text-white';
+            case 'managers':
+                return 'bg-cyan-600 text-white';
+            default:
+                return 'bg-primary text-white';
+        }
+    };
+
+    const getFilterIconClass = (filterKey, isActive) => {
+        switch (filterKey) {
+            case 'statuses':
+                return isActive ? 'text-emerald-700' : 'text-emerald-600';
+            case 'managers':
+                return isActive ? 'text-cyan-700' : 'text-cyan-600';
+            default:
+                return isActive ? 'text-primary' : 'text-primary/80';
+        }
+    };
+
+    const getStatusStyle = (status) => {
+        switch (status) {
+            case 'Đang hoạt động': return 'bg-emerald-50 text-emerald-600 border-emerald-100';
+            case 'Tạm ngưng': return 'bg-amber-50 text-amber-600 border-amber-100';
+            case 'Đóng cửa': return 'bg-rose-50 text-rose-500 border-rose-100';
+            default: return 'bg-slate-50 text-slate-500 border-slate-100';
+        }
+    };
+
+    const getRowStyle = (status) => {
+        switch (status) {
+            case 'Đang hoạt động':
+                return 'hover:bg-emerald-50/60';
+            case 'Tạm ngưng':
+                return 'hover:bg-amber-50/60';
+            case 'Đóng cửa':
+                return 'hover:bg-rose-50/60';
+            default:
+                return 'hover:bg-primary/5';
+        }
+    };
+
+    const getNameCellClass = (status) => clsx(
+        'px-4 py-4 whitespace-nowrap text-sm font-semibold text-foreground border-r border-primary/20 border-l-4',
+        status === 'Đang hoạt động' && 'border-l-emerald-400',
+        status === 'Tạm ngưng' && 'border-l-amber-400',
+        status === 'Đóng cửa' && 'border-l-rose-400',
+        !status && 'border-l-primary/50'
+    );
+
     return (
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col -mt-2 min-h-0 px-3 md:px-6">
-            <div className="flex items-center gap-1 mb-4 mt-6">
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5">
+            <div className="flex items-center gap-1 mb-3 mt-1">
                 <button
                     onClick={() => setActiveView('list')}
                     className={clsx(
@@ -365,12 +423,15 @@ const Warehouses = () => {
                             onClick={openMobileFilter}
                             className={clsx(
                                 'relative p-2 rounded-xl border shrink-0 transition-all',
-                                hasActiveFilters ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-white text-muted-foreground',
+                                hasActiveFilters ? getFilterButtonClass('statuses', true) : getFilterButtonClass('statuses', false),
                             )}
                         >
-                            <Filter size={18} />
+                            <Filter size={18} className={getFilterIconClass('statuses', hasActiveFilters)} />
                             {hasActiveFilters && (
-                                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-white text-[9px] font-bold flex items-center justify-center">
+                                <span className={clsx(
+                                    'absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center',
+                                    getFilterCountBadgeClass('statuses')
+                                )}>
                                     {totalActiveFilters}
                                 </span>
                             )}
@@ -393,7 +454,7 @@ const Warehouses = () => {
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy kết quả phù hợp</div>
                         ) : (
                             filteredWarehouses.map((w) => (
-                                <div key={w.id} className="rounded-2xl border border-border bg-white shadow-sm p-4">
+                                <div key={w.id} className="rounded-2xl border border-primary/20 bg-gradient-to-br from-white to-primary/[0.03] shadow-sm p-4">
                                     <div className="flex items-start justify-between gap-2 mb-2">
                                         <div>
                                             <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Kho hàng</p>
@@ -404,7 +465,7 @@ const Warehouses = () => {
                                         </span>
                                     </div>
 
-                                    <div className="space-y-1.5 mb-3">
+                                    <div className="space-y-1.5 mb-3 rounded-xl border border-border/60 bg-muted/10 px-3 py-2.5">
                                         <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
                                             <User className="w-3.5 h-3.5" />
                                             <span>{w.manager_name || '—'}</span>
@@ -424,10 +485,10 @@ const Warehouses = () => {
 
                                     <div className="flex items-center justify-end pt-2 border-t border-border/70">
                                         <div className="flex items-center gap-3">
-                                            <button onClick={() => handleViewWarehouse(w)} className="text-muted-foreground hover:text-primary transition-colors"><Eye size={18} /></button>
-                                            <button onClick={() => handleEditWarehouse(w)} className="text-muted-foreground hover:text-primary transition-colors"><Edit size={18} /></button>
+                                            <button onClick={() => handleViewWarehouse(w)} className="text-blue-500 hover:text-blue-700 transition-colors"><Eye size={18} /></button>
+                                            <button onClick={() => handleEditWarehouse(w)} className="text-amber-500 hover:text-amber-700 transition-colors"><Edit size={18} /></button>
                                             {(role === 'admin' || role === 'manager') && (
-                                                <button onClick={() => handleDeleteWarehouse(w.id, w.name)} className="text-muted-foreground hover:text-red-500 transition-colors"><Trash2 size={18} /></button>
+                                                <button onClick={() => handleDeleteWarehouse(w.id, w.name)} className="text-rose-500 hover:text-rose-700 transition-colors"><Trash2 size={18} /></button>
                                             )}
                                         </div>
                                     </div>
@@ -507,15 +568,13 @@ const Warehouses = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'statuses' ? null : 'statuses')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'statuses' || selectedStatuses.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('statuses', activeDropdown === 'statuses' || selectedStatuses.length > 0)
                                     )}
                                 >
-                                    <Filter size={14} />
+                                    <Filter size={14} className={getFilterIconClass('statuses', activeDropdown === 'statuses' || selectedStatuses.length > 0)} />
                                     Trạng thái
                                     {selectedStatuses.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('statuses'))}>
                                             {selectedStatuses.length}
                                         </span>
                                     )}
@@ -537,15 +596,13 @@ const Warehouses = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'managers' ? null : 'managers')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'managers' || selectedManagers.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('managers', activeDropdown === 'managers' || selectedManagers.length > 0)
                                     )}
                                 >
-                                    <User size={14} />
+                                    <User size={14} className={getFilterIconClass('managers', activeDropdown === 'managers' || selectedManagers.length > 0)} />
                                     Thủ kho
                                     {selectedManagers.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('managers'))}>
                                             {selectedManagers.length}
                                         </span>
                                     )}
@@ -574,19 +631,19 @@ const Warehouses = () => {
                         </div>
                     </div>
 
-                    <div className="hidden md:block flex-1 overflow-x-auto border-t border-border">
+                    <div className="hidden md:block flex-1 overflow-x-auto border-t border-primary/20">
                         <table className="w-full border-collapse">
-                            <thead className="bg-muted/20">
+                            <thead className="bg-primary/5">
                                 <tr>
                                     {visibleTableColumns.map(col => (
-                                        <th key={col.key} className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide">
+                                        <th key={col.key} className={clsx('px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide', col.key === 'name' && 'border-l border-r border-primary/30')}>
                                             {col.label}
                                         </th>
                                     ))}
-                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide">Thao tác</th>
+                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide border-l border-r border-primary/30">Thao tác</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-border">
+                            <tbody className="divide-y divide-primary/10">
                                 {isLoading ? (
                                     <tr>
                                         <td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center text-muted-foreground">
@@ -600,8 +657,8 @@ const Warehouses = () => {
                                         </td>
                                     </tr>
                                 ) : filteredWarehouses.map((w) => (
-                                    <tr key={w.id} className="hover:bg-muted/20 transition-colors">
-                                        {isColumnVisible('name') && <td className="px-4 py-4 whitespace-nowrap text-sm font-semibold text-foreground">{w.name}</td>}
+                                    <tr key={w.id} className={getRowStyle(w.status)}>
+                                        {isColumnVisible('name') && <td className={getNameCellClass(w.status)}>{w.name}</td>}
                                         {isColumnVisible('manager_name') && <td className="px-4 py-4 text-sm text-muted-foreground">{w.manager_name || '—'}</td>}
                                         {isColumnVisible('address') && <td className="px-4 py-4 text-sm text-muted-foreground">{w.address || '—'}</td>}
                                         {isColumnVisible('capacity') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(w.capacity || 0)}</td>}
@@ -612,16 +669,16 @@ const Warehouses = () => {
                                                 </span>
                                             </td>
                                         )}
-                                        <td className="px-4 py-4 text-center">
+                                        <td className="px-4 py-4 text-center border-l border-r border-primary/20">
                                             <div className="flex items-center justify-center gap-3">
-                                                <button onClick={() => handleViewWarehouse(w)} className="text-muted-foreground hover:text-primary transition-colors p-1" title="Xem chi tiết">
+                                                <button onClick={() => handleViewWarehouse(w)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="Xem chi tiết">
                                                     <Eye className="w-4 h-4" />
                                                 </button>
-                                                <button onClick={() => handleEditWarehouse(w)} className="text-muted-foreground hover:text-primary transition-colors p-1" title="Chỉnh sửa">
+                                                <button onClick={() => handleEditWarehouse(w)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
                                                     <Edit className="w-4 h-4" />
                                                 </button>
                                                 {(role === 'admin' || role === 'manager') && (
-                                                    <button onClick={() => handleDeleteWarehouse(w.id, w.name)} className="text-muted-foreground hover:text-red-500 transition-colors p-1" title="Xóa">
+                                                    <button onClick={() => handleDeleteWarehouse(w.id, w.name)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>
                                                 )}
@@ -679,12 +736,15 @@ const Warehouses = () => {
                                 onClick={openMobileFilter}
                                 className={clsx(
                                     'relative p-2 rounded-xl border shrink-0 transition-all',
-                                    hasActiveFilters ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-white text-muted-foreground',
+                                    hasActiveFilters ? getFilterButtonClass('statuses', true) : getFilterButtonClass('statuses', false),
                                 )}
                             >
-                                <Filter size={18} />
+                                <Filter size={18} className={getFilterIconClass('statuses', hasActiveFilters)} />
                                 {hasActiveFilters && (
-                                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-white text-[9px] font-bold flex items-center justify-center">
+                                    <span className={clsx(
+                                        'absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center',
+                                        getFilterCountBadgeClass('statuses')
+                                    )}>
                                         {totalActiveFilters}
                                     </span>
                                 )}
@@ -706,15 +766,13 @@ const Warehouses = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'statuses' ? null : 'statuses')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'statuses' || selectedStatuses.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('statuses', activeDropdown === 'statuses' || selectedStatuses.length > 0)
                                         )}
                                     >
-                                        <Filter size={14} />
+                                        <Filter size={14} className={getFilterIconClass('statuses', activeDropdown === 'statuses' || selectedStatuses.length > 0)} />
                                         Trạng thái
                                         {selectedStatuses.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('statuses'))}>
                                                 {selectedStatuses.length}
                                             </span>
                                         )}
@@ -736,15 +794,13 @@ const Warehouses = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'managers' ? null : 'managers')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'managers' || selectedManagers.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('managers', activeDropdown === 'managers' || selectedManagers.length > 0)
                                         )}
                                     >
-                                        <User size={14} />
+                                        <User size={14} className={getFilterIconClass('managers', activeDropdown === 'managers' || selectedManagers.length > 0)} />
                                         Thủ kho
                                         {selectedManagers.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('managers'))}>
                                                 {selectedManagers.length}
                                             </span>
                                         )}
@@ -913,7 +969,7 @@ const Warehouses = () => {
                         {
                             id: 'statuses',
                             label: 'Trạng thái',
-                            icon: <Filter size={16} />,
+                            icon: <Filter size={16} className="text-emerald-600" />,
                             options: statusOptions,
                             selectedValues: pendingStatuses,
                             onSelectionChange: setPendingStatuses,
@@ -921,7 +977,7 @@ const Warehouses = () => {
                         {
                             id: 'managers',
                             label: 'Thủ kho',
-                            icon: <User size={16} />,
+                            icon: <User size={16} className="text-cyan-600" />,
                             options: managerOptions,
                             selectedValues: pendingManagers,
                             onSelectionChange: setPendingManagers,

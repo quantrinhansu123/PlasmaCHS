@@ -392,6 +392,104 @@ const Cylinders = () => {
         }
     };
 
+    const getFilterButtonClass = (filterKey, isActive) => {
+        if (!isActive) {
+            return 'border-border bg-white text-muted-foreground hover:text-foreground';
+        }
+
+        switch (filterKey) {
+            case 'status':
+                return 'border-blue-200 bg-blue-50 text-blue-700';
+            case 'volume':
+                return 'border-violet-200 bg-violet-50 text-violet-700';
+            case 'customers':
+                return 'border-cyan-200 bg-cyan-50 text-cyan-700';
+            case 'warehouses':
+                return 'border-indigo-200 bg-indigo-50 text-indigo-700';
+            case 'categories':
+                return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+            default:
+                return 'border-primary bg-primary/5 text-primary';
+        }
+    };
+
+    const getFilterCountBadgeClass = (filterKey) => {
+        switch (filterKey) {
+            case 'status':
+                return 'bg-blue-600 text-white';
+            case 'volume':
+                return 'bg-violet-600 text-white';
+            case 'customers':
+                return 'bg-cyan-600 text-white';
+            case 'warehouses':
+                return 'bg-indigo-600 text-white';
+            case 'categories':
+                return 'bg-emerald-600 text-white';
+            default:
+                return 'bg-primary text-white';
+        }
+    };
+
+    const getFilterIconClass = (filterKey, isActive) => {
+        switch (filterKey) {
+            case 'status':
+                return isActive ? 'text-blue-700' : 'text-blue-500';
+            case 'volume':
+                return isActive ? 'text-violet-700' : 'text-violet-500';
+            case 'customers':
+                return isActive ? 'text-cyan-700' : 'text-cyan-500';
+            case 'warehouses':
+                return isActive ? 'text-indigo-700' : 'text-indigo-500';
+            case 'categories':
+                return isActive ? 'text-emerald-700' : 'text-emerald-500';
+            default:
+                return isActive ? 'text-primary' : 'text-primary/80';
+        }
+    };
+
+    const getCategoryBadgeClass = (categoryId) => clsx(
+        'inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border',
+        categoryId === 'BV' && 'bg-blue-50 text-blue-700 border-blue-200',
+        categoryId === 'TM' && 'bg-pink-50 text-pink-700 border-pink-200',
+        !categoryId && 'bg-muted text-muted-foreground border-border'
+    );
+
+    const getVolumeBadgeClass = (volume) => clsx(
+        'inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold border',
+        volume && 'bg-violet-50 text-violet-700 border-violet-200',
+        !volume && 'bg-muted text-muted-foreground border-border'
+    );
+
+    const getRowStyle = (status) => {
+        switch (status) {
+            case 'sẵn sàng':
+                return 'hover:bg-emerald-50/60';
+            case 'đang sử dụng':
+            case 'đã sử dụng':
+            case 'thuộc khách hàng':
+                return 'hover:bg-sky-50/60';
+            case 'đang vận chuyển':
+                return 'hover:bg-indigo-50/60';
+            case 'chờ nạp':
+            case 'bình rỗng':
+                return 'hover:bg-amber-50/60';
+            case 'hỏng':
+                return 'hover:bg-rose-50/60';
+            default:
+                return 'hover:bg-primary/5';
+        }
+    };
+
+    const getSerialCellClass = (status) => clsx(
+        'px-4 py-4 text-sm font-semibold text-foreground font-mono border-r border-primary/20 border-l-4',
+        status === 'sẵn sàng' && 'border-l-emerald-400',
+        (status === 'đang sử dụng' || status === 'đã sử dụng' || status === 'thuộc khách hàng') && 'border-l-sky-400',
+        status === 'đang vận chuyển' && 'border-l-indigo-400',
+        (status === 'chờ nạp' || status === 'bình rỗng') && 'border-l-amber-400',
+        status === 'hỏng' && 'border-l-rose-400',
+        !status && 'border-l-transparent'
+    );
+
     return (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col -mt-2 min-h-0 px-3 md:px-6">
             <div className="flex items-center gap-1 mb-4 mt-6">
@@ -477,7 +575,7 @@ const Cylinders = () => {
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy kết quả phù hợp</div>
                         ) : (
                             filteredCylinders.map((cylinder, index) => (
-                                <div key={cylinder.id} className="rounded-2xl border border-border bg-white shadow-sm p-4">
+                                <div key={cylinder.id} className="rounded-2xl border border-primary/15 bg-white shadow-sm p-4">
                                     <div className="flex items-start justify-between gap-2 mb-2">
                                         <div>
                                             <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">#{index + 1}</p>
@@ -488,14 +586,18 @@ const Cylinders = () => {
                                         </span>
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-2 mb-3">
+                                    <div className="grid grid-cols-2 gap-2 mb-3 rounded-xl bg-muted/10 border border-border/60 p-2.5">
                                         <div>
                                             <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Loại bình</p>
-                                            <p className="text-[12px] text-foreground font-medium">{cylinder.volume || '—'}</p>
+                                            <p className="text-[12px] text-foreground font-medium">
+                                                <span className={getVolumeBadgeClass(cylinder.volume)}>{cylinder.volume || '—'}</span>
+                                            </p>
                                         </div>
                                         <div>
                                             <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Phân loại</p>
-                                            <p className="text-[12px] text-foreground font-medium">{cylinder.category || '—'}</p>
+                                            <p className="text-[12px] text-foreground font-medium">
+                                                <span className={getCategoryBadgeClass(cylinder.category)}>{cylinder.category || '—'}</span>
+                                            </p>
                                         </div>
                                         <div className="col-span-2">
                                             <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Khách hàng / Vị trí</p>
@@ -509,10 +611,10 @@ const Cylinders = () => {
                                             <span>{cylinder.warehouses?.name || '—'}</span>
                                         </div>
                                         <div className="flex items-center gap-3">
-                                            <button onClick={() => handleViewCylinder(cylinder)} className="text-muted-foreground hover:text-primary transition-colors"><Eye size={18} /></button>
-                                            <button onClick={() => handleEditCylinder(cylinder)} className="text-muted-foreground hover:text-primary transition-colors"><Edit size={18} /></button>
+                                            <button onClick={() => handleViewCylinder(cylinder)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg"><Eye size={16} /></button>
+                                            <button onClick={() => handleEditCylinder(cylinder)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
                                             {(role === 'admin' || role === 'manager') && (
-                                                <button onClick={() => handleDeleteCylinder(cylinder.id, cylinder.serial_number)} className="text-muted-foreground hover:text-red-500 transition-colors"><Trash2 size={18} /></button>
+                                                <button onClick={() => handleDeleteCylinder(cylinder.id, cylinder.serial_number)} className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg"><Trash2 size={16} /></button>
                                             )}
                                         </div>
                                     </div>
@@ -592,15 +694,13 @@ const Cylinders = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'status' || selectedStatuses.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)
                                     )}
                                 >
-                                    <Filter size={14} />
+                                    <Filter size={14} className={getFilterIconClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)} />
                                     Trạng thái
                                     {selectedStatuses.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('status'))}>
                                             {selectedStatuses.length}
                                         </span>
                                     )}
@@ -622,15 +722,13 @@ const Cylinders = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'volume' ? null : 'volume')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'volume' || selectedVolumes.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('volume', activeDropdown === 'volume' || selectedVolumes.length > 0)
                                     )}
                                 >
-                                    <ActivitySquare size={14} />
+                                    <ActivitySquare size={14} className={getFilterIconClass('volume', activeDropdown === 'volume' || selectedVolumes.length > 0)} />
                                     Thể tích
                                     {selectedVolumes.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('volume'))}>
                                             {selectedVolumes.length}
                                         </span>
                                     )}
@@ -652,15 +750,13 @@ const Cylinders = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'customers' ? null : 'customers')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'customers' || selectedCustomers.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)
                                     )}
                                 >
-                                    <User size={14} />
+                                    <User size={14} className={getFilterIconClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)} />
                                     Khách hàng
                                     {selectedCustomers.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('customers'))}>
                                             {selectedCustomers.length}
                                         </span>
                                     )}
@@ -682,15 +778,13 @@ const Cylinders = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'warehouses' ? null : 'warehouses')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'warehouses' || selectedWarehouses.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)
                                     )}
                                 >
-                                    <Warehouse size={14} />
+                                    <Warehouse size={14} className={getFilterIconClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)} />
                                     Kho
                                     {selectedWarehouses.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('warehouses'))}>
                                             {selectedWarehouses.length}
                                         </span>
                                     )}
@@ -712,15 +806,13 @@ const Cylinders = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'categories' ? null : 'categories')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'categories' || selectedCategories.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('categories', activeDropdown === 'categories' || selectedCategories.length > 0)
                                     )}
                                 >
-                                    <ActivitySquare size={14} />
+                                    <ActivitySquare size={14} className={getFilterIconClass('categories', activeDropdown === 'categories' || selectedCategories.length > 0)} />
                                     Phân loại
                                     {selectedCategories.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('categories'))}>
                                             {selectedCategories.length}
                                         </span>
                                     )}
@@ -749,19 +841,25 @@ const Cylinders = () => {
                         </div>
                     </div>
 
-                    <div className="hidden md:block flex-1 overflow-x-auto border-t border-border">
+                    <div className="hidden md:block flex-1 overflow-x-auto bg-white">
                         <table className="w-full border-collapse">
-                            <thead className="bg-muted/20">
+                            <thead className="bg-primary/5">
                                 <tr>
                                     {visibleTableColumns.map(col => (
-                                        <th key={col.key} className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide">
+                                        <th
+                                            key={col.key}
+                                            className={clsx(
+                                                'px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide',
+                                                col.key === 'serial_number' && 'border-l border-r border-primary/30'
+                                            )}
+                                        >
                                             {col.label}
                                         </th>
                                     ))}
-                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide">Thao tác</th>
+                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide border-l border-r border-primary/30">Thao tác</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-border">
+                            <tbody className="divide-y divide-primary/10">
                                 {isLoading ? (
                                     <tr>
                                         <td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center text-muted-foreground">
@@ -775,8 +873,8 @@ const Cylinders = () => {
                                         </td>
                                     </tr>
                                 ) : filteredCylinders.map((cylinder) => (
-                                    <tr key={cylinder.id} className="hover:bg-muted/20 transition-colors">
-                                        {isColumnVisible('serial_number') && <td className="px-4 py-4 text-sm font-semibold text-foreground font-mono">{cylinder.serial_number}</td>}
+                                    <tr key={cylinder.id} className={getRowStyle(cylinder.status)}>
+                                        {isColumnVisible('serial_number') && <td className={getSerialCellClass(cylinder.status)}>{cylinder.serial_number}</td>}
                                         {isColumnVisible('volume') && <td className="px-4 py-4 text-sm text-muted-foreground">{cylinder.volume || '—'}</td>}
                                         {isColumnVisible('customer_name') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{cylinder.customer_name || 'Vỏ bình tại kho'}</td>}
                                         {isColumnVisible('warehouse') && <td className="px-4 py-4 text-sm text-muted-foreground">{cylinder.warehouses?.name || '—'}</td>}
@@ -787,16 +885,16 @@ const Cylinders = () => {
                                                 </span>
                                             </td>
                                         )}
-                                        <td className="px-4 py-4 text-center">
+                                        <td className="px-4 py-4 text-center border-l border-r border-primary/20">
                                             <div className="flex items-center justify-center gap-3">
-                                                <button onClick={() => handleViewCylinder(cylinder)} className="text-muted-foreground hover:text-primary transition-colors p-1" title="Xem chi tiết">
+                                                <button onClick={() => handleViewCylinder(cylinder)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="Xem chi tiết">
                                                     <Eye className="w-4 h-4" />
                                                 </button>
-                                                <button onClick={() => handleEditCylinder(cylinder)} className="text-muted-foreground hover:text-primary transition-colors p-1" title="Chỉnh sửa">
+                                                <button onClick={() => handleEditCylinder(cylinder)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
                                                     <Edit className="w-4 h-4" />
                                                 </button>
                                                 {(role === 'admin' || role === 'manager') && (
-                                                    <button onClick={() => handleDeleteCylinder(cylinder.id, cylinder.serial_number)} className="text-muted-foreground hover:text-red-500 transition-colors p-1" title="Xóa">
+                                                    <button onClick={() => handleDeleteCylinder(cylinder.id, cylinder.serial_number)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>
                                                 )}
@@ -881,15 +979,13 @@ const Cylinders = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'status' || selectedStatuses.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)
                                         )}
                                     >
-                                        <Filter size={14} />
+                                        <Filter size={14} className={getFilterIconClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)} />
                                         Trạng thái
                                         {selectedStatuses.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('status'))}>
                                                 {selectedStatuses.length}
                                             </span>
                                         )}
@@ -911,15 +1007,13 @@ const Cylinders = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'volume' ? null : 'volume')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'volume' || selectedVolumes.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('volume', activeDropdown === 'volume' || selectedVolumes.length > 0)
                                         )}
                                     >
-                                        <ActivitySquare size={14} />
+                                        <ActivitySquare size={14} className={getFilterIconClass('volume', activeDropdown === 'volume' || selectedVolumes.length > 0)} />
                                         Thể tích
                                         {selectedVolumes.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('volume'))}>
                                                 {selectedVolumes.length}
                                             </span>
                                         )}
@@ -941,15 +1035,13 @@ const Cylinders = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'customers' ? null : 'customers')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'customers' || selectedCustomers.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)
                                         )}
                                     >
-                                        <User size={14} />
+                                        <User size={14} className={getFilterIconClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)} />
                                         Khách hàng
                                         {selectedCustomers.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('customers'))}>
                                                 {selectedCustomers.length}
                                             </span>
                                         )}
@@ -971,15 +1063,13 @@ const Cylinders = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'warehouses' ? null : 'warehouses')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'warehouses' || selectedWarehouses.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)
                                         )}
                                     >
-                                        <Warehouse size={14} />
+                                        <Warehouse size={14} className={getFilterIconClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)} />
                                         Kho
                                         {selectedWarehouses.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('warehouses'))}>
                                                 {selectedWarehouses.length}
                                             </span>
                                         )}
@@ -1001,15 +1091,13 @@ const Cylinders = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'categories' ? null : 'categories')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'categories' || selectedCategories.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('categories', activeDropdown === 'categories' || selectedCategories.length > 0)
                                         )}
                                     >
-                                        <ActivitySquare size={14} />
+                                        <ActivitySquare size={14} className={getFilterIconClass('categories', activeDropdown === 'categories' || selectedCategories.length > 0)} />
                                         Phân loại
                                         {selectedCategories.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('categories'))}>
                                                 {selectedCategories.length}
                                             </span>
                                         )}
@@ -1198,7 +1286,7 @@ const Cylinders = () => {
                         {
                             id: 'status',
                             label: 'Trạng thái',
-                            icon: <Filter size={16} />,
+                            icon: <Filter size={16} className="text-blue-600" />,
                             options: statusOptions,
                             selectedValues: pendingStatuses,
                             onSelectionChange: setPendingStatuses,
@@ -1206,7 +1294,7 @@ const Cylinders = () => {
                         {
                             id: 'volume',
                             label: 'Thể tích',
-                            icon: <ActivitySquare size={16} />,
+                            icon: <ActivitySquare size={16} className="text-violet-600" />,
                             options: volumeOptions,
                             selectedValues: pendingVolumes,
                             onSelectionChange: setPendingVolumes,
@@ -1214,7 +1302,7 @@ const Cylinders = () => {
                         {
                             id: 'customers',
                             label: 'Khách hàng',
-                            icon: <User size={16} />,
+                            icon: <User size={16} className="text-cyan-600" />,
                             options: customerOptions,
                             selectedValues: pendingCustomers,
                             onSelectionChange: setPendingCustomers,
@@ -1222,7 +1310,7 @@ const Cylinders = () => {
                         {
                             id: 'warehouses',
                             label: 'Kho',
-                            icon: <Warehouse size={16} />,
+                            icon: <Warehouse size={16} className="text-indigo-600" />,
                             options: warehouseOptions,
                             selectedValues: pendingWarehouses,
                             onSelectionChange: setPendingWarehouses,
@@ -1230,7 +1318,7 @@ const Cylinders = () => {
                         {
                             id: 'categories',
                             label: 'Phân loại',
-                            icon: <ActivitySquare size={16} />,
+                            icon: <ActivitySquare size={16} className="text-emerald-600" />,
                             options: categoryOptions,
                             selectedValues: pendingCategories,
                             onSelectionChange: setPendingCategories,

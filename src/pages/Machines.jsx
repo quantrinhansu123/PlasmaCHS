@@ -394,8 +394,9 @@ const Machines = () => {
     const getStatusBadgeClass = (status) => {
         switch (status) {
             case 'sẵn sàng':
-            case 'thuộc khách hàng':
                 return 'bg-emerald-50 text-emerald-600 border-emerald-100';
+            case 'thuộc khách hàng':
+                return 'bg-blue-50 text-blue-600 border-blue-100';
             case 'kiểm tra':
             case 'bảo trì':
                 return 'bg-amber-50 text-amber-600 border-amber-100';
@@ -406,9 +407,95 @@ const Machines = () => {
         }
     };
 
+    const getFilterButtonClass = (filterKey, isActive) => {
+        if (!isActive) {
+            return 'border-border bg-white text-muted-foreground hover:text-foreground';
+        }
+
+        switch (filterKey) {
+            case 'status':
+                return 'border-blue-200 bg-blue-50 text-blue-700';
+            case 'machineType':
+                return 'border-violet-200 bg-violet-50 text-violet-700';
+            case 'customers':
+                return 'border-cyan-200 bg-cyan-50 text-cyan-700';
+            case 'departments':
+                return 'border-amber-200 bg-amber-50 text-amber-700';
+            case 'warehouses':
+                return 'border-indigo-200 bg-indigo-50 text-indigo-700';
+            default:
+                return 'border-primary bg-primary/5 text-primary';
+        }
+    };
+
+    const getFilterCountBadgeClass = (filterKey) => {
+        switch (filterKey) {
+            case 'status':
+                return 'bg-blue-600 text-white';
+            case 'machineType':
+                return 'bg-violet-600 text-white';
+            case 'customers':
+                return 'bg-cyan-600 text-white';
+            case 'departments':
+                return 'bg-amber-600 text-white';
+            case 'warehouses':
+                return 'bg-indigo-600 text-white';
+            default:
+                return 'bg-primary text-white';
+        }
+    };
+
+    const getFilterIconClass = (filterKey, isActive) => {
+        switch (filterKey) {
+            case 'status':
+                return isActive ? 'text-blue-700' : 'text-blue-500';
+            case 'machineType':
+                return isActive ? 'text-violet-700' : 'text-violet-500';
+            case 'customers':
+                return isActive ? 'text-cyan-700' : 'text-cyan-500';
+            case 'departments':
+                return isActive ? 'text-amber-700' : 'text-amber-500';
+            case 'warehouses':
+                return isActive ? 'text-indigo-700' : 'text-indigo-500';
+            default:
+                return isActive ? 'text-primary' : 'text-primary/80';
+        }
+    };
+
+    const getMachineTypeBadgeClass = (machineTypeId) => clsx(
+        'inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold border',
+        machineTypeId && 'bg-violet-50 text-violet-700 border-violet-200',
+        !machineTypeId && 'bg-muted text-muted-foreground border-border'
+    );
+
+    const getRowStyle = (status) => {
+        switch (status) {
+            case 'sẵn sàng':
+                return 'hover:bg-emerald-50/60';
+            case 'thuộc khách hàng':
+                return 'hover:bg-blue-50/60';
+            case 'kiểm tra':
+            case 'bảo trì':
+                return 'hover:bg-amber-50/60';
+            case 'đang sửa':
+                return 'hover:bg-rose-50/60';
+            default:
+                return 'hover:bg-primary/5';
+        }
+    };
+
+    const getSerialCellClass = (status) => clsx(
+        'px-4 py-4 text-sm font-semibold text-foreground font-mono border-r border-primary/20 border-l-4',
+        status === 'sẵn sàng' && 'border-l-emerald-400',
+        status === 'thuộc khách hàng' && 'border-l-blue-400',
+        (status === 'kiểm tra' || status === 'bảo trì') && 'border-l-amber-400',
+        status === 'đang sửa' && 'border-l-rose-400',
+        !status && 'border-l-transparent'
+    );
+
     return (
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col -mt-2 min-h-0 px-3 md:px-6">
-            <div className="flex items-center gap-1 mb-4 mt-6">
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5">
+            <div className="flex items-center gap-1 mb-3 mt-1">
                 <button
                     onClick={() => setActiveView('list')}
                     className={clsx(
@@ -491,7 +578,7 @@ const Machines = () => {
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy kết quả phù hợp</div>
                         ) : (
                             filteredMachines.map((machine) => (
-                                <div key={machine.id} className="rounded-2xl border border-border bg-white shadow-sm p-4">
+                                <div key={machine.id} className="rounded-2xl border border-primary/15 bg-white shadow-sm p-4">
                                     <div className="flex items-start justify-between gap-2 mb-2">
                                         <div>
                                             <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Mã máy</p>
@@ -502,10 +589,12 @@ const Machines = () => {
                                         </span>
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-2 mb-3">
+                                    <div className="grid grid-cols-2 gap-2 mb-3 rounded-xl bg-muted/10 border border-border/60 p-2.5">
                                         <div>
                                             <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Loại máy</p>
-                                            <p className="text-[12px] text-foreground font-medium">{getLabel(MACHINE_TYPES, machine.machine_type)}</p>
+                                            <p className="text-[12px] text-foreground font-medium">
+                                                <span className={getMachineTypeBadgeClass(machine.machine_type)}>{getLabel(MACHINE_TYPES, machine.machine_type)}</span>
+                                            </p>
                                         </div>
                                         <div>
                                             <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Bộ phận</p>
@@ -523,10 +612,10 @@ const Machines = () => {
                                             <span>{getWarehouseLabel(machine.warehouse)}</span>
                                         </div>
                                         <div className="flex items-center gap-3">
-                                            <button onClick={() => handleViewMachine(machine)} className="text-muted-foreground hover:text-primary transition-colors"><Eye size={18} /></button>
-                                            <button onClick={() => handleEditMachine(machine)} className="text-muted-foreground hover:text-primary transition-colors"><Edit size={18} /></button>
+                                            <button onClick={() => handleViewMachine(machine)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg"><Eye size={16} /></button>
+                                            <button onClick={() => handleEditMachine(machine)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
                                             {(role === 'admin' || role === 'manager') && (
-                                                <button onClick={() => handleDeleteMachine(machine.id, machine.serial_number)} className="text-muted-foreground hover:text-red-500 transition-colors"><Trash2 size={18} /></button>
+                                                <button onClick={() => handleDeleteMachine(machine.id, machine.serial_number)} className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg"><Trash2 size={16} /></button>
                                             )}
                                         </div>
                                     </div>
@@ -606,15 +695,13 @@ const Machines = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'status' || selectedStatuses.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)
                                     )}
                                 >
-                                    <Filter size={14} />
+                                    <Filter size={14} className={getFilterIconClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)} />
                                     Trạng thái
                                     {selectedStatuses.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('status'))}>
                                             {selectedStatuses.length}
                                         </span>
                                     )}
@@ -636,15 +723,13 @@ const Machines = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'machineType' ? null : 'machineType')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'machineType' || selectedMachineTypes.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('machineType', activeDropdown === 'machineType' || selectedMachineTypes.length > 0)
                                     )}
                                 >
-                                    <Wrench size={14} />
+                                    <Wrench size={14} className={getFilterIconClass('machineType', activeDropdown === 'machineType' || selectedMachineTypes.length > 0)} />
                                     Loại máy
                                     {selectedMachineTypes.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('machineType'))}>
                                             {selectedMachineTypes.length}
                                         </span>
                                     )}
@@ -666,15 +751,13 @@ const Machines = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'customers' ? null : 'customers')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'customers' || selectedCustomers.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)
                                     )}
                                 >
-                                    <User size={14} />
+                                    <User size={14} className={getFilterIconClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)} />
                                     Khách hàng
                                     {selectedCustomers.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('customers'))}>
                                             {selectedCustomers.length}
                                         </span>
                                     )}
@@ -696,15 +779,13 @@ const Machines = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'departments' ? null : 'departments')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'departments' || selectedDepartments.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('departments', activeDropdown === 'departments' || selectedDepartments.length > 0)
                                     )}
                                 >
-                                    <Activity size={14} />
+                                    <Activity size={14} className={getFilterIconClass('departments', activeDropdown === 'departments' || selectedDepartments.length > 0)} />
                                     Bộ phận
                                     {selectedDepartments.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('departments'))}>
                                             {selectedDepartments.length}
                                         </span>
                                     )}
@@ -726,15 +807,13 @@ const Machines = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'warehouses' ? null : 'warehouses')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'warehouses' || selectedWarehouses.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)
                                     )}
                                 >
-                                    <Warehouse size={14} />
+                                    <Warehouse size={14} className={getFilterIconClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)} />
                                     Kho
                                     {selectedWarehouses.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('warehouses'))}>
                                             {selectedWarehouses.length}
                                         </span>
                                     )}
@@ -763,19 +842,25 @@ const Machines = () => {
                         </div>
                     </div>
 
-                    <div className="hidden md:block flex-1 overflow-x-auto border-t border-border">
+                    <div className="hidden md:block flex-1 overflow-x-auto bg-white">
                         <table className="w-full border-collapse">
-                            <thead className="bg-muted/20">
+                            <thead className="bg-primary/5">
                                 <tr>
                                     {visibleTableColumns.map(col => (
-                                        <th key={col.key} className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide">
+                                        <th
+                                            key={col.key}
+                                            className={clsx(
+                                                'px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide',
+                                                col.key === 'serial_number' && 'border-l border-r border-primary/30'
+                                            )}
+                                        >
                                             {col.label}
                                         </th>
                                     ))}
-                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide">Thao tác</th>
+                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide border-l border-r border-primary/30">Thao tác</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-border">
+                            <tbody className="divide-y divide-primary/10">
                                 {isLoading ? (
                                     <tr>
                                         <td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center text-muted-foreground">
@@ -789,8 +874,8 @@ const Machines = () => {
                                         </td>
                                     </tr>
                                 ) : filteredMachines.map((machine) => (
-                                    <tr key={machine.id} className="hover:bg-muted/20 transition-colors">
-                                        {isColumnVisible('serial_number') && <td className="px-4 py-4 text-sm font-semibold text-foreground font-mono">{machine.serial_number}</td>}
+                                    <tr key={machine.id} className={getRowStyle(machine.status)}>
+                                        {isColumnVisible('serial_number') && <td className={getSerialCellClass(machine.status)}>{machine.serial_number}</td>}
                                         {isColumnVisible('machine_type') && <td className="px-4 py-4 text-sm text-muted-foreground">{getLabel(MACHINE_TYPES, machine.machine_type)}</td>}
                                         {isColumnVisible('warehouse') && <td className="px-4 py-4 text-sm text-muted-foreground">{getWarehouseLabel(machine.warehouse)}</td>}
                                         {isColumnVisible('customer_name') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{machine.customer_name || 'Sẵn sàng xuất kho'}</td>}
@@ -802,16 +887,16 @@ const Machines = () => {
                                             </td>
                                         )}
                                         {isColumnVisible('department_in_charge') && <td className="px-4 py-4 text-sm text-muted-foreground">{machine.department_in_charge || '—'}</td>}
-                                        <td className="px-4 py-4 text-center">
+                                        <td className="px-4 py-4 text-center border-l border-r border-primary/20">
                                             <div className="flex items-center justify-center gap-3">
-                                                <button onClick={() => handleViewMachine(machine)} className="text-muted-foreground hover:text-primary transition-colors p-1" title="Xem chi tiết">
+                                                <button onClick={() => handleViewMachine(machine)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="Xem chi tiết">
                                                     <Eye className="w-4 h-4" />
                                                 </button>
-                                                <button onClick={() => handleEditMachine(machine)} className="text-muted-foreground hover:text-primary transition-colors p-1" title="Chỉnh sửa">
+                                                <button onClick={() => handleEditMachine(machine)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
                                                     <Edit className="w-4 h-4" />
                                                 </button>
                                                 {(role === 'admin' || role === 'manager') && (
-                                                    <button onClick={() => handleDeleteMachine(machine.id, machine.serial_number)} className="text-muted-foreground hover:text-red-500 transition-colors p-1" title="Xóa">
+                                                    <button onClick={() => handleDeleteMachine(machine.id, machine.serial_number)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>
                                                 )}
@@ -896,15 +981,13 @@ const Machines = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'status' || selectedStatuses.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)
                                         )}
                                     >
-                                        <Filter size={14} />
+                                        <Filter size={14} className={getFilterIconClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)} />
                                         Trạng thái
                                         {selectedStatuses.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('status'))}>
                                                 {selectedStatuses.length}
                                             </span>
                                         )}
@@ -926,15 +1009,13 @@ const Machines = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'machineType' ? null : 'machineType')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'machineType' || selectedMachineTypes.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('machineType', activeDropdown === 'machineType' || selectedMachineTypes.length > 0)
                                         )}
                                     >
-                                        <Wrench size={14} />
+                                        <Wrench size={14} className={getFilterIconClass('machineType', activeDropdown === 'machineType' || selectedMachineTypes.length > 0)} />
                                         Loại máy
                                         {selectedMachineTypes.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('machineType'))}>
                                                 {selectedMachineTypes.length}
                                             </span>
                                         )}
@@ -956,15 +1037,13 @@ const Machines = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'customers' ? null : 'customers')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'customers' || selectedCustomers.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)
                                         )}
                                     >
-                                        <User size={14} />
+                                        <User size={14} className={getFilterIconClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)} />
                                         Khách hàng
                                         {selectedCustomers.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('customers'))}>
                                                 {selectedCustomers.length}
                                             </span>
                                         )}
@@ -986,15 +1065,13 @@ const Machines = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'departments' ? null : 'departments')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'departments' || selectedDepartments.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('departments', activeDropdown === 'departments' || selectedDepartments.length > 0)
                                         )}
                                     >
-                                        <Activity size={14} />
+                                        <Activity size={14} className={getFilterIconClass('departments', activeDropdown === 'departments' || selectedDepartments.length > 0)} />
                                         Bộ phận
                                         {selectedDepartments.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('departments'))}>
                                                 {selectedDepartments.length}
                                             </span>
                                         )}
@@ -1016,15 +1093,13 @@ const Machines = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'warehouses' ? null : 'warehouses')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'warehouses' || selectedWarehouses.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)
                                         )}
                                     >
-                                        <Warehouse size={14} />
+                                        <Warehouse size={14} className={getFilterIconClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)} />
                                         Kho
                                         {selectedWarehouses.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('warehouses'))}>
                                                 {selectedWarehouses.length}
                                             </span>
                                         )}
@@ -1214,7 +1289,7 @@ const Machines = () => {
                         {
                             id: 'status',
                             label: 'Trạng thái',
-                            icon: <Filter size={16} />,
+                            icon: <Filter size={16} className="text-blue-600" />,
                             options: statusOptions,
                             selectedValues: pendingStatuses,
                             onSelectionChange: setPendingStatuses,
@@ -1222,7 +1297,7 @@ const Machines = () => {
                         {
                             id: 'machineType',
                             label: 'Loại máy',
-                            icon: <Wrench size={16} />,
+                            icon: <Wrench size={16} className="text-violet-600" />,
                             options: machineTypeOptions,
                             selectedValues: pendingMachineTypes,
                             onSelectionChange: setPendingMachineTypes,
@@ -1230,7 +1305,7 @@ const Machines = () => {
                         {
                             id: 'customers',
                             label: 'Khách hàng',
-                            icon: <User size={16} />,
+                            icon: <User size={16} className="text-cyan-600" />,
                             options: customerOptions,
                             selectedValues: pendingCustomers,
                             onSelectionChange: setPendingCustomers,
@@ -1238,7 +1313,7 @@ const Machines = () => {
                         {
                             id: 'departments',
                             label: 'Bộ phận',
-                            icon: <Activity size={16} />,
+                            icon: <Activity size={16} className="text-amber-600" />,
                             options: departmentOptions,
                             selectedValues: pendingDepartments,
                             onSelectionChange: setPendingDepartments,
@@ -1246,7 +1321,7 @@ const Machines = () => {
                         {
                             id: 'warehouses',
                             label: 'Kho',
-                            icon: <Warehouse size={16} />,
+                            icon: <Warehouse size={16} className="text-indigo-600" />,
                             options: warehouseOptions,
                             selectedValues: pendingWarehouses,
                             onSelectionChange: setPendingWarehouses,

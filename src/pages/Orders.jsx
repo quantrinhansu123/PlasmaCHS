@@ -288,6 +288,91 @@ const Orders = () => {
         return ORDER_STATUSES.find(s => s.id === statusId) || ORDER_STATUSES[0];
     };
 
+    const getStatusBadgeClass = (statusColor) => clsx(
+        'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold',
+        statusColor === 'blue' && 'bg-blue-100 text-blue-700',
+        statusColor === 'yellow' && 'bg-amber-100 text-amber-700',
+        statusColor === 'orange' && 'bg-orange-100 text-orange-700',
+        statusColor === 'green' && 'bg-emerald-100 text-emerald-700',
+        statusColor === 'red' && 'bg-red-100 text-red-700',
+        statusColor === 'gray' && 'bg-muted text-muted-foreground',
+        !statusColor && 'bg-muted text-muted-foreground'
+    );
+
+    const getFilterButtonClass = (filterKey, isActive) => {
+        if (!isActive) {
+            return 'border-border bg-white text-muted-foreground hover:text-foreground';
+        }
+
+        switch (filterKey) {
+            case 'status':
+                return 'border-blue-200 bg-blue-50 text-blue-700';
+            case 'categories':
+                return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+            case 'orderTypes':
+                return 'border-violet-200 bg-violet-50 text-violet-700';
+            case 'productTypes':
+                return 'border-amber-200 bg-amber-50 text-amber-700';
+            case 'customers':
+                return 'border-cyan-200 bg-cyan-50 text-cyan-700';
+            default:
+                return 'border-primary bg-primary/5 text-primary';
+        }
+    };
+
+    const getFilterCountBadgeClass = (filterKey) => {
+        switch (filterKey) {
+            case 'status':
+                return 'bg-blue-600 text-white';
+            case 'categories':
+                return 'bg-emerald-600 text-white';
+            case 'orderTypes':
+                return 'bg-violet-600 text-white';
+            case 'productTypes':
+                return 'bg-amber-600 text-white';
+            case 'customers':
+                return 'bg-cyan-600 text-white';
+            default:
+                return 'bg-primary text-white';
+        }
+    };
+
+    const getFilterIconClass = (filterKey, isActive) => {
+        switch (filterKey) {
+            case 'status':
+                return isActive ? 'text-blue-700' : 'text-blue-500';
+            case 'categories':
+                return isActive ? 'text-emerald-700' : 'text-emerald-500';
+            case 'orderTypes':
+                return isActive ? 'text-violet-700' : 'text-violet-500';
+            case 'productTypes':
+                return isActive ? 'text-amber-700' : 'text-amber-500';
+            case 'customers':
+                return isActive ? 'text-cyan-700' : 'text-cyan-500';
+            default:
+                return isActive ? 'text-primary' : 'text-primary/80';
+        }
+    };
+
+    const getCategoryBadgeClass = (categoryId) => clsx(
+        'inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border',
+        categoryId === 'KH_SI' && 'bg-indigo-50 text-indigo-700 border-indigo-200',
+        categoryId === 'KH_LE' && 'bg-emerald-50 text-emerald-700 border-emerald-200',
+        !categoryId && 'bg-muted text-muted-foreground border-border'
+    );
+
+    const getOrderTypeBadgeClass = (orderTypeId) => clsx(
+        'inline-flex items-center text-[11px] font-semibold',
+        orderTypeId && 'text-foreground',
+        !orderTypeId && 'text-muted-foreground'
+    );
+
+    const getProductTypeBadgeClass = (productTypeId) => clsx(
+        'inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold border',
+        productTypeId?.startsWith('MAY') && 'bg-amber-50 text-amber-700 border-amber-200',
+        (!productTypeId || !productTypeId.startsWith('MAY')) && 'bg-blue-50 text-blue-700 border-blue-200'
+    );
+
     const getLabel = (list, id) => {
         const matched = list.find(item => item.id === id);
         return matched?.label || matched?.name || id;
@@ -406,13 +491,13 @@ const Orders = () => {
     };
 
     const getRowStyle = (category, isSelected) => {
-        let baseStyle = "group hover-lift transition-all duration-300 border-l-4 ";
-        if (isSelected) baseStyle += "bg-blue-50/40 border-l-blue-600 ";
+        let baseStyle = "group border-l-4 ";
+        if (isSelected) baseStyle += "bg-blue-50/40 border-l-blue-500 ";
         else {
             switch (category) {
-                case 'KH_SI': baseStyle += "border-l-indigo-500 hover:bg-indigo-50/10 "; break;
-                case 'KH_LE': baseStyle += "border-l-emerald-500 hover:bg-emerald-50/10 "; break;
-                default: baseStyle += "border-l-transparent hover:bg-blue-50/5 ";
+                case 'KH_SI': baseStyle += "border-l-indigo-400 hover:bg-indigo-50/70 "; break;
+                case 'KH_LE': baseStyle += "border-l-emerald-400 hover:bg-emerald-50/70 "; break;
+                default: baseStyle += "border-l-transparent hover:bg-blue-50/60 ";
             }
         }
         return baseStyle;
@@ -484,9 +569,9 @@ const Orders = () => {
     ];
 
     return (
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col -mt-2 min-h-0 px-3 md:px-6">
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5">
             {/* Top Sidebar Style Tabs */}
-            <div className="flex items-center gap-1 mb-4 mt-6">
+            <div className="flex items-center gap-1 mb-3 mt-1">
                 <button
                     onClick={() => setActiveView('list')}
                     className={clsx(
@@ -552,8 +637,11 @@ const Orders = () => {
                             </span>
                         )}
                     </button>
-                    <button
-                        onClick={() => navigate('/tao-don-hang')}
+                        <button
+                            onClick={() => {
+                                setOrderToEdit(null);
+                                setIsFormModalOpen(true);
+                            }}
                         className="p-2 rounded-xl bg-primary text-white shrink-0 shadow-md shadow-primary/20"
                     >
                         <Plus size={18} />
@@ -570,7 +658,7 @@ const Orders = () => {
                         filteredOrders.map((order) => {
                             const status = getStatusConfig(order.status);
                             return (
-                                <div key={order.id} className="bg-white border border-border rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow">
+                                <div key={order.id} className="bg-white border border-primary/15 rounded-2xl p-4 shadow-sm">
                                     <div className="flex justify-between items-start mb-3">
                                         <div className="flex items-center gap-2">
                                             <input
@@ -581,18 +669,7 @@ const Orders = () => {
                                             />
                                             <span className="text-[13px] font-bold text-foreground">{order.order_code}</span>
                                         </div>
-                                        <span
-                                            className={clsx(
-                                                "px-2 py-1 rounded-full text-[10px] font-bold uppercase",
-                                                status.color === 'blue' && "bg-blue-100 text-blue-700",
-                                                status.color === 'yellow' && "bg-yellow-100 text-yellow-700",
-                                                status.color === 'orange' && "bg-orange-100 text-orange-700",
-                                                status.color === 'green' && "bg-green-100 text-green-700",
-                                                status.color === 'red' && "bg-red-100 text-red-700",
-                                                status.color === 'gray' && "bg-gray-100 text-gray-700",
-                                                !status.color && "bg-gray-100 text-gray-700"
-                                            )}
-                                        >
+                                        <span className={clsx(getStatusBadgeClass(status.color), 'text-[10px] uppercase')}>
                                             {status.label}
                                         </span>
                                     </div>
@@ -600,16 +677,16 @@ const Orders = () => {
                                     <div className="mb-3">
                                         <h3 className="text-[14px] font-bold text-foreground leading-snug">{order.customer_name}</h3>
                                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
-                                            <span className="text-[11px] font-bold text-muted-foreground uppercase">{getLabel(CUSTOMER_CATEGORIES, order.customer_category)}</span>
+                                            <span className={getCategoryBadgeClass(order.customer_category)}>{getLabel(CUSTOMER_CATEGORIES, order.customer_category)}</span>
                                             <span className="text-[11px] font-medium text-muted-foreground">{order.created_at ? new Date(order.created_at).toLocaleDateString('vi-VN') : '---'}</span>
                                         </div>
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-y-2 text-xs mb-3">
+                                    <div className="grid grid-cols-2 gap-y-2 text-xs mb-3 bg-muted/10 rounded-xl p-2.5 border border-border/60">
                                         <div className="space-y-1">
                                             <p className="text-muted-foreground font-medium flex items-center gap-1.5">
-                                                <Package className="w-3.5 h-3.5 text-primary" />
-                                                {getLabel(PRODUCT_TYPES, order.product_type)}
+                                                <Package className="w-3.5 h-3.5 text-blue-600" />
+                                                <span className={getProductTypeBadgeClass(order.product_type)}>{getLabel(PRODUCT_TYPES, order.product_type)}</span>
                                             </p>
                                             <p className="text-foreground font-bold ml-5">SL: {formatNumber(order.quantity)}</p>
                                         </div>
@@ -620,13 +697,16 @@ const Orders = () => {
                                             </p>
                                             <p className="text-muted-foreground font-medium flex items-center gap-1.5">
                                                 <Filter className="w-3.5 h-3.5 text-muted-foreground" />
-                                                Loại: {getLabel(ORDER_TYPES, order.order_type)}
+                                                <span className="flex items-center gap-1">
+                                                    <span className="text-muted-foreground">Loại:</span>
+                                                    <span className={getOrderTypeBadgeClass(order.order_type)}>{getLabel(ORDER_TYPES, order.order_type)}</span>
+                                                </span>
                                             </p>
                                         </div>
                                     </div>
 
                                     {(order.recipient_name || order.recipient_phone) && (
-                                        <div className="bg-muted/20 rounded-lg p-2.5 space-y-1 border border-border mb-3">
+                                        <div className="bg-cyan-50/30 rounded-lg p-2.5 space-y-1 border border-cyan-100 mb-3">
                                             <p className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1">Người nhận</p>
                                             <div className="flex items-center justify-between">
                                                 <div className="flex items-center gap-2">
@@ -651,20 +731,20 @@ const Orders = () => {
                                         <div className="flex items-center gap-2">
                                             <button
                                                 onClick={() => { setSelectedOrder(order); setIsActionModalOpen(true); }}
-                                                className="p-2 text-muted-foreground hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                                                className="p-2 text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg"
                                                 title="Thao tác đơn hàng"
                                             >
                                                 <Package className="w-4 h-4" />
                                             </button>
                                             <button
                                                 onClick={() => handlePrint(order)}
-                                                className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                                                className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg"
                                             >
                                                 <Printer className="w-4 h-4" />
                                             </button>
                                             <button
                                                 onClick={() => handleEditOrder(order)}
-                                                className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                                                className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"
                                             >
                                                 <Edit className="w-4 h-4" />
                                             </button>
@@ -703,7 +783,7 @@ const Orders = () => {
                 </div>
 
                 {/* ── DESKTOP TOOLBAR ── */}
-                <div className="hidden md:block p-4 space-y-4">
+                <div className="hidden md:block p-3 space-y-3">
                     <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-2 flex-1">
                             <button
@@ -764,7 +844,10 @@ const Orders = () => {
                                 )}
                             </div>
                             <button
-                                onClick={() => navigate('/tao-don-hang')}
+                                onClick={() => {
+                                    setOrderToEdit(null);
+                                    navigate('/tao-don-hang');
+                                }}
                                 className="flex items-center gap-2 px-6 py-1.5 rounded-xl bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all"
                             >
                                 <Plus size={18} />
@@ -780,15 +863,13 @@ const Orders = () => {
                                 onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
                                 className={clsx(
                                     "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
-                                    activeDropdown === 'status' || selectedStatuses.length > 0
-                                        ? "border-primary bg-primary/5 text-primary"
-                                        : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                    getFilterButtonClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)
                                 )}
                             >
-                                <Filter size={14} />
+                                <Filter size={14} className={getFilterIconClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)} />
                                 Trạng thái
                                 {selectedStatuses.length > 0 && (
-                                    <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                    <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('status'))}>
                                         {selectedStatuses.length}
                                     </span>
                                 )}
@@ -810,15 +891,13 @@ const Orders = () => {
                                 onClick={() => setActiveDropdown(activeDropdown === 'categories' ? null : 'categories')}
                                 className={clsx(
                                     "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
-                                    activeDropdown === 'categories' || selectedCustomerCategories.length > 0
-                                        ? "border-primary bg-primary/5 text-primary"
-                                        : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                    getFilterButtonClass('categories', activeDropdown === 'categories' || selectedCustomerCategories.length > 0)
                                 )}
                             >
-                                <User size={14} />
+                                <User size={14} className={getFilterIconClass('categories', activeDropdown === 'categories' || selectedCustomerCategories.length > 0)} />
                                 Loại khách
                                 {selectedCustomerCategories.length > 0 && (
-                                    <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                    <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('categories'))}>
                                         {selectedCustomerCategories.length}
                                     </span>
                                 )}
@@ -840,15 +919,13 @@ const Orders = () => {
                                 onClick={() => setActiveDropdown(activeDropdown === 'orderTypes' ? null : 'orderTypes')}
                                 className={clsx(
                                     "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
-                                    activeDropdown === 'orderTypes' || selectedOrderTypes.length > 0
-                                        ? "border-primary bg-primary/5 text-primary"
-                                        : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                    getFilterButtonClass('orderTypes', activeDropdown === 'orderTypes' || selectedOrderTypes.length > 0)
                                 )}
                             >
-                                <Package size={14} />
+                                <Package size={14} className={getFilterIconClass('orderTypes', activeDropdown === 'orderTypes' || selectedOrderTypes.length > 0)} />
                                 Loại đơn
                                 {selectedOrderTypes.length > 0 && (
-                                    <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                    <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('orderTypes'))}>
                                         {selectedOrderTypes.length}
                                     </span>
                                 )}
@@ -870,15 +947,13 @@ const Orders = () => {
                                 onClick={() => setActiveDropdown(activeDropdown === 'productTypes' ? null : 'productTypes')}
                                 className={clsx(
                                     "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
-                                    activeDropdown === 'productTypes' || selectedProductTypes.length > 0
-                                        ? "border-primary bg-primary/5 text-primary"
-                                        : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                    getFilterButtonClass('productTypes', activeDropdown === 'productTypes' || selectedProductTypes.length > 0)
                                 )}
                             >
-                                <Package size={14} />
+                                <Package size={14} className={getFilterIconClass('productTypes', activeDropdown === 'productTypes' || selectedProductTypes.length > 0)} />
                                 Hàng hóa
                                 {selectedProductTypes.length > 0 && (
-                                    <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                    <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('productTypes'))}>
                                         {selectedProductTypes.length}
                                     </span>
                                 )}
@@ -900,15 +975,13 @@ const Orders = () => {
                                 onClick={() => setActiveDropdown(activeDropdown === 'customers' ? null : 'customers')}
                                 className={clsx(
                                     "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
-                                    activeDropdown === 'customers' || selectedCustomers.length > 0
-                                        ? "border-primary bg-primary/5 text-primary"
-                                        : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                    getFilterButtonClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)
                                 )}
                             >
-                                <User size={14} />
+                                <User size={14} className={getFilterIconClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)} />
                                 Khách hàng
                                 {selectedCustomers.length > 0 && (
-                                    <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                    <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('customers'))}>
                                         {selectedCustomers.length}
                                     </span>
                                 )}
@@ -944,9 +1017,9 @@ const Orders = () => {
                 </div>
 
                 {/* Table Content Area */}
-                <div className="hidden md:block flex-1 overflow-x-auto border-t border-border">
+                <div className="hidden md:block flex-1 overflow-x-auto bg-white">
                     <table className="w-full border-collapse">
-                        <thead className="bg-muted/20">
+                        <thead className="bg-primary/5">
                             <tr>
                                 <th className="px-4 py-3.5 w-10">
                                     <div className="flex items-center justify-center">
@@ -959,14 +1032,20 @@ const Orders = () => {
                                     </div>
                                 </th>
                                 {visibleTableColumns.map(col => (
-                                    <th key={col.key} className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide">
+                                    <th
+                                        key={col.key}
+                                        className={clsx(
+                                            "px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide",
+                                            col.key === 'code' && 'border-l border-r border-primary/10'
+                                        )}
+                                    >
                                         {col.label}
                                     </th>
                                 ))}
-                                <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide">Thao tác</th>
+                                <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide border-l border-r border-primary/10">Thao tác</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-border">
+                        <tbody className="divide-y divide-primary/10">
                             {isLoading ? (
                                 <tr>
                                     <td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center text-muted-foreground">
@@ -982,7 +1061,7 @@ const Orders = () => {
                             ) : filteredOrders.map((order) => {
                                 const status = getStatusConfig(order.status);
                                 return (
-                                    <tr key={order.id} className="hover:bg-muted/10 transition-colors">
+                                    <tr key={order.id} className={getRowStyle(order.customer_category, selectedIds.includes(order.id))}>
                                         <td className="px-4 py-4">
                                             <div className="flex items-center justify-center">
                                                 <input
@@ -993,20 +1072,32 @@ const Orders = () => {
                                                 />
                                             </div>
                                         </td>
-                                        {isColumnVisible('code') && <td className="px-4 py-4 whitespace-nowrap">
+                                        {isColumnVisible('code') && <td className="px-4 py-4 whitespace-nowrap border-l border-r border-primary/10">
                                             <span className="text-[13px] font-medium text-foreground">
                                                 {order.order_code}
                                             </span>
                                         </td>}
-                                        {isColumnVisible('category') && <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">{getLabel(CUSTOMER_CATEGORIES, order.customer_category)}</td>}
+                                        {isColumnVisible('category') && <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">
+                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold">
+                                                {getLabel(CUSTOMER_CATEGORIES, order.customer_category)}
+                                            </span>
+                                        </td>}
                                         {isColumnVisible('customer') && <td className="px-4 py-4">
                                             <span className="text-[13px] font-medium text-foreground">{order.customer_name}</span>
                                         </td>}
                                         {isColumnVisible('recipient') && <td className="px-4 py-4">
                                             <span className="text-[13px] text-muted-foreground font-normal">{order.recipient_name}</span>
                                         </td>}
-                                        {isColumnVisible('type') && <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">{getLabel(ORDER_TYPES, order.order_type)}</td>}
-                                        {isColumnVisible('product') && <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">{getLabel(PRODUCT_TYPES, order.product_type)}</td>}
+                                        {isColumnVisible('type') && <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">
+                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-200 text-xs font-semibold">
+                                                {getLabel(ORDER_TYPES, order.order_type)}
+                                            </span>
+                                        </td>}
+                                        {isColumnVisible('product') && <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">
+                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-xs font-semibold">
+                                                {getLabel(PRODUCT_TYPES, order.product_type)}
+                                            </span>
+                                        </td>}
                                         {isColumnVisible('quantity') && <td className="px-4 py-4">
                                             <span className="text-[13px] font-semibold text-foreground">{formatNumber(order.quantity)}</span>
                                         </td>}
@@ -1035,50 +1126,39 @@ const Orders = () => {
                                             )}
                                         </td>}
                                         {isColumnVisible('status') && <td className="px-4 py-4">
-                                            <span
-                                                className={clsx(
-                                                    "inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium",
-                                                    status.color === 'blue' && "bg-blue-100 text-blue-700",
-                                                    status.color === 'yellow' && "bg-yellow-100 text-yellow-700",
-                                                    status.color === 'orange' && "bg-orange-100 text-orange-700",
-                                                    status.color === 'green' && "bg-green-100 text-green-700",
-                                                    status.color === 'red' && "bg-red-100 text-red-700",
-                                                    status.color === 'gray' && "bg-gray-100 text-gray-700",
-                                                    !status.color && "bg-gray-100 text-gray-700"
-                                                )}
-                                            >
+                                            <span className={getStatusBadgeClass(status.color)}>
                                                 {status.label}
                                             </span>
                                         </td>}
                                         {isColumnVisible('date') && <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">
                                             {order.created_at ? new Date(order.created_at).toLocaleDateString('vi-VN') : '---'}
                                         </td>}
-                                        <td className="px-4 py-4 text-center">
+                                        <td className="px-4 py-4 text-center border-l border-r border-primary/10">
                                             <div className="flex items-center justify-center gap-3">
                                                 <button
                                                     onClick={() => { setSelectedOrder(order); setIsActionModalOpen(true); }}
-                                                    className="text-muted-foreground hover:text-green-600 transition-colors p-1 rounded hover:bg-green-50"
+                                                    className="text-emerald-600/80 hover:text-emerald-700 transition-colors p-1 rounded hover:bg-emerald-50"
                                                     title="Thao tác đơn hàng"
                                                 >
                                                     <Package className="w-4 h-4" />
                                                 </button>
                                                 <button
                                                     onClick={() => handlePrint(order)}
-                                                    className="text-muted-foreground hover:text-primary transition-colors p-1 rounded hover:bg-primary/10"
+                                                    className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50"
                                                     title={order.product_type?.startsWith('MAY') ? 'In phiếu xuất kho + biên bản bàn giao máy' : 'In phiếu xuất kho'}
                                                 >
                                                     <Printer className="w-4 h-4" />
                                                 </button>
                                                 <button
                                                     onClick={() => handleEditOrder(order)}
-                                                    className="text-muted-foreground hover:text-primary transition-colors p-1 rounded hover:bg-primary/10"
+                                                    className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50"
                                                     title="Chỉnh sửa"
                                                 >
                                                     <Edit className="w-4 h-4" />
                                                 </button>
                                                 <button
                                                     onClick={() => handleDeleteOrder(order.id, order.order_code)}
-                                                    className="text-muted-foreground hover:text-red-600 transition-colors p-1 rounded hover:bg-red-50"
+                                                    className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50"
                                                     title="Xóa"
                                                 >
                                                     <Trash2 className="w-4 h-4" />
@@ -1166,15 +1246,13 @@ const Orders = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
                                         className={clsx(
                                             "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
-                                            activeDropdown === 'status' || selectedStatuses.length > 0
-                                                ? "border-primary bg-primary/5 text-primary"
-                                                : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                            getFilterButtonClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)
                                         )}
                                     >
-                                        <Filter size={14} />
+                                        <Filter size={14} className={getFilterIconClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)} />
                                         Trạng thái
                                         {selectedStatuses.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('status'))}>
                                                 {selectedStatuses.length}
                                             </span>
                                         )}
@@ -1196,15 +1274,13 @@ const Orders = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'categories' ? null : 'categories')}
                                         className={clsx(
                                             "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
-                                            activeDropdown === 'categories' || selectedCustomerCategories.length > 0
-                                                ? "border-primary bg-primary/5 text-primary"
-                                                : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                            getFilterButtonClass('categories', activeDropdown === 'categories' || selectedCustomerCategories.length > 0)
                                         )}
                                     >
-                                        <User size={14} />
+                                        <User size={14} className={getFilterIconClass('categories', activeDropdown === 'categories' || selectedCustomerCategories.length > 0)} />
                                         Loại khách
                                         {selectedCustomerCategories.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('categories'))}>
                                                 {selectedCustomerCategories.length}
                                             </span>
                                         )}
@@ -1226,15 +1302,13 @@ const Orders = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'orderTypes' ? null : 'orderTypes')}
                                         className={clsx(
                                             "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
-                                            activeDropdown === 'orderTypes' || selectedOrderTypes.length > 0
-                                                ? "border-primary bg-primary/5 text-primary"
-                                                : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                            getFilterButtonClass('orderTypes', activeDropdown === 'orderTypes' || selectedOrderTypes.length > 0)
                                         )}
                                     >
-                                        <Package size={14} />
+                                        <Package size={14} className={getFilterIconClass('orderTypes', activeDropdown === 'orderTypes' || selectedOrderTypes.length > 0)} />
                                         Loại đơn
                                         {selectedOrderTypes.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('orderTypes'))}>
                                                 {selectedOrderTypes.length}
                                             </span>
                                         )}
@@ -1256,15 +1330,13 @@ const Orders = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'productTypes' ? null : 'productTypes')}
                                         className={clsx(
                                             "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
-                                            activeDropdown === 'productTypes' || selectedProductTypes.length > 0
-                                                ? "border-primary bg-primary/5 text-primary"
-                                                : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                            getFilterButtonClass('productTypes', activeDropdown === 'productTypes' || selectedProductTypes.length > 0)
                                         )}
                                     >
-                                        <Package size={14} />
+                                        <Package size={14} className={getFilterIconClass('productTypes', activeDropdown === 'productTypes' || selectedProductTypes.length > 0)} />
                                         Hàng hóa
                                         {selectedProductTypes.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('productTypes'))}>
                                                 {selectedProductTypes.length}
                                             </span>
                                         )}
@@ -1286,15 +1358,13 @@ const Orders = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'customers' ? null : 'customers')}
                                         className={clsx(
                                             "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
-                                            activeDropdown === 'customers' || selectedCustomers.length > 0
-                                                ? "border-primary bg-primary/5 text-primary"
-                                                : "border-border bg-white text-muted-foreground hover:text-foreground"
+                                            getFilterButtonClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)
                                         )}
                                     >
-                                        <User size={14} />
+                                        <User size={14} className={getFilterIconClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)} />
                                         Khách hàng
                                         {selectedCustomers.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('customers'))}>
                                                 {selectedCustomers.length}
                                             </span>
                                         )}
@@ -1332,40 +1402,40 @@ const Orders = () => {
                         <div className="px-3 md:px-4 pt-4 md:pt-5 pb-5 md:pb-6 space-y-5">
                         {/* Stats Cards */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                            <div className="bg-blue-50 rounded-2xl p-5 shadow-sm">
+                            <div className="bg-blue-50/70 border border-blue-100 rounded-2xl p-5 shadow-sm">
                                 <div className="flex items-center justify-start gap-4">
-                                    <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center shrink-0">
+                                    <div className="w-12 h-12 bg-blue-100/80 rounded-full flex items-center justify-center shrink-0 ring-1 ring-blue-200/70">
                                         <Package className="w-6 h-6 text-blue-600" />
                                     </div>
                                     <div>
                                         <p className="text-[11px] font-semibold text-blue-600 uppercase tracking-wider">Tổng số đơn hàng</p>
-                                        <p className="text-3xl font-bold text-blue-900 mt-1">{formatNumber(filteredOrdersCount)}</p>
+                                        <p className="text-3xl font-bold text-foreground mt-1">{formatNumber(filteredOrdersCount)}</p>
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="bg-green-50 rounded-2xl p-5 shadow-sm">
+                            <div className="bg-emerald-50/70 border border-emerald-100 rounded-2xl p-5 shadow-sm">
                                 <div className="flex items-center justify-start gap-4">
-                                    <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center shrink-0">
-                                        <CheckCircle className="w-6 h-6 text-green-600" />
+                                    <div className="w-12 h-12 bg-emerald-100/80 rounded-full flex items-center justify-center shrink-0 ring-1 ring-emerald-200/70">
+                                        <CheckCircle className="w-6 h-6 text-emerald-600" />
                                     </div>
                                     <div>
-                                        <p className="text-[11px] font-semibold text-green-600 uppercase tracking-wider">Tổng tiền</p>
-                                        <p className="text-3xl font-bold text-green-900 mt-1">
+                                        <p className="text-[11px] font-semibold text-emerald-600 uppercase tracking-wider">Tổng tiền</p>
+                                        <p className="text-3xl font-bold text-foreground mt-1">
                                             {formatNumber(filteredOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0))}đ
                                         </p>
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="bg-orange-50 rounded-2xl p-5 shadow-sm">
+                            <div className="bg-amber-50/70 border border-amber-100 rounded-2xl p-5 shadow-sm">
                                 <div className="flex items-center justify-start gap-4">
-                                    <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center shrink-0">
-                                        <BarChart2 className="w-6 h-6 text-orange-600" />
+                                    <div className="w-12 h-12 bg-amber-100/80 rounded-full flex items-center justify-center shrink-0 ring-1 ring-amber-200/70">
+                                        <BarChart2 className="w-6 h-6 text-amber-600" />
                                     </div>
                                     <div>
-                                        <p className="text-[11px] font-semibold text-orange-600 uppercase tracking-wider">Đơn hàng trung bình</p>
-                                        <p className="text-3xl font-bold text-orange-900 mt-1">
+                                        <p className="text-[11px] font-semibold text-amber-600 uppercase tracking-wider">Đơn hàng trung bình</p>
+                                        <p className="text-3xl font-bold text-foreground mt-1">
                                             {formatNumber(filteredOrdersCount > 0 ? Math.round(filteredOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0) / filteredOrdersCount) : 0)}đ
                                         </p>
                                     </div>
@@ -1584,7 +1654,7 @@ const Orders = () => {
                         {
                             id: 'status',
                             label: 'Trạng thái',
-                            icon: <Filter size={16} />,
+                            icon: <Filter size={16} className="text-blue-600" />,
                             options: statusOptions,
                             selectedValues: pendingStatuses,
                             onSelectionChange: setPendingStatuses,
@@ -1592,7 +1662,7 @@ const Orders = () => {
                         {
                             id: 'categories',
                             label: 'Loại khách',
-                            icon: <User size={16} />,
+                            icon: <User size={16} className="text-emerald-600" />,
                             options: categoryOptions,
                             selectedValues: pendingCustomerCategories,
                             onSelectionChange: setPendingCustomerCategories,
@@ -1600,7 +1670,7 @@ const Orders = () => {
                         {
                             id: 'orderTypes',
                             label: 'Loại đơn',
-                            icon: <Package size={16} />,
+                            icon: <Package size={16} className="text-violet-600" />,
                             options: orderTypeOptions,
                             selectedValues: pendingOrderTypes,
                             onSelectionChange: setPendingOrderTypes,
@@ -1608,7 +1678,7 @@ const Orders = () => {
                         {
                             id: 'productTypes',
                             label: 'Hàng hóa',
-                            icon: <Package size={16} />,
+                            icon: <Package size={16} className="text-amber-600" />,
                             options: productTypeOptions,
                             selectedValues: pendingProductTypes,
                             onSelectionChange: setPendingProductTypes,
@@ -1616,7 +1686,7 @@ const Orders = () => {
                         {
                             id: 'customers',
                             label: 'Khách hàng',
-                            icon: <User size={16} />,
+                            icon: <User size={16} className="text-cyan-600" />,
                             options: customerOptions,
                             selectedValues: pendingCustomers,
                             onSelectionChange: setPendingCustomers,
@@ -1640,30 +1710,30 @@ const Orders = () => {
 
             {/* SERIALS VIEW MODAL */}
             {serialsModalOrder && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
-                    <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-sm overflow-hidden flex flex-col max-h-[80vh]">
-                        <div className="p-6 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50/50">
+                <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-sm overflow-hidden flex flex-col max-h-[80vh] border border-border">
+                        <div className="p-6 border-b border-border flex items-center justify-between shrink-0 bg-white">
                             <div>
-                                <h3 className="text-lg font-black text-slate-900">Mã Serial Vỏ Bình</h3>
-                                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">Đơn {serialsModalOrder.order_code}</p>
+                                <h3 className="text-lg font-black text-foreground">Mã Serial Vỏ Bình</h3>
+                                <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mt-1">Đơn {serialsModalOrder.order_code}</p>
                             </div>
-                            <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 shrink-0">
+                            <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary shrink-0">
                                 <Package className="w-5 h-5" />
                             </div>
                         </div>
-                        <div className="p-6 overflow-y-auto">
+                        <div className="p-6 overflow-y-auto bg-white">
                             <div className="grid grid-cols-2 gap-3">
                                 {serialsModalOrder.assigned_cylinders.map((serial, idx) => (
-                                    <div key={idx} className="bg-white border border-slate-200 shadow-sm rounded-xl px-3 py-2 text-center text-sm font-bold text-slate-700 font-mono">
+                                    <div key={idx} className="bg-white border border-border shadow-sm rounded-xl px-3 py-2 text-center text-sm font-bold text-foreground font-mono">
                                         {serial}
                                     </div>
                                 ))}
                             </div>
                         </div>
-                        <div className="p-4 bg-slate-50 border-t border-slate-100 mt-auto shrink-0">
+                        <div className="p-4 bg-white border-t border-border mt-auto shrink-0">
                             <button
                                 onClick={() => setSerialsModalOrder(null)}
-                                className="w-full py-3 text-slate-600 font-bold text-sm bg-white hover:bg-slate-100 transition-colors rounded-xl border border-slate-200 shadow-sm"
+                                className="w-full py-3 text-foreground font-bold text-sm bg-muted/20 hover:bg-muted/40 transition-colors rounded-xl border border-border shadow-sm"
                             >
                                 Đóng lại
                             </button>
