@@ -13,12 +13,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { CUSTOMER_CATEGORIES } from '../constants/orderConstants';
 import { supabase } from '../supabase/config';
 
-const CUSTOMER_TYPES = [
-    { id: 'TM', label: 'Thương mại (TM)' },
-    { id: 'ĐL', label: 'Đại lý (ĐL)' },
-    { id: 'Khác', label: 'Khác' },
-];
-
 const TARGET_MODES = [
     { id: 'ALL', label: 'Tất cả KH', icon: Users, desc: 'Áp dụng cho toàn bộ khách hàng' },
     { id: 'CATEGORY', label: 'Theo loại KH', icon: Tag, desc: 'Chọn loại khách hàng áp dụng' },
@@ -30,7 +24,7 @@ const INITIAL_FORM_STATE = {
     free_cylinders: '',
     start_date: '',
     end_date: '',
-    customer_type: CUSTOMER_TYPES[0].id,
+    customer_type: CUSTOMER_CATEGORIES[0].id,
     target_mode: 'ALL',
     target_categories: [],
     target_customer_ids: [],
@@ -283,7 +277,7 @@ const CreatePromotion = () => {
                                 onChange={(e) => handleChange('customer_type', e.target.value)}
                                 className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 font-bold text-lg shadow-sm transition-all text-gray-900 appearance-none cursor-pointer"
                             >
-                                {CUSTOMER_TYPES.map(type => (
+                                {CUSTOMER_CATEGORIES.map(type => (
                                     <option key={type.id} value={type.id}>{type.label}</option>
                                 ))}
                             </select>

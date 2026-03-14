@@ -2,10 +2,12 @@ import {
     CheckCircle2,
     PackageMinus,
     Plus,
+    ScanLine,
     Trash2
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import BarcodeScanner from '../components/Common/BarcodeScanner';
 import { ISSUE_TYPES } from '../constants/goodsIssueConstants';
 import { PRODUCT_TYPES } from '../constants/orderConstants';
 import { supabase } from '../supabase/config';
@@ -14,9 +16,12 @@ const CreateGoodsIssue = () => {
     const navigate = useNavigate();
     const { state } = useLocation();
     const editIssue = state?.issue;
+    const forcedType = state?.forcedType;
 
     const [suppliers, setSuppliers] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [isScannerOpen, setIsScannerOpen] = useState(false);
+    const [activeScanningIndex, setActiveScanningIndex] = useState(null);
 
     const [formData, setFormData] = useState({
         issue_code: '',
@@ -34,6 +39,12 @@ const CreateGoodsIssue = () => {
     ]);
 
     const [warehousesList, setWarehousesList] = useState([]);
+
+    const filteredProducts = forcedType === 'TRA_VO'
+        ? PRODUCT_TYPES.filter(p => p.id.startsWith('BINH'))
+        : forcedType === 'TRA_MAY'
+            ? PRODUCT_TYPES.filter(p => p.id.startsWith('MAY'))
+            : PRODUCT_TYPES;
 
     useEffect(() => {
         loadSuppliers();
@@ -54,8 +65,14 @@ const CreateGoodsIssue = () => {
             fetchItems();
         } else {
             generateCode();
+            if (forcedType) {
+                setFormData(prev => ({ ...prev, issue_type: forcedType }));
+                if (filteredProducts.length > 0) {
+                    setItems([{ id: Date.now(), item_type: filteredProducts[0].id, item_id: '', item_code: '', quantity: 1, _search: '' }]);
+                }
+            }
         }
-    }, [editIssue]);
+    }, [editIssue, forcedType]);
 
     const generateCode = async () => {
         const date = new Date();
@@ -126,6 +143,20 @@ const CreateGoodsIssue = () => {
 
     const updateItem = (id, field, value) => {
         setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
+    };
+
+    const openScanner = (index) => {
+        setActiveScanningIndex(index);
+        setIsScannerOpen(true);
+    };
+
+    const handleScanSuccess = (code) => {
+        if (activeScanningIndex !== null) {
+            const itemToUpdate = items[activeScanningIndex];
+            updateItem(itemToUpdate.id, 'item_code', code);
+            setIsScannerOpen(false);
+            setActiveScanningIndex(null);
+        }
     };
 
     // Calculate total
@@ -218,7 +249,11 @@ const CreateGoodsIssue = () => {
                     </div>
                     <div>
                         <h1 className="text-2xl md:text-3xl font-black text-gray-900 tracking-tight">
-                            {editIssue ? 'Cập nhật Phiếu Xuất' : 'Tạo Phiếu Xuất (Trả vỏ/máy)'}
+                            {editIssue ? 'Cập nhật Phiếu Xuất' : (
+                                forcedType === 'TRA_VO' ? 'Tạo Phiếu Xuất Trả Vỏ' :
+                                    forcedType === 'TRA_MAY' ? 'Tạo Phiếu Xuất Trả Máy' :
+                                        'Tạo Phiếu Xuất'
+                            )}
                         </h1>
                         <p className="text-gray-500 font-medium mt-1">Lập danh sách xuất trả tài sản về nhà cung cấp</p>
                     </div>
@@ -318,17 +353,27 @@ const CreateGoodsIssue = () => {
                                             onChange={(e) => updateItem(item.id, 'item_type', e.target.value)}
                                             className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl font-bold text-gray-900 focus:ring-2 focus:ring-rose-500 focus:border-rose-500 outline-none"
                                         >
-                                            {PRODUCT_TYPES.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                                            {filteredProducts.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
                                         </select>
                                     </div>
-                                    <div className="md:col-span-6">
+                                    <div className="md:col-span-6 relative">
                                         <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1 md:hidden">Mã tài sản (Nhập Serial/RFID)</label>
-                                        <input
-                                            value={item.item_code}
-                                            onChange={(e) => updateItem(item.id, 'item_code', e.target.value)}
-                                            placeholder="Quét hoặc nhập mã Serial RFID"
-                                            className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl font-medium text-gray-900 focus:ring-2 focus:ring-rose-500 focus:border-rose-500 outline-none"
-                                        />
+                                        <div className="relative">
+                                            <input
+                                                value={item.item_code}
+                                                onChange={(e) => updateItem(item.id, 'item_code', e.target.value)}
+                                                placeholder="Quét hoặc nhập mã Serial RFID"
+                                                className="w-full px-4 py-2.5 pr-12 bg-white border border-gray-200 rounded-xl font-medium text-gray-900 focus:ring-2 focus:ring-rose-500 focus:border-rose-500 outline-none"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => openScanner(index)}
+                                                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+                                                title="Quét mã barcode"
+                                            >
+                                                <ScanLine className="w-5 h-5" />
+                                            </button>
+                                        </div>
                                     </div>
                                     <div className="md:col-span-3">
                                         <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1 md:hidden">Số lượng</label>
@@ -391,6 +436,13 @@ const CreateGoodsIssue = () => {
                     </div>
                 </div>
             </form>
+
+            <BarcodeScanner
+                isOpen={isScannerOpen}
+                onClose={() => setIsScannerOpen(false)}
+                onScanSuccess={handleScanSuccess}
+                title="Quét mã tài sản"
+            />
         </div>
     );
 };

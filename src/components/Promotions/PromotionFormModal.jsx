@@ -1,12 +1,9 @@
 import { CalendarDays, Gift, Save, Tag, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../../supabase/config';
+import { CUSTOMER_CATEGORIES } from '../../constants/orderConstants';
 
-const CUSTOMER_TYPES = [
-    { id: 'TM', label: 'Thương mại (TM)' },
-    { id: 'ĐL', label: 'Đại lý (ĐL)' },
-    { id: 'Khác', label: 'Khác' },
-];
+
 
 export default function PromotionFormModal({ promotion, onClose, onSuccess }) {
     const isEdit = !!promotion;
@@ -18,7 +15,7 @@ export default function PromotionFormModal({ promotion, onClose, onSuccess }) {
         free_cylinders: '',
         start_date: '',
         end_date: '',
-        customer_type: CUSTOMER_TYPES[0].id,
+        customer_type: CUSTOMER_CATEGORIES[0].id,
     };
 
     const [formData, setFormData] = useState(defaultState);
@@ -30,7 +27,7 @@ export default function PromotionFormModal({ promotion, onClose, onSuccess }) {
                 free_cylinders: promotion.free_cylinders || '',
                 start_date: promotion.start_date || '',
                 end_date: promotion.end_date || '',
-                customer_type: promotion.customer_type || CUSTOMER_TYPES[0].id,
+                customer_type: promotion.customer_type || CUSTOMER_CATEGORIES[0].id,
             });
         }
     }, [promotion, isEdit]);
@@ -232,7 +229,7 @@ export default function PromotionFormModal({ promotion, onClose, onSuccess }) {
                                         onChange={handleChange}
                                         className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-800 appearance-none focus:outline-none focus:ring-4 focus:ring-rose-100 focus:border-rose-300 focus:bg-white transition-all"
                                     >
-                                        {CUSTOMER_TYPES.map(type => (
+                                        {CUSTOMER_CATEGORIES.map(type => (
                                             <option key={type.id} value={type.id}>{type.label}</option>
                                         ))}
                                     </select>

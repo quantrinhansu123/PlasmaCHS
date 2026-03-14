@@ -119,20 +119,25 @@ const GoodsIssues = () => {
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 md:mb-8 relative z-10">
                 <div className="flex items-center gap-3">
-                    <button onClick={() => navigate('/trang-chu')} className="w-10 h-10 bg-white border border-gray-200 rounded-xl flex items-center justify-center text-gray-400 hover:text-gray-900 hover:border-gray-400 transition-all shadow-sm">
-                        ←
-                    </button>
                     <h1 className="text-2xl md:text-3xl font-black text-gray-900 tracking-tight flex items-center gap-3">
                         <PackageMinus className="w-8 h-8 text-rose-600" />
                         Lịch sử xuất vỏ/máy
                     </h1>
                 </div>
-                <button
-                    onClick={() => navigate('/tao-phieu-xuat')}
-                    className="flex items-center gap-2 px-6 py-3.5 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl font-black transition-all shadow-xl shadow-rose-200"
-                >
-                    <PackageMinus className="w-5 h-5" /> TẠO PHIẾU XUẤT (Trả NCC)
-                </button>
+                <div className="flex flex-wrap gap-3">
+                    <button
+                        onClick={() => navigate('/tao-phieu-xuat', { state: { forcedType: 'TRA_VO' } })}
+                        className="flex items-center gap-2 px-6 py-3.5 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl font-black transition-all shadow-xl shadow-rose-200"
+                    >
+                        <PackageMinus className="w-5 h-5" /> XUẤT TRẢ VỎ
+                    </button>
+                    <button
+                        onClick={() => navigate('/tao-phieu-xuat', { state: { forcedType: 'TRA_MAY' } })}
+                        className="flex items-center gap-2 px-6 py-3.5 bg-slate-800 hover:bg-slate-900 text-white rounded-2xl font-black transition-all shadow-xl shadow-slate-200"
+                    >
+                        <PackageMinus className="w-5 h-5" /> XUẤT TRẢ MÁY
+                    </button>
+                </div>
             </div>
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 relative z-10">
