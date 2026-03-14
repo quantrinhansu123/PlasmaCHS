@@ -327,9 +327,69 @@ const Promotions = () => {
         '#06B6D4', '#F97316', '#84CC16', '#EC4899', '#6366F1'
     ];
 
+    const getFilterButtonClass = (filterKey, isActive) => {
+        if (!isActive) {
+            return 'border-border bg-white text-muted-foreground hover:text-foreground';
+        }
+
+        switch (filterKey) {
+            case 'statuses':
+                return 'border-amber-200 bg-amber-50 text-amber-700';
+            case 'customerTypes':
+                return 'border-violet-200 bg-violet-50 text-violet-700';
+            case 'active':
+                return 'border-cyan-200 bg-cyan-50 text-cyan-700';
+            default:
+                return 'border-primary bg-primary/5 text-primary';
+        }
+    };
+
+    const getFilterCountBadgeClass = (filterKey) => {
+        switch (filterKey) {
+            case 'statuses':
+                return 'bg-amber-600 text-white';
+            case 'customerTypes':
+                return 'bg-violet-600 text-white';
+            case 'active':
+                return 'bg-cyan-600 text-white';
+            default:
+                return 'bg-primary text-white';
+        }
+    };
+
+    const getFilterIconClass = (filterKey, isActive) => {
+        switch (filterKey) {
+            case 'statuses':
+                return isActive ? 'text-amber-700' : 'text-amber-600';
+            case 'customerTypes':
+                return isActive ? 'text-violet-700' : 'text-violet-600';
+            case 'active':
+                return isActive ? 'text-cyan-700' : 'text-cyan-600';
+            default:
+                return isActive ? 'text-primary' : 'text-primary/80';
+        }
+    };
+
+    const getRowStyle = (statusLabel) => clsx(
+        'hover:bg-primary/5',
+        statusLabel === 'Đang hoạt động' && 'hover:bg-emerald-50/60',
+        statusLabel === 'Hết hạn' && 'hover:bg-rose-50/60',
+        statusLabel === 'Vô hiệu' && 'hover:bg-slate-100/70',
+        statusLabel === 'Chờ kích hoạt' && 'hover:bg-amber-50/60'
+    );
+
+    const getCodeCellClass = (statusLabel) => clsx(
+        'px-4 py-4 text-sm font-semibold text-foreground border-r border-primary/20 border-l-4',
+        statusLabel === 'Đang hoạt động' && 'border-l-emerald-400',
+        statusLabel === 'Hết hạn' && 'border-l-rose-400',
+        statusLabel === 'Vô hiệu' && 'border-l-slate-400',
+        statusLabel === 'Chờ kích hoạt' && 'border-l-amber-400',
+        !statusLabel && 'border-l-transparent'
+    );
+
     return (
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col -mt-2 min-h-0 px-3 md:px-6">
-            <div className="flex items-center gap-1 mb-4 mt-6">
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5">
+            <div className="flex items-center gap-1 mb-3 mt-1">
                 <button
                     onClick={() => setActiveView('list')}
                     className={clsx(
@@ -384,12 +444,15 @@ const Promotions = () => {
                             onClick={openMobileFilter}
                             className={clsx(
                                 'relative p-2 rounded-xl border shrink-0 transition-all',
-                                hasActiveFilters ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-white text-muted-foreground',
+                                hasActiveFilters ? getFilterButtonClass('statuses', true) : getFilterButtonClass('statuses', false),
                             )}
                         >
-                            <Filter size={18} />
+                            <Filter size={18} className={getFilterIconClass('statuses', hasActiveFilters)} />
                             {hasActiveFilters && (
-                                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-white text-[9px] font-bold flex items-center justify-center">
+                                <span className={clsx(
+                                    'absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center',
+                                    getFilterCountBadgeClass('statuses')
+                                )}>
                                     {totalActiveFilters}
                                 </span>
                             )}
@@ -413,7 +476,7 @@ const Promotions = () => {
                         ) : filteredPromotions.map((promo) => {
                             const status = getPromoStatus(promo);
                             return (
-                                <div key={promo.id} className="rounded-2xl border border-border bg-white shadow-sm p-4">
+                                <div key={promo.id} className="rounded-2xl border border-primary/20 bg-gradient-to-br from-white to-primary/[0.03] shadow-sm p-4">
                                     <div className="flex items-start justify-between gap-2 mb-2">
                                         <div>
                                             <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Mã khuyến mãi</p>
@@ -424,7 +487,7 @@ const Promotions = () => {
                                         </span>
                                     </div>
 
-                                    <div className="space-y-1.5 mb-3 text-[12px] text-muted-foreground">
+                                    <div className="space-y-1.5 mb-3 text-[12px] text-muted-foreground rounded-xl border border-border/60 bg-muted/10 px-3 py-2.5">
                                         <p><span className="font-semibold text-foreground/90">Ưu đãi:</span> + {promo.free_cylinders || 0} bình khí</p>
                                         <p><span className="font-semibold text-foreground/90">Đối tượng:</span> {promo.customer_type || '—'}</p>
                                         <div className="flex items-center gap-1.5">
@@ -440,8 +503,8 @@ const Promotions = () => {
                                             <span className="ml-2 text-[10px] font-medium text-muted-foreground">{promo.is_active ? 'Bật' : 'Tắt'}</span>
                                         </label>
                                         <div className="flex items-center gap-3">
-                                            <button onClick={() => handleEditPromo(promo)} className="text-muted-foreground hover:text-primary transition-colors"><Edit size={18} /></button>
-                                            <button onClick={() => handleDeletePromo(promo.id, promo.code)} className="text-muted-foreground hover:text-red-500 transition-colors"><Trash2 size={18} /></button>
+                                            <button onClick={() => handleEditPromo(promo)} className="text-blue-500 hover:text-blue-700 transition-colors"><Edit size={18} /></button>
+                                            <button onClick={() => handleDeletePromo(promo.id, promo.code)} className="text-rose-500 hover:text-rose-700 transition-colors"><Trash2 size={18} /></button>
                                         </div>
                                     </div>
                                 </div>
@@ -520,15 +583,13 @@ const Promotions = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'statuses' ? null : 'statuses')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'statuses' || selectedStatuses.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('statuses', activeDropdown === 'statuses' || selectedStatuses.length > 0)
                                     )}
                                 >
-                                    <Filter size={14} />
+                                    <Filter size={14} className={getFilterIconClass('statuses', activeDropdown === 'statuses' || selectedStatuses.length > 0)} />
                                     Trạng thái
                                     {selectedStatuses.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('statuses'))}>
                                             {selectedStatuses.length}
                                         </span>
                                     )}
@@ -550,15 +611,13 @@ const Promotions = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'customerTypes' ? null : 'customerTypes')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'customerTypes' || selectedCustomerTypes.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('customerTypes', activeDropdown === 'customerTypes' || selectedCustomerTypes.length > 0)
                                     )}
                                 >
-                                    <Gift size={14} />
+                                    <Gift size={14} className={getFilterIconClass('customerTypes', activeDropdown === 'customerTypes' || selectedCustomerTypes.length > 0)} />
                                     Loại khách hàng
                                     {selectedCustomerTypes.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('customerTypes'))}>
                                             {selectedCustomerTypes.length}
                                         </span>
                                     )}
@@ -580,15 +639,13 @@ const Promotions = () => {
                                     onClick={() => setActiveDropdown(activeDropdown === 'active' ? null : 'active')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        activeDropdown === 'active' || selectedActiveStatus.length > 0
-                                            ? 'border-primary bg-primary/5 text-primary'
-                                            : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                        getFilterButtonClass('active', activeDropdown === 'active' || selectedActiveStatus.length > 0)
                                     )}
                                 >
-                                    <Tag size={14} />
+                                    <Tag size={14} className={getFilterIconClass('active', activeDropdown === 'active' || selectedActiveStatus.length > 0)} />
                                     Kích hoạt
                                     {selectedActiveStatus.length > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('active'))}>
                                             {selectedActiveStatus.length}
                                         </span>
                                     )}
@@ -617,19 +674,19 @@ const Promotions = () => {
                         </div>
                     </div>
 
-                    <div className="hidden md:block flex-1 overflow-x-auto border-t border-border">
+                    <div className="hidden md:block flex-1 overflow-x-auto border-t border-primary/20">
                         <table className="w-full border-collapse">
-                            <thead className="bg-muted/20">
+                            <thead className="bg-primary/5">
                                 <tr>
                                     {visibleTableColumns.map(col => (
-                                        <th key={col.key} className={clsx('px-4 py-3.5 text-[12px] font-bold text-muted-foreground uppercase tracking-wide', col.key === 'content' || col.key === 'status' || col.key === 'active' ? 'text-center' : 'text-left')}>
+                                        <th key={col.key} className={clsx('px-4 py-3.5 text-[12px] font-bold text-muted-foreground uppercase tracking-wide', col.key === 'content' || col.key === 'status' || col.key === 'active' ? 'text-center' : 'text-left', col.key === 'code' && 'border-l border-r border-primary/30')}>
                                             {col.label}
                                         </th>
                                     ))}
-                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide">Thao tác</th>
+                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide border-l border-r border-primary/30">Thao tác</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-border">
+                            <tbody className="divide-y divide-primary/10">
                                 {isLoading ? (
                                     <tr>
                                         <td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center text-muted-foreground">
@@ -645,8 +702,8 @@ const Promotions = () => {
                                 ) : filteredPromotions.map((promo) => {
                                     const status = getPromoStatus(promo);
                                     return (
-                                        <tr key={promo.id} className="hover:bg-muted/20 transition-colors">
-                                            {isColumnVisible('code') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{promo.code}</td>}
+                                        <tr key={promo.id} className={getRowStyle(status.label)}>
+                                            {isColumnVisible('code') && <td className={getCodeCellClass(status.label)}>{promo.code}</td>}
                                             {isColumnVisible('content') && <td className="px-4 py-4 text-sm font-semibold text-foreground text-center">+ {promo.free_cylinders || 0} bình khí</td>}
                                             {isColumnVisible('period') && <td className="px-4 py-4 text-sm text-muted-foreground">{formatDate(promo.start_date)} — {formatDate(promo.end_date)}</td>}
                                             {isColumnVisible('target') && <td className="px-4 py-4 text-sm text-muted-foreground">{promo.customer_type || '—'}</td>}
@@ -663,12 +720,12 @@ const Promotions = () => {
                                                     </label>
                                                 </td>
                                             )}
-                                            <td className="px-4 py-4 text-center">
+                                            <td className="px-4 py-4 text-center border-l border-r border-primary/20">
                                                 <div className="flex items-center justify-center gap-3">
-                                                    <button onClick={() => handleEditPromo(promo)} className="text-muted-foreground hover:text-primary transition-colors p-1" title="Chỉnh sửa">
+                                                    <button onClick={() => handleEditPromo(promo)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
                                                         <Edit className="w-4 h-4" />
                                                     </button>
-                                                    <button onClick={() => handleDeletePromo(promo.id, promo.code)} className="text-muted-foreground hover:text-red-500 transition-colors p-1" title="Xóa">
+                                                    <button onClick={() => handleDeletePromo(promo.id, promo.code)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>
                                                 </div>
@@ -726,12 +783,15 @@ const Promotions = () => {
                                 onClick={openMobileFilter}
                                 className={clsx(
                                     'relative p-2 rounded-xl border shrink-0 transition-all',
-                                    hasActiveFilters ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-white text-muted-foreground',
+                                    hasActiveFilters ? getFilterButtonClass('statuses', true) : getFilterButtonClass('statuses', false),
                                 )}
                             >
-                                <Filter size={18} />
+                                <Filter size={18} className={getFilterIconClass('statuses', hasActiveFilters)} />
                                 {hasActiveFilters && (
-                                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-white text-[9px] font-bold flex items-center justify-center">
+                                    <span className={clsx(
+                                        'absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center',
+                                        getFilterCountBadgeClass('statuses')
+                                    )}>
                                         {totalActiveFilters}
                                     </span>
                                 )}
@@ -753,15 +813,13 @@ const Promotions = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'statuses' ? null : 'statuses')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'statuses' || selectedStatuses.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('statuses', activeDropdown === 'statuses' || selectedStatuses.length > 0)
                                         )}
                                     >
-                                        <Filter size={14} />
+                                        <Filter size={14} className={getFilterIconClass('statuses', activeDropdown === 'statuses' || selectedStatuses.length > 0)} />
                                         Trạng thái
                                         {selectedStatuses.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('statuses'))}>
                                                 {selectedStatuses.length}
                                             </span>
                                         )}
@@ -783,15 +841,13 @@ const Promotions = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'customerTypes' ? null : 'customerTypes')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'customerTypes' || selectedCustomerTypes.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('customerTypes', activeDropdown === 'customerTypes' || selectedCustomerTypes.length > 0)
                                         )}
                                     >
-                                        <Gift size={14} />
+                                        <Gift size={14} className={getFilterIconClass('customerTypes', activeDropdown === 'customerTypes' || selectedCustomerTypes.length > 0)} />
                                         Loại khách hàng
                                         {selectedCustomerTypes.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('customerTypes'))}>
                                                 {selectedCustomerTypes.length}
                                             </span>
                                         )}
@@ -813,15 +869,13 @@ const Promotions = () => {
                                         onClick={() => setActiveDropdown(activeDropdown === 'active' ? null : 'active')}
                                         className={clsx(
                                             'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            activeDropdown === 'active' || selectedActiveStatus.length > 0
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border bg-white text-muted-foreground hover:text-foreground'
+                                            getFilterButtonClass('active', activeDropdown === 'active' || selectedActiveStatus.length > 0)
                                         )}
                                     >
-                                        <Tag size={14} />
+                                        <Tag size={14} className={getFilterIconClass('active', activeDropdown === 'active' || selectedActiveStatus.length > 0)} />
                                         Kích hoạt
                                         {selectedActiveStatus.length > 0 && (
-                                            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('active'))}>
                                                 {selectedActiveStatus.length}
                                             </span>
                                         )}
@@ -974,7 +1028,7 @@ const Promotions = () => {
                         {
                             id: 'statuses',
                             label: 'Trạng thái',
-                            icon: <Filter size={16} />,
+                            icon: <Filter size={16} className="text-amber-600" />,
                             options: statusOptions,
                             selectedValues: pendingStatuses,
                             onSelectionChange: setPendingStatuses,
@@ -982,7 +1036,7 @@ const Promotions = () => {
                         {
                             id: 'customerTypes',
                             label: 'Loại khách hàng',
-                            icon: <Gift size={16} />,
+                            icon: <Gift size={16} className="text-violet-600" />,
                             options: customerTypeOptions,
                             selectedValues: pendingCustomerTypes,
                             onSelectionChange: setPendingCustomerTypes,
@@ -990,7 +1044,7 @@ const Promotions = () => {
                         {
                             id: 'active',
                             label: 'Kích hoạt',
-                            icon: <Tag size={16} />,
+                            icon: <Tag size={16} className="text-cyan-600" />,
                             options: activeOptions,
                             selectedValues: pendingActiveStatus,
                             onSelectionChange: setPendingActiveStatus,

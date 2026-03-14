@@ -137,84 +137,84 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
     };
 
     return (
-        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
-            <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 bg-slate-900/55 backdrop-blur-sm flex items-stretch sm:items-center justify-center z-[100] p-0 sm:p-4 animate-in fade-in duration-200 [&_input]:!font-[600] [&_select]:!font-[600] [&_textarea]:!font-[600] [&_input]:!text-slate-800 [&_select]:!text-slate-800 [&_textarea]:!text-slate-800 [&_input::placeholder]:!text-slate-400 [&_textarea::placeholder]:!text-slate-400">
+            <div className="bg-slate-50 rounded-none sm:rounded-3xl shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col h-[100dvh] sm:h-auto sm:max-h-[92vh] border-0 sm:border sm:border-slate-200">
 
                 {/* Header */}
-                <div className="p-6 border-b border-gray-100 flex items-center justify-between shrink-0 bg-gray-50/50">
+                <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between shrink-0 bg-white sticky top-0 z-20">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-blue-700">
+                        <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600">
                             <User className="w-6 h-6" />
                         </div>
                         <div>
-                            <h3 className="text-xl font-black text-gray-900">
+                            <h3 className="text-[20px] leading-tight font-bold text-slate-900 tracking-tight">
                                 {isEdit ? 'Chỉnh sửa Khách Hàng' : 'Thêm mới Khách Hàng'}
                             </h3>
-                            <p className="text-sm font-medium text-gray-500">
+                            <p className="text-[12px] font-semibold text-slate-500 mt-0.5">
                                 {isEdit ? `Mã KH: ${formData.code}` : 'Điền đầy đủ thông tin bên dưới'}
                             </p>
                         </div>
                     </div>
                     <button
                         onClick={onClose}
-                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                        className="p-2 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-xl transition-all"
                     >
                         <X className="w-6 h-6" />
                     </button>
                 </div>
 
                 {/* Form Body */}
-                <div className="p-8 overflow-y-auto">
+                <div className="p-5 sm:p-6 overflow-y-auto bg-slate-50 custom-scrollbar flex-1 min-h-0">
                     {errorMsg && (
-                        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm font-bold text-red-600 flex items-center gap-2">
+                        <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl text-[13px] font-semibold text-rose-600 flex items-center gap-2">
                             <X className="w-5 h-5 shrink-0" />
                             {errorMsg}
                         </div>
                     )}
 
-                    <form id="customerForm" onSubmit={handleSubmit} className="space-y-8">
+                    <form id="customerForm" onSubmit={handleSubmit} className="space-y-6">
 
                         {/* Section 1: Thông tin cơ bản */}
-                        <div>
-                            <h4 className="flex items-center gap-2 text-sm font-black text-blue-800 uppercase tracking-widest mb-4 border-b border-gray-100 pb-2">
-                                <User className="w-4 h-4" /> THÔNG TIN ĐỊNH DANH
+                        <div className="rounded-3xl border border-emerald-100 bg-white p-5 sm:p-6 space-y-5 shadow-sm [&_label]:text-emerald-700 [&_label_svg]:text-emerald-600">
+                            <h4 className="flex items-center gap-2.5 text-[18px] !font-extrabold !text-emerald-700 pb-3 border-b border-emerald-100">
+                                <User className="w-4 h-4 text-emerald-600" /> Thông tin định danh
                             </h4>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Mã Khách Hàng <span className="text-red-500">*</span></label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><Hash className="w-4 h-4" />Mã Khách Hàng <span className="text-red-500">*</span></label>
                                     <div className="relative">
-                                        <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                        <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />
                                         <input
                                             type="text"
                                             name="code"
                                             value={formData.code}
                                             disabled={true}
                                             placeholder="Đang tạo tự động..."
-                                            className="w-full pl-9 pr-4 py-3 bg-gray-100 border border-gray-200 rounded-xl outline-none font-bold text-gray-500 cursor-not-allowed"
+                                            className="w-full h-12 pl-9 pr-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-semibold text-slate-500 cursor-not-allowed"
                                             required
                                         />
                                     </div>
-                                    <p className="text-[10px] text-gray-500 mt-1">Được tạo tự động theo quy tắc KHxxxxx</p>
+                                    <p className="text-[11px] text-slate-500 mt-1">Được tạo tự động theo quy tắc KHxxxxx</p>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Tên Khách Hàng / Bệnh Viện <span className="text-red-500">*</span></label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><Building className="w-4 h-4" />Tên Khách Hàng / Bệnh Viện <span className="text-red-500">*</span></label>
                                     <input
                                         type="text"
                                         name="name"
                                         value={formData.name}
                                         onChange={handleChange}
                                         placeholder="Tên đơn vị khách hàng..."
-                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-bold text-gray-900"
+                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 focus:bg-white outline-none transition-all font-semibold text-slate-900"
                                         required
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Loại khách hàng</label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><Building className="w-4 h-4" />Loại khách hàng</label>
                                     <select
                                         name="category"
                                         value={formData.category}
                                         onChange={handleChange}
-                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-bold text-gray-700 cursor-pointer"
+                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 focus:bg-white outline-none transition-all font-semibold text-slate-700 cursor-pointer"
                                     >
                                         <option value="BV">Bệnh viện (BV)</option>
                                         <option value="TM">Thẩm mỹ viện (TM)</option>
@@ -224,59 +224,59 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Ng.đại diện để liên lạc <span className="text-red-500">*</span></label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><User className="w-4 h-4" />Ng.đại diện để liên lạc <span className="text-red-500">*</span></label>
                                     <input
                                         type="text"
                                         name="legal_rep"
                                         value={formData.legal_rep}
                                         onChange={handleChange}
                                         placeholder="Tên người đại diện..."
-                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-medium text-gray-900"
+                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 focus:bg-white outline-none transition-all font-semibold text-slate-900"
                                         required
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Thông tin người liên hệ phụ</label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><Phone className="w-4 h-4" />Thông tin người liên hệ phụ</label>
                                     <input
                                         type="text"
                                         name="contact_info"
                                         value={formData.contact_info}
                                         onChange={handleChange}
                                         placeholder="Tên, chức vụ người liên hệ phụ..."
-                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-medium text-gray-900"
+                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 focus:bg-white outline-none transition-all font-semibold text-slate-900"
                                     />
                                 </div>
                             </div>
                         </div>
 
                         {/* Section 2: Liên hệ và Phân công */}
-                        <div>
-                            <h4 className="flex items-center gap-2 text-sm font-black text-gray-800 uppercase tracking-widest mb-4 border-b border-gray-100 pb-2">
-                                <MapPin className="w-4 h-4" /> ĐỊA CHỈ & ƯU TIÊN LIÊN HỆ
+                        <div className="rounded-3xl border border-green-100 bg-white p-5 sm:p-6 space-y-5 shadow-sm [&_label]:text-green-700 [&_label_svg]:text-green-600">
+                            <h4 className="flex items-center gap-2.5 text-[18px] !font-extrabold !text-green-700 pb-3 border-b border-green-100">
+                                <MapPin className="w-4 h-4 text-green-600" /> Địa chỉ & ưu tiên liên hệ
                             </h4>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Số điện thoại liên lạc <span className="text-red-500">*</span></label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><Phone className="w-4 h-4" />Số điện thoại liên lạc <span className="text-red-500">*</span></label>
                                     <div className="relative">
-                                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-green-500" />
                                         <input
                                             type="text"
                                             name="phone"
                                             value={formData.phone}
                                             onChange={handleChange}
                                             placeholder="09xx.xxx.xxx"
-                                            className="w-full pl-9 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-medium text-gray-900"
+                                            className="w-full h-12 pl-9 pr-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-green-100 focus:border-green-400 focus:bg-white outline-none transition-all font-semibold text-slate-900"
                                             required
                                         />
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Kho xuất hàng <span className="text-red-500">*</span></label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><MapPin className="w-4 h-4" />Kho xuất hàng <span className="text-red-500">*</span></label>
                                     <select
                                         name="warehouse_id"
                                         value={formData.warehouse_id}
                                         onChange={handleChange}
-                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-bold text-gray-700 cursor-pointer"
+                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-green-100 focus:border-green-400 focus:bg-white outline-none transition-all font-semibold text-slate-700 cursor-pointer"
                                         required
                                     >
                                         {warehouses && warehouses.map(wh => (
@@ -285,42 +285,42 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Địa chỉ giao nhận chi tiết <span className="text-red-500">*</span></label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><MapPin className="w-4 h-4" />Địa chỉ giao nhận chi tiết <span className="text-red-500">*</span></label>
                                     <input
                                         type="text"
                                         name="address"
                                         value={formData.address}
                                         onChange={handleChange}
                                         placeholder="Số nhà, đường, phường, quận/huyện, tỉnh/thành phố..."
-                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-medium text-gray-900"
+                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-green-100 focus:border-green-400 focus:bg-white outline-none transition-all font-semibold text-slate-900"
                                         required
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Nhóm Kinh Doanh</label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><Building className="w-4 h-4" />Nhóm Kinh Doanh</label>
                                     <input
                                         type="text"
                                         name="business_group"
                                         value={formData.business_group}
                                         onChange={handleChange}
                                         placeholder="Ví dụ: Nhóm KD Miền Bắc..."
-                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-medium text-gray-900"
+                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-green-100 focus:border-green-400 focus:bg-white outline-none transition-all font-semibold text-slate-900"
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">NV Kinh Doanh phụ trách chăm sóc</label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><User className="w-4 h-4" />NV Kinh Doanh phụ trách chăm sóc</label>
                                     <select
                                         name="care_by"
                                         value={formData.care_by}
                                         onChange={handleChange}
-                                        className="w-full px-4 py-3 bg-orange-50/50 border border-orange-100 rounded-xl focus:ring-4 focus:ring-orange-100 focus:border-orange-500 outline-none transition-all font-bold text-orange-900 cursor-pointer"
+                                        className="w-full h-12 px-4 bg-emerald-50 border border-emerald-100 rounded-2xl focus:ring-4 focus:ring-emerald-100 focus:border-emerald-500 outline-none transition-all font-semibold text-emerald-900 cursor-pointer"
                                     >
                                         <option value="">-- Chọn NVKD --</option>
                                         {staffList.map(u => <option key={u.id} value={u.name}>{u.name}{u.role ? ` (${u.role})` : ''}</option>)}
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Đại lý (nơi quản lý KH)</label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><Building className="w-4 h-4" />Đại lý (nơi quản lý KH)</label>
                                     <input
                                         type="text"
                                         name="agency_name"
@@ -328,19 +328,19 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                         onChange={handleChange}
                                         placeholder="Gõ tên đại lý..."
                                         list="modal-agency-suggestions"
-                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-medium text-gray-900"
+                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-green-100 focus:border-green-400 focus:bg-white outline-none transition-all font-semibold text-slate-900"
                                     />
                                     <datalist id="modal-agency-suggestions">
                                         {agencySuggestions.map((a, i) => <option key={i} value={a} />)}
                                     </datalist>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Đại lý phụ trách (NVKD)</label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><User className="w-4 h-4" />Đại lý phụ trách (NVKD)</label>
                                     <select
                                         name="managed_by"
                                         value={formData.managed_by}
                                         onChange={handleChange}
-                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-bold text-gray-900 cursor-pointer"
+                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-green-100 focus:border-green-400 focus:bg-white outline-none transition-all font-semibold text-slate-900 cursor-pointer"
                                     >
                                         <option value="">-- Chọn NVKD phụ trách --</option>
                                         {staffList.map(u => <option key={u.id} value={u.name}>{u.name}{u.role ? ` (${u.role})` : ''}</option>)}
@@ -350,45 +350,45 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                         </div>
 
                         {/* Section 3: Thông tin xuất hoá đơn */}
-                        <div>
-                            <h4 className="flex items-center gap-2 text-sm font-black text-gray-800 uppercase tracking-widest mb-4 border-b border-gray-100 pb-2">
-                                <Receipt className="w-4 h-4" /> THÔNG TIN XUẤT HOÁ ĐƠN
+                        <div className="rounded-3xl border border-emerald-100 bg-white p-5 sm:p-6 space-y-5 shadow-sm [&_label]:text-emerald-700 [&_label_svg]:text-emerald-600">
+                            <h4 className="flex items-center gap-2.5 text-[18px] !font-extrabold !text-emerald-700 pb-3 border-b border-emerald-100">
+                                <Receipt className="w-4 h-4 text-emerald-600" /> Thông tin xuất hoá đơn
                             </h4>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Mã số thuế</label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><Building className="w-4 h-4" />Mã số thuế</label>
                                     <div className="relative">
-                                        <Building className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                        <Building className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />
                                         <input
                                             type="text"
                                             name="tax_code"
                                             value={formData.tax_code}
                                             onChange={handleChange}
                                             placeholder="VD: 0101234567"
-                                            className="w-full pl-9 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-bold text-gray-900"
+                                            className="w-full h-12 pl-9 pr-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 focus:bg-white outline-none transition-all font-semibold text-slate-900"
                                         />
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Tên công ty (trên hoá đơn)</label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><Building className="w-4 h-4" />Tên công ty (trên hoá đơn)</label>
                                     <input
                                         type="text"
                                         name="invoice_company_name"
                                         value={formData.invoice_company_name}
                                         onChange={handleChange}
                                         placeholder="Tên công ty ghi trên hoá đơn..."
-                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-bold text-gray-900"
+                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 focus:bg-white outline-none transition-all font-semibold text-slate-900"
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Địa chỉ xuất hoá đơn</label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><MapPin className="w-4 h-4" />Địa chỉ xuất hoá đơn</label>
                                     <input
                                         type="text"
                                         name="invoice_address"
                                         value={formData.invoice_address}
                                         onChange={handleChange}
                                         placeholder="Địa chỉ ghi trên hoá đơn GTGT..."
-                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-medium text-gray-900"
+                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 focus:bg-white outline-none transition-all font-semibold text-slate-900"
                                     />
                                 </div>
                             </div>
@@ -400,20 +400,20 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                 </div>
 
                 {/* Footer Actions */}
-                <div className="p-6 bg-white border-t border-gray-100 shrink-0 flex items-center justify-end gap-3 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.05)] relative z-10">
+                <div className="px-4 py-3 bg-white border-t border-slate-200 shrink-0 flex items-center justify-end gap-3 sticky bottom-0 z-20">
                     <button
                         type="button"
                         onClick={onClose}
-                        className="px-6 py-3 text-sm font-bold text-gray-500 hover:bg-gray-100 rounded-xl transition-colors"
+                        className="px-4 py-2.5 rounded-xl border border-slate-300 bg-slate-100 text-slate-500 hover:text-slate-700 font-semibold text-[15px] transition-colors outline-none"
                         disabled={isLoading}
                     >
-                        Hủy thoát
+                        Hủy
                     </button>
                     <button
                         type="submit"
                         form="customerForm"
                         disabled={isLoading}
-                        className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl shadow-sm shadow-blue-200 transition-all flex items-center gap-2 border border-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-8 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white text-[15px] font-bold rounded-2xl shadow-md shadow-emerald-200 transition-all flex items-center gap-2 border border-emerald-700/40 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {isLoading ? (
                             <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>

@@ -214,9 +214,15 @@ const Suppliers = () => {
         '#06B6D4', '#F97316', '#84CC16', '#EC4899', '#6366F1'
     ];
 
+    const getRowStyle = () => 'hover:bg-primary/5';
+
+    const getNameCellClass = () => clsx(
+        'px-4 py-4 text-sm font-semibold text-foreground border-r border-primary/20'
+    );
+
     return (
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col -mt-2 min-h-0 px-3 md:px-6">
-            <div className="flex items-center gap-1 mb-4 mt-6">
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5">
+            <div className="flex items-center gap-1 mb-3 mt-1">
                 <button
                     onClick={() => setActiveView('list')}
                     className={clsx(
@@ -285,7 +291,7 @@ const Suppliers = () => {
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy kết quả phù hợp</div>
                         ) : (
                             filteredSuppliers.map((supplier) => (
-                                <div key={supplier.id} className="rounded-2xl border border-border bg-white shadow-sm p-4">
+                                <div key={supplier.id} className="rounded-2xl border border-primary/20 bg-gradient-to-br from-white to-primary/[0.03] shadow-sm p-4">
                                     <div className="flex items-start justify-between gap-2 mb-2">
                                         <div>
                                             <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Nhà cung cấp</p>
@@ -296,7 +302,7 @@ const Suppliers = () => {
                                         </span>
                                     </div>
 
-                                    <div className="space-y-1.5 mb-3">
+                                    <div className="space-y-1.5 mb-3 rounded-xl border border-border/60 bg-muted/10 px-3 py-2.5">
                                         <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
                                             <Phone className="w-3.5 h-3.5" />
                                             <span>{supplier.phone || '—'}</span>
@@ -309,10 +315,10 @@ const Suppliers = () => {
 
                                     <div className="flex items-center justify-end pt-2 border-t border-border/70">
                                         <div className="flex items-center gap-3">
-                                            <button onClick={() => handleViewSupplier(supplier)} className="text-muted-foreground hover:text-primary transition-colors"><Eye size={18} /></button>
-                                            <button onClick={() => handleEditSupplier(supplier)} className="text-muted-foreground hover:text-primary transition-colors"><Edit size={18} /></button>
+                                            <button onClick={() => handleViewSupplier(supplier)} className="text-blue-500 hover:text-blue-700 transition-colors"><Eye size={18} /></button>
+                                            <button onClick={() => handleEditSupplier(supplier)} className="text-amber-500 hover:text-amber-700 transition-colors"><Edit size={18} /></button>
                                             {(role === 'admin' || role === 'manager') && (
-                                                <button onClick={() => handleDeleteSupplier(supplier.id, supplier.name)} className="text-muted-foreground hover:text-red-500 transition-colors"><Trash2 size={18} /></button>
+                                                <button onClick={() => handleDeleteSupplier(supplier.id, supplier.name)} className="text-rose-500 hover:text-rose-700 transition-colors"><Trash2 size={18} /></button>
                                             )}
                                         </div>
                                     </div>
@@ -387,19 +393,19 @@ const Suppliers = () => {
                         </div>
                     </div>
 
-                    <div className="hidden md:block flex-1 overflow-x-auto border-t border-border">
+                    <div className="hidden md:block flex-1 overflow-x-auto border-t border-primary/20">
                         <table className="w-full border-collapse">
-                            <thead className="bg-muted/20">
+                            <thead className="bg-primary/5">
                                 <tr>
                                     {visibleTableColumns.map(col => (
-                                        <th key={col.key} className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide">
+                                        <th key={col.key} className={clsx('px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide', col.key === 'name' && 'border-r border-primary/30')}>
                                             {col.label}
                                         </th>
                                     ))}
-                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide">Thao tác</th>
+                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide border-l border-r border-primary/30">Thao tác</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-border">
+                            <tbody className="divide-y divide-primary/10">
                                 {isLoading ? (
                                     <tr>
                                         <td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center text-muted-foreground">
@@ -413,20 +419,20 @@ const Suppliers = () => {
                                         </td>
                                     </tr>
                                 ) : filteredSuppliers.map((supplier) => (
-                                    <tr key={supplier.id} className="hover:bg-muted/20 transition-colors">
-                                        {isColumnVisible('name') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{supplier.name || '—'}</td>}
+                                    <tr key={supplier.id} className={getRowStyle()}>
+                                        {isColumnVisible('name') && <td className={getNameCellClass()}>{supplier.name || '—'}</td>}
                                         {isColumnVisible('phone') && <td className="px-4 py-4 text-sm text-muted-foreground">{supplier.phone || '—'}</td>}
                                         {isColumnVisible('address') && <td className="px-4 py-4 text-sm text-muted-foreground">{supplier.address || '—'}</td>}
-                                        <td className="px-4 py-4 text-center">
+                                        <td className="px-4 py-4 text-center border-l border-r border-primary/20">
                                             <div className="flex items-center justify-center gap-3">
-                                                <button onClick={() => handleViewSupplier(supplier)} className="text-muted-foreground hover:text-primary transition-colors p-1" title="Xem chi tiết">
+                                                <button onClick={() => handleViewSupplier(supplier)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="Xem chi tiết">
                                                     <Eye className="w-4 h-4" />
                                                 </button>
-                                                <button onClick={() => handleEditSupplier(supplier)} className="text-muted-foreground hover:text-primary transition-colors p-1" title="Chỉnh sửa">
+                                                <button onClick={() => handleEditSupplier(supplier)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
                                                     <Edit className="w-4 h-4" />
                                                 </button>
                                                 {(role === 'admin' || role === 'manager') && (
-                                                    <button onClick={() => handleDeleteSupplier(supplier.id, supplier.name)} className="text-muted-foreground hover:text-red-500 transition-colors p-1" title="Xóa">
+                                                    <button onClick={() => handleDeleteSupplier(supplier.id, supplier.name)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>
                                                 )}

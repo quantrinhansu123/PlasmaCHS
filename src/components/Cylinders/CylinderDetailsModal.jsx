@@ -188,34 +188,34 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
     const displayedTimeline = showFullTimeline ? timeline : timeline.slice(0, 3);
 
     return (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
-            <div className="bg-slate-50 rounded-[2rem] shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col h-[85vh] mt-12">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end md:items-center justify-center z-[100] p-0 md:p-4 animate-in fade-in duration-200">
+            <div className="bg-slate-50 rounded-t-[1.5rem] md:rounded-[2rem] shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col h-[100dvh] md:h-[85vh] mt-0 md:mt-12">
 
                 {/* Header Profile */}
-                <div className="bg-white px-8 py-6 border-b border-slate-200 shrink-0 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-teal-50 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 opacity-60 pointer-events-none"></div>
+                <div className="bg-white px-4 md:px-8 py-4 md:py-6 border-b border-slate-200 shrink-0 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-40 h-40 md:w-64 md:h-64 bg-teal-50 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 opacity-60 pointer-events-none"></div>
 
-                    <div className="flex items-start justify-between relative z-10">
-                        <div className="flex items-center gap-5">
-                            <div className="w-16 h-16 bg-gradient-to-br from-teal-500 to-emerald-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-teal-200">
-                                <ActivitySquare className="w-8 h-8" />
+                    <div className="flex items-start justify-between gap-3 relative z-10">
+                        <div className="flex items-start md:items-center gap-3 md:gap-5 min-w-0">
+                            <div className="w-12 h-12 md:w-16 md:h-16 bg-gradient-to-br from-teal-500 to-emerald-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-teal-200 shrink-0">
+                                <ActivitySquare className="w-6 h-6 md:w-8 md:h-8" />
                             </div>
-                            <div>
-                                <h2 className="text-2xl font-black text-slate-900 mb-1 tracking-tight flex items-center gap-3">
+                            <div className="min-w-0">
+                                <h2 className="text-xl md:text-2xl font-black text-slate-900 mb-1 tracking-tight flex items-center gap-2 md:gap-3 truncate">
                                     Vỏ bình {cylinder.serial_number}
                                 </h2>
-                                <div className="flex items-center gap-4 text-sm font-bold text-slate-500">
+                                <div className="flex flex-wrap items-center gap-2 md:gap-4 text-xs md:text-sm font-bold text-slate-500">
                                     <span className="flex items-center gap-1.5"><Activity className="w-4 h-4 text-slate-400" /> {cylinder.volume || '—'}</span>
                                     {cylinder.category && <span className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 rounded-md text-slate-600">{cylinder.category}</span>}
                                     <span className="flex items-center gap-1.5 text-teal-600"><MapPin className="w-4 h-4 text-teal-400" /> {cylinder.status || '—'}</span>
                                     {cylinder.customer_name && (
-                                        <span className="flex items-center gap-1.5 text-slate-600">Đang ở: {cylinder.customer_name}</span>
+                                        <span className="flex items-center gap-1.5 text-slate-600 min-w-0"><span className="truncate max-w-[220px] md:max-w-[320px]">Đang ở: {cylinder.customer_name}</span></span>
                                     )}
                                 </div>
                             </div>
                         </div>
-                        <button onClick={onClose} className="p-2.5 bg-slate-100 text-slate-400 hover:text-slate-900 hover:bg-slate-200 rounded-xl transition-colors">
-                            <X className="w-6 h-6" />
+                        <button onClick={onClose} className="p-2 md:p-2.5 bg-slate-100 text-slate-400 hover:text-slate-900 hover:bg-slate-200 rounded-xl transition-colors shrink-0">
+                            <X className="w-5 h-5 md:w-6 md:h-6" />
                         </button>
                     </div>
                 </div>
@@ -231,12 +231,12 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                         <>
                             {/* QC Metadata Section */}
                             {qcData && (
-                                <div className="px-8 pt-6 pb-2">
+                                <div className="px-4 md:px-8 pt-5 md:pt-6 pb-2">
                                     <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest flex items-center gap-2 mb-4">
                                         <Activity className="w-4 h-4 text-emerald-500" />
                                         Thông số kỹ thuật (Kiểm định)
                                     </h3>
-                                    <div className="bg-emerald-50/50 border border-emerald-100 rounded-2xl p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    <div className="bg-emerald-50/50 border border-emerald-100 rounded-2xl p-3 md:p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
                                         <div className="flex flex-col gap-3">
                                             <div>
                                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Trọng lượng vỏ</p>
@@ -287,16 +287,16 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                             )}
 
                             {/* Timeline Section - Vòng đời bình */}
-                            <div className="px-8 pt-6 pb-4">
-                                <div className="flex items-center justify-between mb-4">
-                                    <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
+                            <div className="px-4 md:px-8 pt-5 md:pt-6 pb-4">
+                                <div className="flex items-center justify-between gap-3 mb-4">
+                                    <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest flex items-center gap-2 min-w-0">
                                         <Truck className="w-4 h-4 text-slate-400" />
-                                        Vòng đời — {timeline.length} sự kiện
+                                        <span className="truncate">Vòng đời — {timeline.length} sự kiện</span>
                                     </h3>
                                     {timeline.length > 3 && (
                                         <button
                                             onClick={() => setShowFullTimeline(!showFullTimeline)}
-                                            className="flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-all"
+                                            className="shrink-0 flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 md:px-3 py-1.5 rounded-lg transition-all"
                                         >
                                             {showFullTimeline ? (
                                                 <><ChevronUp className="w-3.5 h-3.5" /> Thu gọn</>
@@ -315,26 +315,26 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                                 ) : (
                                     <div className="space-y-0 relative">
                                         {/* Vertical line */}
-                                        <div className="absolute left-[19px] top-2 bottom-2 w-0.5 bg-slate-200"></div>
+                                        <div className="absolute left-[15px] md:left-[19px] top-2 bottom-2 w-0.5 bg-slate-200"></div>
 
                                         {displayedTimeline.map((event, idx) => {
                                             const c = colorMap[event.color] || colorMap.teal;
                                             return (
-                                                <div key={idx} className="flex items-start gap-4 relative group">
+                                                <div key={idx} className="flex items-start gap-3 md:gap-4 relative group">
                                                     {/* Dot */}
-                                                    <div className={`w-10 h-10 rounded-xl ${c.iconBg} ${c.text} flex items-center justify-center shrink-0 z-10 shadow-sm border ${c.border}`}>
+                                                    <div className={`w-8 h-8 md:w-10 md:h-10 rounded-xl ${c.iconBg} ${c.text} flex items-center justify-center shrink-0 z-10 shadow-sm border ${c.border}`}>
                                                         {getEventIcon(event.icon)}
                                                     </div>
 
                                                     {/* Content */}
                                                     <div className={`flex-1 pb-5 ${idx === displayedTimeline.length - 1 ? '' : ''}`}>
-                                                        <div className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-                                                            <div className="flex items-center justify-between mb-1">
+                                                        <div className="bg-white rounded-xl p-3 md:p-4 border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
+                                                            <div className="flex items-start justify-between gap-2 mb-1">
                                                                 <span className={`text-xs font-black uppercase tracking-wider ${c.text}`}>{event.label}</span>
                                                                 <span className="text-[10px] font-bold text-slate-400">{formatDate(event.date)}</span>
                                                             </div>
                                                             <h4 className="font-bold text-slate-800 text-sm mb-1">{event.location}</h4>
-                                                            <div className="flex items-center gap-2">
+                                                            <div className="flex flex-wrap items-center gap-2">
                                                                 <span className="text-[10px] font-black text-slate-400 bg-slate-50 px-2 py-0.5 rounded">{event.code}</span>
                                                                 <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border ${getStatusStyle(event.status)}`}>{event.status}</span>
                                                             </div>
@@ -345,7 +345,7 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                                         })}
 
                                         {!showFullTimeline && timeline.length > 3 && (
-                                            <div className="flex items-center gap-4 pl-10 pt-1">
+                                            <div className="flex items-center gap-4 pl-8 md:pl-10 pt-1">
                                                 <p className="text-xs font-bold text-slate-400 italic">
                                                     ...và {timeline.length - 3} sự kiện trước đó
                                                 </p>
@@ -356,12 +356,12 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                             </div>
 
                             {/* Divider */}
-                            <div className="mx-8 border-t border-slate-200"></div>
+                            <div className="mx-4 md:mx-8 border-t border-slate-200"></div>
 
                             {/* Legacy 2-column view */}
                             <div className="flex flex-col md:flex-row bg-[#F8FAFC]">
                                 {/* Cột 1: Thuê / Giao đi */}
-                                <div className="flex-1 p-6 overflow-y-auto border-r border-slate-200">
+                                <div className="flex-1 p-4 md:p-6 overflow-y-auto md:border-r border-slate-200">
                                     <h3 className="text-sm font-black text-rose-600 uppercase tracking-widest mb-4 flex items-center gap-2"><LogOut className="w-4 h-4" /> Đơn Giao Bình / Cho Thuê</h3>
                                     <div className="space-y-4">
                                         {orders.filter(o => {
@@ -397,7 +397,7 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                                 </div>
 
                                 {/* Cột 2: Thu hồi / Trả / Thay đổi */}
-                                <div className="flex-1 p-6 overflow-y-auto">
+                                <div className="flex-1 p-4 md:p-6 overflow-y-auto">
                                     <h3 className="text-sm font-black text-teal-600 uppercase tracking-widest mb-4 flex items-center gap-2"><LogIn className="w-4 h-4" /> Đơn Nhập Bình / Thu Hồi</h3>
                                     <div className="space-y-4">
                                         {orders.filter(o => {
