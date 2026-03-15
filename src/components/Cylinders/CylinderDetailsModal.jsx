@@ -20,6 +20,7 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
     const [loading, setLoading] = useState(true);
     const [orders, setOrders] = useState([]);
     const [timeline, setTimeline] = useState([]);
+    const [storageHistory, setStorageHistory] = useState([]);
     const [showFullTimeline, setShowFullTimeline] = useState(false);
     const [qcData, setQcData] = useState(null);
 
@@ -31,7 +32,7 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
     const fetchAllHistory = async () => {
         setLoading(true);
         try {
-            // 1. Orders (giao cho khách / thu hồi)
+            // 1. Orders (giao cho khách / thu hồi / điều chuyển)
             const { data: orderData } = await supabase
                 .from('orders')
                 .select('*')
@@ -49,17 +50,16 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
             // 3. Goods Issues (xuất trả về NCC)
             const { data: issueItems } = await supabase
                 .from('goods_issue_items')
-                .select('*, goods_issues!inner(issue_code, supplier_id, warehouse_id, issue_date, status)')
+                .select('*, goods_issue_code, goods_issues!inner(issue_code, supplier_id, warehouse_id, issue_date, status)')
                 .eq('item_code', cylinder.serial_number);
 
             // 4. QC Data
-            const { data: qcDataRes, error: qcError } = await supabase
+            const { data: qcDataRes } = await supabase
                 .from('cylinder_qc_records')
                 .select('*')
                 .eq('serial_number', cylinder.serial_number)
                 .maybeSingle();
 
-            // Ignore 406 (Not Found) or 42P01 (Table not found)
             if (qcDataRes) {
                 setQcData(qcDataRes);
             } else {
@@ -72,31 +72,45 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
             // From orders
             (orderData || []).forEach(o => {
                 const type = o.order_type?.toLowerCase() || '';
-                const isOutgoing = type.includes('thuê') || type.includes('bán') || type.includes('giao');
-                const isInternal = o.customer_name === 'Vỏ bình' || type.includes('điều chuyển') || type.includes('thay đổi kho');
+                const isOutgoing = type.includes('thuê') || type.includes('bán') || type.includes('giao') || type.includes('xuất') || type.includes('thuong');
+                const isInternal = o.customer_name === 'Vỏ bình' || type.includes('điều chuyển') || type.includes('thay đổi kho') || type.includes('nội bộ') || type.includes('kho sang kho');
+                const isReturn = type.includes('thu hồi') || type.includes('trả') || type.includes('nhập');
 
-                let eventLabel = 'Thu hồi về kho';
+                // Map raw order_type ID to Friendly Label
+                let typeLabel = getOrderTypeLabel(o.order_type);
+
+                let eventLabel = typeLabel || 'Thu hồi về kho';
                 let eventIcon = 'incoming';
                 let eventColor = 'teal';
                 let eventType = 'THU_HOI';
+                let location = o.customer_name || 'Khách hàng';
 
                 if (isOutgoing) {
-                    eventLabel = 'Giao cho khách';
+                    eventLabel = typeLabel || 'Giao cho khách';
                     eventIcon = 'outgoing';
                     eventColor = 'rose';
                     eventType = 'GIAO_KHACH';
+                    location = `${o.warehouse || 'Kho'} → ${o.customer_name || 'Khách hàng'}`;
                 } else if (isInternal) {
-                    eventLabel = 'Thay đổi kho';
+                    eventLabel = 'Điều chuyển nội bộ';
                     eventIcon = 'warehouse';
                     eventColor = 'blue';
                     eventType = 'DIEU_CHUYEN';
+                    location = `${o.warehouse || 'Kho nguồn'} → Kho nhận`;
+                } else if (isReturn) {
+                    eventLabel = typeLabel || 'Thu hồi về kho';
+                    eventIcon = 'incoming';
+                    eventColor = 'teal';
+                    eventType = 'THU_HOI';
+                    location = `${o.customer_name || 'Khách'} → ${o.warehouse || 'Kho'}`;
                 }
 
                 events.push({
                     date: o.created_at,
                     type: eventType,
                     label: eventLabel,
-                    location: isInternal ? 'Kho hệ thống' : (o.customer_name || 'Khách hàng'),
+                    location: location,
+                    rawLocation: o.customer_name || o.warehouse || 'Không xác định',
                     code: o.order_code,
                     status: o.status,
                     icon: eventIcon,
@@ -112,10 +126,11 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                     date: r.receipt_date || ri.created_at,
                     type: 'NHAP_KHO',
                     label: 'Nhập kho từ NCC',
-                    location: `Kho ${r.warehouse_id} ← ${r.supplier_name}`,
+                    location: `NCC ${r.supplier_name} → Kho ${r.warehouse_id}`,
+                    rawLocation: `Kho ${r.warehouse_id}`,
                     code: r.receipt_code,
                     status: r.status,
-                    icon: 'warehouse',
+                    icon: 'supplier',
                     color: 'emerald',
                     source: 'receipt'
                 });
@@ -129,7 +144,8 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                     type: 'TRA_NCC',
                     label: 'Trả về NCC',
                     location: `Kho ${gi.warehouse_id} → NCC`,
-                    code: gi.issue_code,
+                    rawLocation: 'NCC',
+                    code: gi.issue_code || ii.goods_issue_code,
                     status: gi.status,
                     icon: 'supplier',
                     color: 'amber',
@@ -140,6 +156,17 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
             // Sort by date descending (newest first)
             events.sort((a, b) => new Date(b.date) - new Date(a.date));
             setTimeline(events);
+
+            // Calculate Storage History (Top 3 unique locations)
+            const distinctLocations = [];
+            events.forEach(e => {
+                const loc = e.rawLocation;
+                if (loc && !distinctLocations.includes(loc) && distinctLocations.length < 3) {
+                    distinctLocations.push(loc);
+                }
+            });
+            setStorageHistory(distinctLocations);
+
         } catch (error) {
             console.error('Error fetching cylinder lifecycle:', error);
         } finally {
@@ -158,6 +185,35 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
         return 'bg-amber-50 text-amber-600 border-amber-200';
     };
 
+    const getStatusLabel = (status) => {
+        switch (status) {
+            case 'CHO_DUYET': return 'Chờ duyệt';
+            case 'CHO_CTY_DUYET': return 'Chờ Cty duyệt';
+            case 'KHO_XU_LY': return 'Kho đang xử lý';
+            case 'DA_DUYET': return 'Đã xuất kho';
+            case 'CHO_GIAO_HANG': return 'Chờ giao hàng';
+            case 'DANG_GIAO_HANG': return 'Đang giao';
+            case 'CHO_DOI_SOAT': return 'Chờ đối soát';
+            case 'HOAN_THANH': return 'Hoàn thành';
+            case 'HUY_DON': return 'Đã hủy';
+            case 'DOI_SOAT_THAT_BAI': return 'Lỗi đối soát';
+            case 'DIEU_CHINH': return 'Cần điều chỉnh';
+            default: return status || '—';
+        }
+    };
+
+    const getOrderTypeLabel = (type) => {
+        if (!type) return '—';
+        const t = type.toUpperCase();
+        switch (t) {
+            case 'THUONG': return 'Đơn bán / Thuê';
+            case 'DEMO': return 'Đơn dùng thử (Demo)';
+            case 'NGOAI_GIAO': return 'Đơn ngoại giao';
+            case 'NGHIEN_CUU': return 'Đơn nghiên cứu';
+            default: return type;
+        }
+    };
+
     const getEventIcon = (iconType) => {
         switch (iconType) {
             case 'outgoing': return <Users className="w-4 h-4" />;
@@ -168,15 +224,6 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
         }
     };
 
-    const getColorClasses = (color) => ({
-        dot: `bg-${color}-500`,
-        bg: `bg-${color}-50`,
-        text: `text-${color}-600`,
-        border: `border-${color}-200`,
-        line: `bg-${color}-200`
-    });
-
-    // Colors that work with Tailwind JIT
     const colorMap = {
         rose: { dot: 'bg-rose-500', bg: 'bg-rose-50', text: 'text-rose-600', border: 'border-rose-200', iconBg: 'bg-rose-100' },
         teal: { dot: 'bg-teal-500', bg: 'bg-teal-50', text: 'text-teal-600', border: 'border-teal-200', iconBg: 'bg-teal-100' },
@@ -189,7 +236,7 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
 
     return (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end md:items-center justify-center z-[100] p-0 md:p-4 animate-in fade-in duration-200">
-            <div className="bg-slate-50 rounded-t-[1.5rem] md:rounded-[2rem] shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col h-[100dvh] md:h-[85vh] mt-0 md:mt-12">
+            <div className="bg-slate-50 rounded-t-[1.5rem] md:rounded-[2rem] shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col h-[100dvh] md:h-[90vh] mt-0 md:mt-12">
 
                 {/* Header Profile */}
                 <div className="bg-white px-4 md:px-8 py-4 md:py-6 border-b border-slate-200 shrink-0 relative overflow-hidden">
@@ -208,9 +255,6 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                                     <span className="flex items-center gap-1.5"><Activity className="w-4 h-4 text-slate-400" /> {cylinder.volume || '—'}</span>
                                     {cylinder.category && <span className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 rounded-md text-slate-600">{cylinder.category}</span>}
                                     <span className="flex items-center gap-1.5 text-teal-600"><MapPin className="w-4 h-4 text-teal-400" /> {cylinder.status || '—'}</span>
-                                    {cylinder.customer_name && (
-                                        <span className="flex items-center gap-1.5 text-slate-600 min-w-0"><span className="truncate max-w-[220px] md:max-w-[320px]">Đang ở: {cylinder.customer_name}</span></span>
-                                    )}
                                 </div>
                             </div>
                         </div>
@@ -218,6 +262,28 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                             <X className="w-5 h-5 md:w-6 md:h-6" />
                         </button>
                     </div>
+
+                    {/* Top 3 Storage History - MỚI BỔ SUNG */}
+                    {!loading && storageHistory.length > 0 && (
+                        <div className="mt-6 p-4 bg-slate-50 rounded-2xl border border-slate-100 relative z-10">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3 flex items-center gap-2">
+                                <MapPin className="w-3 h-3" /> 3 Nơi lưu trữ mới nhất
+                            </p>
+                            <div className="flex items-center gap-2 md:gap-4">
+                                {storageHistory.map((loc, idx) => (
+                                    <div key={idx} className="flex items-center gap-2 md:gap-4 flex-1">
+                                        <div className="bg-white px-3 md:px-4 py-2.5 rounded-xl border border-slate-200 shadow-sm grow min-w-0">
+                                            <p className="text-[10px] font-bold text-slate-400 mb-0.5">Vị trí {idx + 1}</p>
+                                            <p className="font-black text-slate-800 text-xs md:text-sm truncate">{loc}</p>
+                                        </div>
+                                        {idx < storageHistory.length - 1 && (
+                                            <span className="text-slate-300 font-black">←</span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Body */}
@@ -229,66 +295,9 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                         </div>
                     ) : (
                         <>
-                            {/* QC Metadata Section */}
-                            {qcData && (
-                                <div className="px-4 md:px-8 pt-5 md:pt-6 pb-2">
-                                    <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest flex items-center gap-2 mb-4">
-                                        <Activity className="w-4 h-4 text-emerald-500" />
-                                        Thông số kỹ thuật (Kiểm định)
-                                    </h3>
-                                    <div className="bg-emerald-50/50 border border-emerald-100 rounded-2xl p-3 md:p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-                                        <div className="flex flex-col gap-3">
-                                            <div>
-                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Trọng lượng vỏ</p>
-                                                <p className="font-black text-emerald-700">{qcData.empty_weight} kg</p>
-                                            </div>
-                                            <div>
-                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Chất liệu</p>
-                                                <p className="font-black text-slate-700 text-xs">{qcData.material || '—'}</p>
-                                            </div>
-                                        </div>
-                                        <div className="flex flex-col gap-3">
-                                            <div>
-                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Dung tích</p>
-                                                <p className="font-black text-emerald-700">{qcData.water_capacity} L</p>
-                                            </div>
-                                            <div>
-                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Thời gian giữ áp</p>
-                                                <p className="font-black text-slate-700 text-xs">{qcData.hold_time || '—'}</p>
-                                            </div>
-                                        </div>
-                                        <div className="flex flex-col gap-3">
-                                            <div>
-                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Lô / Mẫu</p>
-                                                <p className="font-black text-slate-700 text-sm">
-                                                    {qcData.batch_no || '—'}<br />
-                                                    <span className="text-[10px] font-semibold text-slate-500">{qcData.product_type}</span>
-                                                </p>
-                                            </div>
-                                            <div>
-                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Áp suất Test</p>
-                                                <p className="font-black text-slate-700 text-xs">{qcData.test_pressure || '—'}</p>
-                                            </div>
-                                        </div>
-                                        <div className="flex flex-col justify-between">
-                                            <div>
-                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Kết luận kiểm định</p>
-                                                <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-xs font-black inline-block mt-1">
-                                                    {qcData.conclusion || 'OK'}
-                                                </span>
-                                            </div>
-                                            <div>
-                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 mt-3">Tiêu chuẩn</p>
-                                                <p className="font-black text-slate-700 text-xs">{qcData.standard || '—'}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
                             {/* Timeline Section - Vòng đời bình */}
-                            <div className="px-4 md:px-8 pt-5 md:pt-6 pb-4">
-                                <div className="flex items-center justify-between gap-3 mb-4">
+                            <div className="px-4 md:px-8 pt-6 md:pt-8 pb-4">
+                                <div className="flex items-center justify-between gap-3 mb-6">
                                     <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest flex items-center gap-2 min-w-0">
                                         <Truck className="w-4 h-4 text-slate-400" />
                                         <span className="truncate">Vòng đời — {timeline.length} sự kiện</span>
@@ -327,16 +336,16 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                                                     </div>
 
                                                     {/* Content */}
-                                                    <div className={`flex-1 pb-5 ${idx === displayedTimeline.length - 1 ? '' : ''}`}>
-                                                        <div className="bg-white rounded-xl p-3 md:p-4 border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-                                                            <div className="flex items-start justify-between gap-2 mb-1">
-                                                                <span className={`text-xs font-black uppercase tracking-wider ${c.text}`}>{event.label}</span>
+                                                    <div className={`flex-1 pb-6`}>
+                                                        <div className="bg-white rounded-2xl p-4 md:p-5 border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
+                                                            <div className="flex items-start justify-between gap-2 mb-2">
+                                                                <span className={`text-[10px] font-black uppercase tracking-widest ${c.text}`}>{event.label}</span>
                                                                 <span className="text-[10px] font-bold text-slate-400">{formatDate(event.date)}</span>
                                                             </div>
-                                                            <h4 className="font-bold text-slate-800 text-sm mb-1">{event.location}</h4>
+                                                            <h4 className="font-black text-slate-800 text-sm md:text-base mb-2">{event.location}</h4>
                                                             <div className="flex flex-wrap items-center gap-2">
                                                                 <span className="text-[10px] font-black text-slate-400 bg-slate-50 px-2 py-0.5 rounded">{event.code}</span>
-                                                                <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border ${getStatusStyle(event.status)}`}>{event.status}</span>
+                                                                <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border ${getStatusStyle(event.status)}`}>{getStatusLabel(event.status)}</span>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -355,79 +364,108 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                                 )}
                             </div>
 
-                            {/* Divider */}
-                            <div className="mx-4 md:mx-8 border-t border-slate-200"></div>
+                            {/* QC Metadata Section */}
+                            {qcData && (
+                                <div className="px-4 md:px-8 py-6 bg-white border-y border-slate-100">
+                                    <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest flex items-center gap-2 mb-5">
+                                        <Activity className="w-4 h-4 text-emerald-500" />
+                                        Thông số kỹ thuật & Kiểm định
+                                    </h3>
+                                    <div className="bg-emerald-50/30 border border-emerald-100 rounded-2xl p-4 md:p-6 grid grid-cols-2 md:grid-cols-4 gap-6">
+                                        <div>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Trọng lượng (kg)</p>
+                                            <p className="font-black text-emerald-700 text-lg">{qcData.empty_weight}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Dung tích (L)</p>
+                                            <p className="font-black text-emerald-700 text-lg">{qcData.water_capacity}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Thời điểm Test</p>
+                                            <p className="font-black text-slate-700 text-xs md:text-sm">{qcData.hold_time || '—'}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Kết luận</p>
+                                            <span className="bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-lg text-[10px] font-black inline-block">
+                                                {qcData.conclusion || 'ĐẠT (OK)'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
-                            {/* Legacy 2-column view */}
-                            <div className="flex flex-col md:flex-row bg-[#F8FAFC]">
-                                {/* Cột 1: Thuê / Giao đi */}
-                                <div className="flex-1 p-4 md:p-6 overflow-y-auto md:border-r border-slate-200">
-                                    <h3 className="text-sm font-black text-rose-600 uppercase tracking-widest mb-4 flex items-center gap-2"><LogOut className="w-4 h-4" /> Đơn Giao Bình / Cho Thuê</h3>
+                            {/* Legacy Summary Columns */}
+                            <div className="flex flex-col md:flex-row bg-slate-50/50">
+                                {/* Đơn Giao / Cho Thuê */}
+                                <div className="flex-1 p-5 md:p-8 md:border-r border-slate-200">
+                                    <div className="flex items-center gap-3 mb-6">
+                                        <div className="w-8 h-8 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center">
+                                            <LogOut className="w-4 h-4" />
+                                        </div>
+                                        <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Đơn giao bình / cho thuê</h3>
+                                    </div>
                                     <div className="space-y-4">
                                         {orders.filter(o => {
                                             const t = o.order_type?.toLowerCase() || '';
-                                            return t.includes('thuê') || t.includes('bán') || t.includes('giao');
+                                            return t.includes('thuê') || t.includes('bán') || t.includes('giao') || t.includes('xuất');
                                         }).length === 0 ? (
-                                            <div className="p-10 text-center flex flex-col items-center border border-dashed border-slate-200 rounded-3xl bg-white">
-                                                <Package className="w-10 h-10 text-slate-200 mb-3" />
-                                                <p className="text-slate-400 font-bold text-sm">Chưa có giao dịch xuất vỏ</p>
+                                            <div className="p-10 text-center border border-dashed border-slate-200 rounded-3xl bg-white/50">
+                                                <Package className="w-10 h-10 text-slate-200 mx-auto mb-3" />
+                                                <p className="text-slate-400 font-bold text-xs uppercase">Trống</p>
                                             </div>
                                         ) : (
                                             orders.filter(o => {
                                                 const t = o.order_type?.toLowerCase() || '';
-                                                return t.includes('thuê') || t.includes('bán') || t.includes('giao');
+                                                return t.includes('thuê') || t.includes('bán') || t.includes('giao') || t.includes('xuất');
                                             }).map(o => (
-                                                <div key={o.id} className="bg-white p-5 rounded-2xl border border-rose-100 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
-                                                    <div className="absolute top-0 left-0 w-1 h-full bg-rose-400"></div>
+                                                <div key={o.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all relative group">
+                                                    <div className="absolute top-0 left-0 w-1.5 h-full bg-rose-400 opacity-0 group-hover:opacity-100 transition-opacity"></div>
                                                     <div className="flex justify-between items-start mb-3">
-                                                        <div>
-                                                            <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-1 rounded-md uppercase tracking-wider">{o.order_code}</span>
-                                                            <div className="text-[10px] font-bold text-slate-400 mt-2">{formatDate(o.created_at)}</div>
-                                                        </div>
-                                                        <span className={`px-2 py-0.5 text-[9px] font-black tracking-widest uppercase rounded flex items-center gap-1 ${getStatusStyle(o.status)}`}>
-                                                            {o.status}
-                                                        </span>
+                                                        <span className="text-[9px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md uppercase">{o.order_code}</span>
+                                                        <span className={`px-2 py-0.5 text-[8px] font-black uppercase rounded border ${getStatusStyle(o.status)}`}>{getStatusLabel(o.status)}</span>
                                                     </div>
-                                                    <h4 className="font-black text-slate-800 text-base mb-1">{o.customer_name}</h4>
-                                                    <p className="text-xs font-bold text-rose-500 uppercase tracking-wider">{o.order_type}</p>
+                                                    <h4 className="font-black text-slate-800 text-sm mb-1">{o.customer_name}</h4>
+                                                    <p className="text-[10px] font-bold text-rose-500 uppercase tracking-widest">{getOrderTypeLabel(o.order_type) || 'Đơn xuất'}</p>
+                                                    <p className="text-[10px] font-bold text-slate-400 mt-2">{formatDate(o.created_at)}</p>
                                                 </div>
                                             ))
                                         )}
                                     </div>
                                 </div>
 
-                                {/* Cột 2: Thu hồi / Trả / Thay đổi */}
-                                <div className="flex-1 p-4 md:p-6 overflow-y-auto">
-                                    <h3 className="text-sm font-black text-teal-600 uppercase tracking-widest mb-4 flex items-center gap-2"><LogIn className="w-4 h-4" /> Đơn Nhập Bình / Thu Hồi</h3>
+                                {/* Đơn Nhập / Thu Hồi / Điều Chuyển */}
+                                <div className="flex-1 p-5 md:p-8">
+                                    <div className="flex items-center gap-3 mb-6">
+                                        <div className="w-8 h-8 rounded-xl bg-teal-100 text-teal-600 flex items-center justify-center">
+                                            <LogIn className="w-4 h-4" />
+                                        </div>
+                                        <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Đơn nhập bình / thu hồi</h3>
+                                    </div>
                                     <div className="space-y-4">
                                         {orders.filter(o => {
                                             const t = o.order_type?.toLowerCase() || '';
-                                            return t.includes('thu hồi') || t.includes('trả') || t.includes('nhập') || o.customer_name === 'Vỏ bình';
+                                            return t.includes('thu hồi') || t.includes('trả') || t.includes('nhập') || t.includes('điều chuyển') || t.includes('kho') || o.customer_name === 'Vỏ bình';
                                         }).length === 0 ? (
-                                            <div className="p-10 text-center flex flex-col items-center border border-dashed border-slate-200 rounded-3xl bg-white">
-                                                <Package className="w-10 h-10 text-slate-200 mb-3" />
-                                                <p className="text-slate-400 font-bold text-sm">Chưa có giao dịch nhập/thu hồi</p>
+                                            <div className="p-10 text-center border border-dashed border-slate-200 rounded-3xl bg-white/50">
+                                                <Package className="w-10 h-10 text-slate-200 mx-auto mb-3" />
+                                                <p className="text-slate-400 font-bold text-xs uppercase">Trống</p>
                                             </div>
                                         ) : (
                                             orders.filter(o => {
                                                 const t = o.order_type?.toLowerCase() || '';
-                                                return t.includes('thu hồi') || t.includes('trả') || t.includes('nhập') || o.customer_name === 'Vỏ bình';
+                                                return t.includes('thu hồi') || t.includes('trả') || t.includes('nhập') || t.includes('điều chuyển') || t.includes('kho') || o.customer_name === 'Vỏ bình';
                                             }).map(o => {
-                                                const isInternal = o.customer_name === 'Vỏ bình';
+                                                const isInternal = o.customer_name === 'Vỏ bình' || t.includes('kho') || t.includes('điều chuyển');
                                                 return (
-                                                    <div key={o.id} className={`bg-white p-5 rounded-2xl border ${isInternal ? 'border-blue-100' : 'border-teal-100'} shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group`}>
-                                                        <div className={`absolute top-0 left-0 w-1 h-full ${isInternal ? 'bg-blue-400' : 'bg-teal-400'}`}></div>
+                                                    <div key={o.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all relative group">
+                                                        <div className={`absolute top-0 left-0 w-1.5 h-full ${isInternal ? 'bg-blue-400' : 'bg-teal-400'} opacity-0 group-hover:opacity-100 transition-opacity`}></div>
                                                         <div className="flex justify-between items-start mb-3">
-                                                            <div>
-                                                                <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-1 rounded-md uppercase tracking-wider">{o.order_code}</span>
-                                                                <div className="text-[10px] font-bold text-slate-400 mt-2">{formatDate(o.created_at)}</div>
-                                                            </div>
-                                                            <span className={`px-2 py-0.5 text-[9px] font-black tracking-widest uppercase rounded flex items-center gap-1 ${getStatusStyle(o.status)}`}>
-                                                                {o.status}
-                                                            </span>
+                                                            <span className="text-[9px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md uppercase">{o.order_code}</span>
+                                                            <span className={`px-2 py-0.5 text-[8px] font-black uppercase rounded border ${getStatusStyle(o.status)}`}>{getStatusLabel(o.status)}</span>
                                                         </div>
-                                                        <h4 className="font-black text-slate-800 text-base mb-1">{isInternal ? 'Kho hệ thống' : o.customer_name}</h4>
-                                                        <p className={`text-xs font-bold ${isInternal ? 'text-blue-500' : 'text-teal-500'} uppercase tracking-wider`}>{isInternal ? 'Thay đổi kho' : o.order_type}</p>
+                                                        <h4 className="font-black text-slate-800 text-sm mb-1">{isInternal ? 'Kho nội bộ / Lưu chuyển' : o.customer_name}</h4>
+                                                        <p className={`text-[10px] font-bold ${isInternal ? 'text-blue-500' : 'text-teal-500'} uppercase tracking-widest`}>{getOrderTypeLabel(o.order_type) || 'Đơn nhập'}</p>
+                                                        <p className="text-[10px] font-bold text-slate-400 mt-2">{formatDate(o.created_at)}</p>
                                                     </div>
                                                 );
                                             })
@@ -438,7 +476,6 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                         </>
                     )}
                 </div>
-
             </div>
         </div>
     );

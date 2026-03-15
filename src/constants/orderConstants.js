@@ -8,8 +8,8 @@ export const MOCK_CUSTOMERS = [
 
 
 export const ORDER_TYPES = [
-    { id: 'THUONG', label: 'Đơn thường' },
-    { id: 'DEMO', label: 'Đơn demo' },
+    { id: 'THUONG', label: 'Đơn bán / Thuê' },
+    { id: 'DEMO', label: 'Đơn dùng thử (Demo)' },
     { id: 'NGOAI_GIAO', label: 'Đơn ngoại giao' },
     { id: 'NGHIEN_CUU', label: 'Đơn nghiên cứu' },
 ];
