@@ -467,11 +467,20 @@ const CreateOrder = () => {
 
                 // Log CREATED history
                 if (inserted && inserted[0]) {
+                    const orderId = inserted[0].id;
                     await supabase.from('order_history').insert([{
-                        order_id: inserted[0].id,
+                        order_id: orderId,
                         action: 'CREATED',
                         new_status: initialStatus,
                         created_by: currentUser
+                    }]);
+
+                    // Create System Notification
+                    await supabase.from('notifications').insert([{
+                        title: `Đơn hàng mới: ${formData.orderCode}`,
+                        description: `Khách hàng ${customerName} đã được tạo bởi ${currentUser}.`,
+                        type: 'info',
+                        link: `/danh-sach-don-hang`
                     }]);
                 }
 

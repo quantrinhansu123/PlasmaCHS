@@ -2,10 +2,36 @@ import React from 'react';
 import { ArrowLeft, Home, Bell } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { clsx } from 'clsx';
+import { supabase } from '../../supabase/config';
 
 function MobileBottomNav() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [unreadCount, setUnreadCount] = React.useState(0);
+
+  const fetchUnreadCount = async () => {
+    const { count, error } = await supabase
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('is_read', false);
+    
+    if (!error) setUnreadCount(count || 0);
+  };
+
+  React.useEffect(() => {
+    fetchUnreadCount();
+
+    const channel = supabase
+      .channel('mobile-notifications')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => {
+        fetchUnreadCount();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const isHome = location.pathname === '/trang-chu' || location.pathname === '/';
 
@@ -28,11 +54,19 @@ function MobileBottomNav() {
         <Home size={20} strokeWidth={2.2} />
       </button>
 
-      <button className="relative p-2 text-muted-foreground hover:text-foreground transition-colors">
+      <button 
+        onClick={() => {
+          // You could navigate to a dedicated notification page on mobile if exists
+          console.log('Notification clicked on mobile');
+        }}
+        className="relative p-2 text-muted-foreground hover:text-foreground transition-colors"
+      >
         <Bell size={24} />
-        <span className="absolute top-1 right-1 w-4 h-4 bg-primary text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white">
-          4
-        </span>
+        {unreadCount > 0 && (
+          <span className="absolute top-1 right-1 w-4 h-4 bg-primary text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white">
+            {unreadCount}
+          </span>
+        )}
       </button>
     </div>
   );

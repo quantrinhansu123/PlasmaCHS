@@ -90,12 +90,15 @@ const mockNotifications = [
   },
 ];
 
+import { supabase } from '../../supabase/config';
+
 function Topbar({ sidebarOpen, setSidebarOpen }) {
   const [time, setTime] = useState(new Date());
-  const [notifications, setNotifications] = useState(mockNotifications);
+  const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const notificationDropdownRef = useRef(null);
   const userDropdownRef = useRef(null);
@@ -105,7 +108,55 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
 
   const defaultAvatar = 'https://ui-avatars.com/api/?name=Le+Minh+Cong&background=random&color=random';
 
-  const unreadCount = notifications.filter((notification) => !notification.isRead).length;
+  // Real-time Fetching Notifications
+  const fetchNotifications = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (!error && data) {
+      setNotifications(data);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+
+    // Setup Real-time Subscription
+    const channel = supabase
+      .channel('public:notifications')
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'notifications' 
+      }, (payload) => {
+        setNotifications(prev => [payload.new, ...prev]);
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'notifications'
+      }, (payload) => {
+        setNotifications(prev => prev.map(n => n.id === payload.new.id ? payload.new : n));
+      })
+      .on('postgres_changes', {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'notifications'
+      }, (payload) => {
+        setNotifications(prev => prev.filter(n => n.id !== payload.old.id));
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const unreadCount = notifications.filter((notification) => !notification.is_read).length;
   const displayNotifications = isExpanded ? notifications : notifications.slice(0, 5);
   const hasMore = notifications.length > 5;
 
@@ -204,20 +255,41 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
     return `${dayName}, ${date.toLocaleDateString('vi-VN')}`;
   };
 
-  const markAllAsRead = () => {
-    setNotifications(notifications.map((notification) => ({ ...notification, isRead: true })));
+  const markAllAsRead = async () => {
+    const { error } = await supabase
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('is_read', false);
+    
+    if (!error) {
+      setNotifications(notifications.map((n) => ({ ...n, is_read: true })));
+    }
   };
 
-  const clearAll = () => {
-    setNotifications([]);
+  const clearAll = async () => {
+    const { error } = await supabase
+      .from('notifications')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
+    
+    if (!error) {
+      setNotifications([]);
+    }
   };
 
-  const markAsRead = (id) => {
-    setNotifications(
-      notifications.map((notification) =>
-        notification.id === id ? { ...notification, isRead: true } : notification
-      )
-    );
+  const markAsRead = async (id) => {
+    const { error } = await supabase
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('id', id);
+    
+    if (!error) {
+      setNotifications(
+        notifications.map((n) =>
+          n.id === id ? { ...n, is_read: true } : n
+        )
+      );
+    }
   };
 
   const getIcon = (type) => {
@@ -251,7 +323,7 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
   };
 
   return (
-    <header className="h-[55px] bg-white border-b border-border flex items-center justify-between px-4 lg:px-6 z-30 sticky top-0">
+    <header className="h-[55px] bg-white border-b border-border flex items-center justify-between px-4 lg:px-6 z-[100000] sticky top-0">
       <div className="flex items-center gap-2 lg:gap-2.5">
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -331,8 +403,8 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
           </button>
 
           {showNotifications && (
-            <div className="absolute right-0 mt-2 w-[350px] bg-card rounded-xl shadow-xl border border-border overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-right">
-              <div className="p-3 border-b border-border flex items-center justify-between bg-card sticky top-0 z-10">
+            <div className="absolute right-0 mt-2 w-[350px] bg-white rounded-xl shadow-xl border border-border overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-right">
+              <div className="p-3 border-b border-border flex items-center justify-between bg-white sticky top-0 z-10">
                 <div className="flex items-center gap-2">
                   <Bell size={16} className="text-primary" />
                   <h3 className="font-bold text-foreground text-[13px]">Thông báo</h3>
@@ -374,7 +446,7 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
                         onClick={() => markAsRead(notification.id)}
                         className={clsx(
                           'p-3 transition-colors cursor-pointer hover:bg-muted/30 relative',
-                          getTypeStyles(notification.type, notification.isRead)
+                          getTypeStyles(notification.type, notification.is_read)
                         )}
                       >
                         <div className="flex gap-2.5">
@@ -393,19 +465,19 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
                               <h4
                                 className={clsx(
                                   'font-bold text-[13px] leading-tight transition-colors truncate',
-                                  notification.isRead ? 'text-foreground/70' : 'text-primary'
+                                  notification.is_read ? 'text-foreground/70' : 'text-primary'
                                 )}
                               >
                                 {notification.title}
                               </h4>
-                              {!notification.isRead && (
+                              {!notification.is_read && (
                                 <span className="w-1.5 h-1.5 bg-primary rounded-full shrink-0 mt-1" />
                               )}
                             </div>
                             <p className="text-[12px] text-muted-foreground leading-snug mb-0.5 line-clamp-1">
                               {notification.description}
                             </p>
-                            <span className="text-[10px] text-muted-foreground/50">{notification.time}</span>
+                            <span className="text-[10px] text-muted-foreground/50">{new Date(notification.created_at).toLocaleString('vi-VN')}</span>
                           </div>
                         </div>
                       </div>
@@ -464,7 +536,7 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
           </div>
 
           {showUserDropdown && (
-            <div className="absolute right-0 mt-3 w-56 bg-card rounded-xl shadow-2xl border border-border overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-right">
+            <div className="absolute right-0 mt-3 w-56 bg-white rounded-xl shadow-2xl border border-border overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-right">
               <div className="p-1.5 space-y-0.5">
                 <button
                   onClick={() => {
