@@ -120,15 +120,15 @@ const BarcodeScanner = ({
 
             {/* Confirmation Overlay */}
             {pendingScan && (
-                <div className="absolute inset-0 z-[100] bg-black/90 backdrop-blur-xl flex flex-col items-center justify-center p-6 text-white animate-in fade-in duration-300">
-                    <div className="w-full max-w-sm bg-white/10 rounded-3xl border border-white/20 p-8 flex flex-col items-center text-center shadow-2xl">
+                <div className="fixed inset-0 z-[200000] bg-black/95 flex flex-col items-center justify-center p-6 text-white">
+                    <div className="w-full max-w-sm bg-gray-900 rounded-3xl border border-white/20 p-8 flex flex-col items-center text-center shadow-2xl">
                         <div className="w-20 h-20 bg-blue-600 rounded-full flex items-center justify-center mb-6 shadow-lg shadow-blue-500/50">
                             <ScanLine className="w-10 h-10 text-white" />
                         </div>
                         
                         <h4 className="text-2xl font-black mb-2 tracking-tight">ĐÃ QUÉT MÃ</h4>
-                        <div className="bg-white/10 px-6 py-3 rounded-2xl mb-8 border border-white/10">
-                            <span className="text-3xl font-mono font-bold tracking-widest text-blue-400">{pendingScan}</span>
+                        <div className="bg-white/10 px-6 py-3 rounded-2xl mb-8 border border-white/10 w-full">
+                            <span className="text-2xl font-mono font-bold tracking-widest text-blue-400 break-all">{pendingScan}</span>
                         </div>
 
                         <div className="w-full space-y-4">
@@ -141,7 +141,7 @@ const BarcodeScanner = ({
                             
                             <button
                                 onClick={handleCancel}
-                                className="w-full py-4 bg-white/5 hover:bg-white/10 text-gray-300 font-bold text-lg rounded-2xl transition-all active:scale-95"
+                                className="w-full py-4 bg-white/5 hover:bg-white/10 text-gray-400 font-bold text-lg rounded-2xl transition-all active:scale-95"
                             >
                                 Quét lại mã này
                             </button>
