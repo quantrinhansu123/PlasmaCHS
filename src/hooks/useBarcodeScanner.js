@@ -31,13 +31,20 @@ const useBarcodeScanner = ({
         return () => {
             if (scannerRef.current) {
                 stopScanner(scannerRef.current);
+                scannerRef.current = null;
             }
         };
     }, []);
 
     const start = useCallback(async (onSuccess) => {
-        // Store the callback
+        // Store the callback in ref to avoid re-initializing engine when callback changes
         onSuccessCallbackRef.current = onSuccess;
+        
+        // If already scanning, just update the callback and return
+        if (isScanning && scannerRef.current) {
+            return;
+        }
+
         setScanError(null);
 
         // Clear previous instance if any

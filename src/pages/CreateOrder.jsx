@@ -49,6 +49,8 @@ const CreateOrder = () => {
     const [assignedCylinders, setAssignedCylinders] = useState([]);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
     const [scanTargetIndex, setScanTargetIndex] = useState(-1);
+    const scanTargetIndexRef = useRef(-1);
+    useEffect(() => { scanTargetIndexRef.current = scanTargetIndex; }, [scanTargetIndex]);
     const [scanCount, setScanCount] = useState(0);
     const assignedCylindersRef = useRef(assignedCylinders);
     useEffect(() => { assignedCylindersRef.current = assignedCylinders; }, [assignedCylinders]);
@@ -248,7 +250,9 @@ const CreateOrder = () => {
     // that uses Native/ZXing behind the scenes
     const handleScanSuccess = useCallback((decodedText) => {
         const currentArr = assignedCylindersRef.current;
-        const currentIdx = scanTargetIndex;
+        const currentIdx = scanTargetIndexRef.current;
+        
+        if (currentIdx === -1) return;
         
         // Skip if already in the list
         if (currentArr.includes(decodedText)) return;

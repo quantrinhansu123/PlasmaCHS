@@ -1,13 +1,13 @@
-import { ChevronDown, Edit3, Hash, MapPin, Package, Phone, Save, Search, User, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { ChevronDown, Edit3, Hash, MapPin, Package, Phone, Save, ScanLine, Search, User, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     CUSTOMER_CATEGORIES,
-    MOCK_CUSTOMERS,
     ORDER_TYPES,
     PRODUCT_TYPES
 } from '../../constants/orderConstants';
 import usePermissions from '../../hooks/usePermissions';
 import { supabase } from '../../supabase/config';
+import BarcodeScanner from '../Common/BarcodeScanner';
 
 export default function OrderFormModal({ order, onClose, onSuccess }) {
     const { role, user } = usePermissions();
@@ -15,8 +15,18 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
     const [isLoading, setIsLoading] = useState(false);
     const [isFetchingCustomers, setIsFetchingCustomers] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
-    const [customers, setCustomers] = useState(MOCK_CUSTOMERS);
+    const [customers, setCustomers] = useState([]);
     const [shippersList, setShippersList] = useState([]);
+    const [promotionsList, setPromotionsList] = useState([]);
+
+    // Scanner states
+    const [assignedCylinders, setAssignedCylinders] = useState([]);
+    const [isScannerOpen, setIsScannerOpen] = useState(false);
+    const [scanTargetIndex, setScanTargetIndex] = useState(-1);
+    const scanTargetIndexRef = useRef(-1);
+    useEffect(() => { scanTargetIndexRef.current = scanTargetIndex; }, [scanTargetIndex]);
+    const assignedCylindersRef = useRef(assignedCylinders);
+    useEffect(() => { assignedCylindersRef.current = assignedCylinders; }, [assignedCylinders]);
     const [showReasonModal, setShowReasonModal] = useState(false);
     const [editReason, setEditReason] = useState('');
 
@@ -56,7 +66,8 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
         department: '',
         promotion: '',
         shipperId: '',
-        shippingFee: 0
+        shippingFee: 0,
+        assignedCylinders: []
     };
 
     const [formData, setFormData] = useState(defaultState);
@@ -66,7 +77,22 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
         fetchRealCustomers();
         fetchWarehouses();
         fetchShippers();
+        fetchPromotions();
     }, []);
+
+    const fetchPromotions = async () => {
+        try {
+            const { data } = await supabase
+                .from('app_promotions')
+                .select('*')
+                .eq('is_active', true)
+                .lte('start_date', new Date().toISOString().split('T')[0])
+                .gte('end_date', new Date().toISOString().split('T')[0]);
+            if (data) setPromotionsList(data);
+        } catch (error) {
+            console.error('Error fetching promotions:', error);
+        }
+    };
 
     const fetchWarehouses = async () => {
         try {
@@ -145,6 +171,9 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
                 shipperId: order.shipper_id || '',
                 shippingFee: order.shipping_fee || 0
             });
+            if (order.assigned_cylinders) {
+                setAssignedCylinders(order.assigned_cylinders);
+            }
         }
     }, [order, isEdit, customers]);
 
@@ -176,7 +205,69 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
 
     const handleQuantityChange = (e) => {
         const value = e.target.value.replace(/\D/g, '');
-        setFormData(prev => ({ ...prev, quantity: value === '' ? 0 : parseInt(value, 10) }));
+        const parsedValue = value === '' ? 0 : parseInt(value, 10);
+        setFormData(prev => ({ ...prev, quantity: parsedValue }));
+
+        // Auto-resize assignedCylinders for BINH
+        if (formData.productType.startsWith('BINH')) {
+            setAssignedCylinders(prev => {
+                const newArr = [...prev];
+                if (parsedValue > newArr.length) {
+                    for (let i = newArr.length; i < parsedValue; i++) newArr.push('');
+                } else {
+                    newArr.length = parsedValue;
+                }
+                return newArr;
+            });
+        }
+    };
+
+    const handleCylinderSerialChange = (index, value) => {
+        setAssignedCylinders(prev => {
+            const newArr = [...prev];
+            newArr[index] = value;
+            return newArr;
+        });
+    };
+
+    const handleScanSuccess = useCallback((decodedText) => {
+        const currentArr = assignedCylindersRef.current;
+        const currentIdx = scanTargetIndexRef.current;
+        
+        if (currentIdx === -1) return;
+
+        setAssignedCylinders(prev => {
+            const newArr = [...prev];
+            newArr[currentIdx] = decodedText;
+            return newArr;
+        });
+
+        const updatedArr = [...currentArr];
+        updatedArr[currentIdx] = decodedText;
+        const nextEmpty = updatedArr.findIndex((s, i) => i > currentIdx && !s);
+        const fallbackEmpty = updatedArr.findIndex((s) => !s);
+        const nextIdx = nextEmpty !== -1 ? nextEmpty : fallbackEmpty;
+
+        if (nextIdx !== -1 && nextIdx !== currentIdx) {
+            setScanTargetIndex(nextIdx);
+        } else {
+            setIsScannerOpen(false);
+            setScanTargetIndex(-1);
+        }
+    }, [scanTargetIndex]);
+
+    const startScanner = (targetIdx) => {
+        setScanTargetIndex(targetIdx);
+        setIsScannerOpen(true);
+    };
+
+    const startScanAll = () => {
+        const firstEmpty = assignedCylinders.findIndex(s => !s);
+        if (firstEmpty === -1) {
+            alert('Đã gán đủ mã bình!');
+            return;
+        }
+        startScanner(firstEmpty);
     };
 
     const handleUnitPriceChange = (e) => {
@@ -194,7 +285,10 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
         return val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
     };
 
-    const calculatedTotalAmount = (formData.quantity || 0) * (formData.unitPrice || 0);
+    const selectedPromo = promotionsList.find(p => p.code === formData.promotion);
+    const freeCylinders = selectedPromo ? (selectedPromo.free_cylinders || 0) : 0;
+    const billedQuantity = Math.max(0, (formData.quantity || 0) - freeCylinders);
+    const calculatedTotalAmount = billedQuantity * (formData.unitPrice || 0);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -221,6 +315,68 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
                 initialStatus = 'DA_DUYET';
             }
 
+            const assignedSerials = formData.productType.startsWith('BINH') ? assignedCylinders.filter(Boolean) : [];
+
+            // 1. VALIDATION: Check if cylinders exist and are in the correct warehouse
+            if (assignedSerials.length > 0) {
+                const { data: validCylinders, error: checkError } = await supabase
+                    .from('cylinders')
+                    .select('serial_number, warehouse_id, status')
+                    .in('serial_number', assignedSerials);
+
+                if (checkError) throw new Error('Lỗi kiểm tra mã bình: ' + checkError.message);
+
+                if (!validCylinders || validCylinders.length !== assignedSerials.length) {
+                    const foundSerials = validCylinders?.map(c => c.serial_number) || [];
+                    const missing = assignedSerials.filter(s => !foundSerials.includes(s));
+                    throw new Error(`Mã bình không tồn tại trong hệ thống: ${missing.join(', ')}`);
+                }
+
+                const wrongWarehouse = validCylinders.filter(c => c.warehouse_id !== formData.warehouse);
+                if (wrongWarehouse.length > 0) {
+                    throw new Error(`Mã bình sau không thuộc kho đã chọn: ${wrongWarehouse.map(c => c.serial_number).join(', ')}`);
+                }
+            }
+
+            // 2. INVENTORY DEDUCTION (If direct DA_DUYET)
+            if (!isEdit && initialStatus === 'DA_DUYET') {
+                const productConfig = PRODUCT_TYPES.find(p => p.id === formData.productType);
+                const productLabel = productConfig ? productConfig.label : formData.productType;
+
+                const { data: invData, error: invErr } = await supabase
+                    .from('inventory')
+                    .select('id, quantity')
+                    .eq('warehouse_id', formData.warehouse)
+                    .ilike('item_name', productLabel.trim())
+                    .maybeSingle();
+
+                if (invErr) throw new Error('Lỗi kiểm tra tồn kho: ' + invErr.message);
+                if (!invData || invData.quantity < formData.quantity) {
+                    throw new Error(`Tồn kho không đủ! Hiện tại chỉ còn ${invData?.quantity || 0} ${productLabel}.`);
+                }
+
+                if (assignedSerials.length > 0) {
+                    const { error: cylUpdErr } = await supabase
+                        .from('cylinders')
+                        .update({ status: 'đang vận chuyển', customer_name: customerName })
+                        .in('serial_number', assignedSerials);
+                    if (cylUpdErr) throw new Error('Lỗi cập nhật trạng thái bình: ' + cylUpdErr.message);
+                }
+
+                const { error: invUpdErr } = await supabase
+                    .from('inventory')
+                    .update({ quantity: invData.quantity - formData.quantity })
+                    .eq('id', invData.id);
+                if (invUpdErr) throw new Error('Lỗi trừ tồn kho: ' + invUpdErr.message);
+
+                await supabase.from('inventory_transactions').insert([{
+                    inventory_id: invData.id,
+                    transaction_type: 'OUT',
+                    quantity_changed: formData.quantity,
+                    note: `Xuất kho trực tiếp (từ Modal) - Đơn ${formData.orderCode}`
+                }]);
+            }
+
             const payload = {
                 order_code: formData.orderCode,
                 customer_category: formData.customerCategory,
@@ -239,6 +395,7 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
                 promotion_code: formData.promotion,
                 shipper_id: formData.shipperId || null,
                 shipping_fee: formData.shippingFee || 0,
+                assigned_cylinders: assignedSerials.length > 0 ? assignedSerials : null,
                 status: isEdit ? order.status : initialStatus,
                 ordered_by: isEdit ? order.ordered_by : currentUser,
                 updated_at: new Date().toISOString()
@@ -579,12 +736,68 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
                                             className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-800 appearance-none focus:outline-none focus:ring-4 focus:ring-green-100 focus:border-green-400 focus:bg-white transition-all"
                                         >
                                             <option value="">-- Không có mã khuyến mãi --</option>
-                                            <option value="KMB02">KMB02 - Ưu đãi bình mới</option>
-                                            <option value="KM_MAY_01">KM_MAY_01 - Giảm giá máy</option>
+                                            {promotionsList.map(p => (
+                                                <option key={p.id} value={p.code}>
+                                                    {p.code} - Tặng {p.free_cylinders} bình
+                                                </option>
+                                            ))}
                                         </select>
                                         <ChevronDown className="w-4 h-4 text-green-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                                     </div>
+                                    {freeCylinders > 0 && (
+                                        <div className="mt-1 px-3 py-1.5 bg-orange-50 border border-orange-100 rounded-xl flex justify-between items-center text-[11px] font-bold text-orange-600">
+                                            <span>Khấu trừ: -{freeCylinders} bình</span>
+                                            <span>Tính tiền: {billedQuantity} bình</span>
+                                        </div>
+                                    )}
                                 </div>
+
+                                {formData.productType.startsWith('BINH') && formData.quantity > 0 && (
+                                    <div className="pt-3 mt-2 border-t border-emerald-100 space-y-4">
+                                        <div className="flex items-center justify-between">
+                                            <h5 className="text-[13px] !font-bold !text-emerald-700 flex items-center gap-2">
+                                                <ScanLine className="w-4 h-4" /> Gán mã bình ({assignedCylinders.filter(Boolean).length}/{formData.quantity})
+                                            </h5>
+                                            <button
+                                                type="button"
+                                                onClick={startScanAll}
+                                                className="px-3 py-1.5 bg-emerald-600 text-white text-[11px] font-bold rounded-lg hover:bg-emerald-700 transition-all flex items-center gap-1.5"
+                                            >
+                                                <ScanLine className="w-3.5 h-3.5" /> Quét tất cả
+                                            </button>
+                                        </div>
+                                        <div className="space-y-2">
+                                            {assignedCylinders.map((serial, idx) => (
+                                                <div key={idx} className="flex items-center gap-2">
+                                                    <span className="text-[11px] font-bold text-slate-400 w-5 text-right">{idx + 1}.</span>
+                                                    <input
+                                                        type="text"
+                                                        value={serial}
+                                                        onChange={(e) => handleCylinderSerialChange(idx, e.target.value)}
+                                                        placeholder={`Mã serial bình ${idx + 1}...`}
+                                                        className="flex-1 h-10 px-3 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-[13px] focus:outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 transition-all"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => startScanner(idx)}
+                                                        className="p-2.5 bg-emerald-100 text-emerald-600 rounded-xl hover:bg-emerald-200 transition-all"
+                                                    >
+                                                        <ScanLine className="w-4 h-4" />
+                                                    </button>
+                                                    {serial && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleCylinderSerialChange(idx, '')}
+                                                            className="p-2.5 text-rose-400 hover:bg-rose-50 rounded-xl transition-all"
+                                                        >
+                                                            <X className="w-4 h-4" />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
 
                                 <div className="pt-3 mt-2 border-t border-emerald-100 space-y-4 [&_label]:text-emerald-700 [&_label_svg]:text-emerald-600">
                                     <h5 className="text-[13px] !font-bold !text-emerald-700">Phí giao hàng & đơn vị VC</h5>
@@ -703,5 +916,11 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
                 </div>
             )
         }
+        <BarcodeScanner
+            isOpen={isScannerOpen}
+            onScanSuccess={handleScanSuccess}
+            onClose={() => setIsScannerOpen(false)}
+            title={scanTargetIndex !== -1 ? `Quét mã bình #${scanTargetIndex + 1}` : 'Quét mã bình'}
+        />
     </>);
 }
