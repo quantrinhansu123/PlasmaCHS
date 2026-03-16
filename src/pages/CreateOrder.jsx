@@ -1,14 +1,9 @@
 import {
     ChevronDown,
     Clock,
-    Link2,
-    MapPin,
     Package,
-    Phone,
     Plus,
     ScanLine,
-    Trash2,
-    User,
     X
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -912,12 +907,12 @@ const CreateOrder = () => {
                         </div>
                     </div>
 
-                    <div className="p-6 md:p-10 bg-[#F9FAFB] border-t border-[#E5E7EB] flex flex-col md:flex-row items-center justify-between gap-6">
-                        <p className="text-sm text-[#6B7280] font-normal w-full text-center md:text-left" style={{ fontFamily: '"Roboto", sans-serif' }}>* Vui lòng kiểm tra kỹ thông tin trước khi nhấn Xác nhận.</p>
-                        <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
+                    <div className="sticky bottom-0 z-40 px-6 py-4 pb-12 md:px-10 md:py-6 bg-[#F9FAFB] border-t border-[#E5E7EB] flex flex-col md:flex-row items-center justify-between gap-4 md:gap-6 shadow-[0_-8px_20px_rgba(0,0,0,0.08)]">
+
+                        <div className="flex flex-col-reverse sm:flex-row gap-3 w-full md:w-auto">
                             <button
                                 onClick={() => navigate('/danh-sach-don-hang')}
-                                className="w-full sm:w-auto px-8 py-3 bg-white border border-[#D1D5DB] text-[#374151] font-medium hover:bg-[#F3F4F6] transition-all"
+                                className="w-full sm:w-auto px-8 py-3 bg-white border border-[#D1D5DB] text-[#374151] font-bold hover:bg-[#F3F4F6] transition-all rounded-xl"
                                 style={{ fontFamily: '"Roboto", sans-serif' }}
                             >
                                 Hủy bỏ
@@ -925,9 +920,9 @@ const CreateOrder = () => {
                             <button
                                 onClick={handleCreateOrder}
                                 disabled={isSubmitting}
-                                className={`w-full sm:w-auto px-10 py-3 text-white font-medium text-base transition-all ${isSubmitting
+                                className={`w-full sm:w-auto px-10 py-3 text-white font-bold text-base transition-all rounded-xl shadow-lg ${isSubmitting
                                     ? 'bg-[#9CA3AF] cursor-not-allowed'
-                                    : 'bg-[#2563EB] hover:bg-[#1D4ED8]'
+                                    : 'bg-[#2563EB] hover:bg-[#1D4ED8] shadow-blue-200'
                                     }`}
                                 style={{ fontFamily: '"Roboto", sans-serif' }}
                             >

@@ -228,10 +228,10 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
             const newArr = [...prev];
             const now = new Date();
             const timeStr = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
-            
-            newArr[index] = { 
-                serial: value, 
-                scan_time: value ? (prev[index]?.scan_time || timeStr) : null 
+
+            newArr[index] = {
+                serial: value,
+                scan_time: value ? (prev[index]?.scan_time || timeStr) : null
             };
             return newArr;
         });
@@ -240,7 +240,7 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
     const handleScanSuccess = useCallback((decodedText) => {
         const currentArr = assignedCylindersRef.current;
         const currentIdx = scanTargetIndexRef.current;
-        
+
         if (currentIdx === -1) return;
 
         const now = new Date();
@@ -325,8 +325,8 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
                 initialStatus = 'DA_DUYET';
             }
 
-            const assignedSerials = formData.productType.startsWith('BINH') 
-                ? assignedCylinders.map(c => typeof c === 'string' ? c : c.serial).filter(Boolean) 
+            const assignedSerials = formData.productType.startsWith('BINH')
+                ? assignedCylinders.map(c => typeof c === 'string' ? c : c.serial).filter(Boolean)
                 : [];
 
             // 1. VALIDATION: Check if cylinders exist and are in the correct warehouse
@@ -899,11 +899,11 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
                     </form>
                 </div>
 
-                <div className="px-4 py-3 bg-white border-t border-slate-200 shrink-0 flex items-center justify-between gap-3 sticky bottom-0 z-20">
+                <div className="sticky bottom-0 z-40 px-6 py-4 pb-12 md:px-10 md:py-6 bg-[#F9FAFB] border-t border-slate-200 shrink-0 flex flex-col-reverse md:flex-row items-center justify-between gap-4 md:gap-6 shadow-[0_-8px_20px_rgba(0,0,0,0.08)]">
                     <button
                         type="button"
                         onClick={onClose}
-                        className="px-4 py-2.5 rounded-xl border border-slate-300 bg-slate-100 text-slate-500 hover:text-slate-700 font-semibold text-[15px] transition-colors outline-none"
+                        className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-500 hover:text-slate-700 font-bold text-[15px] transition-colors outline-none"
                         disabled={isLoading}
                     >
                         Hủy
@@ -912,14 +912,14 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
                         type="submit"
                         form="orderForm"
                         disabled={isLoading}
-                        className="flex-1 sm:flex-none px-6 py-3 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white text-[15px] font-bold rounded-2xl shadow-md shadow-emerald-200 transition-all flex items-center justify-center gap-2 border border-emerald-700/40 disabled:opacity-50"
+                        className="w-full md:flex-1 sm:w-auto px-6 py-3 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white text-[15px] font-bold rounded-xl shadow-lg shadow-emerald-200 transition-all flex items-center justify-center gap-2 border border-emerald-700/40 disabled:opacity-50"
                     >
                         {isLoading ? (
                             <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                         ) : (
                             <Save className="w-4 h-4" />
                         )}
-                        {isEdit ? 'Lưu thay đổi' : 'Thêm mới'}
+                        {isLoading ? 'Đang lưu đơn...' : isEdit ? 'Xác nhận cập nhật' : 'Xác nhận tạo đơn hàng'}
                     </button>
                 </div>
 
