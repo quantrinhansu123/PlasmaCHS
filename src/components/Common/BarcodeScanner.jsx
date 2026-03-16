@@ -127,29 +127,31 @@ const BarcodeScanner = ({
 
             {/* Confirmation Overlay */}
             {pendingScan && (
-                <div className="fixed inset-0 z-[200000] bg-black/95 flex flex-col items-center justify-center p-6 text-white">
+                <div className="fixed inset-0 z-[200000] bg-black/95 flex flex-col items-center justify-center p-6 confirmation-overlay-white-force" style={{ color: '#FFFFFF' }}>
                     <div className="w-full max-w-sm bg-gray-900 rounded-3xl border border-white/20 p-8 flex flex-col items-center text-center shadow-2xl">
                         <div className="w-20 h-20 bg-blue-600 rounded-full flex items-center justify-center mb-6 shadow-lg shadow-blue-500/50">
-                            <ScanLine className="w-10 h-10 text-white" />
+                            <ScanLine className="w-10 h-10 text-white" style={{ color: '#FFFFFF' }} />
                         </div>
                         
-                        <h4 className="text-2xl font-black mb-2 tracking-tight !text-white">ĐÃ QUÉT MÃ</h4>
+                        <h4 className="text-2xl font-black mb-2 tracking-tight" style={{ color: '#FFFFFF' }}>ĐÃ QUÉT MÃ</h4>
                         <div className="bg-white/10 px-6 py-4 rounded-2xl mb-2 border border-white/20 w-full shadow-inner">
-                            <span className="text-2xl md:text-3xl font-mono font-bold tracking-widest !text-white break-all">{pendingScan}</span>
+                            <span className="text-2xl md:text-3xl font-mono font-bold tracking-widest break-all" style={{ color: '#FFFFFF' }}>{pendingScan}</span>
                         </div>
-                        <p className="text-gray-300 text-sm font-medium mb-8">Thời gian quét: <span className="!text-white font-bold">{scanTime}</span></p>
+                        <p className="text-sm font-medium mb-8" style={{ color: '#FFFFFF' }}>Thời gian quét: <span className="font-bold" style={{ color: '#FFFFFF' }}>{scanTime}</span></p>
 
                         <div className="w-full space-y-4">
                             <button
                                 onClick={handleConfirm}
-                                className="w-full py-5 bg-blue-600 hover:bg-blue-700 !text-white font-black text-xl rounded-2xl shadow-xl shadow-blue-600/30 transition-all flex items-center justify-center gap-3 active:scale-95"
+                                className="w-full py-5 bg-blue-600 hover:bg-blue-700 font-black text-xl rounded-2xl shadow-xl shadow-blue-600/30 transition-all flex items-center justify-center gap-3 active:scale-95"
+                                style={{ color: '#FFFFFF' }}
                             >
                                 XÁC NHẬN {totalCount ? `(${currentCount + 1}/${totalCount})` : `(${currentCount + 1})`}
                             </button>
                             
                             <button
                                 onClick={handleCancel}
-                                className="w-full py-4 bg-white/5 hover:bg-white/10 !text-white font-bold text-lg rounded-2xl transition-all active:scale-95 border border-white/10"
+                                className="w-full py-4 bg-white/5 hover:bg-white/10 font-bold text-lg rounded-2xl transition-all active:scale-95 border border-white/10"
+                                style={{ color: '#FFFFFF' }}
                             >
                                 Quét lại mã này
                             </button>
@@ -190,7 +192,21 @@ const BarcodeScanner = ({
                     animation: scanLine 2s infinite linear;
                 }
                 
-                /* Hide any default elements injected by html5-qrcode (if ZXing/html5-qrcode leaks) */
+                /* Force White Text Hack - Very Aggressive */
+                .confirmation-overlay-white-force,
+                .confirmation-overlay-white-force *,
+                .confirmation-overlay-white-force h4,
+                .confirmation-overlay-white-force span,
+                .confirmation-overlay-white-force p {
+                    color: #ffffff !important;
+                    -webkit-text-fill-color: #ffffff !important; /* Some mobile browsers need this */
+                }
+
+                .confirmation-overlay-white-force {
+                    color-scheme: dark !important; /* Tells mobile browsers this is a dark area */
+                }
+
+                /* Hide any default elements injected by html5-qrcode */
                 #${elementId} select,
                 #${elementId} button,
                 #${elementId} a {

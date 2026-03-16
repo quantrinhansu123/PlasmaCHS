@@ -283,6 +283,18 @@ const CreateOrder = () => {
         });
     };
 
+    const handleManualConfirm = (index) => {
+        const serial = assignedCylinders[index];
+        if (serial) {
+            setAssignedCylinderTimes(prev => {
+                const newArr = [...prev];
+                newArr[index] = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+                return newArr;
+            });
+            toast.success(`Đã xác nhận thời gian quét cho mã ${serial}`);
+        }
+    };
+
     // Handle the scanning event coming from the new 3-tier generic Barcode Scanner
     // that uses Native/ZXing behind the scenes
     const handleScanSuccess = useCallback((decodedText, time) => {
@@ -774,14 +786,20 @@ const CreateOrder = () => {
                                                             placeholder={`Mã serial bình ${idx + 1}...`}
                                                             className="flex-1 px-3 py-2.5 bg-white border border-[#D1D5DB] outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] font-medium text-sm transition-all"
                                                             style={{ fontFamily: '"Roboto", sans-serif' }}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    e.preventDefault();
+                                                                    handleManualConfirm(idx);
+                                                                }
+                                                            }}
                                                         />
                                                         <button
                                                             type="button"
                                                             onClick={() => startCylinderScanner(idx)}
-                                                            className="px-3 py-2.5 bg-[#2563EB] text-white hover:bg-[#1D4ED8] transition-all flex items-center gap-1 text-xs font-medium"
+                                                            className="flex-none w-10 h-10 bg-[#2563EB] text-white hover:bg-[#1D4ED8] transition-all flex items-center justify-center rounded-md shadow-sm"
                                                             title="Quét barcode"
                                                         >
-                                                            <ScanLine className="w-4 h-4" />
+                                                            <ScanLine className="w-5 h-5" />
                                                         </button>
                                                         {serial && (
                                                             <button
@@ -794,7 +812,7 @@ const CreateOrder = () => {
                                                                         return newArr;
                                                                     });
                                                                 }}
-                                                                className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 transition-all"
+                                                                className="flex-none p-2 text-red-400 hover:text-red-600 hover:bg-red-50 transition-all rounded-md"
                                                                 title="Xóa"
                                                             >
                                                                 <X className="w-4 h-4" />

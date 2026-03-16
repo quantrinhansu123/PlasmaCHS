@@ -460,7 +460,19 @@ const CreateCylinderRecovery = () => {
                                     <span className="font-bold text-gray-400 w-6 shrink-0">{idx + 1}.</span>
                                     <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 w-full">
                                         <div className="md:col-span-5 space-y-1">
-                                            <input value={item.serial_number} onChange={(e) => updateItem(item._id, 'serial_number', e.target.value)} placeholder="Mã serial vỏ bình" className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none" />
+                                            <input 
+                                                value={item.serial_number} 
+                                                onChange={(e) => updateItem(item._id, 'serial_number', e.target.value)} 
+                                                placeholder="Mã serial vỏ bình" 
+                                                className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none" 
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' && item.serial_number) {
+                                                        e.preventDefault();
+                                                        updateItem(item._id, 'scan_time', new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
+                                                        toast.success(`Đã xác nhận thời gian cho mã ${item.serial_number}`);
+                                                    }
+                                                }}
+                                            />
                                             {item.scan_time && (
                                                <div className="flex mt-1">
                                                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-blue-600 text-white text-[10px] font-bold rounded shadow-sm border border-blue-500">
