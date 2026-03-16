@@ -275,7 +275,13 @@ h6,
 
   /* Reset ALL global style overrides inside print template */
   .print-only-content th,
-  .print-only-content td {
+  .print-only-content td,
+  .warehouse-print-page th,
+  .warehouse-print-page td,
+  .recovery-print-page th,
+  .recovery-print-page td,
+  .order-print-page th,
+  .order-print-page td {
     font-size: inherit !important;
     font-weight: inherit !important;
     color: black !important;

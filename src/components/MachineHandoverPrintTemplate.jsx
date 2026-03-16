@@ -7,12 +7,12 @@ const getProductLabel = (id) => PRODUCT_TYPES.find(p => p.id === id)?.label || i
 const S = {
     page: {
         fontFamily: '"Times New Roman", Times, serif',
-        fontSize: '13pt',
+        fontSize: '11pt',
         lineHeight: '1.3',
         color: '#000',
         background: '#fff',
         width: '100%',
-        padding: '15mm 20mm 15mm 25mm',
+        padding: '20mm',
         boxSizing: 'border-box',
     },
     headerCompany: {
@@ -20,12 +20,12 @@ const S = {
         marginBottom: '1mm',
     },
     companyName: {
-        fontSize: '13pt',
+        fontSize: '12pt',
         fontWeight: 'bold',
         textTransform: 'uppercase',
     },
     companyAddress: {
-        fontSize: '12pt',
+        fontSize: '10pt',
         marginTop: '2px',
         fontWeight: 'normal',
     },
@@ -34,7 +34,7 @@ const S = {
         margin: '4mm 0 3mm',
     },
     titleH1: {
-        fontSize: '18pt',
+        fontSize: '16pt',
         fontWeight: 'bold',
         textTransform: 'uppercase',
         marginBottom: '3mm',
@@ -42,7 +42,7 @@ const S = {
     dateIntro: {
         textAlign: 'left',
         marginBottom: '2mm',
-        fontSize: '13pt',
+        fontSize: '11pt',
         fontStyle: 'italic',
         fontWeight: 'normal',
     },
@@ -51,7 +51,7 @@ const S = {
     },
     partyTitle: {
         fontWeight: 'bold',
-        fontSize: '13pt',
+        fontSize: '11pt',
         textTransform: 'uppercase',
         marginBottom: '2mm',
     },
@@ -59,7 +59,7 @@ const S = {
         display: 'flex',
         alignItems: 'baseline',
         marginBottom: '1mm',
-        fontSize: '13pt',
+        fontSize: '11pt',
         paddingLeft: '8mm',
     },
     partyLabel: {
@@ -73,14 +73,14 @@ const S = {
         fontWeight: 'normal',
     },
     partyText: {
-        fontSize: '13pt',
+        fontSize: '11pt',
         fontWeight: 'normal',
     },
     partyRowInline: {
         display: 'flex',
         alignItems: 'baseline',
         marginBottom: '1mm',
-        fontSize: '13pt',
+        fontSize: '11pt',
         paddingLeft: '8mm',
     },
     half: {
@@ -89,7 +89,7 @@ const S = {
         alignItems: 'baseline',
     },
     checkText: {
-        fontSize: '13pt',
+        fontSize: '11pt',
         margin: '2mm 0 1mm',
         fontWeight: 'normal',
     },
@@ -185,7 +185,7 @@ const HandoverItem = ({ order }) => {
             {/* ===== HEADER ===== */}
             <div style={S.headerCompany}>
                 <div style={S.companyName}>CÔNG TY TNHH DỊCH VỤ Y TẾ CỘNG ĐỒNG</div>
-                <div style={S.companyAddress}>Hải Âu 02-57 Vinhomes Ocean Park, Gia Lâm, Hà Nội</div>
+                <div style={S.companyAddress}>Hải Âu 02-57 Vinhomes Ocean Park,<br />Xã Đa Tốn, Huyện Gia Lâm, Thành phố Hà Nội, Việt Nam</div>
             </div>
 
             {/* ===== TITLE ===== */}

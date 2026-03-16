@@ -58,12 +58,12 @@ const formatNumber = (val) => {
 const S = {
     page: {
         fontFamily: '"Times New Roman", Times, serif',
-        fontSize: '13pt',
+        fontSize: '11pt',
         lineHeight: '1.1',
         color: '#000',
         background: '#fff',
         width: '100%',
-        padding: '15mm 20mm 15mm 25mm',
+        padding: '20mm',
         boxSizing: 'border-box',
     },
     header: {
@@ -73,29 +73,29 @@ const S = {
     },
     headerLeft: {
         flex: '0 0 58%',
-        fontSize: '11pt',
+        fontSize: '10pt',
     },
     headerRight: {
         flex: '0 0 40%',
         textAlign: 'center',
-        fontSize: '10pt',
+        fontSize: '9pt',
     },
     companyName: {
-        fontSize: '11pt',
+        fontSize: '10pt',
         fontWeight: 'bold',
         textTransform: 'uppercase',
     },
     companyInfo: {
-        fontSize: '11pt',
+        fontSize: '10pt',
         marginTop: '2px',
         fontWeight: 'normal',
     },
     formNumber: {
         fontWeight: 'bold',
-        fontSize: '12pt',
+        fontSize: '11pt',
     },
     formLegal: {
-        fontSize: '10pt',
+        fontSize: '9pt',
         fontStyle: 'italic',
         fontWeight: 'normal',
     },
@@ -104,13 +104,13 @@ const S = {
         margin: '4mm 0 2mm',
     },
     titleH1: {
-        fontSize: '17pt',
+        fontSize: '15pt',
         fontWeight: 'bold',
         textTransform: 'uppercase',
         marginBottom: '2mm',
     },
     dateLine: {
-        fontSize: '12pt',
+        fontSize: '11pt',
         fontWeight: 'bold',
         marginBottom: '2mm',
     },
@@ -122,11 +122,11 @@ const S = {
     titleCenter: {
         textAlign: 'center',
         flex: '1',
-        fontSize: '13pt',
+        fontSize: '11pt',
     },
     debitCredit: {
         textAlign: 'right',
-        fontSize: '13pt',
+        fontSize: '11pt',
         minWidth: '100px',
     },
     infoSection: {
@@ -136,7 +136,7 @@ const S = {
         display: 'flex',
         alignItems: 'baseline',
         marginBottom: '1mm',
-        fontSize: '13pt',
+        fontSize: '11pt',
     },
     infoLabel: {
         whiteSpace: 'nowrap',
@@ -145,7 +145,7 @@ const S = {
     infoValue: {
         flex: '1',
         fontFamily: '"Times New Roman", Times, serif',
-        fontSize: '13pt',
+        fontSize: '11pt',
         padding: '0 4px',
         minHeight: '20px',
         fontWeight: 'normal',
@@ -170,21 +170,21 @@ const S = {
     },
     th: {
         border: '1px solid #000',
-        padding: '3px 4px',
+        padding: '4px 2px',
         textAlign: 'center',
         verticalAlign: 'middle',
         fontWeight: 'bold',
-        fontSize: '10pt',
+        fontSize: '9pt',
         whiteSpace: 'normal',
         color: '#000',
         background: 'transparent',
     },
     td: {
         border: '1px solid #000',
-        padding: '3px 4px',
+        padding: '3px 2px',
         textAlign: 'center',
         verticalAlign: 'middle',
-        fontSize: '10pt',
+        fontSize: '9pt',
         fontWeight: 'normal',
         color: '#000',
         whiteSpace: 'normal',
@@ -194,7 +194,7 @@ const S = {
         padding: '3px 4px',
         textAlign: 'left',
         verticalAlign: 'middle',
-        fontSize: '10pt',
+        fontSize: '9pt',
         fontWeight: 'normal',
         color: '#000',
         whiteSpace: 'normal',
@@ -204,7 +204,7 @@ const S = {
         padding: '3px 4px',
         textAlign: 'right',
         verticalAlign: 'middle',
-        fontSize: '10pt',
+        fontSize: '9pt',
         fontWeight: 'normal',
         color: '#000',
         whiteSpace: 'normal',
@@ -325,7 +325,7 @@ const OrderItem = ({ order, warehousesList }) => {
             <div style={S.header}>
                 <div style={S.headerLeft}>
                     <div style={S.companyName}>CÔNG TY TNHH DỊCH VỤ Y TẾ CỘNG ĐỒNG CHS</div>
-                    <div style={S.companyInfo}>Hải âu 02 - 57 Vinhomes Ocean Park, Xã Gia Lâm, Thành phố Hà Nội, Việt Nam</div>
+                    <div style={S.companyInfo}>Hải âu 02 - 57 Vinhomes Ocean Park,<br />Xã Đa Tốn, Huyện Gia Lâm, Thành phố Hà Nội, Việt Nam</div>
                     <div style={S.companyInfo}>Mã số thuế: 0110517351</div>
                     <div style={S.companyInfo}>Tel: 0981 878 423</div>
                 </div>

@@ -5,7 +5,7 @@ import { supabase } from '../../supabase/config';
 const S = {
     page: {
         fontFamily: '"Times New Roman", Times, serif',
-        fontSize: '13pt',
+        fontSize: '11pt',
         lineHeight: '1.4',
         color: '#000',
         background: '#fff',
@@ -23,7 +23,7 @@ const S = {
         border: 'none',
         padding: '0',
         verticalAlign: 'top',
-        fontSize: '12pt',
+        fontSize: '10pt',
     },
     headerTdRight: {
         width: '35%',
@@ -31,11 +31,11 @@ const S = {
         padding: '0',
         verticalAlign: 'top',
         textAlign: 'right',
-        fontSize: '12pt',
+        fontSize: '10pt',
     },
     title: {
         textAlign: 'center',
-        fontSize: '18pt',
+        fontSize: '16pt',
         fontWeight: 'bold',
         marginTop: '15px',
         marginBottom: '5px',
@@ -45,41 +45,46 @@ const S = {
         textAlign: 'center',
         fontStyle: 'italic',
         marginBottom: '20px',
-        fontSize: '12pt',
+        fontSize: '10pt',
     },
     infoSection: {
-        marginBottom: '15px',
-        fontSize: '12pt',
+        marginBottom: '10px',
+        fontSize: '10pt',
     },
     dataTable: {
         width: '100%',
         borderCollapse: 'collapse',
         marginBottom: '20px',
+        tableLayout: 'fixed',
     },
     th: {
         border: '1px solid #000',
-        padding: '6px 4px',
+        padding: '4px 2px',
         textAlign: 'center',
-        fontSize: '11pt',
+        fontSize: '9.5pt',
         fontWeight: 'bold',
+        wordBreak: 'break-word',
     },
     td: {
         border: '1px solid #000',
-        padding: '4px 6px',
+        padding: '4px 2px',
         textAlign: 'center',
-        fontSize: '11pt',
+        fontSize: '9pt',
+        wordBreak: 'break-word',
     },
     tdLeft: {
         border: '1px solid #000',
-        padding: '4px 6px',
+        padding: '4px 4px',
         textAlign: 'left',
-        fontSize: '11pt',
+        fontSize: '9pt',
+        wordBreak: 'break-word',
     },
     tdRight: {
         border: '1px solid #000',
-        padding: '4px 6px',
+        padding: '4px 4px',
         textAlign: 'right',
-        fontSize: '11pt',
+        fontSize: '9pt',
+        wordBreak: 'break-word',
     },
     signatureTable: {
         width: '100%',
@@ -92,7 +97,7 @@ const S = {
         border: 'none',
         padding: '5px',
         verticalAlign: 'top',
-        fontSize: '11pt',
+        fontSize: '9.5pt', // Reduced from 11pt
         width: '25%',
     },
     footer: {
@@ -161,7 +166,7 @@ export default function WarehousePrintTemplate({ warehouse, onPrinted }) {
                     .warehouse-print-page { 
                         display: block !important; 
                         margin: 0;
-                        padding: 15mm 15mm 15mm 20mm !important; /* Proper margins for content */
+                        padding: 20mm !important; /* Proper margins for content */
                     }
                     .no-print { display: none !important; }
                 }
@@ -173,7 +178,7 @@ export default function WarehousePrintTemplate({ warehouse, onPrinted }) {
                     <tr>
                         <td style={S.headerTdLeft}>
                             <b>CÔNG TY TNHH DỊCH VỤ Y TẾ CỘNG ĐỒNG CHS</b><br />
-                            Hải âu 02 - 57 Vinhomes Ocean Park, Xã Đa Tốn, Huyện Gia Lâm, Thành phố Hà Nội, Việt Nam<br />
+                            Hải âu 02 - 57 Vinhomes Ocean Park,<br />Xã Đa Tốn, Huyện Gia Lâm, Thành phố Hà Nội, Việt Nam<br />
                             Mã số thuế: 0110517351<br />
                             TK ngân hàng: 8186222999 - Ngân hàng TMCP Quân đội<br />
                             Tel: 0981878423
@@ -203,13 +208,13 @@ export default function WarehousePrintTemplate({ warehouse, onPrinted }) {
             <table style={S.dataTable}>
                 <thead>
                     <tr>
-                        <th style={{ ...S.th, width: '5%' }} rowSpan="2">STT</th>
-                        <th style={{ ...S.th, width: '35%' }} rowSpan="2">Tên nhãn hiệu, quy cách, phẩm chất vật tư (sản phẩm, hàng hóa)</th>
-                        <th style={{ ...S.th, width: '10%' }} rowSpan="2">Mã số</th>
-                        <th style={{ ...S.th, width: '10%' }} rowSpan="2">Đơn vị tính</th>
+                        <th style={{ ...S.th, width: '6%', whiteSpace: 'nowrap' }} rowSpan="2">STT</th>
+                        <th style={{ ...S.th, width: '30%' }} rowSpan="2">Tên nhãn hiệu, quy cách,<br />phẩm chất vật tư<br />(sản phẩm, hàng hóa)</th>
+                        <th style={{ ...S.th, width: '11%' }} rowSpan="2">Mã số</th>
+                        <th style={{ ...S.th, width: '7%' }} rowSpan="2">Đơn vị tính</th>
                         <th style={S.th} colSpan="2">Số lượng</th>
-                        <th style={{ ...S.th, width: '15%' }} rowSpan="2">Đơn giá</th>
-                        <th style={{ ...S.th, width: '15%' }} rowSpan="2">Thành tiền</th>
+                        <th style={{ ...S.th, width: '12%' }} rowSpan="2">Đơn giá</th>
+                        <th style={{ ...S.th, width: '14%' }} rowSpan="2">Thành tiền</th>
                     </tr>
                     <tr>
                         <th style={{ ...S.th, width: '10%' }}>Thực xuất</th>

@@ -5,7 +5,7 @@ import { supabase } from '../../supabase/config';
 const S = {
     page: {
         fontFamily: '"Times New Roman", Times, serif',
-        fontSize: '12pt',
+        fontSize: '11pt',
         lineHeight: '1.4',
         color: '#000',
         background: '#fff',
@@ -23,7 +23,7 @@ const S = {
         border: 'none',
         padding: '0',
         verticalAlign: 'top',
-        fontSize: '11pt',
+        fontSize: '10pt',
     },
     headerTdRight: {
         width: '40%',
@@ -31,7 +31,7 @@ const S = {
         padding: '0',
         verticalAlign: 'top',
         textAlign: 'right',
-        fontSize: '11pt',
+        fontSize: '10pt',
     },
     title: {
         textAlign: 'center',
@@ -44,15 +44,15 @@ const S = {
     subtitle: {
         textAlign: 'center',
         fontStyle: 'italic',
-        marginBottom: '25px',
-        fontSize: '11pt',
+        marginBottom: '20px',
+        fontSize: '10pt',
     },
     infoGrid: {
         display: 'grid',
         gridTemplateColumns: '1fr 1fr',
         gap: '10px',
-        marginBottom: '20px',
-        fontSize: '11pt',
+        marginBottom: '15px',
+        fontSize: '10pt',
     },
     infoItem: {
         marginBottom: '5px',
@@ -64,23 +64,23 @@ const S = {
     },
     th: {
         border: '1px solid #000',
-        padding: '8px 4px',
+        padding: '4px 2px',
         textAlign: 'center',
-        fontSize: '10pt',
+        fontSize: '9pt',
         fontWeight: 'bold',
         backgroundColor: '#f9f9f9',
     },
     td: {
         border: '1px solid #000',
-        padding: '6px 4px',
+        padding: '4px 2px',
         textAlign: 'center',
-        fontSize: '10pt',
+        fontSize: '9pt',
     },
     tdLeft: {
         border: '1px solid #000',
-        padding: '6px 8px',
+        padding: '4px 6px',
         textAlign: 'left',
-        fontSize: '10pt',
+        fontSize: '9pt',
     },
     signatureTable: {
         width: '100%',
@@ -93,11 +93,11 @@ const S = {
         padding: '5px',
         verticalAlign: 'top',
         width: '50%',
-        fontSize: '11pt',
+        fontSize: '9.5pt',
     },
     footerContainer: {
-        marginTop: '40px',
-        fontSize: '10pt',
+        marginTop: '30px',
+        fontSize: '9pt',
         borderTop: '1px solid #ccc',
         paddingTop: '10px',
     }
@@ -165,7 +165,7 @@ export default function CylinderRecoveryPrintTemplate({ recovery, items: initial
                     .recovery-print-page { 
                         display: block !important; 
                         margin: 0;
-                        padding: 15mm 15mm 15mm 20mm !important;
+                        padding: 20mm !important;
                     }
                     .no-print { display: none !important; }
                 }
@@ -177,7 +177,7 @@ export default function CylinderRecoveryPrintTemplate({ recovery, items: initial
                     <tr>
                         <td style={S.headerTdLeft}>
                             <b>CÔNG TY TNHH DỊCH VỤ Y TẾ CỘNG ĐỒNG CHS</b><br />
-                            Hải âu 02 - 57 Vinhomes Ocean Park, Đa Tốn, Gia Lâm, Hà Nội<br />
+                            Hải âu 02 - 57 Vinhomes Ocean Park,<br />Xã Đa Tốn, Huyện Gia Lâm, Thành phố Hà Nội, Việt Nam<br />
                             Mã số thuế: 0110517351<br />
                             Tel: 0981878423
                         </td>
