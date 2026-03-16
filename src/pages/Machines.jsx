@@ -26,10 +26,13 @@ import {
     Trash2,
     User,
     Warehouse,
+    Download,
+    Upload,
     Wrench,
     X
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import * as XLSX from 'xlsx';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
@@ -254,6 +257,113 @@ const Machines = () => {
     const formatNumber = (num) => {
         if (!num) return '0';
         return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    };
+
+    const downloadTemplate = () => {
+        const headers = [
+            'Mã máy (Serial)',
+            'Loại máy (BV/TM/FM/IOT)',
+            'Tài khoản máy',
+            'Bluetooth MAC',
+            'Phiên bản',
+            'Thể tích bình',
+            'Loại khí',
+            'Loại van',
+            'Loại đầu phát',
+            'Bộ phận phụ trách',
+            'Kho quản lý',
+        ];
+
+        const exampleData = [
+            {
+                'Mã máy (Serial)': 'PLT-25D1-50-TM',
+                'Loại máy (BV/TM/FM/IOT)': 'TM',
+                'Tài khoản máy': 'ACC-001',
+                'Bluetooth MAC': '00:1A:2B:3C:4D:5E',
+                'Phiên bản': 'V1.0',
+                'Thể tích bình': 'Bình 4L/ CGA870',
+                'Loại khí': 'ArgonMed',
+                'Loại van': 'Van Messer',
+                'Loại đầu phát': 'Tia thường',
+                'Bộ phận phụ trách': 'Kỹ thuật',
+                'Kho quản lý': warehousesList[0]?.name || 'Kho tổng',
+            },
+        ];
+
+        const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Template Import Máy');
+        XLSX.writeFile(wb, 'mau_import_may_moc.xlsx');
+    };
+
+    const handleImportExcel = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+            try {
+                const bstr = evt.target.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const data = XLSX.utils.sheet_to_json(ws);
+
+                if (data.length === 0) {
+                    alert('File Excel không có dữ liệu!');
+                    return;
+                }
+
+                setIsLoading(true);
+                
+                // Map warehouse names to IDs
+                const warehouseMap = (warehousesList || []).reduce((acc, w) => {
+                    acc[w.name.toLowerCase()] = w.id;
+                    return acc;
+                }, {});
+
+                const machinesToInsert = data.map(row => ({
+                    serial_number: row['Mã máy (Serial)']?.toString(),
+                    machine_type: row['Loại máy (BV/TM/FM/IOT)']?.toString() || 'TM',
+                    machine_account: row['Tài khoản máy']?.toString(),
+                    bluetooth_mac: row['Bluetooth MAC']?.toString(),
+                    version: row['Phiên bản']?.toString(),
+                    cylinder_volume: row['Thể tích bình']?.toString(),
+                    gas_type: row['Loại khí']?.toString(),
+                    valve_type: row['Loại van']?.toString(),
+                    emission_head_type: row['Loại đầu phát']?.toString(),
+                    department_in_charge: row['Bộ phận phụ trách']?.toString(),
+                    warehouse: warehouseMap[row['Kho quản lý']?.toString()?.toLowerCase()] || null,
+                    status: 'sẵn sàng'
+                })).filter(m => m.serial_number);
+
+                if (machinesToInsert.length === 0) {
+                    alert('Không tìm thấy dữ liệu hợp lệ (thiếu mã máy)!');
+                    setIsLoading(false);
+                    return;
+                }
+
+                const { error } = await supabase.from('machines').insert(machinesToInsert);
+
+                if (error) {
+                    if (error.code === '23505') {
+                        alert('Lỗi: Một số mã máy (Serial) đã tồn tại trên hệ thống. Vui lòng kiểm tra lại!');
+                    } else {
+                        throw error;
+                    }
+                } else {
+                    alert(`🎉 Đã import thành công ${machinesToInsert.length} máy móc!`);
+                    fetchMachines();
+                }
+            } catch (err) {
+                console.error('Error importing excel:', err);
+                alert('Có lỗi xảy ra khi xử lý file: ' + err.message);
+            } finally {
+                setIsLoading(false);
+                e.target.value = null; // Reset input
+            }
+        };
+        reader.readAsBinaryString(file);
     };
 
     const getLabel = (list, id) => {
@@ -686,6 +796,33 @@ const Machines = () => {
                                     <Plus size={18} />
                                     Thêm
                                 </button>
+
+                                <button
+                                    onClick={downloadTemplate}
+                                    className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-[13px] font-bold hover:bg-indigo-100 shadow-sm transition-all"
+                                    title="Tải file Excel mẫu"
+                                >
+                                    <Download size={16} />
+                                    Tải mẫu
+                                </button>
+
+                                <div className="relative">
+                                    <input
+                                        type="file"
+                                        accept=".xlsx, .xls"
+                                        onChange={handleImportExcel}
+                                        className="hidden"
+                                        id="machine-excel-import"
+                                    />
+                                    <label
+                                        htmlFor="machine-excel-import"
+                                        className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-[13px] font-bold hover:bg-emerald-100 shadow-sm transition-all cursor-pointer"
+                                        title="Nhập dữ liệu từ Excel"
+                                    >
+                                        <Upload size={16} />
+                                        Import Excel
+                                    </label>
+                                </div>
                             </div>
                         </div>
 

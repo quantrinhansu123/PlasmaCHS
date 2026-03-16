@@ -26,9 +26,12 @@ import {
     Trash2,
     User,
     Warehouse,
-    X
+    X,
+    Download,
+    Upload
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import * as XLSX from 'xlsx';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
@@ -249,6 +252,105 @@ const Cylinders = () => {
     const formatNumber = (num) => {
         if (!num) return '0';
         return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    };
+
+    const downloadTemplate = () => {
+        const headers = [
+            'Mã RFID (Serial)',
+            'Thể tích',
+            'Loại khí',
+            'Loại van',
+            'Loại quai',
+            'Phân loại (BV/TM)',
+            'Khối lượng tịnh (kg)',
+            'Kho quản lý',
+        ];
+
+        const exampleData = [
+            {
+                'Mã RFID (Serial)': 'RFID0001',
+                'Thể tích': 'bình 4L/ CGA870',
+                'Loại khí': 'O2',
+                'Loại van': 'Van Messer/Phi 6/ CB Trắng',
+                'Loại quai': 'Có quai',
+                'Phân loại (BV/TM)': 'BV',
+                'Khối lượng tịnh (kg)': '8',
+                'Kho quản lý': uniqueWarehouses[0] || 'Kho tổng',
+            },
+        ];
+
+        const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Template Import Bình');
+        XLSX.writeFile(wb, 'mau_import_binh_khi.xlsx');
+    };
+
+    const handleImportExcel = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+            try {
+                const bstr = evt.target.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const data = XLSX.utils.sheet_to_json(ws);
+
+                if (data.length === 0) {
+                    alert('File Excel không có dữ liệu!');
+                    return;
+                }
+
+                setIsLoading(true);
+                
+                // Fetch all warehouses to map names to IDs
+                const { data: warehouses } = await supabase.from('warehouses').select('id, name');
+                const warehouseMap = (warehouses || []).reduce((acc, w) => {
+                    acc[w.name.toLowerCase()] = w.id;
+                    return acc;
+                }, {});
+
+                const cylindersToInsert = data.map(row => ({
+                    serial_number: row['Mã RFID (Serial)']?.toString(),
+                    volume: row['Thể tích']?.toString(),
+                    gas_type: row['Loại khí']?.toString() || 'AirMAC',
+                    valve_type: row['Loại van']?.toString() || 'Van Messer/Phi 6/ CB Trắng',
+                    handle_type: row['Loại quai']?.toString() || 'Có quai',
+                    category: row['Phân loại (BV/TM)']?.toString() || 'BV',
+                    net_weight: row['Khối lượng tịnh (kg)']?.toString() || '8',
+                    status: 'sẵn sàng',
+                    warehouse_id: warehouseMap[row['Kho quản lý']?.toString()?.toLowerCase()] || null
+                })).filter(c => c.serial_number);
+
+                if (cylindersToInsert.length === 0) {
+                    alert('Không tìm thấy dữ liệu hợp lệ (thiếu mã RFID)!');
+                    setIsLoading(false);
+                    return;
+                }
+
+                const { error } = await supabase.from('cylinders').insert(cylindersToInsert);
+
+                if (error) {
+                    if (error.code === '23505') {
+                        alert('Lỗi: Một số mã RFID đã tồn tại trên hệ thống. Vui lòng kiểm tra lại!');
+                    } else {
+                        throw error;
+                    }
+                } else {
+                    alert(`🎉 Đã import thành công ${cylindersToInsert.length} vỏ bình!`);
+                    fetchCylinders();
+                }
+            } catch (err) {
+                console.error('Error importing excel:', err);
+                alert('Có lỗi xảy ra khi xử lý file: ' + err.message);
+            } finally {
+                setIsLoading(false);
+                e.target.value = null; // Reset input
+            }
+        };
+        reader.readAsBinaryString(file);
     };
 
     const getStatusLabel = (status) => {
@@ -685,6 +787,33 @@ const Cylinders = () => {
                                     <Plus size={18} />
                                     Thêm
                                 </button>
+
+                                <button
+                                    onClick={downloadTemplate}
+                                    className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-[13px] font-bold hover:bg-indigo-100 shadow-sm transition-all"
+                                    title="Tải file Excel mẫu"
+                                >
+                                    <Download size={16} />
+                                    Tải mẫu
+                                </button>
+
+                                <div className="relative">
+                                    <input
+                                        type="file"
+                                        accept=".xlsx, .xls"
+                                        onChange={handleImportExcel}
+                                        className="hidden"
+                                        id="excel-import"
+                                    />
+                                    <label
+                                        htmlFor="excel-import"
+                                        className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-[13px] font-bold hover:bg-emerald-100 shadow-sm transition-all cursor-pointer"
+                                        title="Nhập dữ liệu từ Excel"
+                                    >
+                                        <Upload size={16} />
+                                        Import Excel
+                                    </label>
+                                </div>
                             </div>
                         </div>
 
