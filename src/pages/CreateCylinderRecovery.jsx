@@ -147,8 +147,10 @@ const CreateCylinderRecovery = () => {
             return;
         }
         
+        const safeTime = time || new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+        
         // Add to items list immediately for smooth UI
-        setItems(prev => [...prev, { _id: crypto.randomUUID(), serial_number: decodedText, condition: 'tot', note: '', scan_time: time }]);
+        setItems(prev => [...prev, { _id: crypto.randomUUID(), serial_number: decodedText, condition: 'tot', note: '', scan_time: safeTime }]);
 
         // Background auto-fetch logic
         const fetchInfo = async () => {
@@ -475,10 +477,10 @@ const CreateCylinderRecovery = () => {
                                             />
                                             {item.scan_time && (
                                                <div className="flex mt-1">
-                                                   <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-blue-600 text-white text-[10px] font-bold rounded shadow-sm border border-blue-500">
+                                                   <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-blue-600 text-white rounded-lg shadow-sm border border-blue-500 animate-in fade-in slide-in-from-left-1 duration-300">
                                                        <Clock className="w-3 h-3" />
-                                                       ĐÃ QUÉT: {item.scan_time}
-                                                   </span>
+                                                       <span className="text-[10px] sm:text-[11px] font-black tracking-tight uppercase">ĐÃ QUÉT: {item.scan_time}</span>
+                                                   </div>
                                                </div>
                                             )}
                                         </div>

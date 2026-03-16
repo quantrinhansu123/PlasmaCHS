@@ -22,11 +22,18 @@ const BarcodeScanner = ({
         allowDuplicateScans
     });
 
+    const getCurrentTimeVN = () => {
+        return new Date().toLocaleTimeString('vi-VN', { 
+            hour: '2-digit', 
+            minute: '2-digit'
+        });
+    };
+
     const handleConfirm = () => {
         if (pendingScan) {
             // Ensure we have a time even if state hasn't updated immediately
-            const fallbackTime = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-            onScanSuccess(pendingScan, scanTime || fallbackTime);
+            const timeToPass = scanTime || getCurrentTimeVN();
+            onScanSuccess(pendingScan, timeToPass);
             
             setPendingScan(null);
             setScanTime('');
@@ -49,7 +56,7 @@ const BarcodeScanner = ({
         const wrapScanSuccess = (decodedText) => {
             // Pause further scans while confirming
             setPendingScan(decodedText);
-            setScanTime(new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
+            setScanTime(getCurrentTimeVN());
         };
 
         if (isOpen) {

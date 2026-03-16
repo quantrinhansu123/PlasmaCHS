@@ -286,9 +286,10 @@ const CreateOrder = () => {
     const handleManualConfirm = (index) => {
         const serial = assignedCylinders[index];
         if (serial) {
+            const timeNow = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
             setAssignedCylinderTimes(prev => {
                 const newArr = [...prev];
-                newArr[index] = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+                newArr[index] = timeNow;
                 return newArr;
             });
             toast.success(`Đã xác nhận thời gian quét cho mã ${serial}`);
@@ -309,6 +310,8 @@ const CreateOrder = () => {
             return;
         }
 
+        const safeTime = time || new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+        
         // Fill the current target index
         setAssignedCylinders(prev => {
             const newArr = [...prev];
@@ -317,7 +320,7 @@ const CreateOrder = () => {
         });
         setAssignedCylinderTimes(prev => {
             const newArr = [...prev];
-            newArr[currentIdx] = time;
+            newArr[currentIdx] = safeTime;
             return newArr;
         });
         setScanCount(prev => prev + 1);
@@ -820,11 +823,11 @@ const CreateOrder = () => {
                                                         )}
                                                     </div>
                                                     {assignedCylinderTimes[idx] && (
-                                                        <div className="ml-8 mt-1">
-                                                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-blue-600 text-white text-[10px] font-bold rounded shadow-sm border border-blue-500">
+                                                        <div className="flex pl-8 mt-1">
+                                                            <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-blue-600 text-white rounded-lg shadow-sm border border-blue-500 animate-in fade-in slide-in-from-left-1 duration-300">
                                                                 <Clock className="w-3 h-3" />
-                                                                ĐÃ QUÉT: {assignedCylinderTimes[idx]}
-                                                            </span>
+                                                                <span className="text-[10px] sm:text-[11px] font-black tracking-tight uppercase">ĐÃ QUÉT: {assignedCylinderTimes[idx]}</span>
+                                                            </div>
                                                         </div>
                                                     )}
                                                 </div>
