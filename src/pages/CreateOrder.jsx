@@ -242,6 +242,28 @@ const CreateOrder = () => {
         }
     }, [editOrder]);
 
+    const stopCylinderScanner = useCallback(() => {
+        setIsScannerOpen(false);
+        setScanTargetIndex(-1);
+    }, []);
+
+    const startCylinderScanner = useCallback((targetIndex, isBatch = false) => {
+        setScanTargetIndex(targetIndex);
+        setScanCount(0);
+        setIsScannerOpen(true);
+        setIsBatchScanning(isBatch);
+    }, []);
+
+    // Find first empty slot and start scanning
+    const startScanAll = useCallback(() => {
+        const firstEmpty = assignedCylinders.findIndex(s => !s);
+        if (firstEmpty === -1) {
+            alert('\u0110\u00e3 g\u00e1n \u0111\u1ee7 m\u00e3 b\u00ecnh!');
+            return;
+        }
+        startCylinderScanner(firstEmpty, true);
+    }, [assignedCylinders, startCylinderScanner]);
+
     const handleCylinderSerialChange = (index, value) => {
         setAssignedCylinders(prev => {
             const newArr = [...prev];
@@ -291,27 +313,6 @@ const CreateOrder = () => {
         }
     }, [scanTargetIndex, stopCylinderScanner]);
 
-    const startCylinderScanner = useCallback((targetIndex, isBatch = false) => {
-        setScanTargetIndex(targetIndex);
-        setScanCount(0);
-        setIsScannerOpen(true);
-        setIsBatchScanning(isBatch);
-    }, []);
-
-    // Find first empty slot and start scanning
-    const startScanAll = useCallback(() => {
-        const firstEmpty = assignedCylinders.findIndex(s => !s);
-        if (firstEmpty === -1) {
-            alert('\u0110\u00e3 g\u00e1n \u0111\u1ee7 m\u00e3 b\u00ecnh!');
-            return;
-        }
-        startCylinderScanner(firstEmpty, true);
-    }, [assignedCylinders, startCylinderScanner]);
-
-    const stopCylinderScanner = useCallback(() => {
-        setIsScannerOpen(false);
-        setScanTargetIndex(-1);
-    }, []);
 
     const handleCreateOrder = async () => {
         if (!formData.customerId || !formData.recipientName || !formData.recipientAddress || !formData.recipientPhone || formData.quantity <= 0) {
