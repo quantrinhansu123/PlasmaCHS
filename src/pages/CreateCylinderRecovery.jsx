@@ -1,21 +1,20 @@
 import {
     Camera,
     CheckCircle2,
+    Clock,
     Link2,
     PackageCheck,
     Plus,
     ScanLine,
     Trash2,
-    X,
-    Clock
+    X
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
+import BarcodeScanner from '../components/Common/BarcodeScanner';
 import { ITEM_CONDITIONS } from '../constants/recoveryConstants';
 import { supabase } from '../supabase/config';
-import { patchIOSVideoPlaysinline } from '../utils/scannerHelper';
-import BarcodeScanner from '../components/Common/BarcodeScanner';
-import { toast } from 'react-toastify';
 
 
 const CreateCylinderRecovery = () => {
@@ -146,9 +145,9 @@ const CreateCylinderRecovery = () => {
             toast.info(`Mã ${decodedText} đã được quét!`);
             return;
         }
-        
+
         const safeTime = time || new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-        
+
         // Add to items list immediately for smooth UI
         setItems(prev => [...prev, { _id: crypto.randomUUID(), serial_number: decodedText, condition: 'tot', note: '', scan_time: safeTime }]);
 
@@ -156,7 +155,7 @@ const CreateCylinderRecovery = () => {
         const fetchInfo = async () => {
             const currentFormData = formDataRef.current;
             const currentCustomers = customersRef.current;
-            
+
             try {
                 // 1. Get cylinder status/owner
                 const { data: cylData } = await supabase
@@ -168,7 +167,7 @@ const CreateCylinderRecovery = () => {
                 if (cylData?.customer_name) {
                     // 2. Map name to customer ID
                     const matchedCustomer = currentCustomers.find(c => c.name === cylData.customer_name);
-                    
+
                     if (matchedCustomer) {
                         if (!currentFormData.customer_id) {
                             setFormData(prev => ({ ...prev, customer_id: matchedCustomer.id }));
@@ -176,7 +175,7 @@ const CreateCylinderRecovery = () => {
                         } else if (currentFormData.customer_id !== matchedCustomer.id) {
                             toast.warning(`Lưu ý: Bình ${decodedText} thuộc về KH ${matchedCustomer.name}, khác với KH đang chọn!`);
                         }
-                        
+
                         // 3. Find most recent relative order if no order selected
                         if (!currentFormData.order_id || currentFormData.customer_id !== matchedCustomer.id) {
                             const { data: orderData } = await supabase
@@ -187,7 +186,7 @@ const CreateCylinderRecovery = () => {
                                 .order('created_at', { ascending: false })
                                 .limit(1)
                                 .maybeSingle();
-                            
+
                             if (orderData) {
                                 setFormData(prev => ({ ...prev, order_id: orderData.id, customer_id: matchedCustomer.id }));
                                 toast.success(`Đã tự động liên kết đơn hàng: ĐH ${orderData.order_code}`);
@@ -375,7 +374,7 @@ const CreateCylinderRecovery = () => {
                 </div>
             </div>
 
-            <BarcodeScanner 
+            <BarcodeScanner
                 isOpen={isScannerOpen}
                 onClose={stopScanner}
                 onScanSuccess={handleScanSuccess}
@@ -446,7 +445,7 @@ const CreateCylinderRecovery = () => {
                             <h3 className="text-lg font-bold text-gray-800 uppercase tracking-tight">Danh sách vỏ bình thu hồi ({items.length})</h3>
                         </div>
                         <button type="button" onClick={startScanner} className="flex items-center gap-2 px-5 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-2xl transition-all shadow-lg shadow-blue-200">
-                            <ScanLine className="w-5 h-5" /> Quét Barcode
+                            <ScanLine color="white" size={20} strokeWidth={2.5} /> Quét Barcode
                         </button>
                     </div>
 
@@ -462,11 +461,11 @@ const CreateCylinderRecovery = () => {
                                     <span className="font-bold text-gray-400 w-6 shrink-0">{idx + 1}.</span>
                                     <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 w-full">
                                         <div className="md:col-span-5 space-y-1">
-                                            <input 
-                                                value={item.serial_number} 
-                                                onChange={(e) => updateItem(item._id, 'serial_number', e.target.value)} 
-                                                placeholder="Mã serial vỏ bình" 
-                                                className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none" 
+                                            <input
+                                                value={item.serial_number}
+                                                onChange={(e) => updateItem(item._id, 'serial_number', e.target.value)}
+                                                placeholder="Mã serial vỏ bình"
+                                                className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
                                                 onKeyDown={(e) => {
                                                     if (e.key === 'Enter' && item.serial_number) {
                                                         e.preventDefault();
@@ -476,12 +475,20 @@ const CreateCylinderRecovery = () => {
                                                 }}
                                             />
                                             {item.scan_time && (
-                                               <div className="flex mt-1">
-                                                   <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-blue-600 text-white rounded-lg shadow-sm border border-blue-500 animate-in fade-in slide-in-from-left-1 duration-300">
-                                                       <Clock className="w-3 h-3" />
-                                                       <span className="text-[10px] sm:text-[11px] font-black tracking-tight uppercase">ĐÃ QUÉT: {item.scan_time}</span>
-                                                   </div>
-                                               </div>
+                                                <div className="flex mt-1">
+                                                    <div
+                                                        className="inline-flex items-center gap-1.5 px-2 py-1 bg-blue-600 rounded-lg animate-in fade-in slide-in-from-left-1 duration-300"
+                                                        style={{ color: '#FFFFFF', colorScheme: 'dark' }}
+                                                    >
+                                                        <Clock className="w-3 h-3" style={{ color: '#FFFFFF' }} />
+                                                        <span
+                                                            className="text-[10px] sm:text-[11px] font-black tracking-tight uppercase"
+                                                            style={{ color: '#FFFFFF', WebkitTextFillColor: '#FFFFFF' }}
+                                                        >
+                                                            ĐÃ QUÉT: {item.scan_time}
+                                                        </span>
+                                                    </div>
+                                                </div>
                                             )}
                                         </div>
                                         <div className="md:col-span-3">

@@ -186,6 +186,21 @@ const BarcodeScanner = ({
                         {isScanning ? 'Hệ thống đang hoạt động' : 'Tạm dừng'}
                     </span>
                 </div>
+                
+                {/* Manual entry fallback for testing/backup */}
+                <button 
+                    onClick={() => {
+                        const code = window.prompt('Nhập mã vạch để TEST (Ví dụ: ABC-123):');
+                        if (code) {
+                            setPendingScan(code);
+                            setScanTime(getCurrentTimeVN());
+                        }
+                    }}
+                    className="mt-6 px-6 py-4 bg-red-600 hover:bg-red-700 text-white text-sm font-black rounded-2xl shadow-xl shadow-red-900/50 transition-all mx-auto block border-2 border-white/20 active:scale-95"
+                    style={{ color: '#FFFFFF' }}
+                >
+                    TEST GIẢ LẬP QUÉT (CHỮ TRẮNG)
+                </button>
             </div>
             
             <style jsx="true">{`

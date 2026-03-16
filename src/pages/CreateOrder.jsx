@@ -1,9 +1,20 @@
 import {
-    ScanLine, Plus, X, ChevronDown, Trash2,
-    Link2, User, Phone, MapPin, Package, Clock
+    ChevronDown,
+    Clock,
+    Link2,
+    MapPin,
+    Package,
+    Phone,
+    Plus,
+    ScanLine,
+    Trash2,
+    User,
+    X
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
+import BarcodeScanner from '../components/Common/BarcodeScanner';
 import {
     CUSTOMER_CATEGORIES,
     ORDER_TYPES,
@@ -11,9 +22,6 @@ import {
 } from '../constants/orderConstants';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
-import { patchIOSVideoPlaysinline } from '../utils/scannerHelper';
-import BarcodeScanner from '../components/Common/BarcodeScanner';
-import { toast } from 'react-toastify';
 
 const CreateOrder = () => {
     const navigate = useNavigate();
@@ -301,9 +309,9 @@ const CreateOrder = () => {
     const handleScanSuccess = useCallback((decodedText, time) => {
         const currentArr = assignedCylindersRef.current;
         const currentIdx = scanTargetIndexRef.current;
-        
+
         if (currentIdx === -1) return;
-        
+
         // Skip if already in the list
         if (currentArr.includes(decodedText)) {
             toast.info(`Mã ${decodedText} đã được gán vào đơn hàng này rồi!`);
@@ -311,7 +319,7 @@ const CreateOrder = () => {
         }
 
         const safeTime = time || new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-        
+
         // Fill the current target index
         setAssignedCylinders(prev => {
             const newArr = [...prev];
@@ -802,7 +810,7 @@ const CreateOrder = () => {
                                                             className="flex-none w-10 h-10 bg-[#2563EB] text-white hover:bg-[#1D4ED8] transition-all flex items-center justify-center rounded-md shadow-sm"
                                                             title="Quét barcode"
                                                         >
-                                                            <ScanLine className="w-5 h-5" />
+                                                            <ScanLine className="w-5 h-5 text-white" />
                                                         </button>
                                                         {serial && (
                                                             <button
@@ -824,9 +832,17 @@ const CreateOrder = () => {
                                                     </div>
                                                     {assignedCylinderTimes[idx] && (
                                                         <div className="flex pl-8 mt-1">
-                                                            <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-blue-600 text-white rounded-lg shadow-sm border border-blue-500 animate-in fade-in slide-in-from-left-1 duration-300">
-                                                                <Clock className="w-3 h-3" />
-                                                                <span className="text-[10px] sm:text-[11px] font-black tracking-tight uppercase">ĐÃ QUÉT: {assignedCylinderTimes[idx]}</span>
+                                                            <div
+                                                                className="inline-flex items-center gap-1.5 px-2 py-1 bg-blue-600 rounded-lg animate-in fade-in slide-in-from-left-1 duration-300"
+                                                                style={{ color: '#FFFFFF', colorScheme: 'dark' }}
+                                                            >
+                                                                <Clock className="w-3 h-3" style={{ color: '#FFFFFF' }} />
+                                                                <span
+                                                                    className="text-[10px] sm:text-[11px] font-black tracking-tight uppercase"
+                                                                    style={{ color: '#FFFFFF', WebkitTextFillColor: '#FFFFFF' }}
+                                                                >
+                                                                    ĐÃ QUÉT: {assignedCylinderTimes[idx]}
+                                                                </span>
                                                             </div>
                                                         </div>
                                                     )}
@@ -961,7 +977,7 @@ const CreateOrder = () => {
             )}
 
             {/* 3-Tier Barcode Scanner UI Component */}
-            <BarcodeScanner 
+            <BarcodeScanner
                 isOpen={isScannerOpen}
                 onClose={stopCylinderScanner}
                 onScanSuccess={handleScanSuccess}

@@ -1,5 +1,6 @@
-import { ChevronDown, Edit3, Hash, MapPin, Package, Phone, Save, ScanLine, Search, User, X } from 'lucide-react';
+import { ChevronDown, Clock, Edit3, Hash, MapPin, Package, Phone, Save, ScanLine, Search, User, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'react-toastify';
 import {
     CUSTOMER_CATEGORIES,
     ORDER_TYPES,
@@ -213,7 +214,7 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
             setAssignedCylinders(prev => {
                 const newArr = [...prev];
                 if (parsedValue > newArr.length) {
-                    for (let i = newArr.length; i < parsedValue; i++) newArr.push('');
+                    for (let i = newArr.length; i < parsedValue; i++) newArr.push({ serial: '', scan_time: null });
                 } else {
                     newArr.length = parsedValue;
                 }
@@ -225,7 +226,13 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
     const handleCylinderSerialChange = (index, value) => {
         setAssignedCylinders(prev => {
             const newArr = [...prev];
-            newArr[index] = value;
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
+            
+            newArr[index] = { 
+                serial: value, 
+                scan_time: value ? (prev[index]?.scan_time || timeStr) : null 
+            };
             return newArr;
         });
     };
@@ -236,16 +243,19 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
         
         if (currentIdx === -1) return;
 
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
+
         setAssignedCylinders(prev => {
             const newArr = [...prev];
-            newArr[currentIdx] = decodedText;
+            newArr[currentIdx] = { serial: decodedText, scan_time: timeStr };
             return newArr;
         });
 
         const updatedArr = [...currentArr];
-        updatedArr[currentIdx] = decodedText;
-        const nextEmpty = updatedArr.findIndex((s, i) => i > currentIdx && !s);
-        const fallbackEmpty = updatedArr.findIndex((s) => !s);
+        updatedArr[currentIdx] = { serial: decodedText, scan_time: timeStr };
+        const nextEmpty = updatedArr.findIndex((s, i) => i > currentIdx && !s?.serial);
+        const fallbackEmpty = updatedArr.findIndex((s) => !s?.serial);
         const nextIdx = nextEmpty !== -1 ? nextEmpty : fallbackEmpty;
 
         if (nextIdx !== -1 && nextIdx !== currentIdx) {
@@ -315,7 +325,9 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
                 initialStatus = 'DA_DUYET';
             }
 
-            const assignedSerials = formData.productType.startsWith('BINH') ? assignedCylinders.filter(Boolean) : [];
+            const assignedSerials = formData.productType.startsWith('BINH') 
+                ? assignedCylinders.map(c => typeof c === 'string' ? c : c.serial).filter(Boolean) 
+                : [];
 
             // 1. VALIDATION: Check if cylinders exist and are in the correct warehouse
             if (assignedSerials.length > 0) {
@@ -756,45 +768,83 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
                                     <div className="pt-3 mt-2 border-t border-emerald-100 space-y-4">
                                         <div className="flex items-center justify-between">
                                             <h5 className="text-[13px] !font-bold !text-emerald-700 flex items-center gap-2">
-                                                <ScanLine className="w-4 h-4" /> Gán mã bình ({assignedCylinders.filter(Boolean).length}/{formData.quantity})
+                                                <ScanLine className="w-4 h-4 text-emerald-600" strokeWidth={2.5} /> Gán mã bình ({assignedCylinders.filter(c => typeof c === 'string' ? (c !== '') : (c?.serial !== '')).length}/{formData.quantity})
                                             </h5>
                                             <button
                                                 type="button"
                                                 onClick={startScanAll}
                                                 className="px-3 py-1.5 bg-emerald-600 text-white text-[11px] font-bold rounded-lg hover:bg-emerald-700 transition-all flex items-center gap-1.5"
                                             >
-                                                <ScanLine className="w-3.5 h-3.5" /> Quét tất cả
+                                                <ScanLine className="w-3.5 h-3.5 text-white" strokeWidth={2.5} /> Quét tất cả
                                             </button>
                                         </div>
-                                        <div className="space-y-2">
-                                            {assignedCylinders.map((serial, idx) => (
-                                                <div key={idx} className="flex items-center gap-2">
-                                                    <span className="text-[11px] font-bold text-slate-400 w-5 text-right">{idx + 1}.</span>
-                                                    <input
-                                                        type="text"
-                                                        value={serial}
-                                                        onChange={(e) => handleCylinderSerialChange(idx, e.target.value)}
-                                                        placeholder={`Mã serial bình ${idx + 1}...`}
-                                                        className="flex-1 h-10 px-3 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-[13px] focus:outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 transition-all"
-                                                    />
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => startScanner(idx)}
-                                                        className="p-2.5 bg-emerald-100 text-emerald-600 rounded-xl hover:bg-emerald-200 transition-all"
-                                                    >
-                                                        <ScanLine className="w-4 h-4" />
-                                                    </button>
-                                                    {serial && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleCylinderSerialChange(idx, '')}
-                                                            className="p-2.5 text-rose-400 hover:bg-rose-50 rounded-xl transition-all"
-                                                        >
-                                                            <X className="w-4 h-4" />
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            ))}
+                                        <div className="space-y-3">
+                                            {assignedCylinders.map((item, idx) => {
+                                                const serial = typeof item === 'string' ? item : item.serial;
+                                                const scanTime = typeof item === 'string' ? null : item.scan_time;
+
+                                                return (
+                                                    <div key={idx} className="space-y-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-[11px] font-bold text-slate-400 w-5 text-right">{idx + 1}.</span>
+                                                            <input
+                                                                type="text"
+                                                                value={serial}
+                                                                onChange={(e) => handleCylinderSerialChange(idx, e.target.value)}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter' && e.target.value) {
+                                                                        const now = new Date();
+                                                                        const timeStr = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
+                                                                        toast.success(`Đã nhận mã: ${e.target.value} (${timeStr})`, {
+                                                                            position: "top-center",
+                                                                            autoClose: 1500,
+                                                                            hideProgressBar: true,
+                                                                            closeOnClick: true,
+                                                                            pauseOnHover: false,
+                                                                            draggable: true,
+                                                                            theme: "colored",
+                                                                            style: {
+                                                                                borderRadius: '16px',
+                                                                                fontWeight: 'bold',
+                                                                                fontSize: '13px',
+                                                                                fontFamily: 'Inter, sans-serif'
+                                                                            }
+                                                                        });
+                                                                    }
+                                                                }}
+                                                                placeholder={`Mã serial bình ${idx + 1}...`}
+                                                                className="flex-1 h-10 px-3 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-[13px] focus:outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 transition-all"
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => startScanner(idx)}
+                                                                className="p-2.5 bg-emerald-100 text-emerald-600 rounded-xl hover:bg-emerald-200 transition-all"
+                                                            >
+                                                                <ScanLine className="w-4 h-4 text-emerald-600" strokeWidth={2.5} />
+                                                            </button>
+                                                            {serial && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleCylinderSerialChange(idx, '')}
+                                                                    className="p-2.5 text-rose-400 hover:bg-rose-50 rounded-xl transition-all"
+                                                                >
+                                                                    <X className="w-4 h-4" />
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                        {scanTime && (
+                                                            <div className="flex items-center gap-1 ml-7">
+                                                                <div className="flex items-center gap-1 px-2 py-0.5 bg-blue-500 rounded-md shadow-sm">
+                                                                    <Clock className="w-3 h-3 text-white" strokeWidth={2.5} />
+                                                                    <span className="text-[10px] font-black tracking-wider text-white" style={{ color: 'white !important', WebkitTextFillColor: 'white' }}>
+                                                                        ĐÃ QUÉT: {scanTime}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     </div>
                                 )}
@@ -921,6 +971,7 @@ export default function OrderFormModal({ order, onClose, onSuccess }) {
             onScanSuccess={handleScanSuccess}
             onClose={() => setIsScannerOpen(false)}
             title={scanTargetIndex !== -1 ? `Quét mã bình #${scanTargetIndex + 1}` : 'Quét mã bình'}
+            scan_time={new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false })}
         />
     </>);
 }
