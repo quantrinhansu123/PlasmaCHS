@@ -27,9 +27,12 @@ import {
     Trash2,
     User,
     Users,
+    Download,
+    Upload,
     X
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import * as XLSX from 'xlsx';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
@@ -388,6 +391,155 @@ const Customers = () => {
         setIsFormModalOpen(false);
     };
 
+    const downloadTemplate = () => {
+        const headers = [
+            'Mã khách hàng',
+            'Tên khách hàng',
+            'Loại khách hàng (BV/TM/PK/NG/SP)',
+            'Số điện thoại',
+            'Địa chỉ',
+            'Người đại diện',
+            'Kho quản lý',
+            'KD chăm sóc',
+            'Đại lý',
+            'NVKD phụ trách',
+            'Người liên hệ phụ',
+            'Nhóm kinh doanh',
+            'Mã số thuế',
+            'Tên công ty hoá đơn',
+            'Địa chỉ hoá đơn',
+        ];
+
+        const exampleData = [
+            {
+                'Mã khách hàng': 'KH00001',
+                'Tên khách hàng': 'Bệnh viện Đa khoa Tỉnh',
+                'Loại khách hàng (BV/TM/PK/NG/SP)': 'BV',
+                'Số điện thoại': '0912345678',
+                'Địa chỉ': '123 Đường ABC, Phường XYZ, TP. Hà Nội',
+                'Người đại diện': 'Nguyễn Văn A',
+                'Kho quản lý': warehousesList[0]?.name || 'Kho tổng',
+                'KD chăm sóc': 'Nguyễn Thị B',
+                'Đại lý': 'Đại lý ABC',
+                'NVKD phụ trách': 'Trần Văn C',
+                'Người liên hệ phụ': 'Lê Văn D - 0987654321',
+                'Nhóm kinh doanh': 'Nhóm KD Miền Bắc',
+                'Mã số thuế': '0101234567',
+                'Tên công ty hoá đơn': 'Công ty TNHH Bệnh viện Đa khoa Tỉnh',
+                'Địa chỉ hoá đơn': '123 Đường ABC, Phường XYZ, TP. Hà Nội',
+            },
+        ];
+
+        const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Template Import Khách Hàng');
+        XLSX.writeFile(wb, 'mau_import_khach_hang.xlsx');
+    };
+
+    const handleImportExcel = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+            try {
+                const bstr = evt.target.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const data = XLSX.utils.sheet_to_json(ws);
+
+                if (data.length === 0) {
+                    alert('File Excel không có dữ liệu!');
+                    return;
+                }
+
+                setIsLoading(true);
+
+                // Map warehouse names to IDs
+                const warehouseMap = (warehousesList || []).reduce((acc, w) => {
+                    acc[w.name.toLowerCase()] = w.id;
+                    return acc;
+                }, {});
+
+                // Find if any rows need auto-generated codes
+                const rowsNeedingCode = data.filter(row => !row['Mã khách hàng']);
+                let nextCodeNum = 1;
+
+                if (rowsNeedingCode.length > 0) {
+                    try {
+                        const { data: lastCustomer } = await supabase
+                            .from('customers')
+                            .select('code')
+                            .order('created_at', { ascending: false })
+                            .limit(1);
+
+                        if (lastCustomer && lastCustomer.length > 0 && lastCustomer[0].code.startsWith('KH')) {
+                            const lastCode = lastCustomer[0].code;
+                            const numStr = lastCode.replace(/[^0-9]/g, '');
+                            nextCodeNum = numStr ? parseInt(numStr, 10) + 1 : 1;
+                        }
+                    } catch (err) {
+                        console.error('Error fetching last code:', err);
+                        nextCodeNum = Math.floor(10000 + Math.random() * 90000);
+                    }
+                }
+
+                const customersToInsert = data.map(row => {
+                    let code = row['Mã khách hàng']?.toString();
+                    if (!code) {
+                        code = `KH${(nextCodeNum++).toString().padStart(5, '0')}`;
+                    }
+
+                    return {
+                        code: code,
+                        name: row['Tên khách hàng']?.toString(),
+                        category: row['Loại khách hàng (BV/TM/PK/NG/SP)']?.toString() || 'BV',
+                        phone: row['Số điện thoại']?.toString(),
+                        address: row['Địa chỉ']?.toString(),
+                        legal_rep: row['Người đại diện']?.toString(),
+                        warehouse_id: warehouseMap[row['Kho quản lý']?.toString()?.toLowerCase()] || null,
+                        care_by: row['KD chăm sóc']?.toString(),
+                        agency_name: row['Đại lý']?.toString(),
+                        managed_by: row['NVKD phụ trách']?.toString(),
+                        contact_info: row['Người liên hệ phụ']?.toString(),
+                        business_group: row['Nhóm kinh doanh']?.toString(),
+                        tax_code: row['Mã số thuế']?.toString(),
+                        invoice_company_name: row['Tên công ty hoá đơn']?.toString(),
+                        invoice_address: row['Địa chỉ hoá đơn']?.toString(),
+                        updated_at: new Date().toISOString()
+                    };
+                }).filter(c => c.name);
+
+                if (customersToInsert.length === 0) {
+                    alert('Không tìm thấy dữ liệu hợp lệ (thiếu tên khách hàng)!');
+                    setIsLoading(false);
+                    return;
+                }
+
+                const { error } = await supabase.from('customers').insert(customersToInsert);
+
+                if (error) {
+                    if (error.code === '23505') {
+                        alert('Lỗi: Một số mã khách hàng đã tồn tại trên hệ thống. Vui lòng kiểm tra lại!');
+                    } else {
+                        throw error;
+                    }
+                } else {
+                    alert(`🎉 Đã import thành công ${customersToInsert.length} khách hàng!`);
+                    fetchCustomers();
+                }
+            } catch (err) {
+                console.error('Error importing excel:', err);
+                alert('Có lỗi xảy ra khi xử lý file: ' + err.message);
+            } finally {
+                setIsLoading(false);
+                e.target.value = null; // Reset input
+            }
+        };
+        reader.readAsBinaryString(file);
+    };
+
     const getCategoryStats = () => {
         const stats = {};
         filteredCustomers.forEach(customer => {
@@ -529,6 +681,25 @@ const Customers = () => {
                                 </span>
                             )}
                         </button>
+
+                        <button
+                            onClick={downloadTemplate}
+                            className="p-2 rounded-xl border border-border bg-white text-muted-foreground shrink-0"
+                            title="Tải mẫu"
+                        >
+                            <Download size={18} />
+                        </button>
+
+                        <label className="p-2 rounded-xl border border-border bg-white text-muted-foreground shrink-0 cursor-pointer" title="Import Excel">
+                            <Upload size={18} />
+                            <input
+                                type="file"
+                                accept=".xlsx, .xls"
+                                onChange={handleImportExcel}
+                                className="hidden"
+                            />
+                        </label>
+
                         <button
                             onClick={() => {
                                 setSelectedCustomer(null);
@@ -651,6 +822,25 @@ const Customers = () => {
                                         />
                                     )}
                                 </div>
+
+                                <button
+                                    onClick={downloadTemplate}
+                                    className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-border bg-white text-muted-foreground hover:text-foreground text-[13px] font-bold transition-all shadow-sm"
+                                >
+                                    <Download size={16} />
+                                    Tải mẫu
+                                </button>
+
+                                <label className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-border bg-white text-muted-foreground hover:text-foreground text-[13px] font-bold transition-all shadow-sm cursor-pointer">
+                                    <Upload size={16} />
+                                    Import Excel
+                                    <input
+                                        type="file"
+                                        accept=".xlsx, .xls"
+                                        onChange={handleImportExcel}
+                                        className="hidden"
+                                    />
+                                </label>
 
                                 <button
                                     onClick={() => {

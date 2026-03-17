@@ -5,7 +5,6 @@ import {
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-    WAREHOUSE_NAMES,
     WAREHOUSE_STATUSES
 } from '../constants/warehouseConstants';
 import { supabase } from '../supabase/config';
@@ -24,7 +23,7 @@ const CreateWarehouse = () => {
         capacity: editWarehouse.capacity,
         status: editWarehouse.status
     } : {
-        name: 'Hà Nội',
+        name: '',
         manager_name: '',
         address: '',
         capacity: '',
@@ -120,13 +119,12 @@ const CreateWarehouse = () => {
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
                             <div className="space-y-2">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Tên kho *</label>
-                                <select
+                                <input
                                     value={formData.name}
                                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                    className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-amber-100 focus:border-amber-500 font-bold text-base shadow-sm cursor-pointer text-gray-900"
-                                >
-                                    {WAREHOUSE_NAMES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-                                </select>
+                                    placeholder="Ví dụ: Kho Long Biên"
+                                    className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-amber-100 focus:border-amber-500 font-bold shadow-sm"
+                                />
                             </div>
                             <div className="space-y-2">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Thủ kho *</label>
