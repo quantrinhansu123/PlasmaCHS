@@ -51,7 +51,7 @@ ALTER TABLE goods_receipts ADD CONSTRAINT check_receipt_warehouse CHECK (
 );
 
 ALTER TABLE goods_receipt_items ADD CONSTRAINT check_item_type CHECK (
-    item_type IN ('MAY', 'BINH', 'VAT_TU')
+    item_type IN ('MAY', 'BINH', 'VAT_TU', 'BINH_4L', 'BINH_8L', 'MAY_ROSY', 'MAY_MED')
 );
 
 -- Comments

@@ -37,7 +37,7 @@ ALTER TABLE goods_issues ADD CONSTRAINT check_issue_type CHECK (
 );
 
 ALTER TABLE goods_issue_items ADD CONSTRAINT check_issue_item_type CHECK (
-    item_type IN ('MAY', 'BINH', 'VAT_TU')
+    item_type IN ('MAY', 'BINH', 'VAT_TU', 'BINH_4L', 'BINH_8L', 'MAY_ROSY', 'MAY_MED')
 );
 
 -- Comments

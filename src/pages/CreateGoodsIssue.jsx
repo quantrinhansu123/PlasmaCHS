@@ -208,7 +208,15 @@ const CreateGoodsIssue = () => {
                     .select()
                     .single();
 
-                if (issueError) throw issueError;
+                if (issueError) {
+                    if (issueError.code === '23505') {
+                        await generateCode();
+                        alert('⚠️ Mã phiếu xuất này đã tồn tại trên hệ thống. Hệ thống đã tự động cập nhật mã mới tiếp theo, vui lòng nhấn "Lưu Phiếu Xuất" một lần nữa!');
+                        setIsLoading(false);
+                        return;
+                    }
+                    throw issueError;
+                }
                 issueId = issueData.id;
             }
 
