@@ -24,6 +24,7 @@ const CreateMachine = () => {
     const editMachine = state?.machine;
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [warehousesList, setWarehousesList] = useState([]);
+    const [customersList, setCustomersList] = useState([]);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
 
     const defaultState = {
@@ -37,7 +38,9 @@ const CreateMachine = () => {
         cylinder_volume: 'không',
         gas_type: 'Air',
         valve_type: 'không',
-        emission_head_type: 'không'
+        emission_head_type: 'không',
+        customer_name: '',
+        department_in_charge: ''
     };
 
     const initialFormState = editMachine || defaultState;
@@ -57,6 +60,14 @@ const CreateMachine = () => {
                     if (!editMachine && data.length > 0) {
                         setFormData(prev => ({ ...prev, warehouse: data[0].id }));
                     }
+                }
+
+                const { data: customerData, error: customerError } = await supabase
+                    .from('customers')
+                    .select('name')
+                    .order('name');
+                if (!customerError && customerData) {
+                    setCustomersList(customerData);
                 }
             } catch (err) {
                 console.error('Error fetching warehouses:', err);
@@ -303,6 +314,38 @@ const CreateMachine = () => {
                                 >
                                     {EMISSION_HEAD_TYPES.map(h => <option key={h.id} value={h.id}>{h.label}</option>)}
                                 </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Section 4: Thông tin sử dụng */}
+                    <div className="space-y-4 md:space-y-6">
+                        <div className="flex items-center gap-2 border-b border-gray-100 pb-3 md:pb-4">
+                            <span className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center font-bold">4</span>
+                            <h3 className="text-base md:text-lg font-bold text-gray-800 uppercase tracking-tight">Thông tin sử dụng</h3>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
+                            <div className="space-y-2">
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Khách hàng đang dùng</label>
+                                <select
+                                    value={formData.customer_name || ''}
+                                    onChange={(e) => setFormData({ ...formData, customer_name: e.target.value })}
+                                    className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 font-bold shadow-sm cursor-pointer"
+                                >
+                                    <option value="">-- Trống --</option>
+                                    {customersList.map((c, idx) => (
+                                        <option key={idx} value={c.name}>{c.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Bộ phận phụ trách</label>
+                                <input
+                                    value={formData.department_in_charge}
+                                    onChange={(e) => setFormData({ ...formData, department_in_charge: e.target.value })}
+                                    placeholder="Khoa/Phòng phụ trách..."
+                                    className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 font-bold shadow-sm"
+                                />
                             </div>
                         </div>
                     </div>

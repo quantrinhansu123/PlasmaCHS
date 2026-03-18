@@ -35,6 +35,7 @@ export default function MachineFormModal({ machine, onClose, onSuccess }) {
 
     const [formData, setFormData] = useState(defaultState);
     const [warehousesList, setWarehousesList] = useState([]);
+    const [customersList, setCustomersList] = useState([]);
 
     useEffect(() => {
         const fetchWarehouses = async () => {
@@ -50,6 +51,14 @@ export default function MachineFormModal({ machine, onClose, onSuccess }) {
                     if (!isEdit && data.length > 0 && !formData.warehouse) {
                         setFormData(prev => ({ ...prev, warehouse: data[0].id }));
                     }
+                }
+
+                const { data: customerData, error: customerError } = await supabase
+                    .from('customers')
+                    .select('name')
+                    .order('name');
+                if (!customerError && customerData) {
+                    setCustomersList(customerData);
                 }
             } catch (err) {
                 console.error('Error fetching warehouses:', err);
@@ -355,14 +364,17 @@ export default function MachineFormModal({ machine, onClose, onSuccess }) {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div>
                                         <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Khách hàng đang dùng</label>
-                                        <input
-                                            type="text"
+                                        <select
                                             name="customer_name"
                                             value={formData.customer_name}
                                             onChange={handleChange}
-                                            placeholder="Tên khách hàng hoặc Bệnh viện..."
-                                            className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all font-bold text-slate-900"
-                                        />
+                                            className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all font-bold text-slate-900 cursor-pointer"
+                                        >
+                                            <option value="">-- Trống --</option>
+                                            {customersList.map((c, idx) => (
+                                                <option key={idx} value={c.name}>{c.name}</option>
+                                            ))}
+                                        </select>
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Bộ phận phụ trách</label>
