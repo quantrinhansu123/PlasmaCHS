@@ -4,6 +4,7 @@ import {
     Package,
     Plus,
     ScanLine,
+    Search,
     X
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
