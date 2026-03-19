@@ -15,6 +15,7 @@ export const ORDER_TYPES = [
 ];
 
 export const CUSTOMER_CATEGORIES = [
+    { id: 'ALL', label: 'Tất cả' },
     { id: 'BV', label: 'Bệnh viện' },
     { id: 'TM', label: 'Thẩm mỹ viện' },
     { id: 'PK', label: 'Phòng khám' },

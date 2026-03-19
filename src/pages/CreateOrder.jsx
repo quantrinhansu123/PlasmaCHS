@@ -77,7 +77,7 @@ const CreateOrder = () => {
 
     const defaultState = {
         orderCode: getNewOrderCode(),
-        customerCategory: 'TM',
+        customerCategory: 'ALL',
         warehouse: '',
         customerId: '',
         recipientName: '',
@@ -96,7 +96,7 @@ const CreateOrder = () => {
 
     const initialFormState = editOrder ? {
         orderCode: editOrder.order_code,
-        customerCategory: editOrder.customer_category,
+        customerCategory: editOrder.customer_category || 'ALL',
         warehouse: editOrder.warehouse,
         customerId: '', // Sẽ load sau
         customerName: editOrder.customer_name || '',
@@ -242,8 +242,9 @@ const CreateOrder = () => {
     };
 
     const filteredCustomers = customersList.filter(c => {
-        const categoryMatch = c.category === formData.customerCategory || (!c.category && formData.customerCategory === 'BV'); // fallback if c.category is missing
-        const searchMatch = c.name.toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
+        const categoryMatch = !formData.customerCategory || formData.customerCategory === 'ALL' || c.category === formData.customerCategory;
+        const searchMatch = !customerSearchTerm || 
+            c.name?.toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
             (c.phone && c.phone.includes(customerSearchTerm)) ||
             (c.representative_name && c.representative_name.toLowerCase().includes(customerSearchTerm.toLowerCase()));
         return categoryMatch && searchMatch;
