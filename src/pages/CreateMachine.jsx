@@ -2,6 +2,7 @@ import {
     CheckCircle2,
     MonitorIcon,
     ScanLine,
+    Search,
     X
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -26,6 +27,9 @@ const CreateMachine = () => {
     const [warehousesList, setWarehousesList] = useState([]);
     const [customersList, setCustomersList] = useState([]);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
+    const [customerSearch, setCustomerSearch] = useState('');
+    const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+    const customerDropdownRef = useRef(null);
 
     const defaultState = {
         serial_number: '',
@@ -45,6 +49,20 @@ const CreateMachine = () => {
 
     const initialFormState = editMachine || defaultState;
     const [formData, setFormData] = useState(initialFormState);
+
+    const filteredCustomers = customersList.filter(c => 
+        c.name?.toLowerCase().includes(customerSearch.toLowerCase())
+    );
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (customerDropdownRef.current && !customerDropdownRef.current.contains(event.target)) {
+                setShowCustomerDropdown(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
     useEffect(() => {
         const fetchWarehouses = async () => {
@@ -130,6 +148,13 @@ const CreateMachine = () => {
 
     const resetForm = () => {
         setFormData(initialFormState);
+        setCustomerSearch('');
+    };
+
+    const handleSelectCustomer = (customerName) => {
+        setFormData(prev => ({ ...prev, customer_name: customerName }));
+        setCustomerSearch(customerName);
+        setShowCustomerDropdown(false);
     };
 
     const handleScanSuccess = useCallback((decodedText) => {
@@ -325,18 +350,41 @@ const CreateMachine = () => {
                             <h3 className="text-base md:text-lg font-bold text-gray-800 uppercase tracking-tight">Thông tin sử dụng</h3>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
-                            <div className="space-y-2">
+                            <div className="space-y-2" ref={customerDropdownRef}>
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Khách hàng đang dùng</label>
-                                <select
-                                    value={formData.customer_name || ''}
-                                    onChange={(e) => setFormData({ ...formData, customer_name: e.target.value })}
-                                    className="w-full px-5 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 font-bold shadow-sm cursor-pointer"
-                                >
-                                    <option value="">-- Trống --</option>
-                                    {customersList.map((c, idx) => (
-                                        <option key={idx} value={c.name}>{c.name}</option>
-                                    ))}
-                                </select>
+                                <div className="relative">
+                                    <div className="relative">
+                                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                        <input
+                                            type="text"
+                                            value={customerSearch}
+                                            onChange={(e) => {
+                                                setCustomerSearch(e.target.value);
+                                                setShowCustomerDropdown(true);
+                                            }}
+                                            onFocus={() => setShowCustomerDropdown(true)}
+                                            placeholder="Tìm khách hàng..."
+                                            className="w-full pl-11 pr-4 py-4 bg-white border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 font-bold shadow-sm"
+                                        />
+                                    </div>
+                                    {showCustomerDropdown && (
+                                        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-2xl shadow-lg max-h-60 overflow-y-auto">
+                                            {filteredCustomers.length > 0 ? (
+                                                filteredCustomers.map((c, idx) => (
+                                                    <div
+                                                        key={idx}
+                                                        onClick={() => handleSelectCustomer(c.name)}
+                                                        className={`px-4 py-3 hover:bg-indigo-50 cursor-pointer ${formData.customer_name === c.name ? 'bg-indigo-50 text-indigo-600' : ''}`}
+                                                    >
+                                                        <span className="font-medium">{c.name}</span>
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <div className="px-4 py-3 text-gray-400 text-sm">Không tìm thấy khách hàng</div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                             <div className="space-y-2">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Bộ phận phụ trách</label>
