@@ -11,6 +11,7 @@ import {
   Bot,
   Copyright,
   Search,
+  Ticket,
 } from 'lucide-react';
 
 import { ActionCard } from '../components/ui/ActionCard';
@@ -192,6 +193,13 @@ const dashboardModules = [
     description: 'Thiết lập quyền truy cập và chức năng cho từng nhóm người dùng.',
     href: '/phan-quyen',
     colorScheme: 'slate',
+  },
+  {
+    icon: Ticket,
+    title: 'Ticket sửa chữa',
+    description: 'Quản lý phiếu yêu cầu và tiến độ sửa chữa thiết bị.',
+    href: '/phieu-sua-chua',
+    colorScheme: 'amber',
   },
   {
     icon: Megaphone,

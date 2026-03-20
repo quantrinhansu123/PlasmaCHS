@@ -15,7 +15,8 @@ import {
   Truck,
   UserPlus,
   Users,
-  Warehouse
+  Warehouse,
+  Ticket
 } from 'lucide-react';
 
 export const actionModuleGroups = [
@@ -277,6 +278,22 @@ export const actionModuleGroups = [
         description: 'Thiết lập quyền truy cập và chức năng cho từng nhóm người dùng.',
         href: '/phan-quyen',
         colorScheme: 'slate',
+      },
+    ],
+  },
+  {
+    path: '/phieu-sua-chua',
+    title: 'Ticket sửa chữa',
+    description: 'Quản lý phiếu yêu cầu và tiến độ sửa chữa thiết bị.',
+    icon: Ticket,
+    colorScheme: 'amber',
+    items: [
+      {
+        icon: Ticket,
+        title: 'Ticket sửa chữa',
+        description: 'Quản lý phiếu yêu cầu và tiến độ sửa chữa thiết bị.',
+        href: '/phieu-sua-chua',
+        colorScheme: 'amber',
       },
     ],
   },

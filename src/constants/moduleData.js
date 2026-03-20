@@ -17,7 +17,7 @@ import {
   BookOpen, Calculator as CalcIcon, History,
   Truck, Package, ShoppingCart, FileCheck, Tag,
   Warehouse, Box, ArrowLeftRight, Download, Upload, Factory, MapPin, Truck as DeliveryIcon,
-  Building2, List, ClipboardCheck, Building, Monitor
+  Building2, List, ClipboardCheck, Building, Monitor, Ticket
 } from 'lucide-react';
 
 // Comprehensive mock data for module pages to match the 5F template precisely
@@ -299,6 +299,12 @@ export const moduleData = {
         { icon: ShieldCheck, title: 'Phân quyền', description: 'Vai trò và quyền hạn.', colorScheme: 'red' },
         { icon: RefreshCw, title: 'Sao lưu & Khôi phục', description: 'Xuất, nhập và khôi phục dữ liệu hệ thống.', colorScheme: 'blue' },
         { icon: Monitor, title: 'Thiết bị đăng nhập', description: 'Quản lý tài khoản đã đăng nhập trên những thiết bị nào. Đăng xuất thiết bị từ xa.', colorScheme: 'teal' }
+      ]
+    },
+    {
+      section: 'Dịch vụ & Bảo trì',
+      items: [
+        { icon: Ticket, title: 'Ticket sửa chữa', description: 'Quản lý phiếu yêu cầu và tiến độ sửa chữa thiết bị.', colorScheme: 'amber', path: '/phieu-sua-chua' },
       ]
     }
   ],
