@@ -1,10 +1,10 @@
-import { Camera, ChevronDown, Edit3, HeartPulse, Image as ImageIcon, MapPin, Search, Ticket, Trash2, User, Wrench, X, Plus } from 'lucide-react';
+import { Activity, Camera, ChevronDown, Edit3, HeartPulse, Image as ImageIcon, MapPin, Save, Search, Ticket, Trash2, User, Wrench, X, Plus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 import usePermissions from '../../hooks/usePermissions';
 import { supabase } from '../../supabase/config';
 
-export default function RepairTicketForm({ ticket, onClose, onSuccess }) {
+export default function RepairTicketForm({ ticket, initialCustomer, onClose, onSuccess, fullPage = false }) {
     const { role, user } = usePermissions();
     const isEdit = !!ticket;
     const [isLoading, setIsLoading] = useState(false);
@@ -84,12 +84,23 @@ export default function RepairTicketForm({ ticket, onClose, onSuccess }) {
                 technicalImages: ticket.technical_images || [],
                 status: ticket.status || 'Mới'
             });
-        } else if (user?.id && !isEdit) {
+        } else {
+            // New Ticket: Handle initial customer if provided
+            if (initialCustomer) {
+                setFormData(prev => ({
+                    ...prev,
+                    customerId: initialCustomer.id
+                }));
+                fetchCustomerDevices(initialCustomer.name);
+            }
+
             // Auto assign if user is sales or technical
-            if (role === 'kinh_doanh') setFormData(prev => ({ ...prev, salesId: user.id }));
-            if (role === 'ky_thuat') setFormData(prev => ({ ...prev, technicianId: user.id }));
+            if (user?.id) {
+                if (role === 'kinh_doanh') setFormData(prev => ({ ...prev, salesId: user.id }));
+                if (role === 'ky_thuat') setFormData(prev => ({ ...prev, technicianId: user.id }));
+            }
         }
-    }, [ticket, isEdit, user, role]);
+    }, [ticket, isEdit, user, role, initialCustomer]);
 
     useEffect(() => {
         if (isEdit && ticket && customers.length > 0) {
@@ -319,15 +330,14 @@ export default function RepairTicketForm({ ticket, onClose, onSuccess }) {
         }
     };
 
-    return (
-        <div className="fixed inset-0 bg-slate-900/55 backdrop-blur-sm flex items-stretch sm:items-start sm:pt-16 justify-center z-[100] p-0 sm:p-4 animate-in fade-in duration-200 [&_input]:!font-[600] [&_select]:!font-[600] [&_textarea]:!font-[600] [&_input]:!text-slate-800 [&_select]:!text-slate-800 [&_textarea]:!text-slate-800 [&_input::placeholder]:!text-slate-400 [&_textarea::placeholder]:!text-slate-400">
-            <div className="bg-slate-50 rounded-none sm:rounded-3xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col h-[100dvh] sm:h-auto sm:max-h-[92vh] border-0 sm:border sm:border-slate-200">
+    const content = (
+        <div className={fullPage ? "bg-slate-50 w-full" : "bg-slate-50 rounded-none sm:rounded-3xl shadow-2xl w-full max-w-[99.5%] overflow-hidden flex flex-col h-[100dvh] sm:h-auto sm:max-h-[98vh] border-0 sm:border sm:border-slate-200"}>
 
                 {/* Header */}
                 <div className="px-4 py-3.5 border-b border-slate-200 flex items-center justify-between shrink-0 bg-white sticky top-0 z-20">
                     <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 bg-amber-100 rounded-full flex items-center justify-center text-amber-600">
-                            {isEdit ? <Edit3 className="w-5 h-5" /> : <Ticket className="w-5 h-5" />}
+                        <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600 shadow-sm">
+                            {isEdit ? <Edit3 className="w-6 h-6" /> : <Ticket className="w-6 h-6" />}
                         </div>
                         <div>
                             <h3 className="text-[20px] leading-tight font-bold text-slate-900 tracking-tight">
@@ -338,57 +348,59 @@ export default function RepairTicketForm({ ticket, onClose, onSuccess }) {
                             </p>
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-2 text-amber-600 hover:text-amber-700 hover:bg-amber-50 rounded-xl transition-all">
-                        <X className="w-5 h-5" />
+                    <button onClick={onClose} className="p-2 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-xl transition-all">
+                        <X className="w-6 h-6" />
                     </button>
                 </div>
 
-                {/* Form Body */}
-                <div className="p-5 sm:p-6 overflow-y-auto bg-slate-50 custom-scrollbar flex-1 min-h-0 pb-20 sm:pb-6">
-                    {errorMsg && (
-                        <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl text-[13px] font-semibold text-rose-600 flex items-center gap-2">
-                            <X className="w-4 h-4 shrink-0" /> {errorMsg}
-                        </div>
-                    )}
 
-                    <form id="ticketForm" onSubmit={handleSubmit} className="space-y-6">
-
-                        {/* Khu vực Thông tin cơ bản */}
-                        <div className="rounded-3xl border border-amber-100 bg-white p-5 sm:p-6 space-y-5 shadow-sm [&_label]:text-amber-700 [&_label_svg]:text-amber-600">
-                            <div className="flex items-center gap-2.5 pb-3 border-b border-amber-100">
-                                <Ticket className="w-4 h-4 text-amber-600" />
-                                <h4 className="text-[18px] !font-extrabold !text-amber-700">Thông tin thiết bị</h4>
+                {/* Form Body - Single Page Scroll */}
+                <div className={((fullPage && !isEdit) ? "p-4 sm:p-8" : "p-5 sm:p-6") + " overflow-y-auto bg-slate-50 custom-scrollbar flex-1 min-h-0 pb-32 form-body-scroll"}>
+                    <div className="w-full px-2 sm:px-4">
+                        {errorMsg && (
+                            <div className="mb-6 p-4 bg-rose-50 border border-rose-200 rounded-2xl text-[14px] font-bold text-rose-600 flex items-center gap-3 shadow-sm animate-in fade-in slide-in-from-top-2">
+                                <X className="w-5 h-5 shrink-0" /> {errorMsg}
                             </div>
+                        )}
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                {/* Khách hàng Dropdown */}
-                                <div className="space-y-1.5 sm:col-span-2">
-                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800"><User className="w-4 h-4 text-amber-500" />Khách hàng <span className="text-red-500">*</span></label>
+                        <form id="ticketForm" onSubmit={handleSubmit} className="space-y-10">
+
+                        {/* Section 1: Thông tin thiết bị */}
+                        <div id="section-device" className="scroll-mt-6 rounded-3xl border border-emerald-100 bg-white p-5 sm:p-6 space-y-5 shadow-sm hover:shadow-md transition-shadow [&_label]:text-emerald-700 [&_label_svg]:text-emerald-600">
+                            <h4 className="flex items-center gap-2.5 text-[18px] !font-extrabold !text-emerald-700 pb-3 border-b border-emerald-100">
+                                <Ticket className="w-5 h-5 text-emerald-600" /> 1. Thông tin thiết bị
+                            </h4>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {/* Khách hàng */}
+                                <div className="space-y-2">
+                                    <label className="flex items-center gap-1.5 text-[14px] font-bold text-emerald-700"><Search className="w-4 h-4 text-emerald-600" />Khách hàng <span className="text-red-500">*</span></label>
                                     <div className="relative" ref={customerDropdownRef}>
                                         <div
-                                            className={`w-full h-12 px-4 border rounded-2xl text-[13px] transition-all cursor-pointer flex justify-between items-center ${isFetchingData ? 'bg-slate-50 text-slate-400 border-slate-200' : 'bg-slate-50 border-slate-200 text-slate-900 hover:border-amber-300'}`}
+                                            className={`w-full h-12 px-5 border rounded-2xl text-[14px] transition-all cursor-pointer flex justify-between items-center ${isFetchingData ? 'bg-slate-50 text-slate-400 border-slate-200' : 'bg-slate-50 border-slate-200 text-slate-900 hover:border-emerald-400 hover:bg-white shadow-sm font-semibold'}`}
                                             onClick={() => !isFetchingData && setIsCustomerDropdownOpen(!isCustomerDropdownOpen)}
                                         >
-                                            <span className={formData.customerId ? 'font-semibold text-[13px]' : 'text-slate-500 font-semibold text-[13px]'}>
-                                                {formData.customerId ? customers.find(c => c.id === formData.customerId)?.name : 'Chọn khách hàng'}
+                                            <span>
+                                                {formData.customerId ? customers.find(c => c.id === formData.customerId)?.name : 'Chọn khách hàng...'}
                                             </span>
-                                            <ChevronDown className="w-4 h-4 text-amber-500" />
+                                            <ChevronDown className="w-5 h-5 text-emerald-500" />
                                         </div>
                                         {isCustomerDropdownOpen && !isFetchingData && (
-                                            <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 shadow-xl max-h-56 overflow-hidden flex flex-col rounded-xl">
-                                                <div className="p-2 border-b border-slate-200 bg-slate-50 flex items-center gap-2 sticky top-0 z-10">
-                                                    <Search className="w-4 h-4 text-amber-400" />
+                                            <div className="absolute z-50 w-full mt-2 bg-white border border-slate-200 shadow-2xl max-h-64 overflow-hidden flex flex-col rounded-2xl animate-in fade-in zoom-in-95 duration-200">
+                                                <div className="p-3 border-b border-slate-100 bg-slate-50 flex items-center gap-3 sticky top-0 z-10">
+                                                    <Search className="w-4 h-4 text-emerald-400" />
                                                     <input
-                                                        type="text" className="w-full bg-transparent border-none outline-none text-sm font-semibold placeholder-slate-400" placeholder="Tìm kiếm khách hàng..."
+                                                        type="text" className="w-full bg-transparent border-none outline-none text-[14px] font-bold placeholder-slate-400" placeholder="Tìm kiếm khách hàng theo tên..."
                                                         value={customerSearchTerm} onChange={(e) => setCustomerSearchTerm(e.target.value)} onClick={(e) => e.stopPropagation()} autoFocus
                                                     />
                                                 </div>
                                                 <div className="overflow-y-auto custom-scrollbar flex-1 py-1">
                                                     {cFilteredCustomers.length > 0 ? cFilteredCustomers.map(customer => (
-                                                        <div key={customer.id} className="px-4 py-2.5 cursor-pointer border-b border-slate-100 hover:bg-slate-50" onClick={() => handleCustomerSelect(customer)}>
-                                                            <div className="font-semibold text-sm text-slate-800">{customer.name}</div>
+                                                        <div key={customer.id} className="px-5 py-3.5 cursor-pointer border-b border-slate-50 hover:bg-emerald-50 transition-colors group" onClick={() => handleCustomerSelect(customer)}>
+                                                            <div className="font-bold text-[14px] text-slate-800 group-hover:text-emerald-700">{customer.name}</div>
+                                                            <div className="text-[12px] text-slate-400 font-semibold">{customer.phone || 'Chưa cập nhật SĐT'}</div>
                                                         </div>
-                                                    )) : <div className="px-4 py-4 text-center text-sm text-slate-500">Không tìm thấy kết quả</div>}
+                                                    )) : <div className="px-5 py-6 text-center text-sm text-slate-500 font-semibold italic">Không tìm thấy khách hàng nào</div>}
                                                 </div>
                                             </div>
                                         )}
@@ -396,35 +408,35 @@ export default function RepairTicketForm({ ticket, onClose, onSuccess }) {
                                 </div>
 
                                 {/* Mã thiết bị */}
-                                <div className="space-y-1.5">
-                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800"><MapPin className="w-4 h-4 text-amber-500" />Mã thiết bị <span className="text-red-500">*</span></label>
+                                <div className="space-y-2">
+                                    <label className="flex items-center gap-1.5 text-[14px] font-bold text-emerald-700"><MapPin className="w-4 h-4 text-emerald-600" />Mã thiết bị <span className="text-red-500">*</span></label>
                                     <div className="relative" ref={machineDropdownRef}>
                                         <div 
-                                            className={`w-full h-12 px-4 border rounded-2xl text-[13px] transition-all cursor-pointer flex justify-between items-center ${!formData.customerId ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'bg-slate-50 border-slate-200 text-slate-900 hover:border-amber-300'}`}
+                                            className={`w-full h-12 px-5 border rounded-2xl text-[14px] transition-all cursor-pointer flex justify-between items-center ${!formData.customerId ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'bg-slate-50 border-slate-200 text-slate-900 hover:border-emerald-400 hover:bg-white shadow-sm font-semibold'}`}
                                             onClick={() => formData.customerId && setIsMachineDropdownOpen(!isMachineDropdownOpen)}
                                         >
-                                            <span className={formData.machineSerial ? 'font-semibold text-[13px]' : 'text-slate-500 font-semibold text-[13px]'}>
+                                            <span>
                                                 {formData.machineSerial || '-- Chọn mã thiết bị --'}
                                             </span>
-                                            <ChevronDown className="w-4 h-4 text-amber-500" />
+                                            <ChevronDown className="w-5 h-5 text-emerald-500" />
                                         </div>
 
                                         {isMachineDropdownOpen && (
-                                            <div className="absolute z-50 w-full mt-1 top-full bg-white border border-slate-300 shadow-xl max-h-56 overflow-hidden flex flex-col rounded-xl">
-                                                <div className="p-2 border-b border-slate-200 bg-slate-50 flex items-center gap-2 sticky top-0 z-10">
-                                                    <Search className="w-4 h-4 text-amber-400" />
+                                            <div className="absolute z-50 w-full mt-2 top-full bg-white border border-slate-200 shadow-2xl max-h-64 overflow-hidden flex flex-col rounded-2xl animate-in fade-in zoom-in-95 duration-200">
+                                                <div className="p-3 border-b border-slate-100 bg-slate-50 flex items-center gap-3 sticky top-0 z-10">
+                                                    <Search className="w-4 h-4 text-emerald-400" />
                                                     <input 
-                                                        type="text" className="w-full bg-transparent border-none outline-none text-sm font-semibold placeholder-slate-400" placeholder="Tìm mã hoặc tên máy..." 
+                                                        type="text" className="w-full bg-transparent border-none outline-none text-[14px] font-bold placeholder-slate-400" placeholder="Tìm mã hoặc tên máy..." 
                                                         value={machineSearchTerm} onChange={(e) => setMachineSearchTerm(e.target.value)} onClick={(e)=>e.stopPropagation()} autoFocus
                                                     />
                                                 </div>
                                                 <div className="overflow-y-auto custom-scrollbar flex-1 py-1">
                                                     {mFilteredMachines.length > 0 ? mFilteredMachines.map(m => (
-                                                        <div key={m.serial_number} className="px-4 py-2.5 cursor-pointer border-b border-slate-100 hover:bg-slate-50" onClick={() => handleMachineSelect(m)}>
-                                                            <div className="font-bold text-sm text-slate-800 group-hover:text-amber-600 transition-colors">{m.serial_number}</div>
-                                                            <div className="text-[11px] text-slate-500 font-semibold">{m.name}</div>
+                                                        <div key={m.serial_number} className="px-5 py-3.5 cursor-pointer border-b border-slate-100 hover:bg-emerald-50 transition-colors group" onClick={() => handleMachineSelect(m)}>
+                                                            <div className="font-black text-[14px] text-slate-800 group-hover:text-emerald-600">{m.serial_number}</div>
+                                                            <div className="text-[12px] text-slate-500 font-bold">{m.name}</div>
                                                         </div>
-                                                    )) : <div className="px-4 py-4 text-center text-sm text-slate-500">Không tìm thấy thiết bị nào</div>}
+                                                    )) : <div className="px-5 py-6 text-center text-sm text-slate-500 font-semibold italic">Không tìm thấy thiết bị nào</div>}
                                                 </div>
                                             </div>
                                         )}
@@ -432,54 +444,53 @@ export default function RepairTicketForm({ ticket, onClose, onSuccess }) {
                                 </div>
 
                                 {/* Tên thiết bị (Auto fill) */}
-                                <div className="space-y-1.5">
-                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800"><Edit3 className="w-4 h-4 text-amber-500" />Tên thiết bị</label>
+                                <div className="space-y-2">
+                                    <label className="flex items-center gap-1.5 text-[14px] font-bold text-emerald-700"><Edit3 className="w-4 h-4 text-emerald-600" />Tên thiết bị</label>
                                     <input
                                         name="machineName" value={formData.machineName} onChange={handleChange}
                                         placeholder="Tự động điền..." disabled
-                                        className="w-full h-12 px-4 bg-slate-100 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-600 cursor-not-allowed"
+                                        className="w-full h-12 px-5 bg-slate-100 border border-slate-200 rounded-2xl text-[15px] font-bold text-slate-400 cursor-not-allowed"
                                     />
                                 </div>
                             </div>
                         </div>
 
-                        {/* Khu vực Lỗi chi tiết */}
-                        <div className="rounded-3xl border border-rose-100 bg-white p-5 sm:p-6 space-y-5 shadow-sm [&_label]:text-rose-700 [&_label_svg]:text-rose-600">
-                            <div className="flex items-center gap-2.5 pb-3 border-b border-rose-100">
-                                <HeartPulse className="w-4 h-4 text-rose-600" />
-                                <h4 className="text-[18px] !font-extrabold !text-rose-700">Tình trạng lỗi</h4>
-                            </div>
+                        {/* Section 2: Tình trạng lỗi */}
+                        <div id="section-error" className="scroll-mt-6 rounded-3xl border border-emerald-100 bg-white p-5 sm:p-6 space-y-5 shadow-sm hover:shadow-md transition-shadow [&_label]:text-emerald-700 [&_label_svg]:text-emerald-600">
+                            <h4 className="flex items-center gap-2.5 text-[18px] !font-extrabold !text-emerald-700 pb-3 border-b border-emerald-100">
+                                <HeartPulse className="w-5 h-5 text-emerald-600" /> 2. Tình trạng lỗi & Báo cáo
+                            </h4>
 
-                            <div className="space-y-4">
+                            <div className="space-y-6">
                                 {/* Loại lỗi Custom Dropdown với Nút Add */}
-                                <div className="space-y-1.5">
-                                    <label className="text-[14px] font-semibold text-slate-800">Loại lỗi</label>
+                                <div className="space-y-2">
+                                    <label className="text-[14px] font-bold text-emerald-700 flex items-center gap-1.5"><Activity className="w-4 h-4" />Loại lỗi <span className="text-red-500">*</span></label>
                                     <div className="relative" ref={errorTypeDropdownRef}>
-                                        <div className="w-full h-12 px-4 border bg-slate-50 border-slate-200 rounded-2xl flex justify-between items-center cursor-pointer" onClick={() => setIsErrorTypeDropdownOpen(!isErrorTypeDropdownOpen)}>
-                                            <span className="font-semibold text-slate-800 text-[13px]">
+                                        <div className="w-full h-12 px-5 border bg-slate-50 border-slate-200 rounded-2xl flex justify-between items-center cursor-pointer hover:border-emerald-400 hover:bg-white shadow-sm transition-all text-slate-900 font-semibold" onClick={() => setIsErrorTypeDropdownOpen(!isErrorTypeDropdownOpen)}>
+                                            <span>
                                                 {formData.errorTypeId ? errorTypes.find(e => e.id === formData.errorTypeId)?.name : '-- Chọn loại lỗi --'}
                                             </span>
-                                            <ChevronDown className="w-4 h-4 text-rose-500" />
+                                            <ChevronDown className="w-5 h-5 text-emerald-500" />
                                         </div>
                                         {isErrorTypeDropdownOpen && (
-                                            <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 shadow-xl max-h-60 flex flex-col rounded-xl">
-                                                <div className="p-2 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
-                                                    <Search className="w-4 h-4 text-rose-400" />
+                                            <div className="absolute z-50 w-full mt-2 bg-white border border-slate-200 shadow-2xl max-h-72 flex flex-col rounded-2xl animate-in fade-in zoom-in-95 duration-200">
+                                                <div className="p-3 border-b border-slate-100 bg-slate-50 flex items-center gap-3">
+                                                    <Search className="w-4 h-4 text-emerald-400" />
                                                     <input
-                                                        type="text" className="w-full bg-transparent border-none outline-none text-sm font-semibold placeholder-slate-400" placeholder="Tìm hoặc thêm mới..."
+                                                        type="text" className="w-full bg-transparent border-none outline-none text-[14px] font-bold placeholder-slate-400" placeholder="Tìm hoặc thêm mới lỗi..."
                                                         value={errorTypeSearchTerm} onChange={(e) => setErrorTypeSearchTerm(e.target.value)} onClick={(e) => e.stopPropagation()}
                                                     />
                                                 </div>
-                                                <div className="overflow-y-auto flex-1">
+                                                <div className="overflow-y-auto custom-scrollbar flex-1 py-1">
                                                     {errorTypes.filter(e => e.name.toLowerCase().includes(errorTypeSearchTerm.toLowerCase())).map(err => (
-                                                        <div key={err.id} className="px-4 py-2 cursor-pointer hover:bg-slate-50 text-sm font-semibold" onClick={() => { setFormData(prev => ({ ...prev, errorTypeId: err.id })); setIsErrorTypeDropdownOpen(false); }}>
+                                                        <div key={err.id} className="px-5 py-3 cursor-pointer hover:bg-emerald-50 text-[14px] font-bold text-slate-700 transition-colors" onClick={() => { setFormData(prev => ({ ...prev, errorTypeId: err.id })); setIsErrorTypeDropdownOpen(false); }}>
                                                             {err.name}
                                                         </div>
                                                     ))}
                                                 </div>
-                                                <div className="p-2 border-t border-slate-200 bg-rose-50/50 flex items-center gap-2">
-                                                    <input type="text" value={newErrorTypeName} onChange={(e) => setNewErrorTypeName(e.target.value)} placeholder="Nhập lỗi mới..." onClick={(e) => e.stopPropagation()} className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-sm outline-none focus:border-rose-300" />
-                                                    <button type="button" onClick={(e) => { e.stopPropagation(); handleAddErrorType(); }} className="p-2 bg-rose-600 text-white rounded-lg hover:bg-rose-700 shrink-0"><Plus size={16} /></button>
+                                                <div className="p-3 border-t border-slate-100 bg-emerald-50/30 flex items-center gap-2">
+                                                    <input type="text" value={newErrorTypeName} onChange={(e) => setNewErrorTypeName(e.target.value)} placeholder="Nhập tên lỗi mới..." onClick={(e) => e.stopPropagation()} className="w-full px-4 py-2 rounded-xl border border-slate-200 text-sm font-bold outline-none focus:border-emerald-300 transition-all font-semibold" />
+                                                    <button type="button" onClick={(e) => { e.stopPropagation(); handleAddErrorType(); }} className="h-10 w-10 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 shadow-lg shadow-emerald-200 flex items-center justify-center shrink-0 transition-all"><Plus size={20} /></button>
                                                 </div>
                                             </div>
                                         )}
@@ -487,39 +498,39 @@ export default function RepairTicketForm({ ticket, onClose, onSuccess }) {
                                 </div>
 
                                 {/* Lỗi chi tiết (Long Text) */}
-                                <div className="space-y-1.5">
-                                    <label className="text-[14px] font-semibold text-slate-800">Mô tả lỗi chi tiết</label>
+                                <div className="space-y-2">
+                                    <label className="text-[14px] font-bold text-emerald-700 flex items-center gap-1.5"><Edit3 className="w-4 h-4" />Mô tả lỗi chi tiết</label>
                                     <textarea
-                                        name="errorDetails" value={formData.errorDetails} onChange={handleChange} rows={3}
-                                        placeholder="Mô tả cụ thể biểu hiện bệnh của máy..."
-                                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-[14px] font-semibold text-slate-800 focus:outline-none focus:ring-4 focus:ring-rose-100 focus:border-rose-400"
+                                        name="errorDetails" value={formData.errorDetails} onChange={handleChange} rows={4}
+                                        placeholder="Mô tả cụ thể biểu hiện bệnh của máy, các mã lỗi hiển thị (nếu có)..."
+                                        className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-3xl text-[14px] font-semibold text-slate-800 focus:outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 transition-all placeholder:text-slate-400"
                                     />
                                 </div>
 
                                 {/* Upload ảnh lỗi */}
-                                <div className="space-y-2">
-                                    <label className="text-[14px] font-semibold text-slate-800 flex items-center gap-2"><ImageIcon className="w-4 h-4 text-rose-500" />Hình ảnh chi tiết báo lỗi</label>
+                                <div className="space-y-3">
+                                    <label className="text-[14px] font-bold text-emerald-700 flex items-center gap-2"><ImageIcon className="w-4 h-4 text-emerald-600" />Hình ảnh chi tiết báo lỗi</label>
 
-                                    <div className="flex flex-wrap gap-3">
+                                    <div className="flex flex-wrap gap-4">
                                         {/* Existing Images */}
                                         {formData.detailImages.map((img, idx) => (
-                                            <div key={`od-${idx}`} className="relative w-20 h-20 rounded-xl overflow-hidden border border-slate-200 hidden sm:block">
+                                            <div key={`od-${idx}`} className="relative w-24 h-24 rounded-2xl overflow-hidden border border-slate-100 shadow-sm transition-transform hover:scale-105">
                                                 <img src={img} alt="detail" className="w-full h-full object-cover" />
-                                                <button type="button" onClick={() => removeImage('detail', idx)} className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full bg-opacity-80 hover:bg-opacity-100"><Trash2 size={12} /></button>
+                                                <button type="button" onClick={() => removeImage('detail', idx)} className="absolute top-1.5 right-1.5 p-1.5 bg-rose-600 text-white rounded-lg shadow-lg hover:bg-rose-700 transition-colors"><Trash2 size={12} /></button>
                                             </div>
                                         ))}
                                         {/* File Previews */}
                                         {newDetailFiles.map((file, idx) => (
-                                            <div key={`nd-${idx}`} className="relative w-20 h-20 rounded-xl overflow-hidden border border-slate-200">
+                                            <div key={`nd-${idx}`} className="relative w-24 h-24 rounded-2xl overflow-hidden border-2 border-emerald-200 shadow-sm transition-transform hover:scale-105">
                                                 <img src={URL.createObjectURL(file)} alt="preview" className="w-full h-full object-cover" />
-                                                <button type="button" onClick={() => setNewDetailFiles(prev => prev.filter((_, i) => i !== idx))} className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full bg-opacity-80 hover:bg-opacity-100"><Trash2 size={12} /></button>
+                                                <button type="button" onClick={() => setNewDetailFiles(prev => prev.filter((_, i) => i !== idx))} className="absolute top-1.5 right-1.5 p-1.5 bg-rose-600 text-white rounded-lg shadow-lg hover:bg-rose-700 transition-colors"><Trash2 size={12} /></button>
                                             </div>
                                         ))}
 
                                         {/* Upload Button */}
-                                        <label className="w-20 h-20 flex flex-col items-center justify-center border-2 border-dashed border-rose-300 rounded-xl bg-rose-50 text-rose-500 hover:bg-rose-100 cursor-pointer transition-all">
-                                            <Camera size={20} />
-                                            <span className="text-[10px] font-bold mt-1">Thêm ảnh</span>
+                                        <label className="w-24 h-24 flex flex-col items-center justify-center border-2 border-dashed border-emerald-200 rounded-2xl bg-emerald-50/50 text-emerald-500 hover:bg-emerald-100/50 hover:border-emerald-400 cursor-pointer transition-all">
+                                            <Camera size={24} />
+                                            <span className="text-[11px] font-black mt-2 uppercase">Thêm ảnh</span>
                                             <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => {
                                                 if (e.target.files) setNewDetailFiles(prev => [...prev, ...Array.from(e.target.files)]);
                                             }} />
@@ -529,86 +540,80 @@ export default function RepairTicketForm({ ticket, onClose, onSuccess }) {
                             </div>
                         </div>
 
-                        {/* Khu vực Xử lý Kỹ thuật */}
-                        <div className="rounded-3xl border border-blue-100 bg-white p-5 sm:p-6 space-y-5 shadow-sm [&_label]:text-blue-700 [&_label_svg]:text-blue-600">
-                            <div className="flex items-center gap-2.5 pb-3 border-b border-blue-100">
-                                <Wrench className="w-4 h-4 text-blue-600" />
-                                <h4 className="text-[18px] !font-extrabold !text-blue-700">Phản hồi & Xử lý (Kỹ thuật)</h4>
-                            </div>
+                        {/* Section 3: Xử lý Kỹ thuật */}
+                        <div id="section-technical" className="scroll-mt-6 rounded-3xl border border-emerald-100 bg-white p-5 sm:p-6 space-y-5 shadow-sm hover:shadow-md transition-shadow [&_label]:text-emerald-700 [&_label_svg]:text-emerald-600">
+                            <h4 className="flex items-center gap-2.5 text-[18px] !font-extrabold !text-emerald-700 pb-3 border-b border-emerald-100">
+                                <Wrench className="w-5 h-5 text-emerald-600" /> 3. Phản hồi & Kỹ thuật
+                            </h4>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div className="space-y-1.5">
-                                    <label className="text-[14px] font-semibold text-slate-800">Nhân viên kinh doanh</label>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                <div className="space-y-2">
+                                    <label className="text-[14px] font-bold text-emerald-700 flex items-center gap-1.5"><User className="w-4 h-4 text-emerald-600" />Nhân viên kinh doanh</label>
                                     <div className="relative">
-                                        <select name="salesId" value={formData.salesId} onChange={handleChange} className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[14px] font-semibold text-slate-800 appearance-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100 outline-none">
+                                        <select name="salesId" value={formData.salesId} onChange={handleChange} className="w-full h-12 px-5 bg-slate-50 border border-slate-200 rounded-2xl text-[14px] font-semibold text-slate-800 appearance-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 outline-none hover:bg-white shadow-sm transition-all cursor-pointer">
                                             <option value="">-- Chọn nhân viên --</option>
                                             {salesUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                                         </select>
-                                        <ChevronDown className="w-4 h-4 text-blue-500 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                        <ChevronDown className="w-5 h-5 text-emerald-500 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
                                     </div>
                                 </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-[14px] font-semibold text-slate-800">Nhân viên kỹ thuật</label>
+                                <div className="space-y-2">
+                                    <label className="text-[14px] font-bold text-emerald-700 flex items-center gap-1.5"><Wrench className="w-4 h-4 text-emerald-600" />Nhân viên kỹ thuật</label>
                                     <div className="relative">
-                                        <select name="technicianId" value={formData.technicianId} onChange={handleChange} className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[14px] font-semibold text-slate-800 appearance-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100 outline-none">
+                                        <select name="technicianId" value={formData.technicianId} onChange={handleChange} className="w-full h-12 px-5 bg-slate-50 border border-slate-200 rounded-2xl text-[14px] font-semibold text-slate-800 appearance-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 outline-none hover:bg-white shadow-sm transition-all cursor-pointer">
                                             <option value="">-- Chọn kỹ thuật --</option>
                                             {techUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                                         </select>
-                                        <ChevronDown className="w-4 h-4 text-blue-500 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                        <ChevronDown className="w-5 h-5 text-emerald-500 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div className="space-y-1.5">
-                                    <label className="text-[14px] font-semibold text-slate-800">Trạng thái phiếu</label>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                <div className="space-y-2">
+                                    <label className="text-[14px] font-bold text-emerald-700 flex items-center gap-1.5"><Activity className="w-4 h-4 text-emerald-600" />Trạng thái phiếu</label>
                                     <div className="relative">
                                         <select
                                             name="status" value={formData.status} onChange={handleChange}
-                                            className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[14px] font-semibold text-slate-800 appearance-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100 outline-none"
+                                            className="w-full h-12 px-5 bg-slate-50 border border-slate-200 rounded-2xl text-[14px] font-semibold text-slate-800 appearance-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 outline-none hover:bg-white shadow-sm transition-all cursor-pointer"
                                         >
                                             {['Mới', 'Đang xử lý', 'Chờ linh kiện', 'Hoàn thành', 'Đã hủy'].map(s => (
                                                 <option key={s} value={s}>{s}</option>
                                             ))}
                                         </select>
-                                        <ChevronDown className="w-4 h-4 text-blue-500 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                        <ChevronDown className="w-5 h-5 text-emerald-500 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="space-y-1.5">
-                                <label className="text-[14px] font-semibold text-slate-800">Phản hồi từ kỹ thuật</label>
+                            <div className="space-y-2">
+                                <label className="text-[14px] font-bold text-emerald-700 flex items-center gap-1.5"><Edit3 className="w-4 h-4 text-emerald-600" />Phản hồi từ kỹ thuật</label>
                                 <textarea
-                                    name="technicalFeedback" value={formData.technicalFeedback} onChange={handleChange} rows={2}
-                                    placeholder="Ghi chú sau khi kiểm tra hoặc xử lý xong..."
-                                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-[14px] font-semibold text-slate-800 focus:outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
+                                    name="technicalFeedback" value={formData.technicalFeedback} onChange={handleChange} rows={3}
+                                    placeholder="Ghi chú nội dung đã kiểm tra, phương án xử lý, linh kiện thay thế..."
+                                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-3xl text-[14px] font-semibold text-slate-800 focus:outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 transition-all placeholder:text-slate-400"
                                 />
                             </div>
 
-                            {/* Tech Upload */}
-                            <div className="space-y-2">
-                                <label className="text-[14px] font-semibold text-slate-800 flex items-center gap-2"><ImageIcon className="w-4 h-4 text-blue-500" />Hình ảnh kỹ thuật</label>
-
-                                <div className="flex flex-wrap gap-3">
-                                    {/* Existing Images */}
+                            {/* Section: Ảnh kỹ thuật */}
+                            <div className="space-y-3">
+                                <label className="text-[14px] font-bold text-emerald-700 flex items-center gap-1.5"><ImageIcon className="w-4 h-4 text-emerald-600" />Hình ảnh xử lý kỹ thuật</label>
+                                <div className="flex flex-wrap gap-4">
                                     {formData.technicalImages.map((img, idx) => (
-                                        <div key={`ot-${idx}`} className="relative w-20 h-20 rounded-xl overflow-hidden border border-slate-200">
+                                        <div key={`ot-${idx}`} className="relative w-24 h-24 rounded-2xl overflow-hidden border border-slate-100 shadow-sm transition-transform hover:scale-105">
                                             <img src={img} alt="tech" className="w-full h-full object-cover" />
-                                            <button type="button" onClick={() => removeImage('tech', idx)} className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full bg-opacity-80 hover:bg-opacity-100"><Trash2 size={12} /></button>
+                                            <button type="button" onClick={() => removeImage('tech', idx)} className="absolute top-1.5 right-1.5 p-1.5 bg-rose-600 text-white rounded-lg shadow-lg hover:bg-rose-700 transition-colors"><Trash2 size={12} /></button>
                                         </div>
                                     ))}
-                                    {/* File Previews */}
                                     {newTechFiles.map((file, idx) => (
-                                        <div key={`nt-${idx}`} className="relative w-20 h-20 rounded-xl overflow-hidden border border-slate-200">
+                                        <div key={`nt-${idx}`} className="relative w-24 h-24 rounded-2xl overflow-hidden border-2 border-emerald-200 shadow-sm transition-transform hover:scale-105">
                                             <img src={URL.createObjectURL(file)} alt="preview" className="w-full h-full object-cover" />
-                                            <button type="button" onClick={() => setNewTechFiles(prev => prev.filter((_, i) => i !== idx))} className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full bg-opacity-80 hover:bg-opacity-100"><Trash2 size={12} /></button>
+                                            <button type="button" onClick={() => setNewTechFiles(prev => prev.filter((_, i) => i !== idx))} className="absolute top-1.5 right-1.5 p-1.5 bg-rose-600 text-white rounded-lg shadow-lg hover:bg-rose-700 transition-colors"><Trash2 size={12} /></button>
                                         </div>
                                     ))}
-
-                                    {/* Upload Button */}
-                                    <label className="w-20 h-20 flex flex-col items-center justify-center border-2 border-dashed border-blue-300 rounded-xl bg-blue-50 text-blue-500 hover:bg-blue-100 cursor-pointer transition-all">
-                                        <Camera size={20} />
-                                        <span className="text-[10px] font-bold mt-1">Thêm ảnh</span>
+                                    <label className="w-24 h-24 flex flex-col items-center justify-center border-2 border-dashed border-emerald-200 rounded-2xl bg-emerald-50/50 text-emerald-500 hover:bg-emerald-100/50 hover:border-emerald-400 cursor-pointer transition-all">
+                                        <Camera size={24} />
+                                        <span className="text-[11px] font-black mt-2 uppercase">Thêm ảnh</span>
                                         <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => {
                                             if (e.target.files) setNewTechFiles(prev => [...prev, ...Array.from(e.target.files)]);
                                         }} />
@@ -617,25 +622,42 @@ export default function RepairTicketForm({ ticket, onClose, onSuccess }) {
                             </div>
                         </div>
 
-                        </form>
-                    </div>
-
-                {/* Footer / Buttons */}
-                <div className="fixed bottom-0 left-0 right-0 sm:static bg-white border-t border-slate-200 p-4 shrink-0 z-30 flex items-center justify-end gap-3 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] sm:shadow-none">
-                    <button type="button" onClick={onClose} className="px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition-all text-sm">
-                        Hủy
-                    </button>
-                    <button
-                        type="submit" form="ticketForm" disabled={isLoading}
-                        className="px-6 py-2.5 rounded-xl bg-amber-600 text-white font-bold hover:bg-amber-700 transition-all shadow-lg shadow-amber-600/30 flex items-center gap-2 text-sm disabled:opacity-70 disabled:cursor-not-allowed"
-                    >
-                        {isLoading ? (
-                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        ) : null}
-                        {isEdit ? 'Lưu cập nhật' : 'Tạo phiếu sửa chữa'}
-                    </button>
+                    </form>
                 </div>
             </div>
+
+            {/* Footer / Buttons */}
+            <div className="px-4 py-3 bg-white border-t border-slate-200 shrink-0 flex items-center justify-end gap-3 sticky bottom-0 z-40">
+                <button
+                    type="button"
+                    onClick={onClose}
+                    className="px-5 py-2.5 rounded-xl border border-slate-300 bg-slate-100 text-slate-500 hover:text-slate-700 font-semibold text-[15px] transition-colors outline-none"
+                    disabled={isLoading}
+                >
+                    Hủy
+                </button>
+                <button
+                    type="submit"
+                    form="ticketForm"
+                    disabled={isLoading}
+                    className="px-8 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white text-[15px] font-bold rounded-2xl shadow-md shadow-emerald-200 transition-all flex items-center gap-2 border border-emerald-700/40 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    {isLoading ? (
+                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    ) : (
+                        <Save className="w-5 h-5" />
+                    )}
+                    {isEdit ? 'Lưu cập nhật' : 'Tạo phiếu sửa chữa'}
+                </button>
+            </div>
+            </div>
+        );
+
+    if (fullPage) return content;
+
+    return (
+        <div className="fixed inset-0 bg-slate-900/55 backdrop-blur-sm flex items-stretch sm:items-center justify-center z-[200000] p-0 sm:p-2 animate-in fade-in duration-200 [&_input]:!font-[600] [&_select]:!font-[600] [&_textarea]:!font-[600] [&_input]:!text-slate-800 [&_select]:!text-slate-800 [&_textarea]:!text-slate-800 [&_input::placeholder]:!text-slate-400 [&_textarea::placeholder]:!text-slate-400">
+            {content}
         </div>
     );
 }

@@ -297,6 +297,22 @@ export const actionModuleGroups = [
       },
     ],
   },
+  {
+    path: '/phieu-sua-chua/tao',
+    title: 'Thêm ticket sửa chữa',
+    description: 'Lập phiếu yêu cầu sửa chữa mới nhanh chóng cho máy móc.',
+    icon: Ticket,
+    colorScheme: 'orange',
+    items: [
+      {
+        icon: Ticket,
+        title: 'Thêm ticket sửa chữa',
+        description: 'Lập phiếu yêu cầu sửa chữa mới nhanh chóng cho máy móc.',
+        href: '/phieu-sua-chua?create=true',
+        colorScheme: 'orange',
+      },
+    ],
+  },
 ];
 
 export const actionModuleSectionsByPath = Object.fromEntries(

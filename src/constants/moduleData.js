@@ -305,6 +305,7 @@ export const moduleData = {
       section: 'Dịch vụ & Bảo trì',
       items: [
         { icon: Ticket, title: 'Ticket sửa chữa', description: 'Quản lý phiếu yêu cầu và tiến độ sửa chữa thiết bị.', colorScheme: 'amber', path: '/phieu-sua-chua' },
+        { icon: Ticket, title: 'Thêm ticket sửa chữa', description: 'Lập phiếu yêu cầu sửa chữa mới nhanh chóng cho máy móc.', colorScheme: 'orange', path: '/phieu-sua-chua/tao' },
       ]
     }
   ],

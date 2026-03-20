@@ -29,6 +29,7 @@ import {
     Users,
     Download,
     Upload,
+    Ticket,
     X
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -38,6 +39,7 @@ import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 import CustomerDetailsModal from '../components/Customers/CustomerDetailsModal';
 import CustomerFormModal from '../components/Customers/CustomerFormModal';
+import RepairTicketForm from '../components/Repairs/RepairTicketForm';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
@@ -65,6 +67,7 @@ const Customers = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+    const [isRepairModalOpen, setIsRepairModalOpen] = useState(false);
     const [selectedCustomer, setSelectedCustomer] = useState(null);
 
     const [selectedCategories, setSelectedCategories] = useState([]);
@@ -389,6 +392,12 @@ const Customers = () => {
     const handleFormSubmitSuccess = () => {
         fetchCustomers();
         setIsFormModalOpen(false);
+    };
+
+    const handleRepairSubmitSuccess = () => {
+        setIsRepairModalOpen(false);
+        // Maybe navigate to repair tickets or just show success
+        alert('✅ Đã tạo phiếu sửa chữa thành công!');
     };
 
     const downloadTemplate = () => {
@@ -761,6 +770,7 @@ const Customers = () => {
                                             <span>{c.managed_by || '—'}</span>
                                         </div>
                                         <div className="flex items-center gap-3">
+                                            <button onClick={() => { setSelectedCustomer(c); setIsRepairModalOpen(true); }} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg" title="Báo hỏng"><Ticket size={16} /></button>
                                             <button onClick={() => handleViewCustomer(c)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg"><Eye size={16} /></button>
                                             <button onClick={() => handleEditCustomer(c)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
                                             <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg"><Trash2 size={16} /></button>
@@ -999,6 +1009,9 @@ const Customers = () => {
                                         {isColumnVisible('care_by') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.care_by || '—'}</td>}
                                         <td className="px-4 py-4 text-center border-l border-r border-primary/20">
                                             <div className="flex items-center justify-center gap-3">
+                                                <button onClick={() => { setSelectedCustomer(c); setIsRepairModalOpen(true); }} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Báo hỏng">
+                                                    <Ticket className="w-4 h-4" />
+                                                </button>
                                                 <button onClick={() => handleViewCustomer(c)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="Xem chi tiết">
                                                     <Eye className="w-4 h-4" />
                                                 </button>
@@ -1392,6 +1405,14 @@ const Customers = () => {
                 <CustomerDetailsModal
                     customer={selectedCustomer}
                     onClose={() => setIsDetailsModalOpen(false)}
+                />
+            )}
+
+            {isRepairModalOpen && selectedCustomer && (
+                <RepairTicketForm
+                    initialCustomer={selectedCustomer}
+                    onClose={() => setIsRepairModalOpen(false)}
+                    onSuccess={handleRepairSubmitSuccess}
                 />
             )}
         </div>

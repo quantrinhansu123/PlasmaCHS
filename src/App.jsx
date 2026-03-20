@@ -38,6 +38,7 @@ import Suppliers from './pages/Suppliers';
 import Users from './pages/Users';
 import Warehouses from './pages/Warehouses';
 import RepairTickets from './pages/RepairTickets';
+import CreateRepairTicket from './pages/CreateRepairTicket';
 
 import StatisticsDashboard from './pages/StatisticsDashboard';
 import CustomerReport from './pages/CustomerReport';
@@ -144,6 +145,7 @@ function App() {
               <Route path="/khuyen-mai" element={<Promotions />} />
               <Route path="/khuyen-mai/tao" element={<CreatePromotion />} />
               <Route path="/phieu-sua-chua" element={<RepairTickets />} />
+          <Route path="/phieu-sua-chua/tao" element={<CreateRepairTicket />} />
               {legacyRedirects.map(([from, to]) => (
                 <Route key={from} path={from} element={<Navigate to={to} replace />} />
               ))}

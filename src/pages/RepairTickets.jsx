@@ -21,7 +21,7 @@ import {
     Image as ImageIcon
 } from 'lucide-react';
 import { useEffect, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import RepairTicketForm from '../components/Repairs/RepairTicketForm';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
@@ -50,6 +50,7 @@ const STATUSES = ['Mới', 'Đang xử lý', 'Chờ linh kiện', 'Hoàn thành'
 export default function RepairTickets() {
     const { role } = usePermissions();
     const navigate = useNavigate();
+    const location = useLocation();
     
     // Core states
     const [tickets, setTickets] = useState([]);
@@ -104,7 +105,6 @@ export default function RepairTickets() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [activeDropdown, showColumnPicker]);
 
-    // Data fetching
     useEffect(() => { fetchData(); }, []);
     
     const fetchData = async () => {
