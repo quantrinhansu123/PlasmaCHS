@@ -63,7 +63,10 @@ export default function OrderStatusUpdater({ order, userRole, onClose, onUpdateS
                     // Cập nhật trạng thái vỏ bình sang đang vận chuyển
                     const { data: updatedCylinders, error: cylError } = await supabase
                         .from('cylinders')
-                        .update({ status: 'đang vận chuyển', customer_name: order.customer_name })
+                        .update({ 
+                            status: 'đang vận chuyển', 
+                            customer_name: `${order.customer_name}${order.department ? ` / ${order.department}` : ''}` 
+                        })
                         .in('serial_number', serials)
                         .select('id, serial_number');
 
@@ -123,7 +126,10 @@ export default function OrderStatusUpdater({ order, userRole, onClose, onUpdateS
                 // Cập nhật trạng thái vỏ bình sang đang vận chuyển
                 const { data: updatedCylinders, error: cylError } = await supabase
                     .from('cylinders')
-                    .update({ status: 'đang vận chuyển', customer_name: order.customer_name })
+                    .update({ 
+                        status: 'đang vận chuyển', 
+                        customer_name: `${order.customer_name}${order.department ? ` / ${order.department}` : ''}` 
+                    })
                     .in('serial_number', serials)
                     .select('id, serial_number');
 

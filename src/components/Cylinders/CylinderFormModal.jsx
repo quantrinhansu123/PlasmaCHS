@@ -26,6 +26,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
         valve_type: 'Van Messer/Phi 6/ CB Trắng',
         handle_type: 'Có quai',
         customer_id: '',
+        department: '',
         warehouse_id: ''
     };
 
@@ -73,6 +74,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
 
     useEffect(() => {
         if (isEdit) {
+            const [, cDept] = cylinder.customer_name?.split(' / ') || ['', ''];
             setFormData({
                 serial_number: cylinder.serial_number || '',
                 status: cylinder.status || 'sẵn sàng',
@@ -83,6 +85,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                 valve_type: cylinder.valve_type || 'Van Messer/Phi 6/ CB Trắng',
                 handle_type: cylinder.handle_type || 'Có quai',
                 customer_id: cylinder.customer_id || '',
+                department: cDept || '',
                 warehouse_id: cylinder.warehouse_id || ''
             });
         }
@@ -134,9 +137,22 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
         setIsLoading(true);
 
         try {
-            const payload = { ...formData, updated_at: new Date().toISOString() };
+            // Get customer name from list
+            const customerObj = customersList.find(c => c.id === formData.customer_id);
+            const customerNameBase = customerObj ? customerObj.name : '';
+            const combinedCustomerName = customerNameBase 
+                ? `${customerNameBase}${formData.department ? ` / ${formData.department}` : ''}`
+                : '';
+
+            const payload = { 
+                ...formData, 
+                customer_name: combinedCustomerName,
+                updated_at: new Date().toISOString() 
+            };
             if (!payload.net_weight) delete payload.net_weight;
             payload.customer_id = payload.customer_id || null;
+            // Remove local only field
+            delete payload.department;
 
             if (isEdit) {
                 const { error } = await supabase
@@ -284,6 +300,21 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                                         <option value="">-- Trống (Thuộc kho) --</option>
                                         {customersList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                     </select>
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                        <Settings2 className="w-4 h-4 text-emerald-500" />
+                                        Vị trí (Bộ phận/Khoa)
+                                    </label>
+                                    <input
+                                        type="text"
+                                        name="department"
+                                        value={formData.department || ''}
+                                        onChange={handleChange}
+                                        placeholder="Ví dụ: Khoa Cấp cứu"
+                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-800 focus:outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 focus:bg-white transition-all"
+                                    />
                                 </div>
 
                                 <div className="space-y-1.5">

@@ -60,7 +60,8 @@ ChartJS.register(
 const TABLE_COLUMNS = [
     { key: 'serial_number', label: 'Mã RFID (Serial)' },
     { key: 'volume', label: 'Thể tích / Loại bình' },
-    { key: 'customer_name', label: 'Tên Khách Hàng / Vị trí' },
+    { key: 'customer_name', label: 'Khách hàng' },
+    { key: 'department', label: 'Vị trí' },
     { key: 'warehouse', label: 'Kho Quản Lý' },
     { key: 'status', label: 'Trạng Thái' },
 ];
@@ -143,7 +144,7 @@ const Cylinders = () => {
     }, []);
 
     useEffect(() => {
-        const customers = [...new Set(cylinders.map(c => c.customer_name).filter(Boolean))];
+        const customers = [...new Set(cylinders.map(c => c.customers?.name || c.customer_name?.split(' / ')[0]).filter(Boolean))];
         const volumes = [...new Set(cylinders.map(c => c.volume).filter(Boolean))];
         const warehouses = [...new Set(cylinders.map(c => c.warehouses?.name).filter(Boolean))];
         setUniqueCustomers(customers);
@@ -203,7 +204,7 @@ const Cylinders = () => {
         try {
             const { data, error } = await supabase
                 .from('cylinders')
-                .select('*, warehouses(name)')
+                .select('*, warehouses(name), customers(name)')
                 .order('created_at', { ascending: false });
 
             if (error && error.code !== '42P01') throw error;
@@ -702,8 +703,30 @@ const Cylinders = () => {
                                             </p>
                                         </div>
                                         <div className="col-span-2">
-                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Khách hàng / Vị trí</p>
-                                            <p className="text-[12px] text-foreground font-medium">{cylinder.customer_name || 'Vỏ bình tại kho'}</p>
+                                            <div className="space-y-3">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
+                                                        <User size={14} />
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Khách hàng</p>
+                                                        <p className="text-[12px] text-foreground font-bold truncate">
+                                                            {cylinder.customers?.name || cylinder.customer_name?.split(' / ')[0] || '—'}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
+                                                        <Warehouse size={14} />
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Vị trí</p>
+                                                        <p className="text-[12px] text-foreground font-bold truncate">
+                                                            {cylinder.customer_name?.split(' / ')[1] || '—'}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
 
@@ -1005,7 +1028,16 @@ const Cylinders = () => {
                                     <tr key={cylinder.id} className={getRowStyle(cylinder.status)}>
                                         {isColumnVisible('serial_number') && <td className={getSerialCellClass(cylinder.status)}>{cylinder.serial_number}</td>}
                                         {isColumnVisible('volume') && <td className="px-4 py-4 text-sm text-muted-foreground">{cylinder.volume || '—'}</td>}
-                                        {isColumnVisible('customer_name') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{cylinder.customer_name || 'Vỏ bình tại kho'}</td>}
+                                        {isColumnVisible('customer_name') && (
+                                            <td className="px-4 py-4 text-sm font-semibold text-foreground">
+                                                {cylinder.customers?.name || cylinder.customer_name?.split(' / ')[0] || '—'}
+                                            </td>
+                                        )}
+                                        {isColumnVisible('department') && (
+                                            <td className="px-4 py-4 text-sm font-medium text-muted-foreground">
+                                                {cylinder.customer_name?.split(' / ')[1] || '—'}
+                                            </td>
+                                        )}
                                         {isColumnVisible('warehouse') && <td className="px-4 py-4 text-sm text-muted-foreground">{cylinder.warehouses?.name || '—'}</td>}
                                         {isColumnVisible('status') && (
                                             <td className="px-4 py-4">

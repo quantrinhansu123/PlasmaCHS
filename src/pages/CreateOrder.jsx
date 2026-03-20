@@ -418,7 +418,10 @@ const CreateOrder = () => {
                 if (assignedSerials.length > 0) {
                     const { error: cylUpdErr } = await supabase
                         .from('cylinders')
-                        .update({ status: 'đang vận chuyển', customer_name: customerName })
+                        .update({ 
+                            status: 'đang vận chuyển', 
+                            customer_name: `${customerName}${formData.department ? ` / ${formData.department}` : ''}` 
+                        })
                         .in('serial_number', assignedSerials);
                     if (cylUpdErr) throw new Error('Lỗi cập nhật trạng thái bình: ' + cylUpdErr.message);
                 }
