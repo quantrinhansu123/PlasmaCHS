@@ -12,6 +12,7 @@ export default function OrderStatusUpdater({ order, userRole, onClose, onUpdateS
     const [scannedSerials, setScannedSerials] = useState('');
     const [activeTab, setActiveTab] = useState('actions');
     const [shippers, setShippers] = useState([]);
+    const [adjustedQuantity, setAdjustedQuantity] = useState(order?.quantity || 0);
 
     useEffect(() => {
         const fetchShippers = async () => {
@@ -43,8 +44,8 @@ export default function OrderStatusUpdater({ order, userRole, onClose, onUpdateS
 
             let imageUrl = order.delivery_image_url;
 
-            // Extra checks based on transitions
-            if (transition.nextStatus === 'DA_DUYET' && order.status === 'KHO_XU_LY') {
+                // Extra checks based on transitions
+            if ((transition.nextStatus === 'CHO_GIAO_HANG' || transition.nextStatus === 'DA_DUYET') && order.status === 'KHO_XU_LY') {
                 const productTypeId = order.product_type || '';
                 const isCylinder = productTypeId.startsWith('BINH');
                 
@@ -55,8 +56,8 @@ export default function OrderStatusUpdater({ order, userRole, onClose, onUpdateS
                 // For cylinders, we need scanned serials
                 if (isCylinder) {
                     const serials = scannedSerials.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
-                    if (serials.length !== order.quantity) {
-                        throw new Error(`Bạn cần quét đúng ${order.quantity} mã bình. Hiện tại đã quét: ${serials.length}`);
+                    if (serials.length !== adjustedQuantity) {
+                        throw new Error(`Kho xuất: Bạn cần quét đúng ${adjustedQuantity} mã bình. Hiện tại đã quét: ${serials.length}`);
                     }
 
                     // Cập nhật trạng thái vỏ bình sang đang vận chuyển
@@ -68,8 +69,8 @@ export default function OrderStatusUpdater({ order, userRole, onClose, onUpdateS
 
                     if (cylError) throw new Error('Cập nhật mã bình trên kho thất bại: ' + cylError.message);
 
-                    if (!updatedCylinders || updatedCylinders.length !== order.quantity) {
-                        throw new Error(`Phát hiện mã bình không tồn tại! Chỉ cập nhật được ${updatedCylinders?.length || 0}/${order.quantity} bình. Vui lòng kiểm tra lại.`);
+                    if (!updatedCylinders || updatedCylinders.length !== adjustedQuantity) {
+                        throw new Error(`Phát hiện mã bình không tồn tại! Chỉ cập nhật được ${updatedCylinders?.length || 0}/${adjustedQuantity} bình. Vui lòng kiểm tra lại.`);
                     }
                 }
 
@@ -86,13 +87,13 @@ export default function OrderStatusUpdater({ order, userRole, onClose, onUpdateS
                 if (invErr) throw new Error('Lỗi kiểm tra tồn kho: ' + invErr.message);
 
                 if (invData) {
-                    if (invData.quantity < order.quantity) {
+                    if (invData.quantity < adjustedQuantity) {
                          throw new Error(`Tồn kho không đủ! Hiện tại chỉ còn ${invData.quantity} ${productLabel}.`);
                     }
 
                     await supabase
                         .from('inventory')
-                        .update({ quantity: Math.max(0, invData.quantity - order.quantity) })
+                        .update({ quantity: Math.max(0, invData.quantity - adjustedQuantity) })
                         .eq('id', invData.id);
 
                     await supabase.from('inventory_transactions').insert([{
@@ -100,16 +101,46 @@ export default function OrderStatusUpdater({ order, userRole, onClose, onUpdateS
                         transaction_type: 'OUT',
                         reference_id: order.id,
                         reference_code: order.order_code,
-                        quantity_changed: order.quantity,
-                        note: `Xuất kho ${order.quantity} ${productLabel} - Đơn ${order.order_code}`
+                        quantity_changed: adjustedQuantity,
+                        note: `Xuất kho ${adjustedQuantity} ${productLabel} - Đơn ${order.order_code}`
                     }]);
                 } else {
                      throw new Error(`Hàng hoá "${productLabel}" không có trong kho báo cáo (chưa từng nhập hoặc dữ liệu không khớp).`);
                 }
             }
 
-            if (transition.nextStatus === 'CHO_GIAO_HANG' && !deliveryUnit) {
-                throw new Error('Vui lòng nhập tên Đơn vị vận chuyển.');
+            // Nếu Shipper gán mã lỗi do Kho quên
+            const needsCylinderAssignmentByShipper = (order.status === 'CHO_GIAO_HANG' || order.status === 'DANG_GIAO_HANG') && 
+                                                     order.product_type?.startsWith('BINH') && 
+                                                     (!order.assigned_cylinders || order.assigned_cylinders.length < order.quantity);
+
+            if (needsCylinderAssignmentByShipper && transition.nextStatus !== 'HUY_DON') {
+                const serials = scannedSerials.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+                if (serials.length !== order.quantity) {
+                    throw new Error(`Shipper: Bạn cần quét đúng ${order.quantity} mã bình trước khi giao. Hiện tại đã quét: ${serials.length}`);
+                }
+
+                // Cập nhật trạng thái vỏ bình sang đang vận chuyển
+                const { data: updatedCylinders, error: cylError } = await supabase
+                    .from('cylinders')
+                    .update({ status: 'đang vận chuyển', customer_name: order.customer_name })
+                    .in('serial_number', serials)
+                    .select('id, serial_number');
+
+                if (cylError) throw new Error('Cập nhật mã bình thất bại: ' + cylError.message);
+
+                if (!updatedCylinders || updatedCylinders.length !== order.quantity) {
+                    throw new Error(`Phát hiện mã bình không hợp lệ! Vui lòng quét lại.`);
+                }
+                
+                // Note: We don't deduct inventory here because it might have been deducted by the warehouse, 
+                // but the warehouse just didn't scan the RFIDs. If we need strict inventory deduction, 
+                // it should only happen if not done before. For now, assume warehouse deducted the raw inventory, 
+                // but didn't assign specific RFIDs.
+            }
+
+            if (transition.nextStatus === 'CHO_GIAO_HANG' && !deliveryUnit && order.status === 'KHO_XU_LY') {
+                throw new Error('Bạn phải bắt buộc chọn Đơn vị vận chuyển trước khi xuất kho giao hàng.');
             }
 
             if ((transition.nextStatus === 'CHO_DOI_SOAT' || transition.nextStatus === 'HOAN_THANH') && order.status === 'DANG_GIAO_HANG') {
@@ -151,8 +182,24 @@ export default function OrderStatusUpdater({ order, userRole, onClose, onUpdateS
                 updated_at: new Date().toISOString()
             };
 
-            // Nếu đây là lúc xuất kho (Gán mã bình)
-            if (transition.nextStatus === 'DA_DUYET' && order.status === 'KHO_XU_LY' && order.product_type?.startsWith('BINH')) {
+            // Calculate total amount if quantity changed
+            if (order.status === 'KHO_XU_LY' && adjustedQuantity !== order.quantity) {
+                let freeCylinders = 0;
+                if (order.promotion_code) {
+                    const { data: promoData } = await supabase
+                        .from('app_promotions')
+                        .select('free_cylinders')
+                        .eq('code', order.promotion_code)
+                        .maybeSingle();
+                    if (promoData) freeCylinders = promoData.free_cylinders || 0;
+                }
+                const billedQuantity = Math.max(0, adjustedQuantity - freeCylinders);
+                updatePayload.quantity = adjustedQuantity;
+                updatePayload.total_amount = billedQuantity * (order.unit_price || 0);
+            }
+
+            // Nếu đây là lúc xuất kho (Gán mã bình) hoặc Shipper gán mã bổ sung
+            if (((transition.nextStatus === 'CHO_GIAO_HANG' || transition.nextStatus === 'DA_DUYET') && order.status === 'KHO_XU_LY' && order.product_type?.startsWith('BINH')) || needsCylinderAssignmentByShipper) {
                 updatePayload.assigned_cylinders = scannedSerials.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
             }
 
@@ -237,27 +284,64 @@ export default function OrderStatusUpdater({ order, userRole, onClose, onUpdateS
                     )}
 
                     {activeTab === 'actions' && (<>
-                        {/* RFID Scanner for Warehouse */}
-                        {(order.status === 'KHO_XU_LY') && order.product_type?.startsWith('BINH') && (
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">
-                                    Quét mã vỏ bình RFID (Phải đúng <span className="text-blue-600">{order.quantity}</span> vỏ bình)
-                                </label>
-                                <textarea
-                                    placeholder="Nhập mã hoặc dùng máy quét RFID, mỗi mã một dòng hoặc cách nhau dấu phẩy..."
-                                    className="w-full px-4 py-3 border border-gray-200 rounded-lg font-medium outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50 min-h-[100px] shadow-sm transition-all"
-                                    value={scannedSerials}
-                                    onChange={e => setScannedSerials(e.target.value)}
-                                />
-                                <p className="text-xs text-gray-500 mt-1 font-medium italic">* Serials hợp lệ sẽ đổi ngay trạng thái sang <span className="font-bold">Đang vận chuyển</span></p>
+                        {/* Quantity Adjustment + RFID Scanner for Warehouse */}
+                        {(order.status === 'KHO_XU_LY') && (
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">
+                                        Số lượng duyệt xuất kho
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        className="w-full px-4 py-2 border border-gray-200 rounded-lg font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50 transition-all"
+                                        value={adjustedQuantity}
+                                        onChange={e => setAdjustedQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                                    />
+                                    {adjustedQuantity !== order.quantity && (
+                                        <p className="text-xs text-orange-600 mt-1 font-semibold">* Số lượng đã điều chỉnh. Tổng tiền của đơn sẽ được tính toán lại sau khi lưu.</p>
+                                    )}
+                                </div>
+                                
+                                {order.product_type?.startsWith('BINH') && (
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-1">
+                                            Quét mã vỏ bình RFID (Yêu cầu đúng <span className="text-blue-600">{adjustedQuantity}</span> vỏ bình)
+                                        </label>
+                                        <textarea
+                                            placeholder="Nhập mã hoặc dùng máy quét RFID, mỗi mã một dòng..."
+                                            className="w-full px-4 py-3 border border-gray-200 rounded-lg font-medium outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50 min-h-[100px] shadow-sm transition-all"
+                                            value={scannedSerials}
+                                            onChange={e => setScannedSerials(e.target.value)}
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1 font-medium italic">* Có thể bỏ trống nếu để cho Đơn vị vận chuyển tự quét (Không khuyến khích).</p>
+                                    </div>
+                                )}
                             </div>
                         )}
 
-                        {/* Only show Shipper field if moving to Delivery or already in it and lacking one */}
-                        {(order.status === 'DA_DUYET' || order.status === 'CHO_GIAO_HANG' || order.status === 'DANG_GIAO_HANG') && (
+                        {/* RFID Scanner for Shipper (Nếu Kho chưa gán) */}
+                        {((order.status === 'CHO_GIAO_HANG' || order.status === 'DANG_GIAO_HANG') && 
+                            order.product_type?.startsWith('BINH') && 
+                            (!order.assigned_cylinders || order.assigned_cylinders.length < order.quantity)) && (
+                            <div>
+                                <label className="block text-sm font-bold text-orange-600 mb-1">
+                                    <AlertTriangle className="w-4 h-4 inline-block mr-1 -mt-0.5" /> Kho chưa gán mã. Shipper hãy quét đúng {order.quantity} mã bình trước khi giao:
+                                </label>
+                                <textarea
+                                    placeholder="Quét mã RFID vào đây..."
+                                    className="w-full px-4 py-3 border border-orange-200 rounded-lg font-medium outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-50 min-h-[100px] shadow-sm transition-all"
+                                    value={scannedSerials}
+                                    onChange={e => setScannedSerials(e.target.value)}
+                                />
+                            </div>
+                        )}
+
+                        {/* Only show Shipper field if moving to Delivery or already in it and lacking one. Or show for KHO_XU_LY so warehouse can select early */}
+                        {(order.status === 'KHO_XU_LY' || order.status === 'DA_DUYET' || order.status === 'CHO_GIAO_HANG' || order.status === 'DANG_GIAO_HANG') && (
                             <div>
                                 <label className="block text-sm font-bold text-gray-700 mb-1">
-                                    Đơn vị Vận Chuyển
+                                    Đơn vị Vận Chuyển {order.status === 'KHO_XU_LY' && <span className="text-red-500">*</span>}
                                 </label>
                                 <div className="relative">
                                     <Truck className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -265,7 +349,7 @@ export default function OrderStatusUpdater({ order, userRole, onClose, onUpdateS
                                         className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg font-medium outline-none focus:border-blue-500 appearance-none bg-white cursor-pointer"
                                         value={deliveryUnit}
                                         onChange={e => setDeliveryUnit(e.target.value)}
-                                        disabled={order.status !== 'DA_DUYET' && order.status !== 'CHO_GIAO_HANG'}
+                                        disabled={order.status !== 'KHO_XU_LY' && order.status !== 'DA_DUYET' && order.status !== 'CHO_GIAO_HANG'}
                                     >
                                         <option value="">-- Chọn đơn vị vận chuyển --</option>
                                         {shippers.map(s => (

@@ -45,10 +45,9 @@ ALTER TABLE orders ADD CONSTRAINT check_order_status CHECK (
     status IN (
         'TAT_CA',            -- Tất cả
         'CHO_DUYET',         -- Chờ duyệt
-        'CHO_CTY_DUYET',     -- Chờ Cty duyệt (Mới)
-        'KHO_XU_LY',         -- Kho đang xử lý (Mới)
+        'KHO_XU_LY',         -- Kho đang xử lý
         'DIEU_CHINH',        -- Điều chỉnh
-        'DA_DUYET',          -- Đã duyệt / Xuất kho
+        'DA_DUYET',          -- Đã duyệt / Xuất kho (Retained for legacy, but we use CHO_GIAO_HANG instead)
         'CHO_GIAO_HANG',     -- Chờ giao hàng
         'DANG_GIAO_HANG',    -- Đang giao hàng
         'CHO_DOI_SOAT',      -- Chờ đối soát

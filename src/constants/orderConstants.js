@@ -33,10 +33,9 @@ export const PRODUCT_TYPES = [
 export const ORDER_STATUSES = [
     { id: 'ALL', label: 'Tất cả', color: 'gray' },
     { id: 'CHO_DUYET', label: 'Chờ KD duyệt', color: 'yellow' },
-    { id: 'CHO_CTY_DUYET', label: 'Chờ Cty duyệt', color: 'orange' },
     { id: 'KHO_XU_LY', label: 'Kho đang xử lý', color: 'blue' },
     { id: 'DIEU_CHINH', label: 'Điều chỉnh', color: 'orange' },
-    { id: 'DA_DUYET', label: 'Đã xuất kho', color: 'indigo' },
+    { id: 'DA_DUYET', label: 'Đã báo xuất (Chờ giao)', color: 'indigo' },
     { id: 'CHO_GIAO_HANG', label: 'Chờ giao hàng', color: 'indigo' },
     { id: 'DANG_GIAO_HANG', label: 'Đang giao hàng', color: 'purple' },
     { id: 'CHO_DOI_SOAT', label: 'Chờ đối soát', color: 'cyan' },
@@ -71,16 +70,11 @@ export const ORDER_ROLES = {
 export const ORDER_STATE_TRANSITIONS = {
     'CHO_DUYET': [
         { nextStatus: 'DIEU_CHINH', allowedRoles: [ORDER_ROLES.ADMIN, ORDER_ROLES.LEAD_SALE], label: 'Yêu cầu điều chỉnh' },
-        { nextStatus: 'CHO_CTY_DUYET', allowedRoles: [ORDER_ROLES.ADMIN, ORDER_ROLES.LEAD_SALE], label: 'Lead KD Duyệt' },
+        { nextStatus: 'KHO_XU_LY', allowedRoles: [ORDER_ROLES.ADMIN, ORDER_ROLES.LEAD_SALE], label: 'Lead KD Duyệt (Chuyển Kho)' },
         { nextStatus: 'HUY_DON', allowedRoles: [ORDER_ROLES.ADMIN, ORDER_ROLES.LEAD_SALE, ORDER_ROLES.SALE], label: 'Hủy đơn' }
     ],
-    'CHO_CTY_DUYET': [
-        { nextStatus: 'DIEU_CHINH', allowedRoles: [ORDER_ROLES.ADMIN], label: 'Yêu cầu KD điều chỉnh' },
-        { nextStatus: 'KHO_XU_LY', allowedRoles: [ORDER_ROLES.ADMIN], label: 'Cty Duyệt (Chuyển Kho)' },
-        { nextStatus: 'HUY_DON', allowedRoles: [ORDER_ROLES.ADMIN], label: 'Hủy đơn' }
-    ],
     'KHO_XU_LY': [
-        { nextStatus: 'DA_DUYET', allowedRoles: [ORDER_ROLES.ADMIN, ORDER_ROLES.THU_KHO], label: 'Kho xác nhận xuất' }
+        { nextStatus: 'CHO_GIAO_HANG', allowedRoles: [ORDER_ROLES.ADMIN, ORDER_ROLES.THU_KHO], label: 'Kho Báo Đã Xuất' }
     ],
     'DIEU_CHINH': [
         { nextStatus: 'CHO_DUYET', allowedRoles: [ORDER_ROLES.ADMIN, ORDER_ROLES.SALE], label: 'Gửi lại chờ duyệt' },
