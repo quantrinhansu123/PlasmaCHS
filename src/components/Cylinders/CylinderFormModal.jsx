@@ -1,4 +1,4 @@
-import { Activity, ActivitySquare, Camera, Gauge, Hash, Save, ScanLine, Scale, Settings2, Tag, User, Warehouse, Wind, Wrench, X } from 'lucide-react';
+import { Activity, ActivitySquare, Camera, Gauge, Hash, Save, Scale, ScanLine, Settings2, Tag, User, Warehouse, Wind, Wrench, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import {
     CYLINDER_STATUSES,
@@ -140,14 +140,14 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             // Get customer name from list
             const customerObj = customersList.find(c => c.id === formData.customer_id);
             const customerNameBase = customerObj ? customerObj.name : '';
-            const combinedCustomerName = customerNameBase 
+            const combinedCustomerName = customerNameBase
                 ? `${customerNameBase}${formData.department ? ` / ${formData.department}` : ''}`
                 : '';
 
-            const payload = { 
-                ...formData, 
+            const payload = {
+                ...formData,
                 customer_name: combinedCustomerName,
-                updated_at: new Date().toISOString() 
+                updated_at: new Date().toISOString()
             };
             if (!payload.net_weight) delete payload.net_weight;
             payload.customer_id = payload.customer_id || null;
@@ -305,14 +305,14 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                                 <div className="space-y-1.5">
                                     <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
                                         <Settings2 className="w-4 h-4 text-emerald-500" />
-                                        Vị trí (Bộ phận/Khoa)
+                                        Vị trí
                                     </label>
                                     <input
                                         type="text"
                                         name="department"
                                         value={formData.department || ''}
                                         onChange={handleChange}
-                                        placeholder="Ví dụ: Khoa Cấp cứu"
+                                        placeholder="Ví dụ: Khoa Cấp cứu, Tầng 3..."
                                         className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-800 focus:outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-400 focus:bg-white transition-all"
                                     />
                                 </div>

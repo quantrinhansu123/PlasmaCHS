@@ -10,12 +10,14 @@ import {
     PointElement,
     Title
 } from 'chart.js';
+import { clsx } from 'clsx';
 import {
     ActivitySquare,
     BarChart2,
     ChevronDown,
     ChevronLeft,
     ChevronRight,
+    Download,
     Edit,
     Eye,
     Filter,
@@ -24,17 +26,15 @@ import {
     Search,
     SlidersHorizontal,
     Trash2,
+    Upload,
     User,
     Warehouse,
-    X,
-    Download,
-    Upload
+    X
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import * as XLSX from 'xlsx';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { useNavigate } from 'react-router-dom';
-import { clsx } from 'clsx';
+import * as XLSX from 'xlsx';
 import CylinderDetailsModal from '../components/Cylinders/CylinderDetailsModal';
 import CylinderFormModal from '../components/Cylinders/CylinderFormModal';
 import CylinderQCDialog from '../components/Cylinders/CylinderQCDialog';
@@ -305,7 +305,7 @@ const Cylinders = () => {
                 }
 
                 setIsLoading(true);
-                
+
                 // Fetch all warehouses to map names to IDs
                 const { data: warehouses } = await supabase.from('warehouses').select('id, name');
                 const warehouseMap = (warehouses || []).reduce((acc, w) => {
