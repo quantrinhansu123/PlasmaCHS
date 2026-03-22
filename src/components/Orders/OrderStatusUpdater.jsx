@@ -1,8 +1,9 @@
-import { AlertCircle, AlertTriangle, CheckCircle, Clock, Plus, Truck, UploadCloud } from 'lucide-react';
+import { AlertCircle, AlertTriangle, CheckCircle, Clock, Plus, ScanBarcode, Truck, UploadCloud } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { ORDER_STATE_TRANSITIONS, PRODUCT_TYPES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
 import OrderHistoryTimeline from './OrderHistoryTimeline';
+import BarcodeScanner from '../Common/BarcodeScanner';
 
 export default function OrderStatusUpdater({ order, warehouseName, userRole, onClose, onUpdateSuccess }) {
     const [isLoading, setIsLoading] = useState(false);
@@ -13,6 +14,17 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     const [activeTab, setActiveTab] = useState('actions');
     const [shippers, setShippers] = useState([]);
     const [adjustedQuantity, setAdjustedQuantity] = useState(order?.quantity || 0);
+    const [isScannerOpen, setIsScannerOpen] = useState(false);
+
+    const handleScanSuccess = (decodedText) => {
+        setScannedSerials(prev => {
+            const currentList = prev.split(/[\n, ]+/).map(s => s.trim()).filter(Boolean);
+            if (!currentList.includes(decodedText)) {
+                return prev ? `${prev}\n${decodedText}` : decodedText;
+            }
+            return prev;
+        });
+    };
 
     useEffect(() => {
         const fetchShippers = async () => {
@@ -65,7 +77,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         const timer = setTimeout(() => {
             if (scannedSerials) validateSerials();
         }, 800);
-        
+
         return () => clearTimeout(timer);
     }, [scannedSerials]);
 
@@ -87,15 +99,15 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
 
             let imageUrl = order.delivery_image_url;
 
-                // Extra checks based on transitions
+            // Extra checks based on transitions
             if ((transition.nextStatus === 'CHO_GIAO_HANG' || transition.nextStatus === 'DA_DUYET') && order.status === 'KHO_XU_LY') {
                 const productTypeId = order.product_type || '';
                 const isCylinder = productTypeId.startsWith('BINH');
-                
+
                 // Get the human readable label from PRODUCT_TYPES since inventory table uses "item_name" like "Bình 4L", not "BINH_4L"
                 const productConfig = PRODUCT_TYPES.find(p => p.id === productTypeId);
                 const productLabel = productConfig ? productConfig.label : productTypeId;
-                
+
                 // For cylinders, we need scanned serials
                 if (isCylinder) {
                     const serials = scannedSerials.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
@@ -106,9 +118,9 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     // Cập nhật trạng thái vỏ bình sang đang vận chuyển
                     const { data: updatedCylinders, error: cylError } = await supabase
                         .from('cylinders')
-                        .update({ 
-                            status: 'đang vận chuyển', 
-                            customer_name: `${order.customer_name}${order.department ? ` / ${order.department}` : ''}` 
+                        .update({
+                            status: 'đang vận chuyển',
+                            customer_name: `${order.customer_name}${order.department ? ` / ${order.department}` : ''}`
                         })
                         .in('serial_number', serials)
                         .select('id, serial_number');
@@ -122,7 +134,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
 
                 // Trừ tồn kho khi xuất hàng (cho cả BINH và MAY)
                 const itemType = isCylinder ? 'BINH' : (productLabel.toLowerCase().includes('máy') || productLabel.toLowerCase().includes('may') ? 'MAY' : 'KHAC');
-                
+
                 const { data: invData, error: invErr } = await supabase
                     .from('inventory')
                     .select('id, quantity, item_name')
@@ -134,7 +146,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
 
                 if (invData) {
                     if (invData.quantity < adjustedQuantity) {
-                         throw new Error(`Tồn kho không đủ! Hiện tại chỉ còn ${invData.quantity} ${productLabel}.`);
+                        throw new Error(`Tồn kho không đủ! Hiện tại chỉ còn ${invData.quantity} ${productLabel}.`);
                     }
 
                     await supabase
@@ -151,14 +163,14 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                         note: `Xuất kho ${adjustedQuantity} ${productLabel} - Đơn ${order.order_code}`
                     }]);
                 } else {
-                     throw new Error(`Hàng hoá "${productLabel}" không có trong kho báo cáo (chưa từng nhập hoặc dữ liệu không khớp).`);
+                    throw new Error(`Hàng hoá "${productLabel}" không có trong kho báo cáo (chưa từng nhập hoặc dữ liệu không khớp).`);
                 }
             }
 
             // Nếu Shipper gán mã lỗi do Kho quên
-            const needsCylinderAssignmentByShipper = (order.status === 'CHO_GIAO_HANG' || order.status === 'DANG_GIAO_HANG') && 
-                                                     order.product_type?.startsWith('BINH') && 
-                                                     (!order.assigned_cylinders || order.assigned_cylinders.length < order.quantity);
+            const needsCylinderAssignmentByShipper = (order.status === 'CHO_GIAO_HANG' || order.status === 'DANG_GIAO_HANG') &&
+                order.product_type?.startsWith('BINH') &&
+                (!order.assigned_cylinders || order.assigned_cylinders.length < order.quantity);
 
             if (needsCylinderAssignmentByShipper && transition.nextStatus !== 'HUY_DON') {
                 const serials = scannedSerials.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
@@ -169,9 +181,9 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 // Cập nhật trạng thái vỏ bình sang đang vận chuyển
                 const { data: updatedCylinders, error: cylError } = await supabase
                     .from('cylinders')
-                    .update({ 
-                        status: 'đang vận chuyển', 
-                        customer_name: `${order.customer_name}${order.department ? ` / ${order.department}` : ''}` 
+                    .update({
+                        status: 'đang vận chuyển',
+                        customer_name: `${order.customer_name}${order.department ? ` / ${order.department}` : ''}`
                     })
                     .in('serial_number', serials)
                     .select('id, serial_number');
@@ -181,7 +193,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 if (!updatedCylinders || updatedCylinders.length !== order.quantity) {
                     throw new Error(`Phát hiện mã bình không hợp lệ! Vui lòng quét lại.`);
                 }
-                
+
                 // Note: We don't deduct inventory here because it might have been deducted by the warehouse, 
                 // but the warehouse just didn't scan the RFIDs. If we need strict inventory deduction, 
                 // it should only happen if not done before. For now, assume warehouse deducted the raw inventory, 
@@ -351,12 +363,22 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                         <p className="text-xs text-orange-600 mt-1 font-semibold">* Số lượng đã điều chỉnh. Tổng tiền của đơn sẽ được tính toán lại sau khi lưu.</p>
                                     )}
                                 </div>
-                                
+
                                 {order.product_type?.startsWith('BINH') && (
                                     <div>
-                                        <label className="block text-sm font-bold text-gray-700 mb-1">
-                                            Quét mã vỏ bình RFID (Yêu cầu đúng <span className="text-blue-600">{adjustedQuantity}</span> vỏ bình)
-                                        </label>
+                                        <div className="flex items-center justify-between mb-1">
+                                            <label className="flex items-center gap-1.5 text-sm font-bold text-gray-700">
+                                                <ScanBarcode className="w-5 h-5 text-blue-600 shrink-0" />
+                                                <span>Quét mã vỏ bình RFID (Đúng <span className="text-blue-600">{adjustedQuantity}</span> bình)</span>
+                                            </label>
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsScannerOpen(true)}
+                                                className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition-all flex items-center gap-1.5 shadow-sm ml-2 shrink-0"
+                                            >
+                                                <ScanBarcode className="w-4 h-4" /> Bật Camera quét
+                                            </button>
+                                        </div>
                                         <textarea
                                             placeholder="Nhập mã hoặc dùng máy quét RFID, mỗi mã một dòng..."
                                             className="w-full px-4 py-3 border border-gray-200 rounded-lg font-medium outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50 min-h-[100px] shadow-sm transition-all"
@@ -370,21 +392,31 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                         )}
 
                         {/* RFID Scanner for Shipper (Nếu Kho chưa gán) */}
-                        {((order.status === 'CHO_GIAO_HANG' || order.status === 'DANG_GIAO_HANG') && 
-                            order.product_type?.startsWith('BINH') && 
+                        {((order.status === 'CHO_GIAO_HANG' || order.status === 'DANG_GIAO_HANG') &&
+                            order.product_type?.startsWith('BINH') &&
                             (!order.assigned_cylinders || order.assigned_cylinders.length < order.quantity)) && (
-                            <div>
-                                <label className="block text-sm font-bold text-orange-600 mb-1">
-                                    <AlertTriangle className="w-4 h-4 inline-block mr-1 -mt-0.5" /> Kho chưa gán mã. Shipper hãy quét đúng {order.quantity} mã bình trước khi giao:
-                                </label>
-                                <textarea
-                                    placeholder="Quét mã RFID vào đây..."
-                                    className="w-full px-4 py-3 border border-orange-200 rounded-lg font-medium outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-50 min-h-[100px] shadow-sm transition-all"
-                                    value={scannedSerials}
-                                    onChange={e => setScannedSerials(e.target.value)}
-                                />
-                            </div>
-                        )}
+                                <div>
+                                    <div className="flex items-center justify-between mb-1">
+                                        <label className="flex items-center gap-1.5 text-sm font-bold text-orange-600">
+                                            <AlertTriangle className="w-4 h-4 shrink-0" /> 
+                                            <span>Kho chưa gán mã. Bạn cần quét đúng {order.quantity} vỏ bình:</span>
+                                        </label>
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsScannerOpen(true)}
+                                            className="px-3 py-1.5 bg-orange-600 text-white text-xs font-bold rounded-lg hover:bg-orange-700 transition-all flex items-center gap-1.5 shadow-sm ml-2 shrink-0"
+                                        >
+                                            <ScanBarcode className="w-4 h-4" /> Bật Camera quét
+                                        </button>
+                                    </div>
+                                    <textarea
+                                        placeholder="Quét mã RFID vào đây..."
+                                        className="w-full px-4 py-3 border border-orange-200 rounded-lg font-medium outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-50 min-h-[100px] shadow-sm transition-all"
+                                        value={scannedSerials}
+                                        onChange={e => setScannedSerials(e.target.value)}
+                                    />
+                                </div>
+                            )}
 
                         {/* Only show Shipper field if moving to Delivery or already in it and lacking one. Or show for KHO_XU_LY so warehouse can select early */}
                         {(order.status === 'KHO_XU_LY' || order.status === 'DA_DUYET' || order.status === 'CHO_GIAO_HANG' || order.status === 'DANG_GIAO_HANG') && (
@@ -499,6 +531,16 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     </button>
                 </div>
             </div>
+
+            <BarcodeScanner 
+                isOpen={isScannerOpen} 
+                onClose={() => setIsScannerOpen(false)} 
+                onScanSuccess={handleScanSuccess}
+                title={`Quét mã RFID (${order.status === 'KHO_XU_LY' ? 'Xuất kho' : 'Giao hàng'})`}
+                allowDuplicateScans={false}
+                currentCount={scannedSerials.split(/[\n, ]+/).map(s => s.trim()).filter(Boolean).length}
+                totalCount={order.status === 'KHO_XU_LY' ? adjustedQuantity : order.quantity}
+            />
         </div>
     );
 }
