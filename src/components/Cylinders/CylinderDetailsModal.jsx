@@ -50,7 +50,7 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
             // 3. Goods Issues (xuất trả về NCC)
             const { data: issueItems } = await supabase
                 .from('goods_issue_items')
-                .select('*, goods_issue_code, goods_issues!inner(issue_code, supplier_id, warehouse_id, issue_date, status)')
+                .select('*, goods_issues!inner(issue_code, supplier_id, warehouse_id, issue_date, status)')
                 .eq('item_code', cylinder.serial_number);
 
             // 4. QC Data
@@ -145,7 +145,7 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                     label: 'Trả về NCC',
                     location: `Kho ${gi.warehouse_id} → NCC`,
                     rawLocation: 'NCC',
-                    code: gi.issue_code || ii.goods_issue_code,
+                    code: gi.issue_code,
                     status: gi.status,
                     icon: 'supplier',
                     color: 'amber',

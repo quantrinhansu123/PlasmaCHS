@@ -10,6 +10,15 @@ import {
 import { supabase } from '../../supabase/config';
 import BarcodeScanner from '../Common/BarcodeScanner';
 
+const findMatchingId = (list, value, defaultValue) => {
+    if (!value) return defaultValue;
+    const match = list.find(item => 
+        item.id.toLowerCase() === value.toString().toLowerCase() || 
+        item.label.toLowerCase() === value.toString().toLowerCase()
+    );
+    return match ? match.id : defaultValue;
+};
+
 export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
     const isEdit = !!cylinder;
     const [isLoading, setIsLoading] = useState(false);
@@ -75,15 +84,16 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
     useEffect(() => {
         if (isEdit) {
             const [, cDept] = cylinder.customer_name?.split(' / ') || ['', ''];
+            
             setFormData({
                 serial_number: cylinder.serial_number || '',
-                status: cylinder.status || 'sẵn sàng',
+                status: findMatchingId(CYLINDER_STATUSES, cylinder.status, 'sẵn sàng'),
                 net_weight: cylinder.net_weight || '',
-                category: cylinder.category || 'BV',
-                volume: cylinder.volume || 'bình 4L/ CGA870',
-                gas_type: cylinder.gas_type || 'AirMAC',
-                valve_type: cylinder.valve_type || 'Van Messer/Phi 6/ CB Trắng',
-                handle_type: cylinder.handle_type || 'Có quai',
+                category: ['BV', 'TM'].includes(cylinder.category?.toUpperCase()) ? cylinder.category.toUpperCase() : 'BV',
+                volume: findMatchingId(CYLINDER_VOLUMES, cylinder.volume, 'bình 4L/ CGA870'),
+                gas_type: findMatchingId(GAS_TYPES, cylinder.gas_type, 'AirMAC'),
+                valve_type: findMatchingId(VALVE_TYPES, cylinder.valve_type, 'Van Messer/Phi 6/ CB Trắng'),
+                handle_type: findMatchingId(HANDLE_TYPES, cylinder.handle_type, 'Có quai'),
                 customer_id: cylinder.customer_id || '',
                 department: cDept || '',
                 warehouse_id: cylinder.warehouse_id || ''
@@ -134,6 +144,11 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             return;
         }
 
+        if (!formData.warehouse_id) {
+            setErrorMsg('Vui lòng chọn Kho quản lý.');
+            return;
+        }
+
         setIsLoading(true);
 
         try {
@@ -149,7 +164,11 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                 customer_name: combinedCustomerName,
                 updated_at: new Date().toISOString()
             };
-            if (!payload.net_weight) delete payload.net_weight;
+            if (!payload.net_weight) {
+                delete payload.net_weight;
+            } else {
+                payload.net_weight = parseFloat(payload.net_weight);
+            }
             payload.customer_id = payload.customer_id || null;
             // Remove local only field
             delete payload.department;
@@ -170,10 +189,10 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             onSuccess();
         } catch (error) {
             console.error('Error saving cylinder:', error);
-            if (error.code === '23505') {
+            if (error?.code === '23505') {
                 setErrorMsg(`Mã RFID Serial "${formData.serial_number}" đã tồn tại trên hệ thống.`);
             } else {
-                setErrorMsg(error.message || 'Có lỗi xảy ra khi lưu thông tin bình khí.');
+                setErrorMsg(`Lỗi hệ thống: ${error?.message || JSON.stringify(error)}`);
             }
         } finally {
             setIsLoading(false);
