@@ -6,8 +6,11 @@ import {
     Plus,
     Printer,
     Search,
-    Trash2
+    Trash2,
+    Download,
+    Upload
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
@@ -40,6 +43,7 @@ const GoodsReceipts = () => {
     const [warehousesList, setWarehousesList] = useState([]);
     const { visibleColumns, toggleColumn, isColumnVisible, resetColumns, visibleCount, totalCount } = useColumnVisibility('columns_goods_receipts', TABLE_COLUMNS);
     const visibleTableColumns = TABLE_COLUMNS.filter(col => isColumnVisible(col.key));
+    const [selectedIds, setSelectedIds] = useState([]);
 
     useEffect(() => {
         fetchReceipts();
@@ -55,6 +59,7 @@ const GoodsReceipts = () => {
 
             if (error) throw error;
             setReceipts(data || []);
+            setSelectedIds([]);
         } catch (error) {
             console.error('Error loading receipts:', error);
         } finally {
@@ -85,11 +90,245 @@ const GoodsReceipts = () => {
                 .eq('id', id);
 
             if (error) throw error;
+            setSelectedIds(prev => prev.filter(i => i !== id));
             fetchReceipts();
         } catch (error) {
             console.error('Error deleting receipt:', error);
             alert('❌ Lỗi khi xóa phiếu nhập: ' + error.message);
         }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+        if (!window.confirm(`Bạn có chắc muốn xóa ${selectedIds.length} phiếu nhập đã chọn không? Hành động này sẽ không thể hoàn tác.`)) {
+            return;
+        }
+
+        try {
+            const { error } = await supabase
+                .from('goods_receipts')
+                .delete()
+                .in('id', selectedIds);
+
+            if (error) throw error;
+            
+            setSelectedIds([]);
+            fetchReceipts();
+            alert(`✅ Đã xóa ${selectedIds.length} phiếu nhập thành công!`);
+        } catch (error) {
+            console.error('Error deleting receipts:', error);
+            alert('❌ Lỗi khi xóa: ' + error.message);
+        }
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedIds.length === filteredReceipts.length && filteredReceipts.length > 0) {
+            setSelectedIds([]);
+        } else {
+            setSelectedIds(filteredReceipts.map(r => r.id));
+        }
+    };
+
+    const toggleSelect = (id) => {
+        setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+    };
+
+    const handleDownloadTemplate = () => {
+        const headers = [
+            'Mã phiếu (Để trống sẽ tự tạo)',
+            'Nhà cung cấp',
+            'Kho nhận (HN/TP.HCM/TH/DN)',
+            'Ngày nhập (YYYY-MM-DD)',
+            'Ghi chú phiếu',
+            'Người nhận hàng',
+            'Loại hàng (MAY/BINH/VAT_TU)',
+            'Tên hàng hóa',
+            'Mã serial (nếu có)',
+            'Trạng thái hàng (Sẵn sàng/Lỗi...)',
+            'Số lượng',
+            'Đơn vị',
+            'Đơn giá nhập',
+        ];
+
+        const exampleData = [
+            {
+                'Mã phiếu (Để trống sẽ tự tạo)': 'PN00001',
+                'Nhà cung cấp': 'Công ty Oxy y tế A',
+                'Kho nhận (HN/TP.HCM/TH/DN)': 'HN',
+                'Ngày nhập (YYYY-MM-DD)': '2023-10-25',
+                'Ghi chú phiếu': 'Nhập hàng đợt 1',
+                'Người nhận hàng': 'Nguyễn Văn A',
+                'Loại hàng (MAY/BINH/VAT_TU)': 'BINH',
+                'Tên hàng hóa': 'Bình Oxy 40L',
+                'Mã serial (nếu có)': 'OXY40-001',
+                'Trạng thái hàng (Sẵn sàng/Lỗi...)': 'Sẵn sàng',
+                'Số lượng': 1,
+                'Đơn vị': 'bình',
+                'Đơn giá nhập': 1500000,
+            },
+            {
+                'Mã phiếu (Để trống sẽ tự tạo)': 'PN00001',
+                'Nhà cung cấp': 'Công ty Oxy y tế A',
+                'Kho nhận (HN/TP.HCM/TH/DN)': 'HN',
+                'Ngày nhập (YYYY-MM-DD)': '2023-10-25',
+                'Ghi chú phiếu': 'Nhập hàng đợt 1',
+                'Người nhận hàng': 'Nguyễn Văn A',
+                'Loại hàng (MAY/BINH/VAT_TU)': 'BINH',
+                'Tên hàng hóa': 'Bình Oxy 40L',
+                'Mã serial (nếu có)': 'OXY40-002',
+                'Trạng thái hàng (Sẵn sàng/Lỗi...)': 'Sẵn sàng',
+                'Số lượng': 1,
+                'Đơn vị': 'bình',
+                'Đơn giá nhập': 1500000,
+            }
+        ];
+
+        const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Template Nhap Kho');
+        XLSX.writeFile(wb, 'mau_import_phieu_nhap_kho.xlsx');
+    };
+
+    const handleImportExcel = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+            try {
+                const bstr = evt.target.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const data = XLSX.utils.sheet_to_json(ws);
+
+                if (data.length === 0) {
+                    alert('File Excel không có dữ liệu!');
+                    return;
+                }
+
+                setLoading(true);
+
+                // Group by Receipt Code
+                const mappedData = data.map((row, index) => {
+                    const rowCode = row['Mã phiếu (Để trống sẽ tự tạo)']?.toString().trim();
+                    return {
+                        groupId: rowCode || `AUTO_GROUP_${index}`,
+                        receipt_code: rowCode || '',
+                        supplier_name: row['Nhà cung cấp']?.toString() || 'Chưa xác định',
+                        warehouse_id: row['Kho nhận (HN/TP.HCM/TH/DN)']?.toString().toUpperCase() || 'HN',
+                        receipt_date: row['Ngày nhập (YYYY-MM-DD)']?.toString() || new Date().toISOString().split('T')[0],
+                        note: row['Ghi chú phiếu']?.toString() || '',
+                        received_by: row['Người nhận hàng']?.toString() || '',
+                        
+                        item_type: row['Loại hàng (MAY/BINH/VAT_TU)']?.toString().toUpperCase() || 'VAT_TU',
+                        item_name: row['Tên hàng hóa']?.toString() || '',
+                        serial_number: row['Mã serial (nếu có)']?.toString() || null,
+                        item_status: row['Trạng thái hàng (Sẵn sàng/Lỗi...)']?.toString() || 'Sẵn sàng',
+                        quantity: parseInt(row['Số lượng'], 10) || 1,
+                        unit: row['Đơn vị']?.toString() || 'cái',
+                        unit_price: parseFloat(row['Đơn giá nhập']) || 0,
+                    };
+                }).filter(i => i.item_name);
+
+                if (mappedData.length === 0) {
+                    alert('Không tìm thấy dữ liệu hợp lệ (thiếu Tên hàng hóa)!');
+                    setLoading(false);
+                    return;
+                }
+
+                const groups = {};
+                mappedData.forEach(item => {
+                    if (!groups[item.groupId]) {
+                        groups[item.groupId] = {
+                            receipt_code: item.receipt_code,
+                            supplier_name: item.supplier_name,
+                            warehouse_id: ["HN", "TP.HCM", "TH", "DN"].includes(item.warehouse_id) ? item.warehouse_id : "HN",
+                            receipt_date: item.receipt_date,
+                            status: 'CHO_DUYET',
+                            note: item.note,
+                            received_by: item.received_by,
+                            total_items: 0,
+                            total_amount: 0,
+                            items: []
+                        };
+                    }
+                    groups[item.groupId].items.push({
+                        item_type: ["MAY", "BINH", "VAT_TU", "BINH_4L", "BINH_8L", "MAY_ROSY", "MAY_MED"].includes(item.item_type) ? item.item_type : "VAT_TU",
+                        item_name: item.item_name,
+                        serial_number: item.serial_number,
+                        item_status: item.item_status,
+                        quantity: item.quantity,
+                        unit: item.unit,
+                        unit_price: item.unit_price,
+                        total_price: item.quantity * item.unit_price,
+                        note: '',
+                    });
+                    groups[item.groupId].total_items += item.quantity;
+                    groups[item.groupId].total_amount += (item.quantity * item.unit_price);
+                });
+
+                let nextCodeNum = Date.now() % 100000; 
+                let importedReceipts = 0;
+                let importedItems = 0;
+
+                for (const groupId in groups) {
+                    const group = groups[groupId];
+                    let code = group.receipt_code;
+                    if (!code) {
+                        code = `PN${String(nextCodeNum++).padStart(5, '0')}`;
+                    }
+
+                    const { data: insertedReceipt, error: receiptError } = await supabase
+                        .from('goods_receipts')
+                        .insert([{
+                            receipt_code: code,
+                            supplier_name: group.supplier_name,
+                            warehouse_id: group.warehouse_id,
+                            receipt_date: group.receipt_date,
+                            status: group.status,
+                            note: group.note,
+                            received_by: group.received_by,
+                            total_items: group.total_items,
+                            total_amount: group.total_amount
+                        }])
+                        .select('id')
+                        .single();
+
+                    if (receiptError) {
+                        console.error('Error inserting receipt:', receiptError);
+                        continue;
+                    }
+
+                    importedReceipts++;
+
+                    const itemsToInsert = group.items.map(item => ({
+                        ...item,
+                        receipt_id: insertedReceipt.id
+                    }));
+
+                    const { error: itemsError } = await supabase
+                        .from('goods_receipt_items')
+                        .insert(itemsToInsert);
+
+                    if (itemsError) {
+                        console.error('Error inserting items:', itemsError);
+                    } else {
+                        importedItems += itemsToInsert.length;
+                    }
+                }
+
+                alert(`🎉 Đã import thành công ${importedReceipts} phiếu nhập với tổng cộng ${importedItems} hàng hóa!`);
+                fetchReceipts();
+            } catch (err) {
+                console.error('Error importing excel:', err);
+                alert('Có lỗi xảy ra khi xử lý file: ' + err.message);
+            } finally {
+                setLoading(false);
+                if (e.target) e.target.value = null;
+            }
+        };
+        reader.readAsBinaryString(file);
     };
 
     const handlePrintReceipt = async (receipt) => {
@@ -286,12 +525,39 @@ const GoodsReceipts = () => {
                 </div>
 
                 <div className="flex items-center gap-3">
+                    {selectedIds.length > 0 && (
+                        <button
+                            onClick={handleBulkDelete}
+                            className="flex items-center gap-2 px-6 py-3.5 bg-rose-50 text-rose-600 rounded-2xl border border-rose-200 font-black text-sm hover:bg-rose-100 hover:scale-105 active:scale-95 transition-all shadow-lg animate-in slide-in-from-right-4"
+                        >
+                            <Trash2 className="w-5 h-5" />
+                            Xóa ({selectedIds.length})
+                        </button>
+                    )}
+                    <button
+                        onClick={handleDownloadTemplate}
+                        className="flex items-center gap-2 px-5 py-3.5 bg-indigo-50 text-indigo-700 rounded-2xl border border-indigo-200 font-bold text-sm hover:bg-indigo-100 hover:scale-105 active:scale-95 transition-all shadow-sm"
+                        title="Tải mẫu Excel"
+                    >
+                        <Download className="w-5 h-5" />
+                        <span className="hidden sm:inline">Tải mẫu</span>
+                    </button>
+                    <label className="flex items-center gap-2 px-5 py-3.5 bg-blue-50 text-blue-700 rounded-2xl border border-blue-200 font-bold text-sm hover:bg-blue-100 hover:scale-105 active:scale-95 transition-all shadow-sm cursor-pointer" title="Nhập Excel">
+                        <Upload className="w-5 h-5" />
+                        <span className="hidden sm:inline">Nhập file</span>
+                        <input
+                            type="file"
+                            accept=".xlsx, .xls"
+                            onChange={handleImportExcel}
+                            className="hidden"
+                        />
+                    </label>
                     <button
                         onClick={() => navigate('/tao-phieu-nhap')}
                         className="flex items-center gap-2 px-6 py-3.5 bg-emerald-600 text-white rounded-2xl font-black text-sm hover:bg-emerald-700 hover:scale-105 active:scale-95 transition-all shadow-lg shadow-emerald-200"
                     >
                         <Plus className="w-5 h-5" />
-                        Tạo phiếu nhập mới
+                        Tạo
                     </button>
                 </div>
             </div>
@@ -367,12 +633,30 @@ const GoodsReceipts = () => {
                     <>
                         {/* Mobile Card List */}
                         <div className="md:hidden divide-y divide-gray-100">
+                            {/* Mobile Select All */}
+                            <div className="p-4 flex items-center gap-3 bg-gray-50 border-b border-gray-100">
+                                <input
+                                    type="checkbox"
+                                    className="w-5 h-5 rounded-md border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                    checked={selectedIds.length === filteredReceipts.length && filteredReceipts.length > 0}
+                                    onChange={toggleSelectAll}
+                                />
+                                <span className="text-sm font-bold text-gray-600">Chọn tất cả</span>
+                            </div>
                             {filteredReceipts.map((receipt, idx) => (
-                                <div key={receipt.id} className="p-4 hover:bg-emerald-50/30 active:bg-emerald-50/50 transition-colors">
+                                <div key={receipt.id} className={`p-4 hover:bg-emerald-50/30 active:bg-emerald-50/50 transition-colors ${selectedIds.includes(receipt.id) ? 'bg-emerald-50/40' : ''}`}>
                                     <div className="flex justify-between items-start mb-3">
-                                        <div>
-                                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">#{idx + 1}</span>
-                                            <div className="text-sm font-black text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100 inline-block mt-1">{receipt.receipt_code}</div>
+                                        <div className="flex items-start gap-3">
+                                            <input
+                                                type="checkbox"
+                                                className="w-5 h-5 mt-1 rounded-md border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                                checked={selectedIds.includes(receipt.id)}
+                                                onChange={(e) => { e.stopPropagation(); toggleSelect(receipt.id); }}
+                                            />
+                                            <div>
+                                                <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">#{idx + 1}</span>
+                                                <div className="text-sm font-black text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100 mt-1 inline-block">{receipt.receipt_code}</div>
+                                            </div>
                                         </div>
                                         {getStatusBadge(receipt.status)}
                                     </div>
@@ -398,6 +682,14 @@ const GoodsReceipts = () => {
                             <table className="w-full">
                                 <thead>
                                     <tr className="bg-gradient-to-r from-gray-50 to-gray-100/50 border-b border-gray-100">
+                                        <th className="px-6 py-5 w-12 text-center border-r border-gray-100">
+                                            <input
+                                                type="checkbox"
+                                                className="w-4 h-4 rounded-md border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                                checked={selectedIds.length === filteredReceipts.length && filteredReceipts.length > 0}
+                                                onChange={toggleSelectAll}
+                                            />
+                                        </th>
                                         <th className="px-6 py-5 text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] text-center w-16">STT</th>
                                         {visibleTableColumns.map(col => (<th key={col.key} className={`px-6 py-5 text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] ${col.key === 'items' || col.key === 'status' ? 'text-center' : ''}`}>{col.label}</th>))}
                                         <th className="px-6 py-5 text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] text-center sticky right-0 bg-white/50 backdrop-blur-sm">Thao tác</th>
@@ -405,7 +697,15 @@ const GoodsReceipts = () => {
                                 </thead>
                                 <tbody className="divide-y divide-gray-50">
                                     {filteredReceipts.map((receipt, idx) => (
-                                        <tr key={receipt.id} className="hover:bg-emerald-50/30 transition-colors cursor-pointer">
+                                        <tr key={receipt.id} className={`hover:bg-emerald-50/30 transition-colors cursor-pointer ${selectedIds.includes(receipt.id) ? 'bg-emerald-50/20' : ''}`}>
+                                            <td className="px-6 py-5 text-center border-r border-gray-50">
+                                                <input
+                                                    type="checkbox"
+                                                    className="w-4 h-4 rounded-md border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                                    checked={selectedIds.includes(receipt.id)}
+                                                    onChange={(e) => { e.stopPropagation(); toggleSelect(receipt.id); }}
+                                                />
+                                            </td>
                                             <td className="px-6 py-5 text-center text-sm font-bold text-gray-400">{idx + 1}</td>
                                             {isColumnVisible('code') && <td className="px-6 py-5"><span className="text-sm font-black text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-100">{receipt.receipt_code}</span></td>}
                                             {isColumnVisible('supplier') && <td className="px-6 py-5 font-bold text-slate-900 text-sm">{receipt.supplier_name}</td>}

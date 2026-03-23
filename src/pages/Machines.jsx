@@ -70,6 +70,7 @@ const Machines = () => {
     const { role } = usePermissions();
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
+    const [selectedIds, setSelectedIds] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [machines, setMachines] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -202,8 +203,49 @@ const Machines = () => {
 
             if (error && error.code !== '42P01') throw error;
             setMachines(data || []);
+            setSelectedIds([]); // Clear selection on refresh
         } catch (error) {
             console.error('Error fetching machines:', error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedIds.length === filteredMachines.length && filteredMachines.length > 0) {
+            setSelectedIds([]);
+        } else {
+            setSelectedIds(filteredMachines.map(m => m.id));
+        }
+    };
+
+    const toggleSelectOne = (id) => {
+        setSelectedIds(prev =>
+            prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+        );
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+        if (!window.confirm(`Bạn có chắc chắn muốn xóa ${selectedIds.length} máy móc đã chọn không? Thao tác này không thể hoàn tác.`)) {
+            return;
+        }
+
+        try {
+            setIsLoading(true);
+            const { error } = await supabase
+                .from('machines')
+                .delete()
+                .in('id', selectedIds);
+
+            if (error) throw error;
+
+            alert(`🎉 Đã xóa thành công ${selectedIds.length} máy móc!`);
+            setSelectedIds([]);
+            fetchMachines();
+        } catch (error) {
+            console.error('Error deleting machines:', error);
+            alert('❌ Có lỗi xảy ra khi xóa: ' + error.message);
         } finally {
             setIsLoading(false);
         }
@@ -638,6 +680,14 @@ const Machines = () => {
             {activeView === 'list' && (
                 <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full">
                     <div className="md:hidden flex items-center gap-2 p-3 border-b border-border">
+                        <div className="flex items-center gap-2 shrink-0 pr-1">
+                            <input
+                                type="checkbox"
+                                checked={selectedIds.length === filteredMachines.length && filteredMachines.length > 0}
+                                onChange={toggleSelectAll}
+                                className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                            />
+                        </div>
                         <button
                             onClick={() => navigate(-1)}
                             className="p-2 rounded-xl border border-border bg-white text-muted-foreground shrink-0"
@@ -659,6 +709,14 @@ const Machines = () => {
                                 </button>
                             )}
                         </div>
+                        <div className="flex items-center gap-2 shrink-0 pr-1">
+                            <input
+                                type="checkbox"
+                                checked={selectedIds.length === filteredMachines.length && filteredMachines.length > 0}
+                                onChange={toggleSelectAll}
+                                className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                            />
+                        </div>
                         <button
                             onClick={openMobileFilter}
                             className={clsx(
@@ -673,6 +731,38 @@ const Machines = () => {
                                 </span>
                             )}
                         </button>
+                        <button
+                            onClick={downloadTemplate}
+                            className="p-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 shrink-0 shadow-sm transition-all"
+                            title="Tải mẫu Excel"
+                        >
+                            <Download size={18} />
+                        </button>
+                        <div className="relative">
+                            <input
+                                type="file"
+                                accept=".xlsx, .xls"
+                                onChange={handleImportExcel}
+                                className="hidden"
+                                id="machine-import-mobile"
+                            />
+                            <label
+                                htmlFor="machine-import-mobile"
+                                className="p-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 flex items-center justify-center cursor-pointer shadow-sm transition-all"
+                                title="Import Excel"
+                            >
+                                <Upload size={18} />
+                            </label>
+                        </div>
+                        {selectedIds.length > 0 && (
+                            <button
+                                onClick={handleBulkDelete}
+                                className="p-2 rounded-xl bg-rose-50 text-rose-600 border border-rose-200 shrink-0 shadow-sm animate-in zoom-in-95 duration-200"
+                                title="Xóa các mục đã chọn"
+                            >
+                                <Trash2 size={18} />
+                            </button>
+                        )}
                         <button
                             onClick={() => {
                                 setSelectedMachine(null);
@@ -691,11 +781,26 @@ const Machines = () => {
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy kết quả phù hợp</div>
                         ) : (
                             filteredMachines.map((machine) => (
-                                <div key={machine.id} className="rounded-2xl border border-primary/15 bg-white shadow-sm p-4">
+                                <div key={machine.id} className={clsx(
+                                    "rounded-2xl border shadow-sm p-4 transition-all duration-200",
+                                    selectedIds.includes(machine.id) 
+                                        ? "border-primary bg-primary/[0.05] ring-1 ring-primary/20" 
+                                        : "border-primary/15 bg-white"
+                                )}>
                                     <div className="flex items-start justify-between gap-2 mb-2">
-                                        <div>
-                                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Mã máy</p>
-                                            <h3 className="text-[14px] font-bold text-foreground leading-tight mt-0.5 font-mono">{machine.serial_number}</h3>
+                                        <div className="flex gap-3">
+                                            <div className="pt-1">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedIds.includes(machine.id)}
+                                                    onChange={() => toggleSelectOne(machine.id)}
+                                                    className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                                                />
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Mã máy</p>
+                                                <h3 className="text-[14px] font-bold text-foreground leading-tight mt-0.5 font-mono">{machine.serial_number}</h3>
+                                            </div>
                                         </div>
                                         <span className={clsx('inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border', getStatusBadgeClass(machine.status))}>
                                             {getStatusLabel(machine.status)}
@@ -799,6 +904,16 @@ const Machines = () => {
                                     <Plus size={18} />
                                     Thêm
                                 </button>
+
+                                {selectedIds.length > 0 && (
+                                    <button
+                                        onClick={handleBulkDelete}
+                                        className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-600 text-[13px] font-bold hover:bg-rose-100 shadow-sm transition-all animate-in slide-in-from-right-4"
+                                    >
+                                        <Trash2 size={16} />
+                                        Xóa ({selectedIds.length})
+                                    </button>
+                                )}
 
                                 <button
                                     onClick={downloadTemplate}
@@ -986,6 +1101,14 @@ const Machines = () => {
                         <table className="w-full border-collapse">
                             <thead className="bg-primary/5">
                                 <tr>
+                                    <th className="w-12 px-4 py-3.5 text-center border-r border-primary/30">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedIds.length === filteredMachines.length && filteredMachines.length > 0}
+                                            onChange={toggleSelectAll}
+                                            className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                                        />
+                                    </th>
                                     {visibleTableColumns.map(col => (
                                         <th
                                             key={col.key}
@@ -1014,7 +1137,18 @@ const Machines = () => {
                                         </td>
                                     </tr>
                                 ) : filteredMachines.map((machine) => (
-                                    <tr key={machine.id} className={getRowStyle(machine.status)}>
+                                    <tr key={machine.id} className={clsx(
+                                        getRowStyle(machine.status),
+                                        selectedIds.includes(machine.id) && "bg-primary/[0.04]"
+                                    )}>
+                                        <td className="w-12 px-4 py-4 text-center border-r border-primary/20">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedIds.includes(machine.id)}
+                                                onChange={() => toggleSelectOne(machine.id)}
+                                                className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                                            />
+                                        </td>
                                         {isColumnVisible('serial_number') && <td className={getSerialCellClass(machine.status)}>{machine.serial_number}</td>}
                                         {isColumnVisible('machine_type') && <td className="px-4 py-4 text-sm text-muted-foreground">{getLabel(MACHINE_TYPES, machine.machine_type)}</td>}
                                         {isColumnVisible('warehouse') && <td className="px-4 py-4 text-sm text-muted-foreground">{getWarehouseLabel(machine.warehouse)}</td>}

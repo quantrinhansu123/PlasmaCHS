@@ -2,8 +2,8 @@ import { AlertCircle, AlertTriangle, CheckCircle, Clock, Plus, ScanBarcode, Truc
 import { useEffect, useState } from 'react';
 import { ORDER_STATE_TRANSITIONS, PRODUCT_TYPES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
-import OrderHistoryTimeline from './OrderHistoryTimeline';
 import BarcodeScanner from '../Common/BarcodeScanner';
+import OrderHistoryTimeline from './OrderHistoryTimeline';
 
 export default function OrderStatusUpdater({ order, warehouseName, userRole, onClose, onUpdateSuccess }) {
     const [isLoading, setIsLoading] = useState(false);
@@ -398,7 +398,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                 <div>
                                     <div className="flex items-center justify-between mb-1">
                                         <label className="flex items-center gap-1.5 text-sm font-bold text-orange-600">
-                                            <AlertTriangle className="w-4 h-4 shrink-0" /> 
+                                            <AlertTriangle className="w-4 h-4 shrink-0" />
                                             <span>Kho chưa gán mã. Bạn cần quét đúng {order.quantity} vỏ bình:</span>
                                         </label>
                                         <button
@@ -532,9 +532,9 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 </div>
             </div>
 
-            <BarcodeScanner 
-                isOpen={isScannerOpen} 
-                onClose={() => setIsScannerOpen(false)} 
+            <BarcodeScanner
+                isOpen={isScannerOpen}
+                onClose={() => setIsScannerOpen(false)}
                 onScanSuccess={handleScanSuccess}
                 title={`Quét mã RFID (${order.status === 'KHO_XU_LY' ? 'Xuất kho' : 'Giao hàng'})`}
                 allowDuplicateScans={false}

@@ -76,6 +76,7 @@ const Customers = () => {
     const [uniqueManagedBy, setUniqueManagedBy] = useState([]);
     const [uniqueCareBy, setUniqueCareBy] = useState([]);
     const [warehousesList, setWarehousesList] = useState([]);
+    const [selectedIds, setSelectedIds] = useState([]);
 
     const [showMobileFilter, setShowMobileFilter] = useState(false);
     const [mobileFilterClosing, setMobileFilterClosing] = useState(false);
@@ -210,6 +211,7 @@ const Customers = () => {
 
             if (error) throw error;
             setCustomers(data || []);
+            setSelectedIds([]); // Clear selection on refresh
         } catch (error) {
             console.error('Error fetching customers:', error);
             alert('❌ Không thể tải danh sách khách hàng: ' + error.message);
@@ -398,6 +400,48 @@ const Customers = () => {
         setIsRepairModalOpen(false);
         // Maybe navigate to repair tickets or just show success
         alert('✅ Đã tạo phiếu sửa chữa thành công!');
+    };
+
+    const toggleSelectOne = (id) => {
+        setSelectedIds(prev =>
+            prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+        );
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedIds.length === filteredCustomers.length && filteredCustomers.length > 0) {
+            setSelectedIds([]);
+        } else {
+            setSelectedIds(filteredCustomers.map(c => c.id));
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        const count = selectedIds.length;
+        if (count === 0) return;
+
+        if (!window.confirm(`Bạn có chắc chắn muốn xóa ${count} khách hàng đã chọn? Hành động này không thể hoàn tác.`)) {
+            return;
+        }
+
+        try {
+            setIsLoading(true);
+            const { error } = await supabase
+                .from('customers')
+                .delete()
+                .in('id', selectedIds);
+
+            if (error) throw error;
+
+            alert(`✅ Đã xóa thành công ${count} khách hàng.`);
+            setSelectedIds([]);
+            fetchCustomers();
+        } catch (error) {
+            console.error('Error bulk deleting customers:', error);
+            alert('❌ Lỗi khi xóa hàng loạt: ' + error.message);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const downloadTemplate = () => {
@@ -655,6 +699,14 @@ const Customers = () => {
             {activeView === 'list' && (
                 <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full">
                     <div className="md:hidden flex items-center gap-2 p-3 border-b border-border">
+                        <div className="flex items-center gap-2 shrink-0 pr-1">
+                            <input
+                                type="checkbox"
+                                checked={selectedIds.length === filteredCustomers.length && filteredCustomers.length > 0}
+                                onChange={toggleSelectAll}
+                                className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                            />
+                        </div>
                         <button
                             onClick={() => navigate(-1)}
                             className="p-2 rounded-xl border border-border bg-white text-muted-foreground shrink-0"
@@ -709,6 +761,16 @@ const Customers = () => {
                             />
                         </label>
 
+                        {selectedIds.length > 0 && (
+                            <button
+                                onClick={handleBulkDelete}
+                                className="p-2 rounded-xl bg-rose-50 text-rose-600 border border-rose-200 shrink-0 shadow-sm animate-in zoom-in-95 duration-200"
+                                title="Xóa các mục đã chọn"
+                            >
+                                <Trash2 size={18} />
+                            </button>
+                        )}
+
                         <button
                             onClick={() => {
                                 setSelectedCustomer(null);
@@ -727,11 +789,29 @@ const Customers = () => {
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy kết quả phù hợp</div>
                         ) : (
                             filteredCustomers.map((c) => (
-                                <div key={c.id} className="rounded-2xl border border-primary/15 bg-white shadow-sm p-4">
+                                <div key={c.id} className={clsx(
+                                    "rounded-2xl border shadow-sm p-4 transition-all duration-200",
+                                    selectedIds.includes(c.id) 
+                                        ? "border-primary bg-primary/[0.05] ring-1 ring-primary/20" 
+                                        : "border-primary/15 bg-white"
+                                )}>
                                     <div className="flex items-start justify-between gap-2 mb-2">
-                                        <div>
-                                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">{c.code}</p>
-                                            <h3 className="text-[15px] font-bold text-foreground leading-tight mt-0.5">{c.name}</h3>
+                                        <div className="flex gap-3">
+                                            <div className="pt-1">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedIds.includes(c.id)}
+                                                    onChange={(e) => {
+                                                        e.stopPropagation();
+                                                        toggleSelectOne(c.id);
+                                                    }}
+                                                    className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                                                />
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">{c.code}</p>
+                                                <h3 className="text-[15px] font-bold text-foreground leading-tight mt-0.5">{c.name}</h3>
+                                            </div>
                                         </div>
                                         <span className={getCategoryBadgeClass(c.category)}>
                                             {getLabel(CUSTOMER_CATEGORIES, c.category)}
@@ -862,6 +942,16 @@ const Customers = () => {
                                     <Plus size={18} />
                                     Thêm
                                 </button>
+
+                                {selectedIds.length > 0 && (
+                                    <button
+                                        onClick={handleBulkDelete}
+                                        className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-600 text-[13px] font-bold hover:bg-rose-100 shadow-sm transition-all animate-in slide-in-from-right-4"
+                                    >
+                                        <Trash2 size={16} />
+                                        Xóa ({selectedIds.length})
+                                    </button>
+                                )}
                             </div>
                         </div>
 
@@ -966,6 +1056,14 @@ const Customers = () => {
                         <table className="w-full border-collapse">
                             <thead className="bg-primary/5">
                                 <tr>
+                                    <th className="px-4 py-3.5 text-center border-r border-primary/30">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedIds.length === filteredCustomers.length && filteredCustomers.length > 0}
+                                            onChange={toggleSelectAll}
+                                            className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                                        />
+                                    </th>
                                     {visibleTableColumns.map(col => (
                                         <th
                                             key={col.key}
@@ -983,18 +1081,33 @@ const Customers = () => {
                             <tbody className="divide-y divide-primary/10">
                                 {isLoading ? (
                                     <tr>
-                                        <td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center text-muted-foreground">
+                                        <td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center text-muted-foreground italic">
                                             Đang tải dữ liệu...
                                         </td>
                                     </tr>
                                 ) : filteredCustomers.length === 0 ? (
                                     <tr>
-                                        <td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center text-muted-foreground">
-                                            Không tìm thấy khách hàng nào
+                                        <td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center text-muted-foreground italic">
+                                            Không tìm thấy kết quả phù hợp
                                         </td>
                                     </tr>
-                                ) : filteredCustomers.map((c) => (
-                                    <tr key={c.id} className={getRowStyle(c.category)}>
+                                ) : (
+                                    filteredCustomers.map((c) => (
+                                        <tr 
+                                            key={c.id} 
+                                        className={clsx(
+                                            getRowStyle(c.category),
+                                            selectedIds.includes(c.id) && "bg-primary/[0.04] !hover:bg-primary/[0.08]"
+                                        )}
+                                    >
+                                        <td className="px-4 py-4 text-center border-r border-primary/10">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedIds.includes(c.id)}
+                                                onChange={() => toggleSelectOne(c.id)}
+                                                className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                                            />
+                                        </td>
                                         {isColumnVisible('code') && <td className={getCodeCellClass(c.category)}>{c.code}</td>}
                                         {isColumnVisible('name') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{c.name}</td>}
                                         {isColumnVisible('phone') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.phone || '—'}</td>}
@@ -1010,7 +1123,7 @@ const Customers = () => {
                                         <td className="px-4 py-4 text-center border-l border-r border-primary/20">
                                             <div className="flex items-center justify-center gap-3">
                                                 <button onClick={() => { setSelectedCustomer(c); setIsRepairModalOpen(true); }} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Báo hỏng">
-                                                    <Ticket className="w-4 h-4" />
+                                                    <Ticket size={16} className="w-4 h-4" />
                                                 </button>
                                                 <button onClick={() => handleViewCustomer(c)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="Xem chi tiết">
                                                     <Eye className="w-4 h-4" />
@@ -1018,15 +1131,14 @@ const Customers = () => {
                                                 <button onClick={() => handleEditCustomer(c)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
                                                     <Edit className="w-4 h-4" />
                                                 </button>
-                                                {(role === 'admin' || role === 'manager') && (
-                                                    <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                )}
+                                                <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
                                             </div>
                                         </td>
                                     </tr>
-                                ))}
+                                ))
+                            )}
                             </tbody>
                         </table>
                     </div>

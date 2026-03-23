@@ -485,10 +485,35 @@ const Orders = () => {
                 .eq('id', id);
 
             if (error) throw error;
+            setSelectedIds(prev => prev.filter(i => i !== id));
             fetchOrders();
         } catch (error) {
             console.error('Error deleting order:', error);
             alert('❌ Có lỗi xảy ra khi xóa đơn hàng: ' + error.message);
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+        
+        if (!window.confirm(`Bạn có chắc chắn muốn xóa ${selectedIds.length} đơn hàng đã chọn không?`)) {
+            return;
+        }
+
+        try {
+            const { error } = await supabase
+                .from('orders')
+                .delete()
+                .in('id', selectedIds);
+
+            if (error) throw error;
+            
+            setSelectedIds([]);
+            fetchOrders();
+            alert('✅ Đã xóa các đơn hàng thành công!');
+        } catch (error) {
+            console.error('Error deleting orders:', error);
+            alert('❌ Có lỗi xảy ra khi xóa danh sách đơn hàng: ' + error.message);
         }
     };
 
@@ -652,11 +677,25 @@ const Orders = () => {
                             </span>
                         )}
                     </button>
+
+                    {selectedIds.length > 0 && (
                         <button
-                            onClick={() => {
-                                setOrderToEdit(null);
-                                setIsFormModalOpen(true);
-                            }}
+                            onClick={handleBulkDelete}
+                            className="relative p-2 rounded-xl border border-rose-200 bg-rose-50 text-rose-600 shrink-0 transition-all shadow-sm"
+                            title="Xóa các đơn hàng đã chọn"
+                        >
+                            <Trash2 size={18} />
+                            <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center">
+                                {selectedIds.length}
+                            </span>
+                        </button>
+                    )}
+
+                    <button
+                        onClick={() => {
+                            setOrderToEdit(null);
+                            setIsFormModalOpen(true);
+                        }}
                         className="p-2 rounded-xl bg-primary text-white shrink-0 shadow-md shadow-primary/20"
                     >
                         <Plus size={18} />
@@ -682,8 +721,14 @@ const Orders = () => {
                     ) : (
                         filteredOrders.map((order) => {
                             const status = getStatusConfig(order.status);
+                            const isSelected = selectedIds.includes(order.id);
                             return (
-                                <div key={order.id} className="bg-white border border-primary/15 rounded-2xl p-4 shadow-sm">
+                                <div key={order.id} className={clsx(
+                                    "border rounded-2xl p-4 shadow-sm transition-all duration-200",
+                                    isSelected 
+                                        ? "border-primary bg-primary/[0.05] ring-1 ring-primary/20" 
+                                        : "border-primary/15 bg-white"
+                                )}>
                                     <div className="flex justify-between items-start mb-3">
                                         <div className="flex items-center gap-2">
                                             <input
@@ -845,13 +890,22 @@ const Orders = () => {
                         </div>
                         <div className="flex items-center gap-2">
                             {selectedIds.length > 0 && (
-                                <button
-                                    onClick={handleBulkPrint}
-                                    className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-border bg-white text-muted-foreground text-[13px] font-bold hover:bg-muted/20 shadow-sm transition-all"
-                                >
-                                    <Printer size={16} />
-                                    In {selectedIds.length} phiếu
-                                </button>
+                                <div className="flex items-center gap-2 animate-in slide-in-from-right-4">
+                                    <button
+                                        onClick={handleBulkPrint}
+                                        className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-border bg-white text-muted-foreground text-[13px] font-bold hover:bg-muted/20 shadow-sm transition-all"
+                                    >
+                                        <Printer size={16} />
+                                        In {selectedIds.length} phiếu
+                                    </button>
+                                    <button
+                                        onClick={handleBulkDelete}
+                                        className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-600 text-[13px] font-bold hover:bg-rose-100 shadow-sm transition-all"
+                                    >
+                                        <Trash2 size={16} />
+                                        Xóa ({selectedIds.length})
+                                    </button>
+                                </div>
                             )}
                             <div className="relative" ref={columnPickerRef}>
                                 <button

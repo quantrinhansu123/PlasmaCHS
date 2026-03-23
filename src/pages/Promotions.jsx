@@ -72,6 +72,7 @@ const Promotions = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [selectedPromo, setSelectedPromo] = useState(null);
+    const [selectedIds, setSelectedIds] = useState([]);
 
     const [selectedStatuses, setSelectedStatuses] = useState([]);
     const [selectedCustomerTypes, setSelectedCustomerTypes] = useState([]);
@@ -159,6 +160,7 @@ const Promotions = () => {
             if (error) throw error;
             const list = data || [];
             setPromotions(list);
+            setSelectedIds([]);
 
             const uniqueTypes = [...new Set(list.map(p => p.customer_type).filter(Boolean))];
             setUniqueCustomerTypes(uniqueTypes);
@@ -239,11 +241,45 @@ const Promotions = () => {
         try {
             const { error } = await supabase.from('app_promotions').delete().eq('id', id);
             if (error) throw error;
+            setSelectedIds(prev => prev.filter(i => i !== id));
             fetchPromotions();
         } catch (error) {
             console.error('Error deleting promotion:', error);
             alert('❌ Có lỗi xảy ra: ' + error.message);
         }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+        if (!window.confirm(`Bạn có chắc chắn muốn xóa ${selectedIds.length} khuyến mãi đã chọn không? Hành động này không thể hoàn tác.`)) return;
+
+        try {
+            const { error } = await supabase
+                .from('app_promotions')
+                .delete()
+                .in('id', selectedIds);
+
+            if (error) throw error;
+            
+            setSelectedIds([]);
+            fetchPromotions();
+            alert(`✅ Đã xóa ${selectedIds.length} khuyến mãi thành công!`);
+        } catch (error) {
+            console.error('Error deleting promotions:', error);
+            alert('❌ Lỗi khi xóa: ' + error.message);
+        }
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedIds.length === filteredPromotions.length && filteredPromotions.length > 0) {
+            setSelectedIds([]);
+        } else {
+            setSelectedIds(filteredPromotions.map(p => p.id));
+        }
+    };
+
+    const toggleSelect = (id) => {
+        setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
     };
 
     const handleToggleActive = async (id, currentActive) => {
@@ -467,6 +503,17 @@ const Promotions = () => {
                             <Plus size={18} />
                         </button>
                     </div>
+                    {selectedIds.length > 0 && (
+                        <div className="md:hidden px-3 py-2 bg-rose-50 border-b border-rose-100 flex items-center justify-between">
+                            <span className="text-sm font-bold text-rose-700">Đã chọn {selectedIds.length} mục</span>
+                            <button
+                                onClick={handleBulkDelete}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-colors shadow-sm"
+                            >
+                                <Trash2 size={14} /> Xóa
+                            </button>
+                        </div>
+                    )}
 
                     <div className="md:hidden flex-1 overflow-y-auto p-3 flex flex-col gap-3">
                         {isLoading ? (
@@ -476,11 +523,19 @@ const Promotions = () => {
                         ) : filteredPromotions.map((promo) => {
                             const status = getPromoStatus(promo);
                             return (
-                                <div key={promo.id} className="rounded-2xl border border-primary/20 bg-gradient-to-br from-white to-primary/[0.03] shadow-sm p-4">
+                                <div key={promo.id} className={`rounded-2xl border ${selectedIds.includes(promo.id) ? 'border-primary/50 bg-primary/5' : 'border-primary/20 bg-gradient-to-br from-white to-primary/[0.03]'} shadow-sm p-4`}>
                                     <div className="flex items-start justify-between gap-2 mb-2">
-                                        <div>
-                                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Mã khuyến mãi</p>
-                                            <h3 className="text-[15px] font-bold text-foreground leading-tight mt-0.5">{promo.code}</h3>
+                                        <div className="flex flex-col gap-1 items-start">
+                                            <input
+                                                type="checkbox"
+                                                className="w-4 h-4 rounded text-primary border-primary/30 mt-0.5"
+                                                checked={selectedIds.includes(promo.id)}
+                                                onChange={(e) => { e.stopPropagation(); toggleSelect(promo.id); }}
+                                            />
+                                            <div>
+                                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Mã khuyến mãi</p>
+                                                <h3 className="text-[15px] font-bold text-foreground leading-tight mt-0.5">{promo.code}</h3>
+                                            </div>
                                         </div>
                                         <span className={clsx('inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border', status.style)}>
                                             {status.label}
@@ -575,7 +630,17 @@ const Promotions = () => {
                                     Thêm
                                 </button>
                             </div>
+                            {selectedIds.length > 0 && (
+                                <button
+                                    onClick={handleBulkDelete}
+                                    className="flex items-center gap-2 px-4 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 text-[13px] font-bold transition-colors ml-2"
+                                >
+                                    <Trash2 size={16} />
+                                    Xóa ({selectedIds.length})
+                                </button>
+                            )}
                         </div>
+
 
                         <div className="flex flex-wrap items-center gap-2" ref={dropdownRef}>
                             <div className="relative">
@@ -678,6 +743,14 @@ const Promotions = () => {
                         <table className="w-full border-collapse">
                             <thead className="bg-primary/5">
                                 <tr>
+                                    <th className="px-4 py-3.5 text-center w-12 border-l border-primary/30">
+                                        <input
+                                            type="checkbox"
+                                            className="w-4 h-4 rounded text-primary border-primary/30"
+                                            checked={selectedIds.length === filteredPromotions.length && filteredPromotions.length > 0}
+                                            onChange={toggleSelectAll}
+                                        />
+                                    </th>
                                     {visibleTableColumns.map(col => (
                                         <th key={col.key} className={clsx('px-4 py-3.5 text-[12px] font-bold text-muted-foreground uppercase tracking-wide', col.key === 'content' || col.key === 'status' || col.key === 'active' ? 'text-center' : 'text-left', col.key === 'code' && 'border-l border-r border-primary/30')}>
                                             {col.label}
@@ -702,7 +775,15 @@ const Promotions = () => {
                                 ) : filteredPromotions.map((promo) => {
                                     const status = getPromoStatus(promo);
                                     return (
-                                        <tr key={promo.id} className={getRowStyle(status.label)}>
+                                        <tr key={promo.id} className={clsx(getRowStyle(status.label), selectedIds.includes(promo.id) && 'bg-primary/5')}>
+                                            <td className="px-4 py-4 text-center border-r border-primary/20">
+                                                <input
+                                                    type="checkbox"
+                                                    className="w-4 h-4 rounded text-primary border-primary/30"
+                                                    checked={selectedIds.includes(promo.id)}
+                                                    onChange={(e) => { e.stopPropagation(); toggleSelect(promo.id); }}
+                                                />
+                                            </td>
                                             {isColumnVisible('code') && <td className={getCodeCellClass(status.label)}>{promo.code}</td>}
                                             {isColumnVisible('content') && <td className="px-4 py-4 text-sm font-semibold text-foreground text-center">+ {promo.free_cylinders || 0} bình khí</td>}
                                             {isColumnVisible('period') && <td className="px-4 py-4 text-sm text-muted-foreground">{formatDate(promo.start_date)} — {formatDate(promo.end_date)}</td>}

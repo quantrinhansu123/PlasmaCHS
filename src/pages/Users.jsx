@@ -32,6 +32,7 @@ const Users = () => {
     const [selectedUser, setSelectedUser] = useState(null);
     const { visibleColumns, toggleColumn, isColumnVisible, resetColumns, visibleCount, totalCount } = useColumnVisibility('columns_users', TABLE_COLUMNS);
     const visibleTableColumns = TABLE_COLUMNS.filter(col => isColumnVisible(col.key));
+    const [selectedIds, setSelectedIds] = useState([]);
 
     useEffect(() => {
         fetchUsers();
@@ -47,6 +48,7 @@ const Users = () => {
 
             if (error) throw error;
             setUsers(data || []);
+            setSelectedIds([]);
         } catch (error) {
             console.error('Error fetching users:', error);
             alert('Lỗi khi tải danh sách người dùng!');
@@ -67,11 +69,47 @@ const Users = () => {
                 .eq('id', id);
 
             if (error) throw error;
+            setSelectedIds(prev => prev.filter(i => i !== id));
             fetchUsers();
         } catch (error) {
             console.error('Error deleting user:', error);
             alert('❌ Có lỗi xảy ra khi xóa nhân sự: ' + error.message);
         }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+        if (!window.confirm(`Bạn có chắc chắn muốn xóa ${selectedIds.length} nhân sự đã chọn không? Hành động này không thể hoàn tác.`)) {
+            return;
+        }
+
+        try {
+            const { error } = await supabase
+                .from('app_users')
+                .delete()
+                .in('id', selectedIds);
+
+            if (error) throw error;
+            
+            setSelectedIds([]);
+            fetchUsers();
+            alert(`✅ Đã xóa ${selectedIds.length} nhân sự thành công!`);
+        } catch (error) {
+            console.error('Error deleting users:', error);
+            alert('❌ Lỗi khi xóa: ' + error.message);
+        }
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedIds.length === filteredUsers.length && filteredUsers.length > 0) {
+            setSelectedIds([]);
+        } else {
+            setSelectedIds(filteredUsers.map(u => u.id));
+        }
+    };
+
+    const toggleSelect = (id) => {
+        setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
     };
 
     const handleEditUser = (user) => {
@@ -142,6 +180,15 @@ const Users = () => {
                             className="w-full pl-14 pr-6 py-4 bg-slate-50/50 border border-transparent focus:bg-white focus:border-indigo-100 rounded-2xl focus:ring-4 focus:ring-indigo-50 outline-none transition-all text-sm font-bold text-slate-600 shadow-inner"
                         />
                     </div>
+                    {selectedIds.length > 0 && (
+                        <button
+                            onClick={handleBulkDelete}
+                            className="flex items-center gap-2 px-6 py-4 bg-rose-50 text-rose-600 rounded-2xl border border-rose-200 font-black text-sm hover:bg-rose-100 hover:scale-105 active:scale-95 transition-all shadow-sm"
+                        >
+                            <Trash2 className="w-5 h-5" />
+                            Xóa ({selectedIds.length})
+                        </button>
+                    )}
                     <ColumnToggle columns={TABLE_COLUMNS} visibleColumns={visibleColumns} onToggle={toggleColumn} onReset={resetColumns} visibleCount={visibleCount} totalCount={totalCount} />
                 </div>
             </div>
@@ -165,16 +212,34 @@ const Users = () => {
                     <>
                         {/* Mobile Card List */}
                         <div className="md:hidden divide-y divide-slate-50">
+                            {/* Mobile Select All */}
+                            <div className="p-4 flex items-center gap-3 bg-slate-50/50 border-b border-slate-100">
+                                <input
+                                    type="checkbox"
+                                    className="w-5 h-5 rounded-md border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                    checked={selectedIds.length === filteredUsers.length && filteredUsers.length > 0}
+                                    onChange={toggleSelectAll}
+                                />
+                                <span className="text-sm font-bold text-slate-600">Chọn tất cả</span>
+                            </div>
                             {filteredUsers.map((user, index) => {
                                 const statusConfig = getStatusConfig(user.status);
                                 return (
-                                    <div key={user.id} className="p-4 hover:bg-indigo-50/30 active:bg-indigo-50/50 transition-colors">
+                                    <div key={user.id} className={`p-4 hover:bg-indigo-50/30 active:bg-indigo-50/50 transition-colors ${selectedIds.includes(user.id) ? 'bg-indigo-50/40' : ''}`}>
                                         <div className="flex justify-between items-start mb-3">
-                                            <div className="flex items-center gap-3">
-                                                <div className="avatar-initials flex-shrink-0 w-10 h-10 text-xs">{getInitials(user.name)}</div>
-                                                <div>
-                                                    <div className="font-black text-black text-sm uppercase tracking-tight">{user.name}</div>
-                                                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest opacity-60">@{user.username}</div>
+                                            <div className="flex items-start gap-3">
+                                                <input
+                                                    type="checkbox"
+                                                    className="w-5 h-5 mt-1 rounded-md border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                                    checked={selectedIds.includes(user.id)}
+                                                    onChange={(e) => { e.stopPropagation(); toggleSelect(user.id); }}
+                                                />
+                                                <div className="flex items-center gap-3">
+                                                    <div className="avatar-initials flex-shrink-0 w-10 h-10 text-xs">{getInitials(user.name)}</div>
+                                                    <div>
+                                                        <div className="font-black text-black text-sm uppercase tracking-tight">{user.name}</div>
+                                                        <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest opacity-60">@{user.username}</div>
+                                                    </div>
                                                 </div>
                                             </div>
                                             <span className={`px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border flex items-center gap-1.5 ${statusConfig.colorClass}`}>
@@ -211,6 +276,14 @@ const Users = () => {
                             <table className="w-full border-collapse text-left min-w-[1000px]">
                                 <thead className="glass-header">
                                     <tr>
+                                        <th className="px-8 py-6 w-16 text-center">
+                                            <input
+                                                type="checkbox"
+                                                className="w-4 h-4 rounded text-indigo-600 border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                                                checked={selectedIds.length === filteredUsers.length && filteredUsers.length > 0}
+                                                onChange={toggleSelectAll}
+                                            />
+                                        </th>
                                         <th className="px-8 py-6 text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] text-center w-24">STT</th>
                                         {visibleTableColumns.map(col => (<th key={col.key} className="px-8 py-6 text-[10px] font-black text-slate-600 uppercase tracking-[0.2em]">{col.label}</th>))}
                                         <th className="px-8 py-6 text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] text-center">Thao tác</th>
@@ -220,7 +293,15 @@ const Users = () => {
                                     {filteredUsers.map((user, index) => {
                                         const statusConfig = getStatusConfig(user.status);
                                         return (
-                                            <tr key={user.id} className="hover-lift transition-all duration-300 group border-l-4 border-l-transparent hover:border-l-indigo-500">
+                                            <tr key={user.id} className={`hover-lift transition-all duration-300 group border-l-4 ${selectedIds.includes(user.id) ? 'border-l-indigo-600 bg-indigo-50/20' : 'border-l-transparent hover:border-l-indigo-500'}`}>
+                                                <td className="px-8 py-7 text-center">
+                                                    <input
+                                                        type="checkbox"
+                                                        className="w-4 h-4 rounded text-indigo-600 border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                                                        checked={selectedIds.includes(user.id)}
+                                                        onChange={(e) => { e.stopPropagation(); toggleSelect(user.id); }}
+                                                    />
+                                                </td>
                                                 <td className="px-8 py-7 whitespace-nowrap text-center"><span className="font-black text-slate-300 group-hover:text-indigo-500 transition-colors text-lg">{index + 1}</span></td>
                                                 {isColumnVisible('info') && <td className="px-8 py-7"><div className="flex items-center gap-4"><div className="avatar-initials group-hover:scale-110 group-hover:rotate-6 transition-all duration-300">{getInitials(user.name)}</div><div><div className="font-black text-black text-base group-hover:text-indigo-600 transition-colors uppercase tracking-tight">{user.name}</div><div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1 opacity-60">@{user.username}</div></div></div></td>}
                                                 {isColumnVisible('contact') && <td className="px-8 py-7 whitespace-nowrap"><div className="flex items-center gap-2.5 font-bold text-slate-900 bg-slate-50 px-4 py-2 rounded-xl border border-slate-100 group-hover:bg-white group-hover:shadow-sm transition-all duration-300 w-max"><Phone className="w-4 h-4 text-indigo-400" />{user.phone}</div></td>}

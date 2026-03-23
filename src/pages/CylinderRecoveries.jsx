@@ -4,8 +4,11 @@ import {
     PackageCheck,
     Printer,
     Search,
-    Trash2
+    Trash2,
+    Download,
+    Upload
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
@@ -56,6 +59,7 @@ const CylinderRecoveries = () => {
             console.error('Error:', error);
         } finally {
             setLoading(false);
+            setSelectedIds([]); // Clear selection when fetching newly
         }
     };
 
@@ -74,9 +78,33 @@ const CylinderRecoveries = () => {
         if (!window.confirm(`Xóa phiếu "${code}"?`)) return;
         try {
             await supabase.from('cylinder_recoveries').delete().eq('id', id);
+            setSelectedIds(prev => prev.filter(x => x !== id));
             fetchRecoveries();
         } catch (e) {
             alert('❌ Lỗi: ' + e.message);
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+        if (!window.confirm(`Bạn có chắc chắn muốn xóa ${selectedIds.length} phiếu thu hồi đã chọn không? Hành động này không thể hoàn tác.`)) {
+            return;
+        }
+
+        try {
+            const { error } = await supabase
+                .from('cylinder_recoveries')
+                .delete()
+                .in('id', selectedIds);
+
+            if (error) throw error;
+            
+            setSelectedIds([]);
+            fetchRecoveries();
+            alert(`✅ Đã xóa ${selectedIds.length} phiếu thu hồi thành công!`);
+        } catch (error) {
+            console.error('Error deleting recoveries:', error);
+            alert('❌ Lỗi khi xóa: ' + error.message);
         }
     };
 
@@ -111,6 +139,184 @@ const CylinderRecoveries = () => {
         } else {
             setSelectedIds(filteredRecoveries.map(r => r.id));
         }
+    };
+
+    const handleDownloadTemplate = () => {
+        const headers = [
+            'Mã phiếu thu hồi (Để trống sẽ tự tạo)',
+            'Khách hàng thu hồi',
+            'Kho nhập về (HN/TP.HCM/TH/DN)',
+            'Người vận chuyển (Lái xe)',
+            'Ngày thu hồi (YYYY-MM-DD)',
+            'Ghi chú phiếu',
+            'Mã bình (Serial)',
+            'Tình trạng võ (tot/hong/meo/khac)',
+            'Ghi chú bình'
+        ];
+
+        const exampleData = [
+            {
+                'Mã phiếu thu hồi (Để trống sẽ tự tạo)': 'TH00001',
+                'Khách hàng thu hồi': 'Bệnh viện Chợ Rẫy',
+                'Kho nhập về (HN/TP.HCM/TH/DN)': 'HN',
+                'Người vận chuyển (Lái xe)': 'Nguyễn Văn Tài xế',
+                'Ngày thu hồi (YYYY-MM-DD)': '2023-11-20',
+                'Ghi chú phiếu': 'Thu hồi định kỳ',
+                'Mã bình (Serial)': 'OXY-40L-001',
+                'Tình trạng võ (tot/hong/meo/khac)': 'tot',
+                'Ghi chú bình': ''
+            },
+            {
+                'Mã phiếu thu hồi (Để trống sẽ tự tạo)': 'TH00001',
+                'Khách hàng thu hồi': 'Bệnh viện Chợ Rẫy',
+                'Kho nhập về (HN/TP.HCM/TH/DN)': 'HN',
+                'Người vận chuyển (Lái xe)': 'Nguyễn Văn Tài xế',
+                'Ngày thu hồi (YYYY-MM-DD)': '2023-11-20',
+                'Ghi chú phiếu': 'Thu hồi định kỳ',
+                'Mã bình (Serial)': 'OXY-40L-002',
+                'Tình trạng võ (tot/hong/meo/khac)': 'hong',
+                'Ghi chú bình': 'Bị móp nhẹ'
+            }
+        ];
+
+        const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Template Thu Hoi Vo');
+        XLSX.writeFile(wb, 'mau_import_thu_hoi_vo.xlsx');
+    };
+
+    const handleImportExcel = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+            try {
+                const bstr = evt.target.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const data = XLSX.utils.sheet_to_json(ws);
+
+                if (data.length === 0) {
+                    alert('File Excel không có dữ liệu!');
+                    return;
+                }
+
+                setLoading(true);
+
+                const customerMap = customers.reduce((acc, c) => {
+                    acc[c.name.toLowerCase().trim()] = c.id;
+                    return acc;
+                }, {});
+
+                const mappedData = data.map((row, index) => {
+                    const rowCode = row['Mã phiếu thu hồi (Để trống sẽ tự tạo)']?.toString().trim();
+                    const customerName = row['Khách hàng thu hồi']?.toString().toLowerCase().trim();
+                    return {
+                        groupId: rowCode || `AUTO_GROUP_${index}`,
+                        recovery_code: rowCode || '',
+                        customer_id: customerName ? customerMap[customerName] || null : null,
+                        warehouse_id: row['Kho nhập về (HN/TP.HCM/TH/DN)']?.toString().toUpperCase() || 'HN',
+                        driver_name: row['Người vận chuyển (Lái xe)']?.toString() || '',
+                        recovery_date: row['Ngày thu hồi (YYYY-MM-DD)']?.toString() || new Date().toISOString().split('T')[0],
+                        notes: row['Ghi chú phiếu']?.toString() || '',
+                        
+                        serial_number: row['Mã bình (Serial)']?.toString() || '',
+                        condition: row['Tình trạng võ (tot/hong/meo/khac)']?.toString().toLowerCase() || 'tot',
+                        note: row['Ghi chú bình']?.toString() || '',
+                    };
+                }).filter(i => i.serial_number);
+
+                if (mappedData.length === 0) {
+                    alert('Không tìm thấy dữ liệu hợp lệ (thiếu Mã bình)!');
+                    setLoading(false);
+                    return;
+                }
+
+                const groups = {};
+                mappedData.forEach(item => {
+                    if (!groups[item.groupId]) {
+                        groups[item.groupId] = {
+                            recovery_code: item.recovery_code,
+                            customer_id: item.customer_id,
+                            warehouse_id: ["HN", "TP.HCM", "TH", "DN"].includes(item.warehouse_id) ? item.warehouse_id : "HN",
+                            driver_name: item.driver_name,
+                            recovery_date: item.recovery_date,
+                            status: 'CHO_DUYET',
+                            notes: item.notes,
+                            total_items: 0,
+                            items: []
+                        };
+                    }
+                    groups[item.groupId].items.push({
+                        serial_number: item.serial_number,
+                        condition: ["tot", "hong", "meo", "khac"].includes(item.condition) ? item.condition : "tot",
+                        note: item.note,
+                    });
+                    groups[item.groupId].total_items += 1;
+                });
+
+                let nextCodeNum = Date.now() % 100000; 
+                let importedRecoveries = 0;
+                let importedItems = 0;
+
+                for (const groupId in groups) {
+                    const group = groups[groupId];
+                    let code = group.recovery_code;
+                    if (!code) {
+                        code = `TH${String(nextCodeNum++).padStart(5, '0')}`;
+                    }
+
+                    const { data: insertedRecovery, error: recoveryError } = await supabase
+                        .from('cylinder_recoveries')
+                        .insert([{
+                            recovery_code: code,
+                            customer_id: group.customer_id,
+                            warehouse_id: group.warehouse_id,
+                            driver_name: group.driver_name,
+                            recovery_date: group.recovery_date,
+                            status: group.status,
+                            notes: group.notes,
+                            total_items: group.total_items
+                        }])
+                        .select('id')
+                        .single();
+
+                    if (recoveryError) {
+                        console.error('Error inserting recovery:', recoveryError);
+                        continue;
+                    }
+
+                    importedRecoveries++;
+
+                    const itemsToInsert = group.items.map(item => ({
+                        ...item,
+                        recovery_id: insertedRecovery.id
+                    }));
+
+                    const { error: itemsError } = await supabase
+                        .from('cylinder_recovery_items')
+                        .insert(itemsToInsert);
+
+                    if (itemsError) {
+                        console.error('Error inserting items:', itemsError);
+                    } else {
+                        importedItems += itemsToInsert.length;
+                    }
+                }
+
+                alert(`🎉 Đã import thành công ${importedRecoveries} phiếu thu hồi với tổng cộng ${importedItems} vỏ bình!`);
+                fetchRecoveries();
+            } catch (err) {
+                console.error('Error importing excel:', err);
+                alert('Có lỗi xảy ra khi xử lý file: ' + err.message);
+            } finally {
+                setLoading(false);
+                if (e.target) e.target.value = null;
+            }
+        };
+        reader.readAsBinaryString(file);
     };
 
     const handlePrintSingle = (recovery) => {
@@ -154,13 +360,39 @@ const CylinderRecoveries = () => {
                 </div>
                 <div className="flex gap-3">
                     {selectedIds.length > 0 && (
-                        <button
-                            onClick={handleBatchPrint}
-                            className="flex items-center gap-2 px-5 py-3 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-2xl font-bold transition-all"
-                        >
-                            <Printer className="w-5 h-5" /> In {selectedIds.length} phiếu
-                        </button>
+                        <>
+                            <button
+                                onClick={handleBulkDelete}
+                                className="flex items-center gap-2 px-5 py-3 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-2xl font-bold transition-all shadow-sm"
+                            >
+                                <Trash2 className="w-5 h-5" /> Xóa ({selectedIds.length})
+                            </button>
+                            <button
+                                onClick={handleBatchPrint}
+                                className="flex items-center gap-2 px-5 py-3 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-2xl font-bold transition-all"
+                            >
+                                <Printer className="w-5 h-5" /> In ({selectedIds.length})
+                            </button>
+                        </>
                     )}
+                    <button
+                        onClick={handleDownloadTemplate}
+                        className="flex items-center gap-2 px-5 py-3.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-2xl font-bold text-sm transition-all shadow-xl shadow-indigo-200"
+                        title="Tải mẫu Excel"
+                    >
+                        <Download className="w-5 h-5" />
+                        <span className="hidden sm:inline">Tải mẫu</span>
+                    </button>
+                    <label className="flex items-center gap-2 px-5 py-3.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-2xl font-bold text-sm transition-all shadow-xl shadow-blue-200 cursor-pointer" title="Nhập Excel">
+                        <Upload className="w-5 h-5" />
+                        <span className="hidden sm:inline">Nhập file</span>
+                        <input
+                            type="file"
+                            accept=".xlsx, .xls"
+                            onChange={handleImportExcel}
+                            className="hidden"
+                        />
+                    </label>
                     <button
                         onClick={() => navigate('/tao-phieu-thu-hoi')}
                         className="flex items-center gap-2 px-6 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black transition-all shadow-xl shadow-blue-200"
@@ -205,6 +437,16 @@ const CylinderRecoveries = () => {
                     <>
                         {/* Mobile Card List */}
                         <div className="md:hidden divide-y divide-gray-100">
+                            {/* Mobile Select All */}
+                            <div className="p-4 flex items-center gap-3 bg-gray-50 border-b border-gray-100">
+                                <input
+                                    type="checkbox"
+                                    className="w-5 h-5 rounded-md border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                    checked={selectedIds.length === filteredRecoveries.length && filteredRecoveries.length > 0}
+                                    onChange={toggleSelectAll}
+                                />
+                                <span className="text-sm font-bold text-gray-600">Chọn tất cả</span>
+                            </div>
                             {filteredRecoveries.map(r => (
                                 <div key={r.id} className={`p-4 hover:bg-blue-50/30 active:bg-blue-50/50 transition-colors ${selectedIds.includes(r.id) ? 'bg-blue-50/40' : ''}`}>
                                     <div className="flex justify-between items-start mb-3">

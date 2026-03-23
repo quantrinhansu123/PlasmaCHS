@@ -18,8 +18,11 @@ import {
     AlertCircle,
     Package,
     Trash2,
-    Image as ImageIcon
+    Image as ImageIcon,
+    Download,
+    Upload
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import RepairTicketForm from '../components/Repairs/RepairTicketForm';
@@ -31,7 +34,8 @@ import { supabase } from '../supabase/config';
 
 const TICKET_COLUMNS = [
     { key: 'stt', label: 'STT' },
-    { key: 'created_at', label: 'Ngày' },
+    { key: 'created_at', label: 'Ngày báo' },
+    { key: 'created_by', label: 'Người báo lỗi' },
     { key: 'customer', label: 'Khách hàng' },
     { key: 'machine_serial', label: 'Mã thiết bị' },
     { key: 'machine_name', label: 'Tên thiết bị' },
@@ -69,6 +73,8 @@ export default function RepairTickets() {
     const [selectedCustomers, setSelectedCustomers] = useState([]);
     const [selectedErrorTypes, setSelectedErrorTypes] = useState([]);
     const [selectedTechnicians, setSelectedTechnicians] = useState([]);
+
+    const [selectedIds, setSelectedIds] = useState([]);
 
     // Dropdown / Modal targets
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
@@ -114,6 +120,7 @@ export default function RepairTickets() {
             const { data: ticketsData, error } = await supabase.from('repair_tickets').select('*').order('created_at', { ascending: false });
             if (error) throw error;
             setTickets(ticketsData || []);
+            setSelectedIds([]);
 
             const [custRes, errRes, userRes] = await Promise.all([
                 supabase.from('customers').select('id, name').order('name'),
@@ -185,11 +192,165 @@ export default function RepairTickets() {
             const { error } = await supabase.from('repair_tickets').delete().eq('id', id);
             if (error) throw error;
             toast.success('Xóa phiếu thành công');
+            setSelectedIds(prev => prev.filter(i => i !== id));
             fetchData();
         } catch (error) {
             console.error('Error deleting ticket:', error);
             alert('❌ Lỗi khi xóa: ' + error.message);
         }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+        if (!window.confirm(`Bạn có chắc chắn muốn xóa ${selectedIds.length} phiếu sửa chữa đã chọn không?`)) return;
+
+        try {
+            const { error } = await supabase.from('repair_tickets').delete().in('id', selectedIds);
+            if (error) throw error;
+            
+            toast.success(`Đã xóa ${selectedIds.length} phiếu thành công`);
+            setSelectedIds([]);
+            fetchData();
+        } catch (error) {
+            console.error('Error deleting tickets:', error);
+            alert('❌ Lỗi khi xóa: ' + error.message);
+        }
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedIds.length === filteredTickets.length && filteredTickets.length > 0) {
+            setSelectedIds([]);
+        } else {
+            setSelectedIds(filteredTickets.map(t => t.id));
+        }
+    };
+
+    const toggleSelect = (id) => {
+        setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+    };
+
+    const handleDownloadTemplate = () => {
+        const headers = [
+            'Ngày (YYYY-MM-DD)',
+            'Khách hàng',
+            'Mã thiết bị / Serial',
+            'Tên thiết bị',
+            'Tên lỗi (Máy/Bình/Tình trạng chung)',
+            'Loại lỗi chi tiết',
+            'Chi tiết thêm',
+            'Kinh doanh phụ trách',
+            'Kỹ thuật phụ trách',
+            'Trạng thái (Mới/Đang xử lý/Chờ linh kiện/Hoàn thành/Đã hủy)'
+        ];
+
+        const exampleData = [
+            {
+                'Ngày (YYYY-MM-DD)': '2023-11-20',
+                'Khách hàng': 'Bệnh viện Đa khoa Tâm Anh',
+                'Mã thiết bị / Serial': 'OXY-40L-001',
+                'Tên thiết bị': 'Bình Oxy 40L',
+                'Tên lỗi (Máy/Bình/Tình trạng chung)': 'Lỗi Bình',
+                'Loại lỗi chi tiết': 'Van hỏng',
+                'Chi tiết thêm': 'Xì khí',
+                'Kinh doanh phụ trách': 'Nguyễn Văn Kinh Doanh',
+                'Kỹ thuật phụ trách': 'Trần Văn Kỹ Thuật',
+                'Trạng thái (Mới/Đang xử lý/Chờ linh kiện/Hoàn thành/Đã hủy)': 'Mới'
+            }
+        ];
+
+        const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Template Sua Chua');
+        XLSX.writeFile(wb, 'mau_import_phieu_sua_chua.xlsx');
+    };
+
+    const handleImportExcel = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+            try {
+                const bstr = evt.target.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const data = XLSX.utils.sheet_to_json(ws);
+
+                if (data.length === 0) {
+                    alert('File Excel không có dữ liệu!');
+                    return;
+                }
+
+                setIsLoading(true);
+
+                const customerMap = customers.reduce((acc, c) => {
+                    acc[c.name.toLowerCase().trim()] = c.id;
+                    return acc;
+                }, {});
+
+                const errorTypeMap = errorTypes.reduce((acc, err) => {
+                    acc[err.name.toLowerCase().trim()] = err.id;
+                    return acc;
+                }, {});
+
+                const userMap = users.reduce((acc, u) => {
+                    acc[u.name.toLowerCase().trim()] = u.id;
+                    return acc;
+                }, {});
+
+                const validStatuses = ['Mới', 'Đang xử lý', 'Chờ linh kiện', 'Hoàn thành', 'Đã hủy'];
+
+                const mappedData = data.map((row) => {
+                    const cName = row['Khách hàng']?.toString().toLowerCase().trim();
+                    const eName = row['Loại lỗi chi tiết']?.toString().toLowerCase().trim();
+                    const sName = row['Kinh doanh phụ trách']?.toString().toLowerCase().trim();
+                    const tName = row['Kỹ thuật phụ trách']?.toString().toLowerCase().trim();
+                    const statusVal = row['Trạng thái (Mới/Đang xử lý/Chờ linh kiện/Hoàn thành/Đã hủy)']?.toString().trim() || 'Mới';
+
+                    return {
+                        date: row['Ngày (YYYY-MM-DD)']?.toString() || new Date().toISOString().split('T')[0],
+                        customer_id: cName ? customerMap[cName] || null : null,
+                        machine_serial: row['Mã thiết bị / Serial']?.toString() || '',
+                        machine_name: row['Tên thiết bị']?.toString() || '',
+                        loai_loi: row['Tên lỗi (Máy/Bình/Tình trạng chung)']?.toString() || '',
+                        error_type_id: eName ? errorTypeMap[eName] || null : null,
+                        error_details: row['Chi tiết thêm']?.toString() || '',
+                        sales_id: sName ? userMap[sName] || null : null,
+                        technician_id: tName ? userMap[tName] || null : null,
+                        status: validStatuses.includes(statusVal) ? statusVal : 'Mới',
+                        error_images: [],
+                        technical_images: [],
+                    };
+                }).filter(i => i.machine_serial || i.machine_name);
+
+                if (mappedData.length === 0) {
+                    alert('Không tìm thấy dữ liệu hợp lệ (thiếu Tên/Mã thiết bị)!');
+                    setIsLoading(false);
+                    return;
+                }
+
+                const { error: insertError } = await supabase
+                    .from('repair_tickets')
+                    .insert(mappedData);
+
+                if (insertError) {
+                    console.error('Error inserting tickets:', insertError);
+                    alert('Lỗi khi import: ' + insertError.message);
+                } else {
+                    alert(`🎉 Đã import thành công ${mappedData.length} phiếu sửa chữa!`);
+                    fetchData();
+                }
+
+            } catch (err) {
+                console.error('Error importing excel:', err);
+                alert('Có lỗi xảy ra khi xử lý file: ' + err.message);
+            } finally {
+                setIsLoading(false);
+                if (e.target) e.target.value = null;
+            }
+        };
+        reader.readAsBinaryString(file);
     };
 
     return (
@@ -261,6 +422,34 @@ export default function RepairTickets() {
                                 />
                             )}
                         </div>
+
+                        {selectedIds.length > 0 && (
+                            <button
+                                onClick={handleBulkDelete}
+                                className="h-[38px] px-3 sm:px-4 rounded-xl bg-rose-50 text-rose-600 border border-rose-200 font-bold hover:bg-rose-100 transition-all shadow-sm flex items-center gap-2 shrink-0 animate-in slide-in-from-right-4"
+                            >
+                                <Trash2 size={16} />
+                                <span className="text-[13px] hidden sm:inline">Xóa ({selectedIds.length})</span>
+                            </button>
+                        )}
+                        <button
+                            onClick={handleDownloadTemplate}
+                            className="h-[38px] px-3 sm:px-4 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-200 font-bold hover:bg-indigo-100 transition-all shadow-sm flex items-center gap-2 shrink-0"
+                            title="Tải mẫu Excel"
+                        >
+                            <Download size={16} />
+                            <span className="text-[13px] hidden md:inline">Tải mẫu</span>
+                        </button>
+                        <label className="h-[38px] px-3 sm:px-4 rounded-xl bg-cyan-50 text-cyan-600 border border-cyan-200 font-bold hover:bg-cyan-100 transition-all shadow-sm flex items-center gap-2 shrink-0 cursor-pointer" title="Nhập Excel">
+                            <Upload size={16} />
+                            <span className="text-[13px] hidden md:inline">Nhập file</span>
+                            <input
+                                type="file"
+                                accept=".xlsx, .xls"
+                                onChange={handleImportExcel}
+                                className="hidden"
+                            />
+                        </label>
 
                         <button onClick={() => { setTicketToEdit(null); setIsFormModalOpen(true); }} className="h-[38px] px-3 sm:px-4 rounded-xl bg-blue-500 text-white font-bold hover:bg-blue-600 transition-all shadow-sm shadow-blue-500/20 flex items-center gap-2 shrink-0">
                             <Plus size={16} strokeWidth={3} />
@@ -334,8 +523,13 @@ export default function RepairTickets() {
                             <table className="w-full text-left border-collapse">
                                 <thead>
                                     <tr className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10 shadow-sm">
-                                        <th className="py-3 px-4 font-bold text-slate-800 tracking-wide text-[12px] whitespace-nowrap bg-slate-50 w-12 text-center">
-                                            <input type="checkbox" className="rounded-md border-slate-300 text-amber-500 focus:ring-amber-500" disabled />
+                                        <th className="py-3 px-4 font-bold text-slate-800 tracking-wide text-[12px] whitespace-nowrap bg-slate-50 w-12 text-center border-r border-slate-200">
+                                            <input 
+                                                type="checkbox" 
+                                                className="rounded-md border-slate-300 text-blue-500 focus:ring-blue-500 cursor-pointer" 
+                                                checked={selectedIds.length === filteredTickets.length && filteredTickets.length > 0}
+                                                onChange={toggleSelectAll}
+                                            />
                                         </th>
                                         {columnOrder.filter(isColumnVisible).map((key) => {
                                             const col = columnDefs[key];
@@ -352,9 +546,14 @@ export default function RepairTickets() {
                                 </thead>
                                 <tbody className="bg-white">
                                     {filteredTickets.map((ticket, index) => (
-                                        <tr key={ticket.id} className="border-b border-slate-100 hover:bg-amber-50/30 transition-colors group">
+                                        <tr key={ticket.id} className={clsx("border-b border-slate-100 hover:bg-amber-50/30 transition-colors group", selectedIds.includes(ticket.id) && "bg-blue-50/40")}>
                                             <td className="py-2.5 px-4 whitespace-nowrap text-center border-r border-slate-50">
-                                                <input type="checkbox" className="rounded-md border-slate-300 text-amber-500 focus:ring-amber-500" />
+                                                <input 
+                                                    type="checkbox" 
+                                                    className="rounded-md border-slate-300 text-blue-500 focus:ring-blue-500 cursor-pointer" 
+                                                    checked={selectedIds.includes(ticket.id)}
+                                                    onChange={() => toggleSelect(ticket.id)}
+                                                />
                                             </td>
                                             
                                             {columnOrder.filter(isColumnVisible).map((key) => {
@@ -365,7 +564,9 @@ export default function RepairTickets() {
                                                     case 'stt':
                                                         content = <span className="font-bold text-slate-800">#{ticket.stt}</span>; break;
                                                     case 'created_at':
-                                                        content = <span className="text-slate-500">{new Date(ticket.created_at).toLocaleDateString('vi-VN')}</span>; break;
+                                                        content = <div className="flex flex-col"><span className="text-slate-700 font-bold">{new Date(ticket.created_at).toLocaleDateString('vi-VN')}</span><span className="text-slate-400 text-[11px]">{new Date(ticket.created_at).toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'})}</span></div>; break;
+                                                    case 'created_by':
+                                                        content = <span className="text-emerald-700 font-bold bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100/50">{ticket.created_by ? getUserName(ticket.created_by) : 'Hệ thống'}</span>; break;
                                                     case 'customer':
                                                         content = <div className="font-bold text-slate-700 max-w-[200px] truncate" title={getCustomerName(ticket.customer_id)}>{getCustomerName(ticket.customer_id)}</div>; break;
                                                     case 'machine_serial':

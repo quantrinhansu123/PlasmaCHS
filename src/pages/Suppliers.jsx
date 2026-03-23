@@ -23,8 +23,11 @@ import {
     Search,
     SlidersHorizontal,
     Trash2,
+    Download,
+    Upload,
     X
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { useEffect, useRef, useState } from 'react';
 import { Bar as BarChartJS } from 'react-chartjs-2';
 import { useNavigate } from 'react-router-dom';
@@ -91,6 +94,7 @@ const Suppliers = () => {
         return defaultColOrder;
     });
     const [showColumnPicker, setShowColumnPicker] = useState(false);
+    const [selectedIds, setSelectedIds] = useState([]);
     const visibleTableColumns = columnOrder
         .filter(key => visibleColumns.includes(key))
         .map(key => TABLE_COLUMNS_DEF.find(col => col.key === key))
@@ -133,12 +137,126 @@ const Suppliers = () => {
 
             if (error) throw error;
             setSuppliers(data || []);
+            setSelectedIds([]); // Clear selection on refresh
         } catch (error) {
             console.error('Error fetching suppliers:', error);
             alert('❌ Không thể tải danh sách nhà cung cấp: ' + error.message);
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedIds.length === filteredSuppliers.length && filteredSuppliers.length > 0) {
+            setSelectedIds([]);
+        } else {
+            setSelectedIds(filteredSuppliers.map(s => s.id));
+        }
+    };
+
+    const toggleSelectOne = (id) => {
+        setSelectedIds(prev =>
+            prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+        );
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+        if (!window.confirm(`Bạn có chắc chắn muốn xóa ${selectedIds.length} nhà cung cấp đã chọn không? Thao tác này không thể hoàn tác.`)) {
+            return;
+        }
+
+        try {
+            setIsLoading(true);
+            const { error } = await supabase
+                .from('suppliers')
+                .delete()
+                .in('id', selectedIds);
+
+            if (error) throw error;
+
+            alert(`🎉 Đã xóa thành công ${selectedIds.length} nhà cung cấp!`);
+            setSelectedIds([]);
+            fetchSuppliers();
+        } catch (error) {
+            console.error('Error deleting suppliers:', error);
+            alert('❌ Có lỗi xảy ra khi xóa: ' + error.message);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const downloadTemplate = () => {
+        const headers = [
+            'Tên nhà cung cấp',
+            'Số điện thoại',
+            'Địa chỉ',
+        ];
+
+        const exampleData = [
+            {
+                'Tên nhà cung cấp': 'Công ty TNHH Oxy Việt Nam',
+                'Số điện thoại': '02412345678',
+                'Địa chỉ': 'KCN Tiên Sơn, Bắc Ninh',
+            },
+        ];
+
+        const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Template Import NCC');
+        XLSX.writeFile(wb, 'mau_import_nha_cung_cap.xlsx');
+    };
+
+    const handleImportExcel = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+            try {
+                const bstr = evt.target.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const data = XLSX.utils.sheet_to_json(ws);
+
+                if (data.length === 0) {
+                    alert('File Excel không có dữ liệu!');
+                    return;
+                }
+
+                setIsLoading(true);
+
+                const suppliersToInsert = data.map(row => ({
+                    name: row['Tên nhà cung cấp']?.toString(),
+                    phone: row['Số điện thoại']?.toString(),
+                    address: row['Địa chỉ']?.toString(),
+                    updated_at: new Date().toISOString()
+                })).filter(s => s.name);
+
+                if (suppliersToInsert.length === 0) {
+                    alert('Không tìm thấy dữ liệu hợp lệ (thiếu tên nhà cung cấp)!');
+                    setIsLoading(false);
+                    return;
+                }
+
+                const { error } = await supabase.from('suppliers').insert(suppliersToInsert);
+
+                if (error) {
+                    throw error;
+                } else {
+                    alert(`🎉 Đã import thành công ${suppliersToInsert.length} nhà cung cấp!`);
+                    fetchSuppliers();
+                }
+            } catch (err) {
+                console.error('Error importing excel:', err);
+                alert('Có lỗi xảy ra khi xử lý file: ' + err.message);
+            } finally {
+                setIsLoading(false);
+                e.target.value = null; // Reset input
+            }
+        };
+        reader.readAsBinaryString(file);
     };
 
     const formatNumber = (num) => {
@@ -252,6 +370,14 @@ const Suppliers = () => {
             {activeView === 'list' && (
                 <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full">
                     <div className="md:hidden flex items-center gap-2 p-3 border-b border-border">
+                        <div className="flex items-center gap-2 shrink-0 pr-1">
+                            <input
+                                type="checkbox"
+                                checked={selectedIds.length === filteredSuppliers.length && filteredSuppliers.length > 0}
+                                onChange={toggleSelectAll}
+                                className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                            />
+                        </div>
                         <button
                             onClick={() => navigate(-1)}
                             className="p-2 rounded-xl border border-border bg-white text-muted-foreground shrink-0"
@@ -274,6 +400,38 @@ const Suppliers = () => {
                             )}
                         </div>
                         <button
+                            onClick={downloadTemplate}
+                            className="p-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 shrink-0"
+                            title="Tải mẫu Excel"
+                        >
+                            <Download size={18} />
+                        </button>
+                        <div className="relative">
+                            <input
+                                type="file"
+                                accept=".xlsx, .xls"
+                                onChange={handleImportExcel}
+                                className="hidden"
+                                id="excel-import-mobile"
+                            />
+                            <label
+                                htmlFor="excel-import-mobile"
+                                className="p-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 flex items-center justify-center cursor-pointer shadow-sm transition-all"
+                                title="Import Excel"
+                            >
+                                <Upload size={18} />
+                            </label>
+                        </div>
+                        {selectedIds.length > 0 && (
+                            <button
+                                onClick={handleBulkDelete}
+                                className="p-2 rounded-xl bg-rose-50 text-rose-600 border border-rose-200 shrink-0 shadow-sm animate-in zoom-in-95 duration-200"
+                                title="Xóa các mục đã chọn"
+                            >
+                                <Trash2 size={18} />
+                            </button>
+                        )}
+                        <button
                             onClick={() => {
                                 setSelectedSupplier(null);
                                 setIsFormModalOpen(true);
@@ -291,11 +449,26 @@ const Suppliers = () => {
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy kết quả phù hợp</div>
                         ) : (
                             filteredSuppliers.map((supplier) => (
-                                <div key={supplier.id} className="rounded-2xl border border-primary/20 bg-gradient-to-br from-white to-primary/[0.03] shadow-sm p-4">
+                                <div key={supplier.id} className={clsx(
+                                    "rounded-2xl border bg-gradient-to-br shadow-sm p-4 transition-all duration-200",
+                                    selectedIds.includes(supplier.id) 
+                                        ? "border-primary bg-primary/[0.05] ring-1 ring-primary/20" 
+                                        : "border-primary/20 from-white to-primary/[0.03]"
+                                )}>
                                     <div className="flex items-start justify-between gap-2 mb-2">
-                                        <div>
-                                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Nhà cung cấp</p>
-                                            <h3 className="text-[15px] font-bold text-foreground leading-tight mt-0.5">{supplier.name}</h3>
+                                        <div className="flex gap-3">
+                                            <div className="pt-1">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedIds.includes(supplier.id)}
+                                                    onChange={() => toggleSelectOne(supplier.id)}
+                                                    className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                                                />
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Nhà cung cấp</p>
+                                                <h3 className="text-[15px] font-bold text-foreground leading-tight mt-0.5">{supplier.name}</h3>
+                                            </div>
                                         </div>
                                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border border-primary/20 text-primary bg-primary/5">
                                             NCC
@@ -389,6 +562,43 @@ const Suppliers = () => {
                                     <Plus size={18} />
                                     Thêm
                                 </button>
+
+                                {selectedIds.length > 0 && (
+                                    <button
+                                        onClick={handleBulkDelete}
+                                        className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-600 text-[13px] font-bold hover:bg-rose-100 shadow-sm transition-all animate-in slide-in-from-right-4"
+                                    >
+                                        <Trash2 size={16} />
+                                        Xóa ({selectedIds.length})
+                                    </button>
+                                )}
+
+                                <button
+                                    onClick={downloadTemplate}
+                                    className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-[13px] font-bold hover:bg-indigo-100 shadow-sm transition-all"
+                                    title="Tải file Excel mẫu"
+                                >
+                                    <Download size={16} />
+                                    Tải mẫu
+                                </button>
+
+                                <div className="relative">
+                                    <input
+                                        type="file"
+                                        accept=".xlsx, .xls"
+                                        onChange={handleImportExcel}
+                                        className="hidden"
+                                        id="excel-import"
+                                    />
+                                    <label
+                                        htmlFor="excel-import"
+                                        className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-[13px] font-bold hover:bg-emerald-100 cursor-pointer shadow-sm transition-all"
+                                        title="Import dữ liệu từ file Excel"
+                                    >
+                                        <Upload size={16} />
+                                        Nhập Excel
+                                    </label>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -397,6 +607,14 @@ const Suppliers = () => {
                         <table className="w-full border-collapse">
                             <thead className="bg-primary/5">
                                 <tr>
+                                    <th className="w-12 px-4 py-3.5 text-center border-r border-primary/30">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedIds.length === filteredSuppliers.length && filteredSuppliers.length > 0}
+                                            onChange={toggleSelectAll}
+                                            className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                                        />
+                                    </th>
                                     {visibleTableColumns.map(col => (
                                         <th key={col.key} className={clsx('px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide', col.key === 'name' && 'border-r border-primary/30')}>
                                             {col.label}
@@ -419,7 +637,18 @@ const Suppliers = () => {
                                         </td>
                                     </tr>
                                 ) : filteredSuppliers.map((supplier) => (
-                                    <tr key={supplier.id} className={getRowStyle()}>
+                                    <tr key={supplier.id} className={clsx(
+                                        getRowStyle(),
+                                        selectedIds.includes(supplier.id) && "bg-primary/[0.04]"
+                                    )}>
+                                        <td className="w-12 px-4 py-4 text-center border-r border-primary/20">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedIds.includes(supplier.id)}
+                                                onChange={() => toggleSelectOne(supplier.id)}
+                                                className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                                            />
+                                        </td>
                                         {isColumnVisible('name') && <td className={getNameCellClass()}>{supplier.name || '—'}</td>}
                                         {isColumnVisible('phone') && <td className="px-4 py-4 text-sm text-muted-foreground">{supplier.phone || '—'}</td>}
                                         {isColumnVisible('address') && <td className="px-4 py-4 text-sm text-muted-foreground">{supplier.address || '—'}</td>}

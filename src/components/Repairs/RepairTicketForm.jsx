@@ -18,6 +18,7 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
     const [errorTypes, setErrorTypes] = useState([]);
     const [salesUsers, setSalesUsers] = useState([]);
     const [techUsers, setTechUsers] = useState([]);
+    const [allUsers, setAllUsers] = useState([]);
 
     // Custom dropdown states for Customer
     const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
@@ -126,6 +127,7 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
             // 3. Fetch Users
             const { data: usrData } = await supabase.from('app_users').select('id, name, role');
             if (usrData) {
+                setAllUsers(usrData);
                 // Filter by the user's requested role labels
                 setSalesUsers(usrData.filter(u => u.role === 'Nhân viên kinh doanh'));
                 setTechUsers(usrData.filter(u => u.role === 'Nhân viên kỹ thuật'));
@@ -351,10 +353,14 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                         </div>
                         <div>
                             <h3 className="text-[20px] leading-tight font-bold text-slate-900 tracking-tight">
-                                {isEdit ? 'Cập nhật Ticket Sửa chữa' : 'Tạo Ticket Sửa chữa mới'}
+                                {isEdit ? `Cập nhật Ticket Sửa chữa #${ticket.stt}` : 'Tạo Ticket Sửa chữa mới'}
                             </h3>
                             <p className="text-slate-500 text-[12px] font-semibold mt-0.5">
-                                {isEdit ? `Mã phiếu: #${ticket.stt}` : 'Tạo mới phiếu yêu cầu bảo hành/sửa chữa'}
+                                {isEdit ? (
+                                    <span>
+                                        Báo lỗi bởi: <strong className="text-emerald-700">{allUsers.find(u => u.id === ticket.created_by)?.name || 'Hệ thống'}</strong> lúc <strong className="text-slate-700">{new Date(ticket.created_at).toLocaleString('vi-VN')}</strong>
+                                    </span>
+                                ) : 'Tạo mới phiếu yêu cầu bảo hành/sửa chữa'}
                             </p>
                         </div>
                     </div>

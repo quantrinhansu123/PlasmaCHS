@@ -1,8 +1,11 @@
 import {
     Edit,
     PackageMinus,
-    Trash2
+    Trash2,
+    Download,
+    Upload
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ISSUE_STATUSES, ISSUE_TABLE_COLUMNS, ISSUE_TYPES } from '../constants/goodsIssueConstants';
@@ -22,6 +25,7 @@ const GoodsIssues = () => {
     // We reuse logical columns hook
     const { visibleColumns, toggleColumn, isColumnVisible, resetColumns, visibleCount, totalCount } = useColumnVisibility('columns_goods_issues', ISSUE_TABLE_COLUMNS);
     const visibleTableColumns = ISSUE_TABLE_COLUMNS.filter(col => isColumnVisible(col.key));
+    const [selectedIds, setSelectedIds] = useState([]);
 
     useEffect(() => {
         loadSuppliers();
@@ -45,6 +49,7 @@ const GoodsIssues = () => {
 
             if (error) throw error;
             setIssues(data || []);
+            setSelectedIds([]);
         } catch (error) {
             console.error('Error loading issues:', error);
         } finally {
@@ -69,11 +74,225 @@ const GoodsIssues = () => {
         try {
             const { error } = await supabase.from('goods_issues').delete().eq('id', id);
             if (error) throw error;
+            setSelectedIds(prev => prev.filter(i => i !== id));
             fetchIssues();
         } catch (error) {
             console.error('Error deleting issue:', error);
             alert('❌ Lỗi khi xóa phiếu: ' + error.message);
         }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+        if (!window.confirm(`Bạn có chắc muốn xóa ${selectedIds.length} phiếu xuất đã chọn không? Hành động này sẽ không thể hoàn tác.`)) {
+            return;
+        }
+
+        try {
+            const { error } = await supabase
+                .from('goods_issues')
+                .delete()
+                .in('id', selectedIds);
+
+            if (error) throw error;
+            
+            setSelectedIds([]);
+            fetchIssues();
+            alert(`✅ Đã xóa ${selectedIds.length} phiếu xuất thành công!`);
+        } catch (error) {
+            console.error('Error deleting issues:', error);
+            alert('❌ Lỗi khi xóa: ' + error.message);
+        }
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedIds.length === filteredIssues.length && filteredIssues.length > 0) {
+            setSelectedIds([]);
+        } else {
+            setSelectedIds(filteredIssues.map(i => i.id));
+        }
+    };
+
+    const toggleSelect = (id) => {
+        setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+    };
+
+    const handleDownloadTemplate = () => {
+        const headers = [
+            'Mã phiếu xuất (Để trống sẽ tự tạo)',
+            'Loại xuất (TRA_NCC/HUY_XUAT/TRA_VO/TRA_MAY/KHAC)',
+            'Kho xuất (HN/TP.HCM/TH/DN)',
+            'Nhà cung cấp nhận',
+            'Ngày xuất (YYYY-MM-DD)',
+            'Ghi chú phiếu',
+            'Loại hàng (MAY/BINH/VAT_TU)',
+            'Mã serial (hoặc mã RFID)',
+            'Số lượng xuất',
+        ];
+
+        const exampleData = [
+            {
+                'Mã phiếu xuất (Để trống sẽ tự tạo)': 'PX00001',
+                'Loại xuất (TRA_NCC/HUY_XUAT/TRA_VO/TRA_MAY/KHAC)': 'TRA_NCC',
+                'Kho xuất (HN/TP.HCM/TH/DN)': 'HN',
+                'Nhà cung cấp nhận': 'Công ty Oxy y tế A',
+                'Ngày xuất (YYYY-MM-DD)': '2023-10-25',
+                'Ghi chú phiếu': 'Xuất trả vỏ',
+                'Loại hàng (MAY/BINH/VAT_TU)': 'BINH',
+                'Mã serial (hoặc mã RFID)': 'OXY40-001',
+                'Số lượng xuất': 1,
+            },
+            {
+                'Mã phiếu xuất (Để trống sẽ tự tạo)': 'PX00001',
+                'Loại xuất (TRA_NCC/HUY_XUAT/TRA_VO/TRA_MAY/KHAC)': 'TRA_NCC',
+                'Kho xuất (HN/TP.HCM/TH/DN)': 'HN',
+                'Nhà cung cấp nhận': 'Công ty Oxy y tế A',
+                'Ngày xuất (YYYY-MM-DD)': '2023-10-25',
+                'Ghi chú phiếu': 'Xuất trả máy',
+                'Loại hàng (MAY/BINH/VAT_TU)': 'MAY',
+                'Mã serial (hoặc mã RFID)': 'ROSY-001',
+                'Số lượng xuất': 1,
+            }
+        ];
+
+        const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Template Xuat Kho');
+        XLSX.writeFile(wb, 'mau_import_phieu_xuat_kho.xlsx');
+    };
+
+    const handleImportExcel = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+            try {
+                const bstr = evt.target.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const data = XLSX.utils.sheet_to_json(ws);
+
+                if (data.length === 0) {
+                    alert('File Excel không có dữ liệu!');
+                    return;
+                }
+
+                setLoading(true);
+
+                const supplierMap = suppliers.reduce((acc, s) => {
+                    acc[s.name.toLowerCase()] = s.id;
+                    return acc;
+                }, {});
+
+                const mappedData = data.map((row, index) => {
+                    const rowCode = row['Mã phiếu xuất (Để trống sẽ tự tạo)']?.toString().trim();
+                    const supplierName = row['Nhà cung cấp nhận']?.toString().toLowerCase().trim();
+                    return {
+                        groupId: rowCode || `AUTO_GROUP_${index}`,
+                        issue_code: rowCode || '',
+                        issue_type: row['Loại xuất (TRA_NCC/HUY_XUAT/TRA_VO/TRA_MAY/KHAC)']?.toString().toUpperCase() || 'KHAC',
+                        warehouse_id: row['Kho xuất (HN/TP.HCM/TH/DN)']?.toString().toUpperCase() || 'HN',
+                        supplier_id: supplierName ? supplierMap[supplierName] || null : null,
+                        issue_date: row['Ngày xuất (YYYY-MM-DD)']?.toString() || new Date().toISOString().split('T')[0],
+                        notes: row['Ghi chú phiếu']?.toString() || '',
+                        
+                        item_type: row['Loại hàng (MAY/BINH/VAT_TU)']?.toString().toUpperCase() || 'VAT_TU',
+                        item_code: row['Mã serial (hoặc mã RFID)']?.toString() || '',
+                        quantity: parseInt(row['Số lượng xuất'], 10) || 1,
+                    };
+                }).filter(i => i.item_code || i.item_type === 'VAT_TU');
+
+                if (mappedData.length === 0) {
+                    alert('Không tìm thấy dữ liệu hợp lệ!');
+                    setLoading(false);
+                    return;
+                }
+
+                const groups = {};
+                mappedData.forEach(item => {
+                    if (!groups[item.groupId]) {
+                        groups[item.groupId] = {
+                            issue_code: item.issue_code,
+                            issue_type: ["TRA_NCC", "HUY_XUAT", "KHAC", "TRA_VO", "TRA_BINH_LOI", "TRA_MAY"].includes(item.issue_type) ? item.issue_type : "KHAC",
+                            warehouse_id: ["HN", "TP.HCM", "TH", "DN"].includes(item.warehouse_id) ? item.warehouse_id : "HN",
+                            supplier_id: item.supplier_id,
+                            issue_date: item.issue_date,
+                            status: 'CHO_DUYET',
+                            notes: item.notes,
+                            total_items: 0,
+                            items: []
+                        };
+                    }
+                    groups[item.groupId].items.push({
+                        item_type: ["MAY", "BINH", "VAT_TU", "BINH_4L", "BINH_8L", "MAY_ROSY", "MAY_MED"].includes(item.item_type) ? item.item_type : "VAT_TU",
+                        item_code: item.item_code,
+                        quantity: item.quantity,
+                    });
+                    groups[item.groupId].total_items += item.quantity;
+                });
+
+                let nextCodeNum = Date.now() % 100000; 
+                let importedIssues = 0;
+                let importedItems = 0;
+
+                for (const groupId in groups) {
+                    const group = groups[groupId];
+                    let code = group.issue_code;
+                    if (!code) {
+                        code = `PX${String(nextCodeNum++).padStart(5, '0')}`;
+                    }
+
+                    const { data: insertedIssue, error: issueError } = await supabase
+                        .from('goods_issues')
+                        .insert([{
+                            issue_code: code,
+                            issue_type: group.issue_type,
+                            supplier_id: group.supplier_id,
+                            warehouse_id: group.warehouse_id,
+                            issue_date: group.issue_date,
+                            status: group.status,
+                            notes: group.notes,
+                            total_items: group.total_items
+                        }])
+                        .select('id')
+                        .single();
+
+                    if (issueError) {
+                        console.error('Error inserting issue:', issueError);
+                        continue;
+                    }
+
+                    importedIssues++;
+
+                    const itemsToInsert = group.items.map(item => ({
+                        ...item,
+                        issue_id: insertedIssue.id
+                    }));
+
+                    const { error: itemsError } = await supabase
+                        .from('goods_issue_items')
+                        .insert(itemsToInsert);
+
+                    if (itemsError) {
+                        console.error('Error inserting items:', itemsError);
+                    } else {
+                        importedItems += itemsToInsert.length;
+                    }
+                }
+
+                alert(`🎉 Đã import thành công ${importedIssues} phiếu xuất với tổng cộng ${importedItems} mục!`);
+                fetchIssues();
+            } catch (err) {
+                console.error('Error importing excel:', err);
+                alert('Có lỗi xảy ra khi xử lý file: ' + err.message);
+            } finally {
+                setLoading(false);
+                if (e.target) e.target.value = null;
+            }
+        };
+        reader.readAsBinaryString(file);
     };
 
     const getStatusBadge = (status) => {
@@ -125,6 +344,33 @@ const GoodsIssues = () => {
                     </h1>
                 </div>
                 <div className="flex flex-wrap gap-3">
+                    {selectedIds.length > 0 && (
+                        <button
+                            onClick={handleBulkDelete}
+                            className="flex items-center gap-2 px-6 py-3.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-2xl font-black transition-all shadow-xl shadow-rose-200"
+                        >
+                            <Trash2 className="w-5 h-5" />
+                            XÓA ({selectedIds.length})
+                        </button>
+                    )}
+                    <button
+                        onClick={handleDownloadTemplate}
+                        className="flex items-center gap-2 px-5 py-3.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-2xl font-bold text-sm transition-all shadow-xl shadow-indigo-200"
+                        title="Tải mẫu Excel"
+                    >
+                        <Download className="w-5 h-5" />
+                        <span className="hidden sm:inline">Tải mẫu</span>
+                    </button>
+                    <label className="flex items-center gap-2 px-5 py-3.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-2xl font-bold text-sm transition-all shadow-xl shadow-blue-200 cursor-pointer" title="Nhập Excel">
+                        <Upload className="w-5 h-5" />
+                        <span className="hidden sm:inline">Nhập file</span>
+                        <input
+                            type="file"
+                            accept=".xlsx, .xls"
+                            onChange={handleImportExcel}
+                            className="hidden"
+                        />
+                    </label>
                     <button
                         onClick={() => navigate('/tao-phieu-xuat', { state: { forcedType: 'TRA_VO' } })}
                         className="flex items-center gap-2 px-6 py-3.5 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl font-black transition-all shadow-xl shadow-rose-200"
@@ -167,12 +413,30 @@ const GoodsIssues = () => {
                     <>
                         {/* Mobile Card List */}
                         <div className="md:hidden divide-y divide-gray-100">
+                            {/* Mobile Select All */}
+                            <div className="p-4 flex items-center gap-3 bg-gray-50 border-b border-gray-100">
+                                <input
+                                    type="checkbox"
+                                    className="w-5 h-5 rounded-md border-gray-300 text-rose-600 focus:ring-rose-500 cursor-pointer"
+                                    checked={selectedIds.length === filteredIssues.length && filteredIssues.length > 0}
+                                    onChange={toggleSelectAll}
+                                />
+                                <span className="text-sm font-bold text-gray-600">Chọn tất cả</span>
+                            </div>
                             {filteredIssues.map((issue) => (
-                                <div key={issue.id} className="p-4 hover:bg-rose-50/30 active:bg-rose-50/50 transition-colors">
+                                <div key={issue.id} className={`p-4 hover:bg-rose-50/30 active:bg-rose-50/50 transition-colors ${selectedIds.includes(issue.id) ? 'bg-rose-50/40' : ''}`}>
                                     <div className="flex justify-between items-start mb-3">
-                                        <div>
-                                            <div className="font-bold text-slate-800">{issue.issue_code}</div>
-                                            <div className="text-xs text-slate-500 mt-0.5">{getTypeLabel(issue.issue_type)}</div>
+                                        <div className="flex items-start gap-3">
+                                            <input
+                                                type="checkbox"
+                                                className="w-5 h-5 mt-1 rounded-md border-gray-300 text-rose-600 focus:ring-rose-500 cursor-pointer"
+                                                checked={selectedIds.includes(issue.id)}
+                                                onChange={(e) => { e.stopPropagation(); toggleSelect(issue.id); }}
+                                            />
+                                            <div>
+                                                <div className="font-bold text-slate-800 bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-lg inline-block">{issue.issue_code}</div>
+                                                <div className="text-xs text-slate-500 mt-1">{getTypeLabel(issue.issue_type)}</div>
+                                            </div>
                                         </div>
                                         {getStatusBadge(issue.status)}
                                     </div>
@@ -194,6 +458,14 @@ const GoodsIssues = () => {
                             <table className="w-full">
                                 <thead>
                                     <tr className="bg-gray-50/50">
+                                        <th className="px-6 py-4 w-12 text-center">
+                                            <input
+                                                type="checkbox"
+                                                className="w-4 h-4 rounded-md border-gray-300 text-rose-600 focus:ring-rose-500 cursor-pointer"
+                                                checked={selectedIds.length === filteredIssues.length && filteredIssues.length > 0}
+                                                onChange={toggleSelectAll}
+                                            />
+                                        </th>
                                         <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider text-left">Phiếu</th>
                                         <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider text-left">Ngày</th>
                                         <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider text-left">Kho & NCC</th>
@@ -204,8 +476,16 @@ const GoodsIssues = () => {
                                 </thead>
                                 <tbody className="divide-y divide-gray-50">
                                     {filteredIssues.map((issue) => (
-                                        <tr key={issue.id} className="hover:bg-rose-50/30 transition-colors">
-                                            <td className="px-6 py-4"><div className="font-bold text-slate-800">{issue.issue_code}</div><div className="text-xs text-slate-500 mt-1">{getTypeLabel(issue.issue_type)}</div></td>
+                                        <tr key={issue.id} className={`hover:bg-rose-50/30 transition-colors ${selectedIds.includes(issue.id) ? 'bg-rose-50/20' : ''}`}>
+                                            <td className="px-6 py-4 text-center">
+                                                <input
+                                                    type="checkbox"
+                                                    className="w-4 h-4 rounded-md border-gray-300 text-rose-600 focus:ring-rose-500 cursor-pointer"
+                                                    checked={selectedIds.includes(issue.id)}
+                                                    onChange={(e) => { e.stopPropagation(); toggleSelect(issue.id); }}
+                                                />
+                                            </td>
+                                            <td className="px-6 py-4"><div className="font-bold text-slate-800 bg-slate-50 border border-slate-100 px-2.5 mx-[-10px] py-1 rounded-lg inline-block">{issue.issue_code}</div><div className="text-xs text-slate-500 mt-1.5">{getTypeLabel(issue.issue_type)}</div></td>
                                             <td className="px-6 py-4 text-sm font-medium text-slate-600">{new Date(issue.issue_date).toLocaleDateString()}</td>
                                             <td className="px-6 py-4"><div className="font-medium text-slate-800">{getWarehouseLabel(issue.warehouse_id)}</div><div className="text-xs text-rose-600 font-bold mt-1">{"➞ " + getSupplierName(issue.supplier_id)}</div></td>
                                             <td className="px-6 py-4 text-center font-black text-slate-700">{issue.total_items}</td>
