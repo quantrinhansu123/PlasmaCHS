@@ -3,6 +3,18 @@
 -- Purpose: Pre-calculated views for faster reporting
 -- ==============================================================================
 
+-- Drop existing views to avoid type mismatch errors (e.g. integer to bigint)
+DROP VIEW IF EXISTS view_customer_stats CASCADE;
+DROP VIEW IF EXISTS view_salesperson_stats CASCADE;
+DROP VIEW IF EXISTS view_cylinder_expiry CASCADE;
+DROP VIEW IF EXISTS view_customer_expiry CASCADE;
+DROP VIEW IF EXISTS view_cylinder_errors CASCADE;
+DROP VIEW IF EXISTS view_machine_stats CASCADE;
+DROP VIEW IF EXISTS view_machine_summary CASCADE;
+DROP VIEW IF EXISTS view_orders_monthly CASCADE;
+DROP VIEW IF EXISTS view_dashboard_summary CASCADE;
+DROP VIEW IF EXISTS view_machine_revenue CASCADE;
+
 -- ==============================================================================
 -- View: Thống kê theo khách hàng
 -- Tiêu chí: Tên KH, loại KH (công/tư), kho, máy đang dùng, bình xuất, bán, demo, vỏ thu hồi, bình tồn
@@ -13,10 +25,10 @@ SELECT
     c.code AS ma_khach_hang,
     c.name AS ten_khach_hang,
     c.customer_type AS loai_khach_hang,
-    c.warehouse_id AS kho,
+    COALESCE(w.name, c.warehouse_id) AS kho,
     c.category AS loai_khach,
-    c.current_machines AS may_dang_su_dung,
-    c.current_cylinders AS binh_hien_co,
+    (SELECT COUNT(*) FROM machines m WHERE m.customer_name = c.name) AS may_dang_su_dung,
+    (SELECT COUNT(*) FROM cylinders cy WHERE cy.customer_name = c.name) AS binh_hien_co,
     c.borrowed_cylinders AS vo_binh_dang_muon,
     
     -- Số bình xuất (tất cả đơn đã duyệt)
@@ -56,9 +68,12 @@ SELECT
     
     -- NVKD phụ trách
     c.care_by AS nhan_vien_kinh_doanh,
-    c.last_order_date AS ngay_dat_hang_gan_nhat
+    c.last_order_date AS ngay_dat_hang_gan_nhat,
+    c.machines_in_use AS danh_sach_may,
+    (SELECT STRING_AGG(serial_number, ', ') FROM cylinders cy WHERE cy.customer_name = c.name) AS danh_sach_binh
     
-FROM customers c;
+FROM customers c
+LEFT JOIN warehouses w ON w.id::text = c.warehouse_id;
 
 -- ==============================================================================
 -- View: Thống kê theo nhân viên kinh doanh
@@ -120,9 +135,10 @@ SELECT
     cy.expiry_date AS ngay_het_han,
     GREATEST(0, CURRENT_DATE - cy.expiry_date) AS so_ngay_ton,
     c.care_by AS nhan_vien_kinh_doanh,
-    c.warehouse_id AS kho
+    COALESCE(w.name, c.warehouse_id) AS kho
 FROM cylinders cy
 LEFT JOIN customers c ON c.name = cy.customer_name
+LEFT JOIN warehouses w ON w.id::text = c.warehouse_id
 WHERE cy.expiry_date IS NOT NULL 
 AND cy.expiry_date < CURRENT_DATE;
 
@@ -135,16 +151,17 @@ SELECT
     c.id,
     c.code AS ma_khach_hang,
     c.name AS ten_khach_hang,
-    c.warehouse_id AS kho,
+    COALESCE(w.name, c.warehouse_id) AS kho,
     c.category AS loai_khach,
     c.last_order_date AS ngay_dat_hang_gan_nhat,
     GREATEST(0, CURRENT_DATE - c.last_order_date) AS so_ngay_chua_phat_sinh,
     (SELECT order_code FROM orders WHERE customer_name = c.name ORDER BY created_at DESC LIMIT 1) AS ma_don_gan_nhat,
     (SELECT created_at FROM orders WHERE customer_name = c.name ORDER BY created_at DESC LIMIT 1) AS ngay_tao_don_gan_nhat,
-    c.borrowed_cylinders AS so_vo_ton,
-    c.current_cylinders AS binh_ton,
+    (SELECT COUNT(*) FROM cylinders cy WHERE cy.customer_name = c.name AND cy.status = 'bình rỗng') AS so_vo_ton,
+    (SELECT COUNT(*) FROM cylinders cy WHERE cy.customer_name = c.name) AS binh_ton,
     c.care_by AS nhan_vien_kinh_doanh
 FROM customers c
+LEFT JOIN warehouses w ON w.id::text = c.warehouse_id
 WHERE c.last_order_date IS NOT NULL 
 AND c.last_order_date < CURRENT_DATE - INTERVAL '30 days';
 
@@ -173,9 +190,10 @@ SELECT
         ELSE NULL 
     END AS thoi_gian_xu_ly_ngay,
     c.care_by AS nhan_vien_kinh_doanh,
-    c.warehouse_id AS kho
+    COALESCE(w.name, c.warehouse_id) AS kho
 FROM cylinders cy
 LEFT JOIN customers c ON c.name = cy.customer_name
+LEFT JOIN warehouses w ON w.id::text = c.warehouse_id
 WHERE cy.status = 'hỏng';
 
 -- ==============================================================================
@@ -195,7 +213,7 @@ SELECT
     m.maintenance_date AS ngay_bao_tri_gan_nhat,
     m.maintenance_type AS loai_bao_tri,
     m.next_maintenance_date AS ngay_bao_tri_tiep,
-    m.maintence_by AS nguoi_bao_tri,
+    m.maintenance_by AS nguoi_bao_tri,
     c.care_by AS nhan_vien_kinh_doanh,
     
     -- Phân loại theo trạng thái

@@ -1,5 +1,5 @@
-import { Activity, Bluetooth, ChevronDown, Cpu, Hash, MapPin, MonitorIcon, Package, Radio, Save, ScanLine, Search, Settings2, Wind, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Activity, Bluetooth, ChevronDown, Cpu, Hash, MapPin, MonitorIcon, Package, Radio, Save, ScanLine, Search, Settings2, Wind, X, Building } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
     CYLINDER_VOLUMES,
@@ -12,6 +12,7 @@ import {
 import { supabase } from '../../supabase/config';
 import BarcodeScanner from '../Common/BarcodeScanner';
 import clsx from 'clsx';
+import Combobox from '../ui/Combobox';
 
 export default function MachineFormModal({ machine, onClose, onSuccess }) {
     const isEdit = !!machine;
@@ -37,11 +38,28 @@ export default function MachineFormModal({ machine, onClose, onSuccess }) {
     };
 
     const [formData, setFormData] = useState(defaultState);
+    const [staffList, setStaffList] = useState([]);
     const [warehousesList, setWarehousesList] = useState([]);
     const [customersList, setCustomersList] = useState([]);
     const [customerSearch, setCustomerSearch] = useState('');
     const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
     const customerDropdownRef = useRef(null);
+    
+    const agencyOptions = useMemo(() => {
+        const warehouseBranches = (warehousesList || []).map(w => w.branch_office);
+        const customerAgencies = (customersList || []).map(c => c.agency_name);
+        const customerGroups = (customersList || []).map(c => c.business_group);
+        const userDepartments = (staffList || []).map(u => u.department);
+        const userSalesGroups = (staffList || []).map(u => u.sales_group);
+
+        return Array.from(new Set([
+            ...warehouseBranches,
+            ...customerAgencies,
+            ...customerGroups,
+            ...userDepartments,
+            ...userSalesGroups
+        ])).filter(Boolean).sort();
+    }, [warehousesList, customersList, staffList]);
 
     const handleClose = useCallback(() => {
         setIsClosing(true);
@@ -49,32 +67,34 @@ export default function MachineFormModal({ machine, onClose, onSuccess }) {
     }, [onClose]);
 
     useEffect(() => {
-        const fetchWarehouses = async () => {
+        const fetchAllData = async () => {
             try {
-                const { data, error } = await supabase
+                // Fetch Warehouses
+                const { data: whData } = await supabase
                     .from('warehouses')
-                    .select('id, name')
+                    .select('id, name, branch_office')
                     .eq('status', 'Đang hoạt động')
                     .order('name');
-                if (!error && data) {
-                    setWarehousesList(data);
-                    if (!isEdit && data.length > 0 && !formData.warehouse) {
-                        setFormData(prev => ({ ...prev, warehouse: data[0].id }));
-                    }
-                }
+                if (whData) setWarehousesList(whData);
 
-                const { data: customerData, error: customerError } = await supabase
+                // Fetch Customers
+                const { data: customerData } = await supabase
                     .from('customers')
-                    .select('name')
+                    .select('name, agency_name, business_group')
                     .order('name');
-                if (!customerError && customerData) {
-                    setCustomersList(customerData);
-                }
+                if (customerData) setCustomersList(customerData);
+
+                // Fetch Staff
+                const { data: userData } = await supabase
+                    .from('app_users')
+                    .select('id, name, role, department, sales_group')
+                    .order('name');
+                if (userData) setStaffList(userData);
             } catch (err) {
-                console.error('Error fetching warehouses:', err);
+                console.error('Error fetching modal data:', err);
             }
         };
-        fetchWarehouses();
+        fetchAllData();
     }, [isEdit]);
 
     const filteredCustomers = customersList.filter(c =>
@@ -448,14 +468,13 @@ export default function MachineFormModal({ machine, onClose, onSuccess }) {
                                         )}
                                     </div>
                                     <div>
-                                        <label className="flex items-center gap-1.5 text-[12px] font-black text-slate-700 mb-1.5 uppercase tracking-wider"><MonitorIcon className="w-4 h-4" />Đại lý / Phòng ban</label>
-                                        <input
-                                            type="text"
-                                            name="department_in_charge"
+                                        <label className="flex items-center gap-1.5 text-[12px] font-black text-slate-700 mb-1.5 uppercase tracking-wider"><Building className="w-4 h-4" />Đại lý / Phòng ban</label>
+                                        <Combobox
                                             value={formData.department_in_charge}
-                                            onChange={handleChange}
-                                            placeholder="Tên đại lý/Đơn vị phụ trách..."
-                                            className="w-full h-12 px-4 bg-white border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-bold text-slate-900"
+                                            onChange={(val) => setFormData(prev => ({ ...prev, department_in_charge: val }))}
+                                            options={agencyOptions}
+                                            placeholder="Gõ hoặc chọn đại lý..."
+                                            emptyMessage="Không tìm thấy. Gõ để thêm mới."
                                         />
                                     </div>
                                 </div>

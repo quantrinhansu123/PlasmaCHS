@@ -56,9 +56,10 @@ const COLUMN_DEFS = {
   ten_khach_hang: { label: 'Tên Khách Hàng' },
   loai_khach: { label: 'Loại' },
   kho: { label: 'Kho' },
-  may_dang_su_dung: { label: 'Máy SD' },
-  binh_ban: { label: 'Bình Bán' },
-  binh_demo: { label: 'Bình Demo' },
+  may_dang_su_dung: { label: 'Máy & Mã Máy' },
+  binh_hien_co: { label: 'Tổng Bình (Mã)' },
+  binh_ban: { label: 'Bán' },
+  binh_demo: { label: 'Demo' },
   nhan_vien_kinh_doanh: { label: 'NVKD' }
 };
 
@@ -203,6 +204,22 @@ const CustomerReport = () => {
     categoryId === 'SP' && 'bg-amber-50 text-amber-700 border-amber-200',
     (!categoryId || categoryId === 'công' || categoryId === 'tư') && 'bg-muted text-muted-foreground border-border'
   );
+
+  const getCategoryLabel = (val) => {
+    if (!val) return '-';
+    // If it's already a key in CUSTOMER_CATEGORIES
+    if (CUSTOMER_CATEGORIES[val]) return CUSTOMER_CATEGORIES[val];
+    // If it's a full name, return it
+    return val;
+  };
+
+  const getCategoryKey = (val) => {
+    if (!val) return null;
+    if (CUSTOMER_CATEGORIES[val]) return val;
+    // Map full names to keys for styling
+    const entry = Object.entries(CUSTOMER_CATEGORIES).find(([k, v]) => v.toLowerCase() === val.toLowerCase());
+    return entry ? entry[0] : val;
+  };
 
   const getFilterButtonClass = (filterKey, isActive) => {
     if (!isActive) return 'border-border bg-white text-muted-foreground hover:text-foreground';
@@ -390,13 +407,36 @@ const CustomerReport = () => {
                         if (colKey === 'ten_khach_hang') return <td key={colKey} className="px-4 py-4"><span className="text-[13px] font-bold text-foreground">{item.ten_khach_hang}</span></td>;
                         if (colKey === 'loai_khach') return (
                           <td key={colKey} className="px-4 py-4">
-                            <span className={getCustomerTypeBadgeClass(item.loai_khach || item.loai_khach_hang)}>
-                              {CUSTOMER_CATEGORIES[item.loai_khach] || item.loai_khach_hang || item.loai_khach || '-'}
+                            <span className={getCustomerTypeBadgeClass(getCategoryKey(item.loai_khach || item.loai_khach_hang))}>
+                              {getCategoryLabel(item.loai_khach || item.loai_khach_hang)}
                             </span>
                           </td>
                         );
                         if (colKey === 'kho') return <td key={colKey} className="px-4 py-4"><span className="text-[13px] text-muted-foreground font-medium">{item.kho || '-'}</span></td>;
-                        if (colKey === 'may_dang_su_dung') return <td key={colKey} className="px-4 py-4 text-right"><span className="text-[13px] font-bold text-primary">{formatNumber(item.may_dang_su_dung)}</span></td>;
+                        if (colKey === 'may_dang_su_dung') return (
+                          <td key={colKey} className="px-4 py-4 text-right">
+                            <div className="flex flex-col items-end">
+                              <span className="text-[13px] font-bold text-primary">{formatNumber(item.may_dang_su_dung)}</span>
+                              {item.danh_sach_may && (
+                                <span className="text-[10px] text-muted-foreground font-medium truncate max-w-[120px]" title={item.danh_sach_may}>
+                                  {item.danh_sach_may}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        );
+                        if (colKey === 'binh_hien_co') return (
+                          <td key={colKey} className="px-4 py-4 text-right">
+                            <div className="flex flex-col items-end">
+                              <span className="text-[13px] font-bold text-slate-700">{formatNumber(item.binh_hien_co)}</span>
+                              {item.danh_sach_binh && (
+                                <span className="text-[9px] text-muted-foreground font-medium truncate max-w-[100px]" title={item.danh_sach_binh}>
+                                  {item.danh_sach_binh}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        );
                         if (colKey === 'binh_ban') return <td key={colKey} className="px-4 py-4 text-right"><span className="text-[13px] font-bold text-emerald-600">{formatNumber(item.binh_ban)}</span></td>;
                         if (colKey === 'binh_demo') return <td key={colKey} className="px-4 py-4 text-right"><span className="text-[13px] font-bold text-orange-600">{formatNumber(item.binh_demo)}</span></td>;
                         if (colKey === 'nhan_vien_kinh_doanh') return <td key={colKey} className="px-4 py-4"><span className="text-[13px] font-medium text-foreground">{item.nhan_vien_kinh_doanh || '-'}</span></td>;
@@ -425,7 +465,12 @@ const CustomerReport = () => {
                   </div>
                   <h3 className="text-[14px] font-bold text-foreground mb-3">{item.ten_khach_hang}</h3>
                   <div className="grid grid-cols-3 gap-2 bg-muted/10 rounded-xl p-2.5 border border-border/60">
-                    <div className="text-center"><p className="text-[10px] text-muted-foreground font-bold uppercase mb-0.5">Máy</p><p className="text-sm font-bold text-primary">{formatNumber(item.may_dang_su_dung)}</p></div>
+                    <div className="text-center"><p className="text-[10px] text-muted-foreground font-bold uppercase mb-0.5">Máy</p><p className="text-sm font-bold text-primary">{formatNumber(item.may_dang_su_dung)}</p>
+                      {item.danh_sach_may && <p className="text-[9px] text-muted-foreground truncate">{item.danh_sach_may}</p>}
+                    </div>
+                    <div className="text-center"><p className="text-[10px] text-muted-foreground font-bold uppercase mb-0.5">Tổng Bình</p><p className="text-sm font-bold text-slate-700">{formatNumber(item.binh_hien_co)}</p>
+                      {item.danh_sach_binh && <p className="text-[8px] text-muted-foreground truncate">{item.danh_sach_binh}</p>}
+                    </div>
                     <div className="text-center border-x border-border/60"><p className="text-[10px] text-muted-foreground font-bold uppercase mb-0.5">Bán</p><p className="text-sm font-bold text-emerald-600">{formatNumber(item.binh_ban)}</p></div>
                     <div className="text-center"><p className="text-[10px] text-muted-foreground font-bold uppercase mb-0.5">Demo</p><p className="text-sm font-bold text-orange-600">{formatNumber(item.binh_demo)}</p></div>
                   </div>

@@ -43,15 +43,15 @@ export function Combobox({
     }, [value]);
 
     // Simple filtering logic
-    const filteredOptions = options.filter(option => 
-        option.toLowerCase().includes(searchTerm.toLowerCase())
-    ).slice(0, 50); // Limit to 50 for performance
+    const filteredOptions = (options || []).filter(option => 
+        (option || "").toLowerCase().includes((searchTerm || "").toLowerCase())
+    ).slice(0, 50);
 
     const handleInputChange = (e) => {
         const newVal = e.target.value;
         setSearchTerm(newVal);
         onChange(newVal);
-        if (!open && newVal.length > 0) setOpen(true);
+        if (!open) setOpen(true);
     };
 
     const handleSelect = (optionValue) => {
@@ -71,58 +71,68 @@ export function Combobox({
     const toggleOpen = (e) => {
         e.preventDefault();
         e.stopPropagation();
-        setOpen(!open);
-        inputRef.current?.focus();
+        setOpen(prev => !prev);
     };
 
     return (
         <Popover open={open} onOpenChange={setOpen}>
-            <div className="relative w-full group">
-                <input
-                    ref={inputRef}
-                    disabled={disabled}
-                    value={searchTerm}
-                    onChange={handleInputChange}
-                    onFocus={() => { setOpen(true); }}
-                    placeholder={placeholder}
-                    className={cn(
-                        "w-full h-11 px-4 bg-slate-50/50 border border-slate-200 rounded-xl text-sm font-bold outline-none transition-all pr-16",
-                        "focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white focus:border-primary",
-                        open && "ring-4 ring-primary/10 border-primary bg-white transition-none",
-                        disabled && "bg-slate-50 text-slate-500 cursor-not-allowed",
-                        className
-                    )}
-                />
-                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
-                    {searchTerm && !disabled && (
-                        <button 
-                            type="button" 
-                            onClick={handleClear}
-                            className="p-2 text-slate-400 hover:text-rose-500 rounded-full transition-colors"
-                        >
-                            <X className="w-4 h-4" />
-                        </button>
-                    )}
-                    <button
-                        type="button"
-                        onClick={toggleOpen}
+            <PopoverTrigger asChild>
+                <div 
+                    className="relative w-full"
+                    onClick={() => { if (!disabled) setOpen(true); }}
+                >
+                    <input
+                        ref={inputRef}
                         disabled={disabled}
+                        value={searchTerm}
+                        onChange={handleInputChange}
+                        autoComplete="off"
+                        placeholder={placeholder}
                         className={cn(
-                            "p-2 text-slate-400 hover:text-primary rounded-full transition-all",
-                            open && "text-primary"
+                            "w-full h-11 px-4 bg-slate-50/50 border border-slate-200 rounded-xl text-sm font-bold outline-none transition-all pr-16",
+                            "focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white focus:border-primary",
+                            open && "ring-4 ring-primary/10 border-primary bg-white shadow-sm",
+                            disabled && "bg-slate-50 text-slate-500 cursor-not-allowed",
+                            className
                         )}
-                    >
-                        <ChevronDown className={cn(
-                            "w-4 h-4 transition-transform duration-300",
-                            open && "rotate-180"
-                        )} />
-                    </button>
+                    />
+                    <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
+                        {searchTerm && !disabled && (
+                            <button 
+                                type="button" 
+                                onClick={handleClear}
+                                className="p-2 text-slate-400 hover:text-rose-500 rounded-full transition-colors"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            onClick={toggleOpen}
+                            disabled={disabled}
+                            className={cn(
+                                "p-2 text-slate-400 hover:text-primary rounded-full transition-all",
+                                open && "text-primary"
+                            )}
+                        >
+                            <ChevronDown className={cn(
+                                "w-4 h-4 transition-transform duration-300",
+                                open && "rotate-180"
+                            )} />
+                        </button>
+                    </div>
                 </div>
-            </div>
+            </PopoverTrigger>
 
             <PopoverContent 
                 onOpenAutoFocus={(e) => e.preventDefault()}
-                className="p-1 max-h-60 overflow-y-auto custom-scrollbar shadow-2xl border-primary/20 bg-white/95 backdrop-blur-md"
+                onInteractOutside={(e) => {
+                    // Don't close if clicking the input or clear button
+                    if (e.target && inputRef.current?.contains(e.target)) {
+                        e.preventDefault();
+                    }
+                }}
+                className="z-[100020] p-1 w-[var(--radix-popover-trigger-width)] max-h-60 overflow-y-auto custom-scrollbar shadow-2xl border border-slate-200 bg-white"
                 align="start"
                 sideOffset={6}
             >
@@ -132,6 +142,7 @@ export function Combobox({
                             <button
                                 key={option}
                                 type="button"
+                                onPointerDown={(e) => e.preventDefault()} // Prevents focus theft
                                 onClick={() => handleSelect(option)}
                                 className={cn(
                                     "w-full text-left px-3 py-2 rounded-lg text-[13px] font-bold transition-colors",
@@ -145,7 +156,10 @@ export function Combobox({
                         ))
                     ) : (
                         <div className="px-3 py-4 text-center text-xs text-slate-400 font-semibold italic">
-                            {emptyMessage}
+                            {(!options || options.length === 0) 
+                             ? "Không có dữ liệu gợi ý." 
+                             : (searchTerm ? emptyMessage : "Hãy gõ để tìm kiếm...")
+                            }
                         </div>
                     )}
                 </div>
@@ -153,3 +167,5 @@ export function Combobox({
         </Popover>
     );
 }
+
+export default Combobox;
