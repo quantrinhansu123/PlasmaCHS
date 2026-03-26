@@ -21,6 +21,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'react-toastify';
 import BarcodeScanner from '../Common/BarcodeScanner';
+import { Combobox } from '../ui/Combobox';
 import { ITEM_TYPES, ITEM_UNITS } from '../../constants/goodsReceiptConstants';
 import {
     CYLINDER_STATUSES,
@@ -37,6 +38,8 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
     const [suppliers, setSuppliers] = useState([]);
     const [warehousesList, setWarehousesList] = useState([]);
     const [scannerIndex, setScannerIndex] = useState(null);
+    const [cylindersList, setCylindersList] = useState([]);
+    const [machinesList, setMachinesList] = useState([]);
 
     const handleClose = useCallback(() => {
         setIsClosing(true);
@@ -117,12 +120,13 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
     // Load suppliers and warehouses
     useEffect(() => {
         const loadInitialData = async () => {
-            try {
-                const [suppliersRes, warehousesRes] = await Promise.all([
+            try {                const [suppliersRes, warehousesRes, cylindersRes, machinesRes] = await Promise.all([
                     supabase.from('suppliers').select('id, name').order('name'),
-                    supabase.from('warehouses').select('id, name').eq('status', 'Đang hoạt động').order('name')
+                    supabase.from('warehouses').select('id, name').eq('status', 'Đang hoạt động').order('name'),
+                    supabase.from('cylinders').select('serial_number').order('serial_number'),
+                    supabase.from('machines').select('serial_number').order('serial_number')
                 ]);
-
+ 
                 if (suppliersRes.data) {
                     setSuppliers(suppliersRes.data);
                     if (!isEdit && suppliersRes.data.length > 0) {
@@ -135,6 +139,8 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                         setFormData(prev => !prev.warehouse_id ? { ...prev, warehouse_id: warehousesRes.data[0].id } : prev);
                     }
                 }
+                if (cylindersRes.data) setCylindersList(cylindersRes.data.map(c => c.serial_number));
+                if (machinesRes.data) setMachinesList(machinesRes.data.map(m => m.serial_number));
             } catch (err) {
                 console.error('Error fetching initial data:', err);
             }
@@ -480,7 +486,10 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                                         <select
                                                             disabled={isReadOnly}
                                                             value={item.item_type}
-                                                            onChange={(e) => updateItem(idx, 'item_type', e.target.value)}
+                                                            onChange={(e) => {
+                                                                const newType = e.target.value;
+                                                                setItems(prev => prev.map((it, i) => i === idx ? { ...it, item_type: newType, serial_number: '', item_status: '' } : it));
+                                                            }}
                                                             className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-sm font-bold outline-none cursor-pointer"
                                                         >
                                                             {ITEM_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
@@ -504,14 +513,14 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                                     <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">Serial / Barcode</label>
                                                     <div className="flex gap-2">
                                                         <div className="relative flex-1">
-                                                            <input
+                                                            <Combobox
                                                                 disabled={isReadOnly}
                                                                 value={item.serial_number}
-                                                                onChange={(e) => updateItem(idx, 'serial_number', e.target.value)}
+                                                                onChange={(val) => updateItem(idx, 'serial_number', val)}
+                                                                options={item.item_type === 'MAY' ? machinesList : (['BINH', 'BINH_CO_KHI'].includes(item.item_type) ? cylindersList : [])}
                                                                 placeholder="Mã gán cho bình/máy..."
-                                                                className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-sm font-bold outline-none pr-10"
+                                                                className="h-11 font-bold text-sm"
                                                             />
-                                                            {item.serial_number && !isReadOnly && <button type="button" onClick={() => updateItem(idx, 'serial_number', '')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400"><X className="w-3.5 h-3.5" /></button>}
                                                         </div>
                                                         <button
                                                             type="button"
@@ -630,6 +639,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                 </div>
             </div>
 
+ 
             <BarcodeScanner
                 isOpen={scannerIndex !== null}
                 onClose={() => setScannerIndex(null)}

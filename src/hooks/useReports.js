@@ -374,6 +374,26 @@ export const useReports = () => {
     }
   };
 
+  const fetchCustomerCylinderDebt = async (customerId) => {
+    if (!customerId) return [];
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('view_customer_cylinder_debt')
+        .select('*')
+        .eq('customer_id', customerId);
+      
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      console.error('Error fetching cylinder debt:', err);
+      // toast.error('Lỗi tải thông tin nợ vỏ'); -- Don't show toast for every fetch
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const fetchCylinderAgingStats = async (filters = {}) => {
     setLoading(true);
     setError(null);
@@ -488,6 +508,7 @@ export const useReports = () => {
     fetchMachineInventoryReport,
     fetchSalesReport,
     fetchErrorReport,
+    fetchCustomerCylinderDebt,
     fetchMachineRevenue,
     fetchCylinderAgingStats,
     fetchCylinderAgingDetails,

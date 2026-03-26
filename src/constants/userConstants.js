@@ -17,7 +17,9 @@ export const USER_STATUSES = [
 
 export const TABLE_COLUMNS = [
     { key: 'info', label: 'Thông tin nhân sự' },
-    { key: 'contact', label: 'Liên lạc' },
+    { key: 'department', label: 'Phòng ban' },
+    { key: 'sales_group', label: 'Nhóm kinh doanh' },
     { key: 'role', label: 'Vai trò / Công việc' },
+    { key: 'approval_level', label: 'Quyền Duyệt' },
     { key: 'status', label: 'Trạng thái' },
 ];

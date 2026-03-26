@@ -17,6 +17,7 @@ export default function WarehouseFormModal({ warehouse, onClose, onSuccess }) {
         address: '',
         capacity: 0,
         status: 'Đang hoạt động',
+        branch_office: '',
     };
 
     const [formData, setFormData] = useState(defaultState);
@@ -29,6 +30,7 @@ export default function WarehouseFormModal({ warehouse, onClose, onSuccess }) {
                 address: warehouse.address || '',
                 capacity: warehouse.capacity || 0,
                 status: warehouse.status || 'Đang hoạt động',
+                branch_office: warehouse.branch_office || '',
             });
         }
     }, [warehouse, isEdit]);
@@ -61,6 +63,7 @@ export default function WarehouseFormModal({ warehouse, onClose, onSuccess }) {
                 address: formData.address.trim(),
                 capacity: parseInt(formData.capacity) || 0,
                 status: formData.status,
+                branch_office: formData.branch_office?.trim(),
                 updated_at: new Date().toISOString()
             };
 
@@ -140,6 +143,22 @@ export default function WarehouseFormModal({ warehouse, onClose, onSuccess }) {
                                     className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white transition-all"
                                     required
                                 />
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                    <Building2 className="w-4 h-4 text-primary/60" />
+                                    Chi nhánh / Văn phòng đại diện
+                                </label>
+                                <input
+                                    type="text"
+                                    name="branch_office"
+                                    value={formData.branch_office}
+                                    onChange={handleChange}
+                                    placeholder="Tên chi nhánh (Tự động map sang Đại lý KH)"
+                                    className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white transition-all"
+                                />
+                                <p className="text-[11px] text-slate-500 font-medium">Tên này sẽ tự động điền vào ô "Đại lý" khi tạo khách hàng</p>
                             </div>
 
                             <div className="space-y-1.5">

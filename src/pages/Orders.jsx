@@ -53,6 +53,7 @@ import {
 } from '../constants/orderConstants';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
+import useReports from '../hooks/useReports';
 
 // Register Chart.js components
 ChartJS.register(
@@ -148,6 +149,8 @@ const Orders = () => {
     const dropdownRef = useRef(null); // Keep this for backward compatibility if used elsewhere, but we'll use specific refs
     const listDropdownRef = useRef(null);
     const statsDropdownRef = useRef(null);
+    const { fetchCustomerCylinderDebt } = useReports();
+    const [allCustomerDebts, setAllCustomerDebts] = useState({}); // customer_id -> debt array
 
     useEffect(() => {
         fetchOrders();
@@ -158,7 +161,25 @@ const Orders = () => {
         // Extract unique customers from orders
         const customers = [...new Set(orders.map(o => o.customer_name).filter(Boolean))];
         setUniqueCustomers(customers);
+        
+        // Fetch debts for all customers in the orders list
+        if (orders.length > 0) {
+            fetchAllDebts(orders);
+        }
     }, [orders]);
+
+    const fetchAllDebts = async (currentOrders) => {
+        const uniqueCustomerIds = [...new Set(currentOrders.map(o => o.customer_id).filter(Boolean))];
+        const debtMap = {};
+        
+        // Fetch in parallel for better performance
+        await Promise.all(uniqueCustomerIds.map(async (cid) => {
+            const debt = await fetchCustomerCylinderDebt(cid);
+            debtMap[cid] = debt;
+        }));
+        
+        setAllCustomerDebts(debtMap);
+    };
 
     useEffect(() => {
         localStorage.setItem('columns_orders', JSON.stringify(visibleColumns));
@@ -425,7 +446,11 @@ const Orders = () => {
     }));
 
     const handlePrint = (order) => {
-        setOrdersToPrint(order);
+        const orderWithDebt = {
+            ...order,
+            customer_debt: allCustomerDebts[order.customer_id] || []
+        };
+        setOrdersToPrint(orderWithDebt);
         setHandoverToPrint(null);
         setTimeout(() => {
             window.print();
@@ -446,7 +471,13 @@ const Orders = () => {
             return;
         }
 
-        const selectedOrders = orders.filter(o => selectedIds.includes(o.id));
+        const selectedOrders = orders
+            .filter(o => selectedIds.includes(o.id))
+            .map(o => ({
+                ...o,
+                customer_debt: allCustomerDebts[o.customer_id] || []
+            }));
+            
         setOrdersToPrint(selectedOrders);
 
         setTimeout(() => {
@@ -607,6 +638,93 @@ const Orders = () => {
         '#2563EB', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
         '#06B6D4', '#F97316', '#84CC16', '#EC4899', '#6366F1'
     ];
+
+    const renderCell = (key, order) => {
+        const status = getStatusConfig(order.status);
+        switch (key) {
+            case 'code':
+                return (
+                    <span className="text-[13px] font-medium text-foreground">
+                        {order.order_code}
+                    </span>
+                );
+            case 'category':
+                return (
+                    <span className={getCategoryBadgeClass(order.customer_category)}>
+                        {getLabel(CUSTOMER_CATEGORIES, order.customer_category)}
+                    </span>
+                );
+            case 'customer':
+                return <span className="text-[13px] font-medium text-foreground">{order.customer_name}</span>;
+            case 'recipient':
+                return <span className="text-[13px] text-muted-foreground font-normal">{order.recipient_name}</span>;
+            case 'type':
+                return (
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-200 text-xs font-semibold">
+                        {getLabel(ORDER_TYPES, order.order_type)}
+                    </span>
+                );
+            case 'product':
+                return (
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-xs font-semibold">
+                        {getLabel(PRODUCT_TYPES, order.product_type)}
+                    </span>
+                );
+            case 'quantity':
+                return <span className="text-[13px] font-semibold text-foreground">{formatNumber(order.quantity)}</span>;
+            case 'department':
+                return <span className="text-[13px] text-muted-foreground font-normal">{order.department || '—'}</span>;
+            case 'cylinders':
+                return (
+                    order.assigned_cylinders && order.assigned_cylinders.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5 max-w-[220px]">
+                            {order.assigned_cylinders.slice(0, 3).map((serial, idx) => (
+                                <span key={idx} className="px-2.5 py-1 bg-muted/30 text-muted-foreground rounded-md text-xs font-medium border border-border">
+                                    {serial}
+                                </span>
+                            ))}
+                            {order.assigned_cylinders.length > 3 && (
+                                <button
+                                    onClick={() => setSerialsModalOrder(order)}
+                                    type="button"
+                                    className="!h-auto !px-2.5 !py-1 !rounded-full !text-xs !font-semibold inline-flex items-center justify-center min-w-[40px] bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-colors"
+                                    title="Bấm để xem danh sách đầy đủ"
+                                >
+                                    +{order.assigned_cylinders.length - 3}
+                                </button>
+                            )}
+                        </div>
+                    ) : (
+                        <span className="text-muted-foreground">—</span>
+                    )
+                );
+            case 'cylinder_debt':
+                return (
+                    <div className="flex flex-col gap-0.5">
+                        {(allCustomerDebts[order.customer_id] || []).length > 0 ? (
+                            allCustomerDebts[order.customer_id].map((debt, idx) => (
+                                <div key={idx} className="flex items-center justify-between gap-2 whitespace-nowrap">
+                                    <span className="text-slate-500 font-medium">{debt.cylinder_type}:</span>
+                                    <span className="text-rose-600 font-bold">{debt.balance}</span>
+                                </div>
+                            ))
+                        ) : (
+                            <span className="text-slate-400 italic">Hết nợ</span>
+                        )}
+                    </div>
+                );
+            case 'status':
+                return (
+                    <span className={getStatusBadgeClass(status.color)}>
+                        {status.label}
+                    </span>
+                );
+            case 'date':
+                return order.created_at ? new Date(order.created_at).toLocaleDateString('vi-VN') : '---';
+            default:
+                return order[key] || '—';
+        }
+    };
 
     return (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5">
@@ -790,6 +908,22 @@ const Orders = () => {
                                             </div>
                                         </div>
                                     )}
+
+                                    <div className="bg-amber-50/40 rounded-lg p-2.5 border border-amber-100/50 mb-3">
+                                        <p className="text-[10px] font-bold text-amber-700 uppercase leading-none mb-2">Thông tin nợ vỏ (Thu hồi)</p>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {(allCustomerDebts[order.customer_id] || []).length > 0 ? (
+                                                allCustomerDebts[order.customer_id].map((debt, idx) => (
+                                                    <div key={idx} className="flex items-center justify-between bg-white/60 p-1.5 rounded-md border border-amber-200/30">
+                                                        <span className="text-[10px] text-slate-500 font-medium">{debt.cylinder_type}</span>
+                                                        <span className="text-xs text-rose-600 font-black">{debt.balance}</span>
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <div className="col-span-2 text-[10px] text-slate-400 italic">Không có nợ vỏ</div>
+                                            )}
+                                        </div>
+                                    </div>
 
                                     <div className="flex items-center justify-between pt-3 border-t border-border">
                                         <div className="flex flex-col">
@@ -1175,7 +1309,7 @@ const Orders = () => {
                                 const status = getStatusConfig(order.status);
                                 return (
                                     <tr key={order.id} className={getRowStyle(order.customer_category, selectedIds.includes(order.id))}>
-                                        <td className="px-4 py-4">
+                                        <td className="px-4 py-4 uppercase">
                                             <div className="flex items-center justify-center">
                                                 <input
                                                     type="checkbox"
@@ -1185,67 +1319,17 @@ const Orders = () => {
                                                 />
                                             </div>
                                         </td>
-                                        {isColumnVisible('code') && <td className="px-4 py-4 whitespace-nowrap border-l border-r border-primary/10">
-                                            <span className="text-[13px] font-medium text-foreground">
-                                                {order.order_code}
-                                            </span>
-                                        </td>}
-                                        {isColumnVisible('category') && <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">
-                                            <span className={getCategoryBadgeClass(order.customer_category)}>
-                                                {getLabel(CUSTOMER_CATEGORIES, order.customer_category)}
-                                            </span>
-                                        </td>}
-                                        {isColumnVisible('customer') && <td className="px-4 py-4">
-                                            <span className="text-[13px] font-medium text-foreground">{order.customer_name}</span>
-                                        </td>}
-                                        {isColumnVisible('recipient') && <td className="px-4 py-4">
-                                            <span className="text-[13px] text-muted-foreground font-normal">{order.recipient_name}</span>
-                                        </td>}
-                                        {isColumnVisible('type') && <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">
-                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-200 text-xs font-semibold">
-                                                {getLabel(ORDER_TYPES, order.order_type)}
-                                            </span>
-                                        </td>}
-                                        {isColumnVisible('product') && <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">
-                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-xs font-semibold">
-                                                {getLabel(PRODUCT_TYPES, order.product_type)}
-                                            </span>
-                                        </td>}
-                                        {isColumnVisible('quantity') && <td className="px-4 py-4">
-                                            <span className="text-[13px] font-semibold text-foreground">{formatNumber(order.quantity)}</span>
-                                        </td>}
-                                        {isColumnVisible('department') && <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">{order.department || '—'}</td>}
-                                        {isColumnVisible('cylinders') && <td className="px-4 py-4 text-[13px]">
-                                            {order.assigned_cylinders && order.assigned_cylinders.length > 0 ? (
-                                                <div className="flex flex-wrap gap-1.5 max-w-[220px]">
-                                                    {order.assigned_cylinders.slice(0, 3).map((serial, idx) => (
-                                                        <span key={idx} className="px-2.5 py-1 bg-muted/30 text-muted-foreground rounded-md text-xs font-medium border border-border">
-                                                            {serial}
-                                                        </span>
-                                                    ))}
-                                                    {order.assigned_cylinders.length > 3 && (
-                                                        <button
-                                                            onClick={() => setSerialsModalOrder(order)}
-                                                            type="button"
-                                                            className="!h-auto !px-2.5 !py-1 !rounded-full !text-xs !font-semibold inline-flex items-center justify-center min-w-[40px] bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-colors"
-                                                            title="Bấm để xem danh sách đầy đủ"
-                                                        >
-                                                            +{order.assigned_cylinders.length - 3}
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            ) : (
-                                                <span className="text-muted-foreground">—</span>
-                                            )}
-                                        </td>}
-                                        {isColumnVisible('status') && <td className="px-4 py-4">
-                                            <span className={getStatusBadgeClass(status.color)}>
-                                                {status.label}
-                                            </span>
-                                        </td>}
-                                        {isColumnVisible('date') && <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">
-                                            {order.created_at ? new Date(order.created_at).toLocaleDateString('vi-VN') : '---'}
-                                        </td>}
+                                        {visibleTableColumns.map(col => (
+                                            <td 
+                                                key={col.key} 
+                                                className={clsx(
+                                                    "px-4 py-4",
+                                                    col.key === 'code' && 'border-l border-r border-primary/10'
+                                                )}
+                                            >
+                                                {renderCell(col.key, order)}
+                                            </td>
+                                        ))}
                                         <td className="sticky right-0 z-20 bg-white px-4 py-4 text-center shadow-[-6px_0_10px_-8px_rgba(15,23,42,0.25)] before:content-[''] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:bg-slate-300">
                                             <div className="flex items-center justify-center gap-3">
                                                 <button

@@ -1,5 +1,4 @@
-import { clsx } from 'clsx';
-import { ChevronDown, Clock, Edit3, Hash, MapPin, Package, Phone, Save, ScanLine, Search, User, X } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Clock, Edit3, Hash, MapPin, Package, Phone, Save, ScanLine, Search, User, X, Info } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'react-toastify';
@@ -9,11 +8,14 @@ import {
     PRODUCT_TYPES
 } from '../../constants/orderConstants';
 import usePermissions from '../../hooks/usePermissions';
+import { useReports } from '../../hooks/useReports';
 import { supabase } from '../../supabase/config';
 import BarcodeScanner from '../Common/BarcodeScanner';
+import clsx from 'clsx';
 
 export default function OrderFormModal({ order, onClose, onSuccess, initialMode = 'edit' }) {
     const { role, user } = usePermissions();
+    const { fetchCustomerCylinderDebt } = useReports();
     const isEdit = !!order;
     const [mode, setMode] = useState(initialMode);
     const isReadOnly = mode === 'view';
@@ -86,6 +88,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
 
     const [formData, setFormData] = useState(defaultState);
     const [warehousesList, setWarehousesList] = useState([]);
+    const [cylinderDebt, setCylinderDebt] = useState([]);
 
     useEffect(() => {
         fetchRealCustomers();
@@ -93,6 +96,19 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         fetchShippers();
         fetchPromotions();
     }, []);
+
+    useEffect(() => {
+        if (formData.customerId) {
+            loadCylinderDebt(formData.customerId);
+        } else {
+            setCylinderDebt([]);
+        }
+    }, [formData.customerId]);
+
+    const loadCylinderDebt = async (customerId) => {
+        const debt = await fetchCustomerCylinderDebt(customerId);
+        setCylinderDebt(debt || []);
+    };
 
     const fetchPromotions = async () => {
         try {
@@ -672,6 +688,22 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                             </div>
                                         )}
                                     </div>
+
+                                    {cylinderDebt.length > 0 && (
+                                        <div className="mt-1 p-3 bg-amber-50 border border-amber-200 rounded-2xl animate-in fade-in slide-in-from-top-2">
+                                            <div className="flex items-center gap-2 mb-2 text-amber-700 font-bold text-[11px] uppercase tracking-wider">
+                                                <AlertTriangle size={14} /> Nợ vỏ hiện tại
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                {cylinderDebt.map((debt, idx) => (
+                                                    <div key={idx} className="flex items-center justify-between px-3 py-1.5 bg-white border border-amber-100 rounded-xl shadow-sm">
+                                                        <span className="text-[12px] font-bold text-slate-600">{debt.cylinder_type}</span>
+                                                        <span className="text-[14px] font-black text-amber-600">{debt.debt_count} cái</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="space-y-1.5">

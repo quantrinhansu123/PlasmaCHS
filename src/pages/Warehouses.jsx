@@ -60,6 +60,7 @@ ChartJS.register(
 
 const TABLE_COLUMNS_DEF = [
     { key: 'name', label: 'Tên kho' },
+    { key: 'branch_office', label: 'Chi nhánh / VPĐD' },
     { key: 'manager_name', label: 'Thủ kho' },
     { key: 'address', label: 'Địa chỉ' },
     { key: 'capacity', label: 'Sức chứa' },
@@ -241,6 +242,7 @@ const Warehouses = () => {
     const downloadTemplate = () => {
         const headers = [
             'Tên kho',
+            'Chi nhánh / Văn phòng đại diện',
             'Thủ kho',
             'Địa chỉ',
             'Sức chứa',
@@ -250,6 +252,7 @@ const Warehouses = () => {
         const exampleData = [
             {
                 'Tên kho': 'Kho A - Hà Nội',
+                'Chi nhánh / Văn phòng đại diện': 'Văn phòng Hà Nội',
                 'Thủ kho': 'Nguyễn Văn Hoàn',
                 'Địa chỉ': 'Thanh Xuân, Hà Nội',
                 'Sức chứa': 5000,
@@ -285,6 +288,7 @@ const Warehouses = () => {
 
                 const warehousesToInsert = data.map(row => ({
                     name: row['Tên kho']?.toString(),
+                    branch_office: row['Chi nhánh / Văn phòng đại diện']?.toString(),
                     manager_name: row['Thủ kho']?.toString(),
                     address: row['Địa chỉ']?.toString(),
                     capacity: parseInt(row['Sức chứa']) || 0,

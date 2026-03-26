@@ -432,6 +432,22 @@ const OrderItem = ({ order, warehousesList }) => {
                 </tbody>
             </table>
 
+            {/* ===== CYLINDER DEBT SECTION (For Recovery) ===== */}
+            {order.customer_debt && order.customer_debt.length > 0 && (
+                <div style={{ marginTop: '3mm', border: '1px solid #000', padding: '3px 8px' }}>
+                    <div style={{ fontWeight: 'bold', textDecoration: 'underline', fontSize: '10pt', marginBottom: '3px' }}>
+                        THÔNG TIN THU HỒI VỎ (NỢ VỎ CỦA KHÁCH HÀNG):
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px' }}>
+                        {order.customer_debt.map((d, i) => (
+                            <div key={i} style={{ fontSize: '10pt' }}>
+                                - {d.cylinder_type}: <span style={{ fontWeight: 'bold' }}>{d.balance}</span> bình
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             {/* ===== SUMMARY ===== */}
             <div style={S.summarySection}>
                 <div style={S.infoRow}>

@@ -69,6 +69,7 @@ const CUSTOMER_CATEGORIES = {
   'TM': 'Thẩm mỹ viện',
   'PK': 'Phòng khám',
   'NG': 'Khách ngoại giao',
+  'GD': 'Gia đình',
   'SP': 'Spa / Khác'
 };
 

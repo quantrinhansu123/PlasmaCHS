@@ -54,6 +54,7 @@ export const TABLE_COLUMNS = [
     { key: 'quantity', label: 'Số lượng' },
     { key: 'department', label: 'Mã máy' },
     { key: 'cylinders', label: 'Mã bình' },
+    { key: 'cylinder_debt', label: 'Nợ vỏ' },
     { key: 'status', label: 'Trạng thái' },
     { key: 'date', label: 'Ngày đặt' },
 ];

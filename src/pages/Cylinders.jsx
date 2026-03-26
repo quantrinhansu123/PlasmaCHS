@@ -59,11 +59,13 @@ ChartJS.register(
 
 const TABLE_COLUMNS = [
     { key: 'serial_number', label: 'Mã RFID (Serial)' },
+    { key: 'cylinder_code', label: 'Mã bình khắc' },
     { key: 'volume', label: 'Thể tích / Loại bình' },
     { key: 'customer_name', label: 'Khách hàng' },
     { key: 'department', label: 'Vị trí' },
     { key: 'warehouse', label: 'Kho Quản Lý' },
     { key: 'status', label: 'Trạng Thái' },
+    { key: 'expiry_date', label: 'Hạn kiểm định' },
 ];
 
 const CATEGORY_OPTIONS = [
@@ -300,6 +302,7 @@ const Cylinders = () => {
     const downloadTemplate = () => {
         const headers = [
             'Mã RFID (Serial)',
+            'Mã bình khắc',
             'Thể tích',
             'Loại khí',
             'Loại van',
@@ -308,11 +311,14 @@ const Cylinders = () => {
             'Khối lượng tịnh (kg)',
             'Kho quản lý',
             'Trạng thái',
+            'Hạn kiểm định',
+            'Khách hàng',
         ];
 
         const exampleData = [
             {
                 'Mã RFID (Serial)': 'RFID0001',
+                'Mã bình khắc': 'P0001',
                 'Thể tích': 'bình 4L/ CGA870',
                 'Loại khí': 'O2',
                 'Loại van': 'Van Messer/Phi 6/ CB Trắng',
@@ -321,8 +327,10 @@ const Cylinders = () => {
                 'Khối lượng tịnh (kg)': '8',
                 'Kho quản lý': uniqueWarehouses[0] || 'Kho tổng',
                 'Trạng thái': 'sẵn sàng',
+                'Hạn kiểm định': '2026-12-31',
+                'Khách hàng': 'Phòng khám đa khoa VH',
             },
-        ];
+];
 
         const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
         const wb = XLSX.utils.book_new();
@@ -357,6 +365,13 @@ const Cylinders = () => {
                     return acc;
                 }, {});
 
+                // Fetch all customers to map names to IDs
+                const { data: customers } = await supabase.from('customers').select('id, name');
+                const customerMap = (customers || []).reduce((acc, c) => {
+                    acc[c.name.toLowerCase()] = c.id;
+                    return acc;
+                }, {});
+
                 const cylindersToInsert = data.map(row => {
                     // Try to find status value regardless of header case
                     const statusKey = Object.keys(row).find(k => k.toLowerCase() === 'trạng thái');
@@ -372,8 +387,12 @@ const Cylinders = () => {
                         cylinderStatus = foundStatus ? foundStatus.id : statusVal.toLowerCase();
                     }
 
+                    const custName = row['Khách hàng']?.toString();
+                    const custId = customerMap[custName?.toLowerCase()] || null;
+
                     return {
                         serial_number: row['Mã RFID (Serial)']?.toString(),
+                        cylinder_code: row['Mã bình khắc']?.toString() || null,
                         volume: row['Thể tích']?.toString(),
                         gas_type: row['Loại khí']?.toString() || 'AirMAC',
                         valve_type: row['Loại van']?.toString() || 'Van Messer/Phi 6/ CB Trắng',
@@ -381,7 +400,10 @@ const Cylinders = () => {
                         category: row['Phân loại (BV/TM)']?.toString() || 'BV',
                         net_weight: row['Khối lượng tịnh (kg)']?.toString() || '8',
                         status: cylinderStatus,
-                        warehouse_id: warehouseMap[row['Kho quản lý']?.toString()?.toLowerCase()] || null
+                        warehouse_id: warehouseMap[row['Kho quản lý']?.toString()?.toLowerCase()] || null,
+                        customer_id: custId,
+                        customer_name: custName || null,
+                        expiry_date: row['Hạn kiểm định']?.toString() || null
                     };
                 }).filter(c => c.serial_number);
 
@@ -391,16 +413,18 @@ const Cylinders = () => {
                     return;
                 }
 
-                const { error } = await supabase.from('cylinders').insert(cylindersToInsert);
+                // Use upsert to handle duplicates and updates
+                const { error } = await supabase
+                    .from('cylinders')
+                    .upsert(cylindersToInsert, { 
+                        onConflict: 'serial_number',
+                        ignoreDuplicates: false 
+                    });
 
                 if (error) {
-                    if (error.code === '23505') {
-                        alert('Lỗi: Một số mã RFID đã tồn tại trên hệ thống. Vui lòng kiểm tra lại!');
-                    } else {
-                        throw error;
-                    }
+                    throw error;
                 } else {
-                    alert(`🎉 Đã import thành công ${cylindersToInsert.length} vỏ bình!`);
+                    alert(`🎉 Đã xử lý thành công ${cylindersToInsert.length} vỏ bình (Thêm mới/Cập nhật)!`);
                     fetchCylinders();
                 }
             } catch (err) {

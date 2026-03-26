@@ -109,6 +109,7 @@ const Customers = () => {
         { id: 'TM', label: 'Thẩm mỹ viện' },
         { id: 'PK', label: 'Phòng khám' },
         { id: 'NG', label: 'Khách ngoại giao' },
+        { id: 'GD', label: 'Gia đình' },
         { id: 'SP', label: 'Spa / Khác' },
     ];
 
@@ -289,6 +290,7 @@ const Customers = () => {
         categoryId === 'TM' && 'bg-pink-50 text-pink-700 border-pink-200',
         categoryId === 'PK' && 'bg-primary/10 text-primary hover:bg-primary/20 transition-all shadow-md shadow-primary/10',
         categoryId === 'NG' && 'bg-violet-50 text-violet-700 border-violet-200',
+        categoryId === 'GD' && 'bg-emerald-50 text-emerald-700 border-emerald-200',
         categoryId === 'SP' && 'bg-amber-50 text-amber-700 border-amber-200',
         !categoryId && 'bg-muted text-muted-foreground border-border'
     );
@@ -448,7 +450,7 @@ const Customers = () => {
         const headers = [
             'Mã khách hàng',
             'Tên khách hàng',
-            'Loại khách hàng (BV/TM/PK/NG/SP)',
+            'Loại khách hàng (BV/TM/PK/NG/GD/SP)',
             'Số điện thoại',
             'Địa chỉ',
             'Người đại diện',
@@ -467,7 +469,7 @@ const Customers = () => {
             {
                 'Mã khách hàng': 'KH00001',
                 'Tên khách hàng': 'Bệnh viện Đa khoa Tỉnh',
-                'Loại khách hàng (BV/TM/PK/NG/SP)': 'BV',
+                'Loại khách hàng (BV/TM/PK/NG/GD/SP)': 'BV',
                 'Số điện thoại': '0912345678',
                 'Địa chỉ': '123 Đường ABC, Phường XYZ, TP. Hà Nội',
                 'Người đại diện': 'Nguyễn Văn A',
@@ -547,7 +549,7 @@ const Customers = () => {
                     return {
                         code: code,
                         name: row['Tên khách hàng']?.toString(),
-                        category: row['Loại khách hàng (BV/TM/PK/NG/SP)']?.toString() || 'BV',
+                        category: row['Loại khách hàng (BV/TM/PK/NG/GD/SP)']?.toString() || 'BV',
                         phone: row['Số điện thoại']?.toString(),
                         address: row['Địa chỉ']?.toString(),
                         legal_rep: row['Người đại diện']?.toString(),

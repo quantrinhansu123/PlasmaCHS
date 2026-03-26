@@ -39,7 +39,9 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
         handle_type: 'Có quai',
         customer_id: '',
         department: '',
-        warehouse_id: ''
+        warehouse_id: '',
+        cylinder_code: '',
+        expiry_date: ''
     };
 
     const [formData, setFormData] = useState(defaultState);
@@ -99,7 +101,9 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                 handle_type: findMatchingId(HANDLE_TYPES, cylinder.handle_type, 'Có quai'),
                 customer_id: cylinder.customer_id || '',
                 department: cDept || '',
-                warehouse_id: cylinder.warehouse_id || ''
+                warehouse_id: cylinder.warehouse_id || '',
+                cylinder_code: cylinder.cylinder_code || '',
+                expiry_date: cylinder.expiry_date || ''
             });
         }
     }, [cylinder, isEdit]);
@@ -364,6 +368,35 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                                     <option value="">-- Chọn kho --</option>
                                     {warehousesList.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                                 </select>
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                    <Hash className="w-4 h-4 text-primary/60" />
+                                    Mã bình khắc (Vật lý)
+                                </label>
+                                <input
+                                    type="text"
+                                    name="cylinder_code"
+                                    value={formData.cylinder_code || ''}
+                                    onChange={handleChange}
+                                    placeholder="Ví dụ: P00123"
+                                    className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-[14px] font-bold text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white transition-all shadow-sm"
+                                />
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                    <Calendar className="w-4 h-4 text-primary/60" />
+                                    Hạn kiểm định
+                                </label>
+                                <input
+                                    type="date"
+                                    name="expiry_date"
+                                    value={formData.expiry_date || ''}
+                                    onChange={handleChange}
+                                    className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-[14px] font-bold text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white transition-all shadow-sm"
+                                />
                             </div>
                         </div>
                     </div>

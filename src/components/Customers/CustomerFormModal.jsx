@@ -1,7 +1,7 @@
+import { clsx } from 'clsx';
 import { Building, Hash, MapPin, Phone, Receipt, Save, User, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { clsx } from 'clsx';
 import { supabase } from '../../supabase/config';
 
 export default function CustomerFormModal({ customer, onClose, onSuccess, categories, warehouses }) {
@@ -100,10 +100,21 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
 
     const handleChange = (e) => {
         const { name, value, type } = e.target;
-        setFormData(prev => ({
-            ...prev,
+
+        let updatedData = {
+            ...formData,
             [name]: type === 'number' ? (value === '' ? 0 : parseInt(value, 10)) : value
-        }));
+        };
+
+        // Auto sync agency_name when warehouse_id changes
+        if (name === 'warehouse_id' && warehouses) {
+            const selectedWh = warehouses.find(w => w.id === value);
+            if (selectedWh && selectedWh.branch_office) {
+                updatedData.agency_name = selectedWh.branch_office;
+            }
+        }
+
+        setFormData(updatedData);
     };
 
     const handleSubmit = async (e) => {
@@ -152,7 +163,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
             isClosing ? "opacity-0 pointer-events-none" : "opacity-100"
         )}>
             {/* Backdrop */}
-            <div 
+            <div
                 className={clsx(
                     "absolute inset-0 bg-black/45 backdrop-blur-sm animate-in fade-in duration-300",
                     isClosing && "animate-out fade-out duration-300"
@@ -161,7 +172,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
             />
 
             {/* Panel */}
-            <div 
+            <div
                 className={clsx(
                     "relative bg-slate-50 shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col h-full border-l border-slate-200 animate-in slide-in-from-right duration-500",
                     isClosing && "animate-out slide-out-to-right duration-300"
@@ -249,6 +260,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                         <option value="TM">Thẩm mỹ viện (TM)</option>
                                         <option value="PK">Phòng khám (PK)</option>
                                         <option value="NG">Khách ngoại giao (NG)</option>
+                                        <option value="GD">Khách Gia đình (GD)</option>
                                         <option value="SP">Spa / Khác (SP)</option>
                                     </select>
                                 </div>
@@ -327,14 +339,21 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                 </div>
                                 <div>
                                     <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><Building className="w-4 h-4" />Nhóm Kinh Doanh</label>
-                                    <input
-                                        type="text"
+                                    <select
                                         name="business_group"
                                         value={formData.business_group}
                                         onChange={handleChange}
-                                        placeholder="Ví dụ: Nhóm KD Miền Bắc..."
-                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white outline-none transition-all font-semibold text-slate-900"
-                                    />
+                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white outline-none transition-all font-semibold text-slate-700 cursor-pointer"
+                                    >
+                                        <option value="">-- Chọn Nhóm Kinh Doanh --</option>
+                                        <option value="Nhóm KD Miền Bắc">Nhóm KD Miền Bắc</option>
+                                        <option value="Nhóm KD Miền Trung">Nhóm KD Miền Trung</option>
+                                        <option value="Nhóm KD Miền Nam">Nhóm KD Miền Nam</option>
+                                        <option value="Nhóm Ngoại giao">Nhóm Ngoại giao</option>
+                                        <option value="Nhóm Bệnh viện lớn">Nhóm Bệnh viện lớn</option>
+                                        <option value="Nhóm Spa / Khác">Nhóm Spa / Khác</option>
+                                        <option value="Nhóm Gia đình">Nhóm Gia đình</option>
+                                    </select>
                                 </div>
                                 <div>
                                     <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><User className="w-4 h-4" />NV Kinh Doanh phụ trách chăm sóc</label>
@@ -349,7 +368,10 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5"><Building className="w-4 h-4" />Đại lý (nơi quản lý KH)</label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5">
+                                        <Building className="w-4 h-4" />
+                                        Chi nhánh / VPĐD (Đại lý)
+                                    </label>
                                     <input
                                         type="text"
                                         name="agency_name"
@@ -371,8 +393,10 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                         onChange={handleChange}
                                         className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white outline-none transition-all font-semibold text-slate-900 cursor-pointer"
                                     >
-                                        <option value="">-- Chọn NVKD phụ trách --</option>
-                                        {staffList.map(u => <option key={u.id} value={u.name}>{u.name}{u.role ? ` (${u.role})` : ''}</option>)}
+                                        <option value="">-- Chọn Kho phụ trách --</option>
+                                        {warehouses && warehouses.map(w => (
+                                            <option key={w.id} value={w.name}>{w.name}</option>
+                                        ))}
                                     </select>
                                 </div>
                             </div>

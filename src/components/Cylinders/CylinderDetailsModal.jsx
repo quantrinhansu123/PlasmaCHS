@@ -245,7 +245,7 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
     const content = (
         <div className="flex flex-col h-full bg-[#f8fafc]">
             {/* Header Profile */}
-            <div className="bg-white px-4 md:px-8 py-4 md:py-6 border-b border-slate-200 shrink-0 relative overflow-hidden sticky top-0 z-20">
+            <div className="bg-white px-4 md:px-8 py-4 md:py-6 border-b border-slate-200 shrink-0 overflow-hidden sticky top-0 z-20">
                 <div className="absolute top-0 right-0 w-40 h-40 md:w-64 md:h-64 bg-primary/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 opacity-60 pointer-events-none"></div>
 
                 <div className="flex items-start justify-between gap-3 relative z-10">
@@ -260,7 +260,9 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                             <div className="flex flex-wrap items-center gap-2 md:gap-4 text-xs md:text-sm font-bold text-slate-500">
                                 <span className="flex items-center gap-1.5"><Activity className="w-4 h-4 text-slate-400" /> {cylinder.volume || '—'}</span>
                                 {cylinder.category && <span className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 rounded-md text-slate-600">{cylinder.category}</span>}
+                                {cylinder.cylinder_code && <span className="flex items-center gap-1.5 px-2 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-md">Mã khắc: {cylinder.cylinder_code}</span>}
                                 <span className="flex items-center gap-1.5 text-primary"><MapPin className="w-4 h-4 text-primary/60" /> {cylinder.status || '—'}</span>
+                                {cylinder.expiry_date && <span className="flex items-center gap-1.5 text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-100 italic">Hạn: {formatDate(cylinder.expiry_date)}</span>}
                             </div>
                         </div>
                     </div>

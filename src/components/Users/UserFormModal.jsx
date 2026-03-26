@@ -16,6 +16,9 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
         username: '',
         role: USER_ROLES[0].id,
         phone: '',
+        department: '',
+        sales_group: '',
+        approval_level: 'Staff',
         status: 'Hoạt động',
     };
 
@@ -35,6 +38,9 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                 username: user.username || '',
                 role: user.role || USER_ROLES[0].id,
                 phone: user.phone || '',
+                department: user.department || '',
+                sales_group: user.sales_group || '',
+                approval_level: user.approval_level || 'Staff',
                 status: user.status || 'Hoạt động',
             });
         }
@@ -81,6 +87,9 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                 username: formData.username.trim(),
                 role: formData.role,
                 phone: formData.phone.trim(),
+                department: formData.department.trim(),
+                sales_group: formData.sales_group.trim(),
+                approval_level: formData.approval_level,
                 status: formData.status,
                 updated_at: new Date().toISOString()
             };
@@ -231,6 +240,57 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                                             {USER_ROLES.map(role => (
                                                 <option key={role.id} value={role.id}>{role.label}</option>
                                             ))}
+                                        </select>
+                                        <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-primary/70">
+                                            <ChevronDown className="w-4 h-4" />
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div className="space-y-1.5">
+                                        <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                            Phòng ban / Đại lý
+                                        </label>
+                                        <input
+                                            type="text"
+                                            name="department"
+                                            value={formData.department}
+                                            onChange={handleChange}
+                                            placeholder="VD: Kế toán, Đại lý A..."
+                                            className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-800 transition-all focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                            Nhóm kinh doanh
+                                        </label>
+                                        <input
+                                            type="text"
+                                            name="sales_group"
+                                            value={formData.sales_group}
+                                            onChange={handleChange}
+                                            placeholder="VD: Nhóm 1, Miền Bắc..."
+                                            className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-800 transition-all focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                        Quyền hạn phê duyệt (Approval)
+                                    </label>
+                                    <div className="relative">
+                                        <select
+                                            name="approval_level"
+                                            value={formData.approval_level}
+                                            onChange={handleChange}
+                                            className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-800 appearance-none transition-all focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                        >
+                                            <option value="Staff">Nhân viên (Staff)</option>
+                                            <option value="Supervisor">Tổ trưởng (Supervisor)</option>
+                                            <option value="Manager">Quản lý (Manager)</option>
+                                            <option value="Admin">Giám đốc / Admin</option>
                                         </select>
                                         <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-primary/70">
                                             <ChevronDown className="w-4 h-4" />
