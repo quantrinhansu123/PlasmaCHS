@@ -173,7 +173,10 @@ span:not(.text-white):not([class*="text-"]),
 div:not(.text-white):not([class*="text-"]),
 th,
 td,
-a:not(.text-white):not([class*="text-"]) {
+a:not(.text-white):not([class*="text-"]),
+input,
+select,
+textarea {
   font-weight: 600 !important;
   color: #000000 !important;
 }

@@ -72,7 +72,7 @@ export function SearchableSelect({
             <Search className="mr-2 h-4 w-4 shrink-0 opacity-40" />
             <CommandInput
               placeholder={searchPlaceholder}
-              className="h-10 border-none px-0 text-[13px] focus:ring-0"
+              className="h-10 border-none px-0 text-[13px] text-slate-900 focus:ring-0"
             />
           </div>
           <CommandList className="max-h-60 p-1">

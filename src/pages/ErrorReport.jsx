@@ -250,6 +250,7 @@ const ErrorReport = () => {
                 setSelected={(vals) => { setSelectedWarehouses(vals); setActiveDropdown(null); }}
                 filterSearch={filterSearch}
                 setFilterSearch={setFilterSearch}
+                singleSelect={true}
               />
             )}
           </div>

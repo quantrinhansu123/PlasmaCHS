@@ -30,7 +30,8 @@ import {
     Download,
     Upload,
     Ticket,
-    X
+    X,
+    MoreVertical
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
@@ -83,6 +84,9 @@ const Customers = () => {
     const [pendingCategories, setPendingCategories] = useState([]);
     const [pendingManagedBy, setPendingManagedBy] = useState([]);
     const [pendingCareBy, setPendingCareBy] = useState([]);
+    const [showMoreActions, setShowMoreActions] = useState(false);
+    const [isSearchExpanded, setIsSearchExpanded] = useState(false);
+    const searchInputRef = useRef(null);
 
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [filterSearch, setFilterSearch] = useState('');
@@ -153,6 +157,12 @@ const Customers = () => {
     }, []);
 
     useEffect(() => {
+        if (isSearchExpanded && searchInputRef.current) {
+            searchInputRef.current.focus();
+        }
+    }, [isSearchExpanded]);
+
+    useEffect(() => {
         const managedBy = [...new Set(customers.map(c => c.managed_by).filter(Boolean))];
         const careBy = [...new Set(customers.map(c => c.care_by).filter(Boolean))];
         setUniqueManagedBy(managedBy);
@@ -166,6 +176,9 @@ const Customers = () => {
             }
             if (columnPickerRef.current && !columnPickerRef.current.contains(event.target)) {
                 setShowColumnPicker(false);
+            }
+            if (!event.target.closest('#more-actions-menu') && !event.target.closest('#more-actions-btn')) {
+                setShowMoreActions(false);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
@@ -700,88 +713,148 @@ const Customers = () => {
 
             {activeView === 'list' && (
                 <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full">
-                    <div className="md:hidden flex items-center gap-2 p-3 border-b border-border">
-                        <div className="flex items-center gap-2 shrink-0 pr-1">
-                            <input
-                                type="checkbox"
-                                checked={selectedIds.length === filteredCustomers.length && filteredCustomers.length > 0}
-                                onChange={toggleSelectAll}
-                                className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
-                            />
-                        </div>
-                        <button
-                            onClick={() => navigate(-1)}
-                            className="p-2 rounded-xl border border-border bg-white text-muted-foreground shrink-0"
-                        >
-                            <ChevronLeft size={18} />
-                        </button>
-                        <div className="relative flex-1">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15} />
-                            <input
-                                type="text"
-                                placeholder="Tìm kiếm . . ."
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-full pl-9 pr-8 py-2 bg-muted/20 border border-border/80 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
-                            />
-                            {searchTerm && (
-                                <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                                    <X size={14} />
+                    <div className="md:hidden flex flex-col p-3 border-b border-border bg-white sticky top-0 z-30 shadow-subtle">
+                        {/* Row 1: Back, Title, Plus */}
+                        <div className="flex items-center justify-between mb-3 gap-3">
+                            <div className="flex items-center gap-3">
+                                <button
+                                    onClick={() => navigate(-1)}
+                                    className="p-2.5 rounded-xl border border-border bg-white text-muted-foreground flex items-center justify-center shadow-sm active:scale-95 transition-all"
+                                >
+                                    <ChevronLeft size={20} />
                                 </button>
+                                <h1 className="text-lg font-black text-slate-900 tracking-tight">Khách hàng</h1>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => {
+                                        setSelectedCustomer(null);
+                                        setIsFormModalOpen(true);
+                                    }}
+                                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-white text-[13px] font-black shadow-lg shadow-primary/20 active:scale-95 transition-all"
+                                >
+                                    <Plus size={18} />
+                                    <span>Tạo mới</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Row 2: Selection, Search, Filter, More Actions */}
+                        <div className="flex items-center gap-2 min-h-[44px]">
+                            {!isSearchExpanded ? (
+                                <>
+                                    <div className="flex items-center gap-2 pr-1">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedIds.length === filteredCustomers.length && filteredCustomers.length > 0}
+                                            onChange={toggleSelectAll}
+                                            className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                                        />
+                                    </div>
+                                    <div className="flex-1"></div>
+                                    <button
+                                        onClick={() => setIsSearchExpanded(true)}
+                                        className="p-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 flex items-center justify-center shadow-sm active:scale-95 transition-all"
+                                    >
+                                        <Search size={20} />
+                                    </button>
+                                </>
+                            ) : (
+                                <div className="relative flex-1 group animate-in slide-in-from-right-2 duration-200">
+                                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-primary" size={16} />
+                                    <input
+                                        ref={searchInputRef}
+                                        type="text"
+                                        placeholder="Tìm tên, mã, số ĐT..."
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        onBlur={() => { if (!searchTerm) setIsSearchExpanded(false); }}
+                                        className="w-full pl-10 pr-20 py-2.5 bg-white border-2 border-primary/30 rounded-xl text-[14px] text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all font-semibold shadow-sm"
+                                    />
+                                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                                        {searchTerm && (
+                                            <button 
+                                                onClick={() => setSearchTerm('')} 
+                                                className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-rose-500 transition-all"
+                                            >
+                                                <X size={15} />
+                                            </button>
+                                        )}
+                                        <button 
+                                            onClick={() => setIsSearchExpanded(false)} 
+                                            className="px-2 py-1 text-[12px] font-black text-primary hover:bg-primary/5 rounded-lg transition-all"
+                                        >
+                                            Đóng
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {!isSearchExpanded && (
+                                <>
+                                    <button
+                                        onClick={openMobileFilter}
+                                        className={clsx(
+                                            'relative p-2.5 rounded-xl border shrink-0 transition-all active:scale-95 shadow-sm',
+                                            hasActiveFilters ? 'border-primary bg-primary/5 text-primary' : 'border-slate-200 bg-white text-slate-600',
+                                        )}
+                                    >
+                                        <Filter size={20} />
+                                        {hasActiveFilters && (
+                                            <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-primary text-white text-[10px] font-black flex items-center justify-center ring-2 ring-white">
+                                                {totalActiveFilters}
+                                            </span>
+                                        )}
+                                    </button>
+
+                                    <div className="relative">
+                                        <button
+                                            id="more-actions-btn"
+                                            onClick={() => setShowMoreActions(!showMoreActions)}
+                                            className={clsx(
+                                                "p-2.5 rounded-xl border shrink-0 transition-all active:scale-95 shadow-sm",
+                                                showMoreActions ? "bg-slate-100 border-slate-300" : "bg-white border-slate-200 text-slate-600"
+                                            )}
+                                        >
+                                            <MoreVertical size={20} />
+                                        </button>
+
+                                        {showMoreActions && (
+                                            <div id="more-actions-menu" className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl shadow-xl border border-slate-100 py-2 z-[100] animate-in fade-in slide-in-from-top-2 duration-200 origin-top-right">
+                                                <button
+                                                    onClick={() => { downloadTemplate(); setShowMoreActions(false); }}
+                                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-[14px] font-bold text-slate-700 hover:bg-slate-50 transition-colors"
+                                                >
+                                                    <Download size={18} className="text-slate-400" />
+                                                    Tải mẫu Excel
+                                                </button>
+
+                                                <label className="w-full flex items-center gap-3 px-4 py-2.5 text-[14px] font-bold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer">
+                                                    <Upload size={18} className="text-slate-400" />
+                                                    Import Excel
+                                                    <input
+                                                        type="file"
+                                                        accept=".xlsx, .xls"
+                                                        onChange={(e) => { handleImportExcel(e); setShowMoreActions(false); }}
+                                                        className="hidden"
+                                                    />
+                                                </label>
+
+                                                {selectedIds.length > 0 && (
+                                                    <button
+                                                        onClick={() => { handleBulkDelete(); setShowMoreActions(false); }}
+                                                        className="w-full flex items-center gap-3 px-4 py-2.5 text-[14px] font-bold text-rose-600 hover:bg-rose-50 transition-colors"
+                                                    >
+                                                        <Trash2 size={18} />
+                                                        Xóa ({selectedIds.length})
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
                             )}
                         </div>
-                        <button
-                            onClick={openMobileFilter}
-                            className={clsx(
-                                'relative p-2 rounded-xl border shrink-0 transition-all',
-                                hasActiveFilters ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-white text-muted-foreground',
-                            )}
-                        >
-                            <Filter size={18} />
-                            {hasActiveFilters && (
-                                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-white text-[9px] font-bold flex items-center justify-center">
-                                    {totalActiveFilters}
-                                </span>
-                            )}
-                        </button>
-
-                        <button
-                            onClick={downloadTemplate}
-                            className="p-2 rounded-xl border border-border bg-white text-muted-foreground shrink-0"
-                            title="Tải mẫu"
-                        >
-                            <Download size={18} />
-                        </button>
-
-                        <label className="p-2 rounded-xl border border-border bg-white text-muted-foreground shrink-0 cursor-pointer" title="Import Excel">
-                            <Upload size={18} />
-                            <input
-                                type="file"
-                                accept=".xlsx, .xls"
-                                onChange={handleImportExcel}
-                                className="hidden"
-                            />
-                        </label>
-
-                        {selectedIds.length > 0 && (
-                            <button
-                                onClick={handleBulkDelete}
-                                className="p-2 rounded-xl bg-rose-50 text-rose-600 border border-rose-200 shrink-0 shadow-sm animate-in zoom-in-95 duration-200"
-                                title="Xóa các mục đã chọn"
-                            >
-                                <Trash2 size={18} />
-                            </button>
-                        )}
-
-                        <button
-                            onClick={() => {
-                                setSelectedCustomer(null);
-                                setIsFormModalOpen(true);
-                            }}
-                            className="p-2 rounded-xl bg-primary text-white shrink-0 shadow-md shadow-primary/20"
-                        >
-                            <Plus size={18} />
-                        </button>
                     </div>
 
                     <div className="md:hidden flex-1 overflow-y-auto p-3 flex flex-col gap-3">
@@ -880,7 +953,7 @@ const Customers = () => {
                                         placeholder="Tìm kiếm . . ."
                                         value={searchTerm}
                                         onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="w-full pl-10 pr-8 py-1.5 bg-muted/20 border border-border/80 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
+                                        className="w-full pl-10 pr-8 py-1.5 bg-muted/20 border border-border/80 rounded-xl text-[13px] text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
                                     />
                                     {searchTerm && (
                                         <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">

@@ -234,6 +234,7 @@ const MachineInventoryReport = () => {
                   setSelected={(val) => { setFilters(prev => ({ ...prev, year: val[0] })); setActiveDropdown(null); }} 
                   filterSearch={filterSearch}
                   setFilterSearch={setFilterSearch}
+                  singleSelect={true}
                 />
               )}
             </div>
@@ -255,6 +256,7 @@ const MachineInventoryReport = () => {
                   setSelected={(val) => { setFilters(prev => ({ ...prev, month: val[0] })); setActiveDropdown(null); }} 
                   filterSearch={filterSearch}
                   setFilterSearch={setFilterSearch}
+                  singleSelect={true}
                 />
               )}
             </div>

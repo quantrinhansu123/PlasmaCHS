@@ -57,59 +57,59 @@ const getWarehouseLabel = (warehousesList, id) => warehousesList?.find(w => w.id
 const S = {
     page: {
         fontFamily: '"Times New Roman", Times, serif',
-        fontSize: '10pt',
-        lineHeight: '1.1',
+        fontSize: '11pt',
+        lineHeight: '1.4',
         color: '#000',
         background: '#fff',
         width: '100%',
-        padding: '20mm',
+        padding: '15mm',
         boxSizing: 'border-box',
     },
     header: {
         display: 'flex',
         justifyContent: 'space-between',
-        marginBottom: '3mm',
+        marginBottom: '5mm',
     },
     headerLeft: {
         flex: '0 0 56%',
-        fontSize: '10pt',
+        fontSize: '11pt',
     },
     headerRight: {
         flex: '0 0 42%',
         textAlign: 'center',
-        fontSize: '9pt',
+        fontSize: '10pt',
     },
     companyName: {
-        fontSize: '10pt',
+        fontSize: '11pt',
         fontWeight: 'bold',
         textTransform: 'uppercase',
     },
     companyInfo: {
-        fontSize: '10pt',
+        fontSize: '11pt',
         marginTop: '2px',
         fontWeight: 'normal',
     },
     formNumber: {
         fontWeight: 'bold',
-        fontSize: '11pt',
+        fontSize: '12pt',
     },
     formLegal: {
-        fontSize: '9pt',
+        fontSize: '10pt',
         fontStyle: 'italic',
         fontWeight: 'normal',
     },
     titleSection: {
         textAlign: 'center',
-        margin: '4mm 0 2mm',
+        margin: '6mm 0 3mm',
     },
     titleH1: {
-        fontSize: '15pt',
+        fontSize: '18pt',
         fontWeight: 'bold',
         textTransform: 'uppercase',
         marginBottom: '2mm',
     },
     dateLine: {
-        fontSize: '11pt',
+        fontSize: '12pt',
         fontWeight: 'bold',
         marginBottom: '2mm',
     },
@@ -117,51 +117,55 @@ const S = {
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'flex-start',
+        marginBottom: '4mm',
     },
     titleCenter: {
         textAlign: 'center',
         flex: '1',
-        fontSize: '11pt',
+        fontSize: '12pt',
     },
     debitCredit: {
         textAlign: 'right',
-        fontSize: '9pt',
-        minWidth: '100px',
+        fontSize: '10pt',
+        minWidth: '120px',
     },
     infoSection: {
-        margin: '2mm 0',
+        margin: '4mm 0',
     },
     infoRow: {
         display: 'flex',
         alignItems: 'baseline',
-        marginBottom: '1mm',
+        marginBottom: '2mm',
         fontSize: '11pt',
     },
     infoLabel: {
         whiteSpace: 'nowrap',
         fontWeight: 'normal',
+        fontSize: '11pt',
     },
     infoValue: {
         flex: '1',
         fontFamily: '"Times New Roman", Times, serif',
-        fontSize: '10pt',
+        fontSize: '11pt',
         padding: '0 4px',
-        minHeight: '18px',
+        minHeight: '20px',
         fontWeight: 'normal',
+        borderBottom: '1px dotted #000',
     },
     infoFixedValue: {
         fontFamily: '"Times New Roman", Times, serif',
-        fontSize: '10pt',
+        fontSize: '11pt',
         padding: '0 4px',
-        minHeight: '18px',
+        minHeight: '20px',
         fontWeight: 'normal',
         textAlign: 'center',
+        borderBottom: '1px dotted #000',
     },
     infoRowSplit: {
         display: 'flex',
         alignItems: 'baseline',
-        marginBottom: '1mm',
-        fontSize: '10pt',
+        marginBottom: '2mm',
+        fontSize: '11pt',
     },
     splitHalf: {
         flex: '1',
@@ -172,78 +176,78 @@ const S = {
     table: {
         width: '100%',
         borderCollapse: 'collapse',
-        margin: '2mm 0',
-        fontSize: '10pt',
+        margin: '4mm 0',
+        fontSize: '11pt',
     },
     th: {
         border: '1px solid #000',
-        padding: '4px 2px',
+        padding: '6px 4px',
         textAlign: 'center',
         verticalAlign: 'middle',
         fontWeight: 'bold',
-        fontSize: '9pt',
+        fontSize: '10pt',
         whiteSpace: 'normal',
         color: '#000',
         background: 'transparent',
     },
     td: {
         border: '1px solid #000',
-        padding: '3px 2px',
+        padding: '5px 4px',
         textAlign: 'center',
         verticalAlign: 'middle',
-        fontSize: '9pt',
+        fontSize: '10pt',
         fontWeight: 'normal',
         color: '#000',
         whiteSpace: 'normal',
     },
     tdLeft: {
         border: '1px solid #000',
-        padding: '3px 4px',
+        padding: '5px 8px',
         textAlign: 'left',
         verticalAlign: 'middle',
-        fontSize: '9pt',
+        fontSize: '10pt',
         fontWeight: 'normal',
         color: '#000',
         whiteSpace: 'normal',
     },
     tdRight: {
         border: '1px solid #000',
-        padding: '3px 4px',
+        padding: '5px 8px',
         textAlign: 'right',
         verticalAlign: 'middle',
-        fontSize: '9pt',
+        fontSize: '10pt',
         fontWeight: 'normal',
         color: '#000',
         whiteSpace: 'normal',
     },
     tdBold: {
         border: '1px solid #000',
-        padding: '3px 4px',
+        padding: '5px 8px',
         textAlign: 'center',
         verticalAlign: 'middle',
-        fontSize: '10pt',
+        fontSize: '11pt',
         fontWeight: 'bold',
         color: '#000',
         whiteSpace: 'normal',
     },
     tdBoldRight: {
         border: '1px solid #000',
-        padding: '3px 4px',
+        padding: '5px 8px',
         textAlign: 'right',
         verticalAlign: 'middle',
-        fontSize: '10pt',
+        fontSize: '11pt',
         fontWeight: 'bold',
         color: '#000',
         whiteSpace: 'normal',
     },
     summarySection: {
-        margin: '3mm 0',
-        fontSize: '10pt',
+        margin: '5mm 0',
+        fontSize: '11pt',
     },
     dateFooter: {
         textAlign: 'right',
-        fontSize: '10pt',
-        margin: '3mm 0 2mm',
+        fontSize: '11pt',
+        margin: '5mm 0 3mm',
         fontStyle: 'italic',
         fontWeight: 'normal',
     },
@@ -251,15 +255,15 @@ const S = {
         display: 'flex',
         justifyContent: 'space-between',
         textAlign: 'center',
-        marginTop: '3mm',
-        fontSize: '10pt',
+        marginTop: '5mm',
+        fontSize: '11pt',
     },
     sigBlock: {
         width: '23%',
     },
     sigTitle: {
         fontWeight: 'bold',
-        fontSize: '10pt',
+        fontSize: '11pt',
     },
     sigSubtitle: {
         fontStyle: 'italic',
@@ -267,7 +271,7 @@ const S = {
         fontWeight: 'normal',
     },
     sigSpace: {
-        height: '40px',
+        height: '60px',
     },
     dots: {
         borderBottom: '1px dotted #000',
@@ -346,19 +350,25 @@ const ReceiptItem = ({ receipt, items, warehousesList }) => {
             <div style={S.infoSection}>
                 <div style={S.infoRow}>
                     <span style={S.infoLabel}>- Họ và tên người giao:</span>
-                    <span style={S.infoValue}>{receipt.supplier_name || ''}</span>
+                    <span style={S.infoValue}>{receipt.deliverer_name || receipt.supplier_name || ''}</span>
                 </div>
+                {receipt.deliverer_address && (
+                    <div style={S.infoRow}>
+                        <span style={S.infoLabel}>- Địa chỉ người giao:</span>
+                        <span style={S.infoValue}>{receipt.deliverer_address}</span>
+                    </div>
+                )}
                 <div style={S.infoRow}>
                     <span style={S.infoLabel}>- Theo</span>
-                    <span style={{ ...S.infoFixedValue, width: '80px', flex: '0 0 80px' }}></span>
+                    <span style={{ ...S.infoFixedValue, width: '120px', flex: '0 0 120px' }}></span>
                     <span style={S.infoLabel}>&nbsp;số</span>
-                    <span style={{ ...S.infoFixedValue, width: '80px', flex: '0 0 80px' }}>{receipt.receipt_code}</span>
+                    <span style={{ ...S.infoFixedValue, width: '100px', flex: '0 0 100px' }}>{receipt.receipt_code}</span>
                     <span style={S.infoLabel}>&nbsp;ngày</span>
                     <span style={{ ...S.infoFixedValue, width: '40px', flex: '0 0 40px' }}>{day}</span>
                     <span style={S.infoLabel}>&nbsp;tháng</span>
                     <span style={{ ...S.infoFixedValue, width: '40px', flex: '0 0 40px' }}>{month}</span>
                     <span style={S.infoLabel}>&nbsp;năm</span>
-                    <span style={{ ...S.infoFixedValue, width: '50px', flex: '0 0 50px' }}>{year}</span>
+                    <span style={{ ...S.infoFixedValue, width: '60px', flex: '0 0 60px' }}>{year}</span>
                     <span style={S.infoLabel}>&nbsp;của</span>
                     <span style={S.infoValue}>{receipt.supplier_name || ''}</span>
                 </div>
@@ -367,7 +377,7 @@ const ReceiptItem = ({ receipt, items, warehousesList }) => {
                         <span style={S.infoLabel}>- Nhập tại kho:</span>
                         <span style={S.infoValue}>{warehouseLabel || ''}</span>
                     </div>
-                    <div style={S.splitHalf}>
+                    <div style={{ ...S.splitHalf, paddingLeft: '20px' }}>
                         <span style={S.infoLabel}>Địa điểm:</span>
                         <span style={S.infoValue}>{warehouseLabel || ''}</span>
                     </div>

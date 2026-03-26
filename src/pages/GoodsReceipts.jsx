@@ -29,7 +29,8 @@ import {
     User,
     X,
     Download,
-    Upload
+    Upload,
+    MoreVertical
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useEffect, useState, useRef } from 'react';
@@ -104,6 +105,9 @@ const GoodsReceipts = () => {
     });
 
     const [showColumnPicker, setShowColumnPicker] = useState(false);
+    const [showMoreActions, setShowMoreActions] = useState(false);
+    const [isSearchExpanded, setIsSearchExpanded] = useState(false);
+    const searchInputRef = useRef(null);
     const columnPickerRef = useRef(null);
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [filterSearch, setFilterSearch] = useState('');
@@ -132,6 +136,12 @@ const GoodsReceipts = () => {
     }, [columnOrder]);
 
     useEffect(() => {
+        if (isSearchExpanded && searchInputRef.current) {
+            searchInputRef.current.focus();
+        }
+    }, [isSearchExpanded]);
+
+    useEffect(() => {
         const handleClickOutside = (event) => {
             if (columnPickerRef.current && !columnPickerRef.current.contains(event.target)) {
                 setShowColumnPicker(false);
@@ -152,6 +162,9 @@ const GoodsReceipts = () => {
             if (activeDropdown && !isClickInsideList && !isClickInsideStats) {
                 setActiveDropdown(null);
                 setFilterSearch('');
+            }
+            if (!event.target.closest('#more-actions-menu') && !event.target.closest('#more-actions-btn')) {
+                setShowMoreActions(false);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
@@ -250,6 +263,8 @@ const GoodsReceipts = () => {
             'Ngày nhập (YYYY-MM-DD)',
             'Ghi chú phiếu',
             'Người nhận hàng',
+            'Người giao hàng',
+            'Địa chỉ người giao',
             'Loại hàng (MAY/BINH/VAT_TU)',
             'Tên hàng hóa',
             'Mã serial (nếu có)',
@@ -267,6 +282,8 @@ const GoodsReceipts = () => {
                 'Ngày nhập (YYYY-MM-DD)': '2023-10-25',
                 'Ghi chú phiếu': 'Nhập hàng đợt 1',
                 'Người nhận hàng': 'Nguyễn Văn A',
+                'Người giao hàng': 'Trần Văn B',
+                'Địa chỉ người giao': '123 Đường ABC, Quận 1, TP.HCM',
                 'Loại hàng (MAY/BINH/VAT_TU)': 'BINH',
                 'Tên hàng hóa': 'Bình Oxy 40L',
                 'Mã serial (nếu có)': 'OXY40-001',
@@ -282,6 +299,8 @@ const GoodsReceipts = () => {
                 'Ngày nhập (YYYY-MM-DD)': '2023-10-25',
                 'Ghi chú phiếu': 'Nhập hàng đợt 1',
                 'Người nhận hàng': 'Nguyễn Văn A',
+                'Người giao hàng': 'Trần Văn B',
+                'Địa chỉ người giao': '123 Đường ABC, Quận 1, TP.HCM',
                 'Loại hàng (MAY/BINH/VAT_TU)': 'BINH',
                 'Tên hàng hóa': 'Bình Oxy 40L',
                 'Mã serial (nếu có)': 'OXY40-002',
@@ -329,6 +348,8 @@ const GoodsReceipts = () => {
                         receipt_date: row['Ngày nhập (YYYY-MM-DD)']?.toString() || new Date().toISOString().split('T')[0],
                         note: row['Ghi chú phiếu']?.toString() || '',
                         received_by: row['Người nhận hàng']?.toString() || '',
+                        deliverer_name: row['Người giao hàng']?.toString() || '',
+                        deliverer_address: row['Địa chỉ người giao']?.toString() || '',
                         
                         item_type: row['Loại hàng (MAY/BINH/VAT_TU)']?.toString().toUpperCase() || 'VAT_TU',
                         item_name: row['Tên hàng hóa']?.toString() || '',
@@ -357,6 +378,8 @@ const GoodsReceipts = () => {
                             status: 'CHO_DUYET',
                             note: item.note,
                             received_by: item.received_by,
+                            deliverer_name: item.deliverer_name,
+                            deliverer_address: item.deliverer_address,
                             total_items: 0,
                             total_amount: 0,
                             items: []
@@ -398,6 +421,8 @@ const GoodsReceipts = () => {
                             status: group.status,
                             note: group.note,
                             received_by: group.received_by,
+                            deliverer_name: group.deliverer_name,
+                            deliverer_address: group.deliverer_address,
                             total_items: group.total_items,
                             total_amount: group.total_amount
                         }])
@@ -604,7 +629,9 @@ const GoodsReceipts = () => {
         const search = searchTerm.toLowerCase();
         const matchesSearch = !searchTerm ||
             r.receipt_code?.toLowerCase().includes(search) ||
-            r.supplier_name?.toLowerCase().includes(search);
+            r.supplier_name?.toLowerCase().includes(search) ||
+            r.deliverer_name?.toLowerCase().includes(search) ||
+            r.deliverer_address?.toLowerCase().includes(search);
         const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(r.status);
         const matchesWarehouse = selectedWarehouses.length === 0 || selectedWarehouses.includes(r.warehouse_id);
         return matchesSearch && matchesStatus && matchesWarehouse;
@@ -734,51 +761,148 @@ const GoodsReceipts = () => {
             {activeView === 'list' && (
                 <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full overflow-hidden">
                     {/* MOBILE TOOLBAR */}
-                    <div className="md:hidden flex items-center gap-2 p-3 border-b border-border bg-white">
-                        <button
-                            onClick={() => navigate(-1)}
-                            className="p-2 rounded-xl border border-border bg-white text-muted-foreground shrink-0"
-                        >
-                            <ChevronLeft size={18} />
-                        </button>
-                        <div className="relative flex-1">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15} />
-                            <input
-                                type="text"
-                                placeholder="Tìm kiếm . . ."
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-full pl-9 pr-8 py-2 bg-muted/20 border border-border/80 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
-                            />
-                            {searchTerm && (
-                                <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                                    <X size={14} />
+                    <div className="md:hidden flex flex-col p-3 border-b border-border bg-white sticky top-0 z-30 shadow-subtle">
+                        {/* Row 1: Back, Title, Plus */}
+                        <div className="flex items-center justify-between mb-3 gap-3">
+                            <div className="flex items-center gap-3">
+                                <button
+                                    onClick={() => navigate(-1)}
+                                    className="p-2.5 rounded-xl border border-border bg-white text-muted-foreground flex items-center justify-center shadow-sm active:scale-95 transition-all"
+                                >
+                                    <ChevronLeft size={20} />
                                 </button>
+                                <h1 className="text-lg font-black text-slate-900 tracking-tight">Phiếu nhập kho</h1>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => {
+                                        setSelectedReceipt(null);
+                                        setShowFormModal(true);
+                                    }}
+                                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-white text-[13px] font-black shadow-lg shadow-primary/20 active:scale-95 transition-all"
+                                >
+                                    <Plus size={18} />
+                                    <span>Tạo mới</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Row 2: Selection, Search, Filter, More Actions */}
+                        <div className="flex items-center gap-2 min-h-[44px]">
+                            {!isSearchExpanded ? (
+                                <>
+                                    <div className="flex items-center gap-2 pr-1">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedIds.length === filteredReceipts.length && filteredReceipts.length > 0}
+                                            onChange={toggleSelectAll}
+                                            className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                                        />
+                                    </div>
+                                    <div className="flex-1"></div>
+                                    <button
+                                        onClick={() => setIsSearchExpanded(true)}
+                                        className="p-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 flex items-center justify-center shadow-sm active:scale-95 transition-all"
+                                    >
+                                        <Search size={20} />
+                                    </button>
+                                </>
+                            ) : (
+                                <div className="relative flex-1 group animate-in slide-in-from-right-2 duration-200">
+                                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-primary" size={16} />
+                                    <input
+                                        ref={searchInputRef}
+                                        type="text"
+                                        placeholder="Tìm mã phiếu, NCC..."
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        onBlur={() => { if (!searchTerm) setIsSearchExpanded(false); }}
+                                        className="w-full pl-10 pr-20 py-2.5 bg-white border-2 border-primary/30 rounded-xl text-[14px] text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all font-semibold shadow-sm"
+                                    />
+                                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                                        {searchTerm && (
+                                            <button 
+                                                onClick={() => setSearchTerm('')} 
+                                                className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-rose-500 transition-all"
+                                            >
+                                                <X size={15} />
+                                            </button>
+                                        )}
+                                        <button 
+                                            onClick={() => setIsSearchExpanded(false)} 
+                                            className="px-2 py-1 text-[12px] font-black text-primary hover:bg-primary/5 rounded-lg transition-all"
+                                        >
+                                            Đóng
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {!isSearchExpanded && (
+                                <>
+                                    <button
+                                        onClick={openMobileFilter}
+                                        className={clsx(
+                                            'relative p-2.5 rounded-xl border shrink-0 transition-all active:scale-95 shadow-sm',
+                                            hasActiveFilters ? 'border-primary bg-primary/5 text-primary' : 'border-slate-200 bg-white text-slate-600',
+                                        )}
+                                    >
+                                        <Filter size={20} />
+                                        {hasActiveFilters && (
+                                            <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-primary text-white text-[10px] font-black flex items-center justify-center ring-2 ring-white">
+                                                {totalActiveFilters}
+                                            </span>
+                                        )}
+                                    </button>
+
+                                    <div className="relative">
+                                        <button
+                                            id="more-actions-btn"
+                                            onClick={() => setShowMoreActions(!showMoreActions)}
+                                            className={clsx(
+                                                "p-2.5 rounded-xl border shrink-0 transition-all active:scale-95 shadow-sm",
+                                                showMoreActions ? "bg-slate-100 border-slate-300" : "bg-white border-slate-200 text-slate-600"
+                                            )}
+                                        >
+                                            <MoreVertical size={20} />
+                                        </button>
+
+                                        {showMoreActions && (
+                                            <div id="more-actions-menu" className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl shadow-xl border border-slate-100 py-2 z-[100] animate-in fade-in slide-in-from-top-2 duration-200 origin-top-right">
+                                                <button
+                                                    onClick={() => { exportToExcel(); setShowMoreActions(false); }}
+                                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-[14px] font-bold text-slate-700 hover:bg-slate-50 transition-colors"
+                                                >
+                                                    <Download size={18} className="text-slate-400" />
+                                                    Xuất Excel
+                                                </button>
+
+                                                <label className="w-full flex items-center gap-3 px-4 py-2.5 text-[14px] font-bold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer">
+                                                    <Upload size={18} className="text-slate-400" />
+                                                    Import Excel
+                                                    <input
+                                                        type="file"
+                                                        accept=".xlsx, .xls"
+                                                        onChange={(e) => { handleImportExcel(e); setShowMoreActions(false); }}
+                                                        className="hidden"
+                                                    />
+                                                </label>
+
+                                                {selectedIds.length > 0 && (
+                                                    <button
+                                                        onClick={() => { handleBulkDelete(); setShowMoreActions(false); }}
+                                                        className="w-full flex items-center gap-3 px-4 py-2.5 text-[14px] font-bold text-rose-600 hover:bg-rose-50 transition-colors"
+                                                    >
+                                                        <Trash2 size={18} />
+                                                        Xóa ({selectedIds.length})
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
                             )}
                         </div>
-                        <button
-                            onClick={openMobileFilter}
-                            className={clsx(
-                                'relative p-2 rounded-xl border shrink-0 transition-all',
-                                hasActiveFilters ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-white text-muted-foreground',
-                            )}
-                        >
-                            <Filter size={18} />
-                            {hasActiveFilters && (
-                                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-white text-[9px] font-bold flex items-center justify-center">
-                                    {totalActiveFilters}
-                                </span>
-                            )}
-                        </button>
-                        <button
-                            onClick={() => {
-                                setSelectedReceipt(null);
-                                setShowFormModal(true);
-                            }}
-                            className="p-2 rounded-xl bg-primary shadow-md shadow-primary/20 hover:bg-primary/90"
-                        >
-                            <Plus size={18} />
-                        </button>
                     </div>
 
                     {/* DESKTOP TOOLBAR */}
@@ -799,7 +923,7 @@ const GoodsReceipts = () => {
                                         placeholder="Tìm mã phiếu, NCC..."
                                         value={searchTerm}
                                         onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="w-full pl-10 pr-8 py-1.5 bg-muted/20 border border-border/80 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
+                                        className="w-full pl-10 pr-8 py-1.5 bg-muted/20 border border-border/80 rounded-xl text-[13px] text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
                                     />
                                     {searchTerm && (
                                         <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
@@ -1080,8 +1204,11 @@ const GoodsReceipts = () => {
                                                             <span className="text-[13px] font-black text-rose-600">{formatNumber(receipt.total_amount || 0)} ₫</span>
                                                         </td>
                                                     )}
-                                                    {isColumnVisible('receiver') && (
-                                                        <td className="px-4 py-4 text-[13px] font-medium text-slate-500">{receipt.received_by || '—'}</td>
+                                                    {isColumnVisible('deliverer') && (
+                                                        <td className="px-4 py-4 text-[13px] font-medium text-slate-800 italic">{receipt.deliverer_name || '—'}</td>
+                                                    )}
+                                                    {isColumnVisible('deliverer_address') && (
+                                                        <td className="px-4 py-4 text-[13px] font-medium text-slate-500 max-w-[200px] truncate">{receipt.deliverer_address || '—'}</td>
                                                     )}
                                                     {isColumnVisible('status') && (
                                                         <td className="px-4 py-4">

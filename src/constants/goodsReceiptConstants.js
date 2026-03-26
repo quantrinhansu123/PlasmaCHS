@@ -30,6 +30,7 @@ export const TABLE_COLUMNS = [
     { key: 'date', label: 'Ngày nhập' },
     { key: 'items', label: 'Số MH' },
     { key: 'amount', label: 'Tổng giá trị' },
-    { key: 'receiver', label: 'Người nhận' },
+    { key: 'deliverer', label: 'Người giao' },
+    { key: 'deliverer_address', label: 'Địa chỉ giao' },
     { key: 'status', label: 'Trạng thái' },
 ];

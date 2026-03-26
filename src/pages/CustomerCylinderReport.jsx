@@ -263,6 +263,7 @@ const CustomerCylinderReport = () => {
                   setSelected={(val) => { setFilters(prev => ({ ...prev, year: val[0] })); setActiveDropdown(null); }} 
                   filterSearch={filterSearch}
                   setFilterSearch={setFilterSearch}
+                  singleSelect={true}
                 />
               )}
             </div>
@@ -284,6 +285,7 @@ const CustomerCylinderReport = () => {
                   setSelected={(val) => { setFilters(prev => ({ ...prev, month: val[0] })); setActiveDropdown(null); }} 
                   filterSearch={filterSearch}
                   setFilterSearch={setFilterSearch}
+                  singleSelect={true}
                 />
               )}
             </div>

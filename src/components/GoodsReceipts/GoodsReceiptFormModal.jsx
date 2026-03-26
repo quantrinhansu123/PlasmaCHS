@@ -66,6 +66,8 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
         warehouse_id: '',
         receipt_date: new Date().toISOString().split('T')[0],
         received_by: '',
+        deliverer_name: '',
+        deliverer_address: '',
         note: ''
     });
 
@@ -80,6 +82,8 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                 warehouse_id: receipt.warehouse_id,
                 receipt_date: receipt.receipt_date ? receipt.receipt_date.split('T')[0] : new Date().toISOString().split('T')[0],
                 received_by: receipt.received_by || '',
+                deliverer_name: receipt.deliverer_name || '',
+                deliverer_address: receipt.deliverer_address || '',
                 note: receipt.note || ''
             });
 
@@ -229,7 +233,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                 item_name: item.item_name,
                 serial_number: item.serial_number,
                 item_status: item.item_status,
-                quantity: item.quantity,
+                quantity: parseFloat(item.quantity) || 0,
                 unit: item.unit,
                 unit_price: item.unit_price,
                 total_price: item.total_price,
@@ -369,6 +373,40 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                             disabled={isReadOnly}
                                             value={formData.receipt_date || ''}
                                             onChange={(e) => setFormData(prev => ({ ...prev, receipt_date: e.target.value }))}
+                                            className={clsx(
+                                                "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] transition-all outline-none",
+                                                isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                            )}
+                                        />
+                                    </div>
+
+                                    <div className="space-y-1.5">
+                                        <label className="flex items-center gap-2 text-sm font-bold !text-slate-700 ml-1">
+                                            <User className="w-4 h-4 text-primary" />
+                                            Họ tên người giao
+                                        </label>
+                                        <input
+                                            disabled={isReadOnly}
+                                            value={formData.deliverer_name || ''}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, deliverer_name: e.target.value }))}
+                                            placeholder="Tên người giao hàng..."
+                                            className={clsx(
+                                                "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] transition-all outline-none",
+                                                isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                            )}
+                                        />
+                                    </div>
+
+                                    <div className="md:col-span-2 space-y-1.5">
+                                        <label className="flex items-center gap-2 text-sm font-bold !text-slate-700 ml-1">
+                                            <PenLine className="w-4 h-4 text-primary" />
+                                            Địa chỉ người giao
+                                        </label>
+                                        <input
+                                            disabled={isReadOnly}
+                                            value={formData.deliverer_address || ''}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, deliverer_address: e.target.value }))}
+                                            placeholder="Địa chỉ/Số điện thoại người giao..."
                                             className={clsx(
                                                 "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] transition-all outline-none",
                                                 isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
@@ -537,14 +575,21 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                                     <div className="space-y-1.5">
                                                         <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">Số lượng</label>
                                                         <input
-                                                            type="number"
-                                                            disabled={isReadOnly}
-                                                            min="1"
+                                                            step="any"
                                                             value={item.quantity}
+                                                            onFocus={(e) => e.target.select()}
                                                             onChange={(e) => {
-                                                                const q = parseInt(e.target.value) || 1;
-                                                                updateItem(idx, 'quantity', q);
-                                                                updateItem(idx, 'total_price', q * (item.unit_price || 0));
+                                                                const val = e.target.value;
+                                                                if (val === '') {
+                                                                    updateItem(idx, 'quantity', '');
+                                                                    updateItem(idx, 'total_price', 0);
+                                                                    return;
+                                                                }
+                                                                const q = parseFloat(val);
+                                                                if (!isNaN(q)) {
+                                                                    updateItem(idx, 'quantity', val); // Keep as string to allow typing decimals
+                                                                    updateItem(idx, 'total_price', q * (item.unit_price || 0));
+                                                                }
                                                             }}
                                                             className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-center font-black text-primary outline-none"
                                                         />
@@ -569,11 +614,12 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                                             type="text"
                                                             disabled={isReadOnly}
                                                             value={item.unit_price ? formatNumber(item.unit_price) : ''}
+                                                            onFocus={(e) => e.target.select()}
                                                             onChange={(e) => {
                                                                 const val = e.target.value.replace(/\D/g, '');
                                                                 const p = parseFloat(val) || 0;
                                                                 updateItem(idx, 'unit_price', p);
-                                                                updateItem(idx, 'total_price', (item.quantity || 1) * p);
+                                                                updateItem(idx, 'total_price', (parseFloat(item.quantity) || 0) * p);
                                                             }}
                                                             placeholder="0"
                                                             className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-right font-bold text-slate-700 pr-8 outline-none"
@@ -596,7 +642,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                 <div className="p-4 bg-primary/5 rounded-2xl border border-primary/20 flex flex-col sm:flex-row items-center justify-between gap-4">
                                     <div className="text-sm font-bold text-slate-500">
                                         Tổng: <span className="text-primary text-lg font-black">{items.length}</span> mặt hàng —
-                                        <span className="text-primary text-lg font-black ml-1">{items.reduce((sum, i) => sum + (i.quantity || 0), 0)}</span> đơn vị
+                                        <span className="text-primary text-lg font-black ml-1">{items.reduce((sum, i) => sum + (parseFloat(i.quantity) || 0), 0)}</span> đơn vị
                                     </div>
                                     <div className="text-lg font-black text-rose-600 tracking-tight">
                                         {formatNumber(items.reduce((sum, i) => sum + (i.total_price || 0), 0))} <span className="text-sm font-bold">VNĐ</span>

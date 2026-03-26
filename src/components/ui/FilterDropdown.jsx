@@ -1,5 +1,6 @@
 import React from 'react';
 import { Search } from 'lucide-react';
+import { clsx } from 'clsx';
 
 const FilterDropdown = ({
   options,
@@ -7,6 +8,7 @@ const FilterDropdown = ({
   setSelected,
   filterSearch,
   setFilterSearch,
+  singleSelect = false,
 }) => {
   const normalizeText = (text) => {
     if (!text) return '';
@@ -27,6 +29,10 @@ const FilterDropdown = ({
   });
 
   const toggleOption = (id) => {
+    if (singleSelect) {
+      setSelected([id]);
+      return;
+    }
     if (selected.includes(id)) {
       setSelected(selected.filter(item => item !== id));
     } else {
@@ -58,27 +64,29 @@ const FilterDropdown = ({
         </div>
       </div>
 
-      <div className="p-1 px-2 border-b border-border/60 bg-muted/5">
-        <div className="flex items-center justify-between p-2">
-          <label className="flex items-center gap-2.5 cursor-pointer">
-            <input
-              type="checkbox"
-              className="rounded border-border text-primary focus:ring-primary/20 w-4 h-4"
-              checked={selected.length === options.length && options.length > 0}
-              onChange={toggleAll}
-            />
-            <span className="text-[13px] font-bold text-muted-foreground">Chọn tất cả</span>
-          </label>
-          {selected.length > 0 && (
-            <button
-              onClick={() => setSelected([])}
-              className="text-[12px] font-bold text-primary hover:text-primary/80 transition-colors"
-            >
-              Xóa chọn
-            </button>
-          )}
+      {!singleSelect && (
+        <div className="p-1 px-2 border-b border-border/60 bg-muted/5">
+          <div className="flex items-center justify-between p-2">
+            <label className="flex items-center gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                className="rounded border-border text-primary focus:ring-primary/20 w-4 h-4"
+                checked={selected.length === options.length && options.length > 0}
+                onChange={toggleAll}
+              />
+              <span className="text-[13px] font-bold text-muted-foreground">Chọn tất cả</span>
+            </label>
+            {selected.length > 0 && (
+              <button
+                onClick={() => setSelected([])}
+                className="text-[12px] font-bold text-primary hover:text-primary/80 transition-colors"
+              >
+                Xóa chọn
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="max-h-60 overflow-y-auto p-1 py-2">
         {filteredOptions.length > 0 ? (
@@ -89,8 +97,11 @@ const FilterDropdown = ({
             >
               <div className="flex items-center gap-3">
                 <input
-                  type="checkbox"
-                  className="rounded border-border text-primary focus:ring-primary/20 w-4 h-4"
+                  type={singleSelect ? "radio" : "checkbox"}
+                  className={clsx(
+                    "border-border text-primary focus:ring-primary/20 w-4 h-4",
+                    singleSelect ? "rounded-full" : "rounded"
+                  )}
                   checked={selected.includes(opt.id)}
                   onChange={() => toggleOption(opt.id)}
                 />

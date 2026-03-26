@@ -81,6 +81,10 @@ const MobileFilterSheet = ({
   };
 
   const handleToggleOption = (section, optionId) => {
+    if (section.singleSelect) {
+      section.onSelectionChange([optionId]);
+      return;
+    }
     section.onSelectionChange((prev) =>
       prev.includes(optionId)
         ? prev.filter((id) => id !== optionId)
@@ -177,22 +181,24 @@ const MobileFilterSheet = ({
                       </div>
                     )}
 
-                    <div className="flex items-center justify-between mb-2 px-1">
-                      <label className="flex items-center gap-3 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          className="rounded border-border text-primary focus:ring-primary/20 w-4 h-4"
-                          checked={section.selectedValues.length === section.options.length && section.options.length > 0}
-                          onChange={() => handleToggleAll(section)}
-                        />
-                        <span className="text-[13px] font-bold text-muted-foreground">{section.selectAllLabel || selectAllLabel}</span>
-                      </label>
-                      {section.selectedValues.length > 0 && (
-                        <button onClick={() => section.onSelectionChange([])} className="text-[12px] font-bold text-primary">
-                          {section.clearSelectionLabel || clearSelectionLabel}
-                        </button>
-                      )}
-                    </div>
+                    {!section.singleSelect && (
+                      <div className="flex items-center justify-between mb-2 px-1">
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="rounded border-border text-primary focus:ring-primary/20 w-4 h-4"
+                            checked={section.selectedValues.length === section.options.length && section.options.length > 0}
+                            onChange={() => handleToggleAll(section)}
+                          />
+                          <span className="text-[13px] font-bold text-muted-foreground">{section.selectAllLabel || selectAllLabel}</span>
+                        </label>
+                        {section.selectedValues.length > 0 && (
+                          <button onClick={() => section.onSelectionChange([])} className="text-[12px] font-bold text-primary">
+                            {section.clearSelectionLabel || clearSelectionLabel}
+                          </button>
+                        )}
+                      </div>
+                    )}
 
                     <div className="space-y-0.5">
                       {filteredOptions.length > 0 ? (
@@ -200,8 +206,11 @@ const MobileFilterSheet = ({
                           <label key={option.id} className="flex items-center justify-between px-1 py-2.5 rounded-md hover:bg-muted/20 cursor-pointer">
                             <div className="flex items-center gap-3">
                               <input
-                                type="checkbox"
-                                className="rounded border-border text-primary focus:ring-primary/20 w-4 h-4"
+                                type={section.singleSelect ? "radio" : "checkbox"}
+                                className={clsx(
+                                  "border-border text-primary focus:ring-primary/20 w-4 h-4",
+                                  section.singleSelect ? "rounded-full" : "rounded"
+                                )}
                                 checked={section.selectedValues.includes(option.id)}
                                 onChange={() => handleToggleOption(section, option.id)}
                               />
