@@ -106,6 +106,7 @@ const Customers = () => {
         { key: 'borrowed_cylinders', label: 'Vỏ bình đang mượn' },
         { key: 'machines_in_use', label: 'Mã máy đang sử dụng' },
         { key: 'care_by', label: 'KD chăm sóc' },
+        { key: 'invoice_email', label: 'Email hóa đơn' },
     ];
 
     const CUSTOMER_CATEGORIES = [
@@ -482,6 +483,7 @@ const Customers = () => {
             'Người liên hệ phụ',
             'Nhóm kinh doanh',
             'Mã số thuế',
+            'Email hoá đơn',
             'Tên công ty hoá đơn',
             'Địa chỉ hoá đơn',
         ];
@@ -581,6 +583,7 @@ const Customers = () => {
                         contact_info: row['Người liên hệ phụ']?.toString(),
                         business_group: row['Nhóm kinh doanh']?.toString(),
                         tax_code: row['Mã số thuế']?.toString(),
+                        invoice_email: row['Email hoá đơn']?.toString(),
                         invoice_company_name: row['Tên công ty hoá đơn']?.toString(),
                         invoice_address: row['Địa chỉ hoá đơn']?.toString(),
                         updated_at: new Date().toISOString()
@@ -910,6 +913,12 @@ const Customers = () => {
                                             <MapPin className="w-3.5 h-3.5 mt-0.5" />
                                             <span className="line-clamp-2">{c.address || '—'}</span>
                                         </div>
+                                        {c.invoice_email && (
+                                            <div className="flex items-center gap-2 text-[12px] text-primary/80 font-medium">
+                                                <Mail size={13} />
+                                                <span className="truncate">{c.invoice_email}</span>
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div className="grid grid-cols-3 gap-2 rounded-xl bg-muted/10 border border-border/60 p-2.5 mb-3">
@@ -1203,6 +1212,7 @@ const Customers = () => {
                                         {isColumnVisible('borrowed_cylinders') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.borrowed_cylinders || 0)}</td>}
                                         {isColumnVisible('machines_in_use') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.machines_in_use || '—'}</td>}
                                         {isColumnVisible('care_by') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.care_by || '—'}</td>}
+                                        {isColumnVisible('invoice_email') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.invoice_email || '—'}</td>}
                                         <td className="px-4 py-4 text-center border-l border-r border-primary/20">
                                             <div className="flex items-center justify-center gap-3">
                                                 <button onClick={() => { setSelectedCustomer(c); setIsRepairModalOpen(true); }} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Báo hỏng">

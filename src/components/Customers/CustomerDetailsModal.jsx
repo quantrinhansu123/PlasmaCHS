@@ -12,7 +12,10 @@ import {
     Phone,
     Upload,
     UserCircle,
-    X
+    X,
+    Receipt,
+    Mail,
+    Building
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -309,8 +312,37 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                                     <ArrowDownRight className="w-5 h-5" />
                                                 </div>
                                             </div>
-                                            <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest relative z-10">Tổng Tiền Khách Trả</p>
-                                            <h3 className="text-xl md:text-2xl font-black text-slate-800 mt-1 relative z-10 break-words">{formatCurrency(stats.totalPaid)}</h3>
+                                        </div>
+                                    </div>
+
+                                    {/* Invoicing Information Section */}
+                                    <div className="bg-white border border-slate-200 shadow-sm rounded-3xl p-5 md:p-6 space-y-5">
+                                        <h4 className="flex items-center gap-2.5 text-[16px] font-black text-slate-800 pb-3 border-b border-slate-100 uppercase tracking-tighter">
+                                            <Receipt className="w-4 h-4 text-primary" /> Thông tin xuất hóa đơn
+                                        </h4>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
+                                            <div className="space-y-1">
+                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Mã số thuế</p>
+                                                <p className="font-bold text-slate-700 flex items-center gap-2 text-sm">
+                                                    <Building className="w-3.5 h-3.5 text-slate-400" />
+                                                    {customer.tax_code || '—'}
+                                                </p>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Email nhận hóa đơn</p>
+                                                <p className="font-bold text-primary flex items-center gap-2 text-sm">
+                                                    <Mail className="w-3.5 h-3.5 text-primary/60" />
+                                                    {customer.invoice_email || '—'}
+                                                </p>
+                                            </div>
+                                            <div className="md:col-span-2 space-y-1 pt-2 border-t border-slate-50">
+                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Tên đơn vị (Hoá đơn)</p>
+                                                <p className="font-bold text-slate-800 text-sm italic">{customer.invoice_company_name || '—'}</p>
+                                            </div>
+                                            <div className="md:col-span-2 space-y-1 pt-2 border-t border-slate-50">
+                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Địa chỉ xuất hóa đơn</p>
+                                                <p className="font-bold text-slate-600 text-sm leading-relaxed">{customer.invoice_address || '—'}</p>
+                                            </div>
                                         </div>
                                     </div>
 

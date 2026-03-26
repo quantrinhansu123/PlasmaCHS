@@ -3,12 +3,15 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
 import { supabase } from '../../supabase/config';
+import { validateMST, validatePhone } from '../../utils/taxUtils';
 
 export default function SupplierFormModal({ supplier, onClose, onSuccess }) {
     const isEdit = !!supplier;
     const [isLoading, setIsLoading] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
     const [isClosing, setIsClosing] = useState(false);
+    const [taxError, setTaxError] = useState(false);
+    const [phoneError, setPhoneError] = useState(false);
 
     const defaultState = {
         name: '',
@@ -39,6 +42,12 @@ export default function SupplierFormModal({ supplier, onClose, onSuccess }) {
 
     const handleChange = (e) => {
         const { name, value } = e.target;
+        if (name === 'tax_id') {
+            setTaxError(value ? !validateMST(value) : false);
+        }
+        if (name === 'phone') {
+            setPhoneError(value ? !validatePhone(value) : false);
+        }
         setFormData(prev => ({ ...prev, [name]: value }));
     };
 
@@ -48,6 +57,17 @@ export default function SupplierFormModal({ supplier, onClose, onSuccess }) {
 
         if (!formData.name.trim() || !formData.phone.trim()) {
             setErrorMsg('Vui lòng điền đầy đủ Tên nhà cung cấp và Số điện thoại.');
+            return;
+        }
+
+        if (phoneError || (formData.phone && !validatePhone(formData.phone))) {
+            setErrorMsg('Số điện thoại không đúng định dạng. Vui lòng kiểm tra lại.');
+            setPhoneError(true);
+            return;
+        }
+
+        if (taxError) {
+            setErrorMsg('Mã số thuế không hợp lệ. Vui lòng kiểm tra lại.');
             return;
         }
 
@@ -175,8 +195,18 @@ export default function SupplierFormModal({ supplier, onClose, onSuccess }) {
                                         value={formData.tax_id}
                                         onChange={handleChange}
                                         placeholder="Mã số thuế của doanh nghiệp..."
-                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[14px] focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary focus:bg-white transition-all shadow-sm"
+                                        className={clsx(
+                                            "w-full h-12 px-4 border rounded-2xl text-[14px] focus:outline-none focus:ring-4 transition-all shadow-sm font-semibold",
+                                            taxError 
+                                                ? "bg-rose-50 border-rose-300 text-rose-900 focus:ring-rose-100 focus:border-rose-400" 
+                                                : "bg-slate-50 border-slate-200 text-slate-800 focus:ring-primary/10 focus:border-primary focus:bg-white"
+                                        )}
                                     />
+                                    {taxError && (
+                                        <p className="text-[11px] font-bold text-rose-600 mt-1.5 ml-1 animate-in fade-in slide-in-from-top-1">
+                                            ⚠ Mã số thuế không đúng định dạng hoặc sai số kiểm tra
+                                        </p>
+                                    )}
                                 </div>
 
                                 <div className="space-y-2">
@@ -205,9 +235,19 @@ export default function SupplierFormModal({ supplier, onClose, onSuccess }) {
                                         value={formData.phone}
                                         onChange={handleChange}
                                         placeholder="VD: 024.1234.5678"
-                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[14px] focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary focus:bg-white transition-all shadow-sm"
+                                        className={clsx(
+                                            "w-full h-12 px-4 border rounded-2xl text-[14px] focus:outline-none focus:ring-4 transition-all shadow-sm font-semibold",
+                                            phoneError 
+                                                ? "bg-rose-50 border-rose-300 text-rose-900 focus:ring-rose-100 focus:border-rose-400" 
+                                                : "bg-slate-50 border-slate-200 text-slate-800 focus:ring-primary/10 focus:border-primary focus:bg-white"
+                                        )}
                                         required
                                     />
+                                    {phoneError && (
+                                        <p className="text-[11px] font-bold text-rose-600 mt-1.5 ml-1 animate-in fade-in slide-in-from-top-1">
+                                            ⚠ Số điện thoại không đúng định dạng
+                                        </p>
+                                    )}
                                 </div>
 
                                 <div className="space-y-2">

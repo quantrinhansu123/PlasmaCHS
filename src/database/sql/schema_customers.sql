@@ -18,6 +18,7 @@ CREATE TABLE customers (
     machines_in_use TEXT, -- Mã các máy đang sử dụng (Có thể lưu dạng JSON hoặc text phẩy)
     tax_code VARCHAR(50), -- Mã số thuế
     invoice_address TEXT, -- Địa chỉ xuất hoá đơn GTGT
+    invoice_email VARCHAR(255), -- Email nhận hoá đơn điện tử
     customer_type VARCHAR(50), -- Loại khách hàng: công (BV công), tư (BV tư, TM, PK, NG, SP)
     last_order_date DATE, -- Ngày đặt hàng gần nhất (dùng tính KH quá hạn)
     
