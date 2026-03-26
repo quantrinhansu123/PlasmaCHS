@@ -104,11 +104,11 @@ const S = {
 };
 
 const getConditionLabel = (cond) => {
-    const map = { tot: 'Tốt', hong: 'Hỏng', meo: 'Méo/Móp', khac: 'Khác' };
+    const map = { tot: 'Tốt', lo: 'Lỗi nhẹ', hong: 'Hỏng nặng', khac: 'Khác' };
     return map[cond] || cond;
 };
 
-export default function CylinderRecoveryPrintTemplate({ recovery, items: initialItems, customerName, customerAddress, warehouseName, onPrinted }) {
+export default function MachineRecoveryPrintTemplate({ recovery, items: initialItems, customerName, customerAddress, warehouseName, onPrinted }) {
     const [items, setItems] = useState(initialItems || []);
     const [loading, setLoading] = useState(!initialItems);
 
@@ -133,13 +133,13 @@ export default function CylinderRecoveryPrintTemplate({ recovery, items: initial
         setLoading(true);
         try {
             const { data, error } = await supabase
-                .from('cylinder_recovery_items')
+                .from('machine_recovery_items')
                 .select('*')
                 .eq('recovery_id', recovery.id);
             if (error) throw error;
             setItems(data || []);
         } catch (err) {
-            console.error('Error fetching recovery items:', err);
+            console.error('Error fetching machine recovery items:', err);
         } finally {
             setLoading(false);
         }
@@ -153,16 +153,16 @@ export default function CylinderRecoveryPrintTemplate({ recovery, items: initial
     const year = recoveryDate.getFullYear();
 
     return (
-        <div className="recovery-print-page" style={S.page}>
+        <div className="machine-recovery-print-page" style={S.page}>
             <style>
                 {`
                 @media screen {
-                    .recovery-print-page { display: none !important; }
+                    .machine-recovery-print-page { display: none !important; }
                 }
                 @media print {
                     @page { margin: 0; size: A4 portrait; }
                     body { -webkit-print-color-adjust: exact; background: #fff !important; margin: 0; }
-                    .recovery-print-page { 
+                    .machine-recovery-print-page { 
                         display: block !important; 
                         margin: 0;
                         padding: 20mm !important;
@@ -182,7 +182,7 @@ export default function CylinderRecoveryPrintTemplate({ recovery, items: initial
                             Tel: 0981878423
                         </td>
                         <td style={S.headerTdRight}>
-                            <b>BIÊN BẢN THU NHẬN VỎ BÌNH</b><br />
+                            <b>BIÊN BẢN THU HỒI MÁY</b><br />
                             Mã phiếu: <b>{recovery.recovery_code}</b><br />
                             Ngày {day} tháng {month} năm {year}
                         </td>
@@ -190,7 +190,7 @@ export default function CylinderRecoveryPrintTemplate({ recovery, items: initial
                 </tbody>
             </table>
 
-            <div style={S.title}>BIÊN BẢN THU NHẬN VỎ BÌNH</div>
+            <div style={S.title}>BIÊN BẢN THU HỒI MÁY</div>
             <div style={S.subtitle}>Dành cho bộ phận vận chuyển và kho</div>
 
             <div style={S.infoGrid}>
@@ -198,7 +198,7 @@ export default function CylinderRecoveryPrintTemplate({ recovery, items: initial
                 <div style={S.infoItem}>Địa chỉ: {customerAddress || '—'}</div>
                 <div style={S.infoItem}>NV vận chuyển: {recovery.driver_name || '—'}</div>
                 <div style={S.infoItem}>Kho nhận: {warehouseName || recovery.warehouse_id}</div>
-                <div style={S.infoItem}>Tổng số vỏ: <b>{items.length}</b></div>
+                <div style={S.infoItem}>Tổng số máy: <b>{items.length}</b></div>
             </div>
 
             {recovery.notes && (
@@ -211,7 +211,7 @@ export default function CylinderRecoveryPrintTemplate({ recovery, items: initial
                 <thead>
                     <tr>
                         <th style={{ ...S.th, width: '10%' }}>STT</th>
-                        <th style={{ ...S.th, width: '40%' }}>Mã Serial Vỏ Bình</th>
+                        <th style={{ ...S.th, width: '40%' }}>Mã Serial Máy</th>
                         <th style={{ ...S.th, width: '20%' }}>Tình trạng</th>
                         <th style={{ ...S.th, width: '30%' }}>Ghi chú chi tiết</th>
                     </tr>
@@ -220,7 +220,7 @@ export default function CylinderRecoveryPrintTemplate({ recovery, items: initial
                     {loading ? (
                         <tr><td colSpan="4" style={S.td}>Đang tải...</td></tr>
                     ) : items.length === 0 ? (
-                        <tr><td colSpan="4" style={S.td}>Không có dữ liệu vỏ bình</td></tr>
+                        <tr><td colSpan="4" style={S.td}>Không có dữ liệu máy</td></tr>
                     ) : (
                         items.map((item, idx) => (
                             <tr key={item.id || idx}>

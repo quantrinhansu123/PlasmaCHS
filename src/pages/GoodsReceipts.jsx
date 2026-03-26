@@ -114,7 +114,6 @@ const GoodsReceipts = () => {
     const listDropdownRef = useRef(null);
     const statsDropdownRef = useRef(null);
 
-    const isColumnVisible = (key) => visibleColumns.includes(key);
     const visibleTableColumns = columnOrder
         .filter(key => visibleColumns.includes(key))
         .map(key => TABLE_COLUMNS.find(col => col.key === key))
@@ -176,7 +175,7 @@ const GoodsReceipts = () => {
         try {
             const { data, error } = await supabase
                 .from('goods_receipts')
-                .select('*')
+                .select('*, items:goods_receipt_items(item_name)')
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
@@ -621,6 +620,39 @@ const GoodsReceipts = () => {
 
     const getWarehouseLabel = (id) => {
         return warehousesList.find(w => w.id === id)?.name || id;
+    };
+
+    const renderCell = (key, receipt) => {
+        switch (key) {
+            case 'code':
+                return (
+                    <span className="text-[13px] font-black text-blue-700 bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100">{receipt.receipt_code}</span>
+                );
+            case 'supplier':
+                return <span className="text-[13px] font-bold text-slate-800">{receipt.supplier_name}</span>;
+            case 'warehouse':
+                return <span className="text-[13px] font-bold text-slate-600 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100">{getWarehouseLabel(receipt.warehouse_id)}</span>;
+            case 'date':
+                return <span className="text-[13px] font-medium text-slate-500">{receipt.receipt_date ? new Date(receipt.receipt_date).toLocaleDateString('vi-VN') : '—'}</span>;
+            case 'items':
+                return <span className="text-[13px] font-black text-slate-700">{receipt.total_items}</span>;
+            case 'items_summary':
+                return (
+                    <div className="text-[12px] font-bold text-blue-600 truncate max-w-[250px]" title={receipt.items?.map(i => i.item_name).join(', ')}>
+                        {receipt.items?.map(i => i.item_name).join(', ') || '—'}
+                    </div>
+                );
+            case 'amount':
+                return <span className="text-[13px] font-black text-rose-600 text-right block w-full">{formatNumber(receipt.total_amount || 0)} ₫</span>;
+            case 'deliverer':
+                return <span className="text-[13px] font-medium text-slate-800 italic">{receipt.deliverer_name || '—'}</span>;
+            case 'deliverer_address':
+                return <span className="text-[13px] font-medium text-slate-500 max-w-[200px] truncate block" title={receipt.deliverer_address}>{receipt.deliverer_address || '—'}</span>;
+            case 'status':
+                return getStatusBadge(receipt.status);
+            default:
+                return <span className="text-[13px]">{receipt[key] || '—'}</span>;
+        }
     };
 
 
@@ -1112,8 +1144,14 @@ const GoodsReceipts = () => {
                                                     <p className="text-xs font-medium text-slate-600">{receipt.receipt_date ? new Date(receipt.receipt_date).toLocaleDateString('vi-VN') : '—'}</p>
                                                 </div>
                                                 <div>
-                                                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tight block mb-0.5">Số mặt hàng</span>
+                                                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tight block mb-0.5">Số dòng</span>
                                                     <p className="text-xs font-black text-slate-900">{receipt.total_items}</p>
+                                                </div>
+                                                <div className="col-span-2">
+                                                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tight block mb-0.5">Mặt hàng</span>
+                                                    <p className="text-[11px] font-bold text-blue-600 line-clamp-2">
+                                                        {receipt.items?.map(i => i.item_name).join(', ') || '—'}
+                                                    </p>
                                                 </div>
                                                 <div className="col-span-2">
                                                     <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tight block mb-0.5">Tổng giá trị</span>
@@ -1178,43 +1216,17 @@ const GoodsReceipts = () => {
                                                             />
                                                         </div>
                                                     </td>
-                                                    {isColumnVisible('code') && (
-                                                        <td className="px-4 py-4 whitespace-nowrap">
-                                                            <span className="text-[13px] font-black text-blue-700 bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100">{receipt.receipt_code}</span>
+                                                    {visibleTableColumns.map(col => (
+                                                        <td key={col.key} className={clsx(
+                                                            "px-4 py-4",
+                                                            col.key === 'items' && "text-center",
+                                                            col.key === 'code' && "whitespace-nowrap",
+                                                            col.key === 'amount' && "text-right",
+                                                            (col.key === 'deliverer_address' || col.key === 'items_summary') && "max-w-[200px] truncate"
+                                                        )}>
+                                                            {renderCell(col.key, receipt)}
                                                         </td>
-                                                    )}
-                                                    {isColumnVisible('supplier') && (
-                                                        <td className="px-4 py-4 text-[13px] font-bold text-slate-800">{receipt.supplier_name}</td>
-                                                    )}
-                                                    {isColumnVisible('warehouse') && (
-                                                        <td className="px-4 py-4">
-                                                            <span className="text-[13px] font-bold text-slate-600 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100">{getWarehouseLabel(receipt.warehouse_id)}</span>
-                                                        </td>
-                                                    )}
-                                                    {isColumnVisible('date') && (
-                                                        <td className="px-4 py-4 text-[13px] font-medium text-slate-500">
-                                                            {receipt.receipt_date ? new Date(receipt.receipt_date).toLocaleDateString('vi-VN') : '—'}
-                                                        </td>
-                                                    )}
-                                                    {isColumnVisible('items') && (
-                                                        <td className="px-4 py-4 text-center text-[13px] font-black text-slate-700">{receipt.total_items}</td>
-                                                    )}
-                                                    {isColumnVisible('amount') && (
-                                                        <td className="px-4 py-4 text-right">
-                                                            <span className="text-[13px] font-black text-rose-600">{formatNumber(receipt.total_amount || 0)} ₫</span>
-                                                        </td>
-                                                    )}
-                                                    {isColumnVisible('deliverer') && (
-                                                        <td className="px-4 py-4 text-[13px] font-medium text-slate-800 italic">{receipt.deliverer_name || '—'}</td>
-                                                    )}
-                                                    {isColumnVisible('deliverer_address') && (
-                                                        <td className="px-4 py-4 text-[13px] font-medium text-slate-500 max-w-[200px] truncate">{receipt.deliverer_address || '—'}</td>
-                                                    )}
-                                                    {isColumnVisible('status') && (
-                                                        <td className="px-4 py-4">
-                                                            {getStatusBadge(receipt.status)}
-                                                        </td>
-                                                    )}
+                                                    ))}
                                                     <td className="sticky right-0 z-10 bg-white px-4 py-4 shadow-[-6px_0_10px_-8px_rgba(0,0,0,0.1)]">
                                                         <div className="flex items-center justify-center gap-3">
                                                             {receipt.status === 'CHO_DUYET' && (

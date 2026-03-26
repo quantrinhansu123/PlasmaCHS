@@ -3,6 +3,10 @@
 -- Purpose: Calculate monthly inventory (balance) of machines at customers/warehouses
 -- ==============================================================================
 
+-- Drop existing views
+DROP VIEW IF EXISTS view_machine_monthly_balance CASCADE;
+DROP VIEW IF EXISTS view_machine_movements_combined CASCADE;
+
 -- 1. Combine all machine movements (Orders and Goods Receipts)
 CREATE OR REPLACE VIEW view_machine_movements_combined AS
 WITH movements AS (
@@ -38,16 +42,33 @@ WITH movements AS (
     WHERE gr.status = 'DA_NHAP' AND gri.item_type = 'MAY'
 )
 SELECT 
-    customer_id,
-    customer_name,
-    warehouse_id as kho,
-    nam,
-    thang,
-    SUM(xuat) as xuat,
-    SUM(thu_hoi) as thu_hoi,
-    SUM(xuat - thu_hoi) as chenh_lech
-FROM movements
-GROUP BY customer_id, customer_name, warehouse_id, nam, thang;
+    m.customer_id,
+    m.customer_name,
+    CASE 
+        WHEN w.name IS NOT NULL THEN w.name
+        WHEN m.warehouse_id = 'HN' THEN 'Kho Hà Nội'
+        WHEN m.warehouse_id = 'TP.HCM' THEN 'Kho TP.HCM'
+        WHEN m.warehouse_id = 'TH' THEN 'Kho Thanh Hóa'
+        WHEN m.warehouse_id = 'DN' THEN 'Kho Đà Nẵng'
+        ELSE m.warehouse_id 
+    END::VARCHAR(50) AS kho,
+    m.nam,
+    m.thang,
+    SUM(m.xuat) as xuat,
+    SUM(m.thu_hoi) as thu_hoi,
+    SUM(m.xuat - m.thu_hoi) as chenh_lech
+FROM movements m
+LEFT JOIN warehouses w ON (w.id::text = m.warehouse_id OR w.name = m.warehouse_id)
+GROUP BY m.customer_id, m.customer_name, 
+    CASE 
+        WHEN w.name IS NOT NULL THEN w.name
+        WHEN m.warehouse_id = 'HN' THEN 'Kho Hà Nội'
+        WHEN m.warehouse_id = 'TP.HCM' THEN 'Kho TP.HCM'
+        WHEN m.warehouse_id = 'TH' THEN 'Kho Thanh Hóa'
+        WHEN m.warehouse_id = 'DN' THEN 'Kho Đà Nẵng'
+        ELSE m.warehouse_id 
+    END::VARCHAR(50), 
+    m.nam, m.thang;
 
 -- 2. View with cumulative balances (Opening/Closing)
 CREATE OR REPLACE VIEW view_machine_monthly_balance AS

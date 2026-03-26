@@ -58,7 +58,9 @@ const COLUMN_DEFS = {
   don_xuat_ban: { label: 'Đơn Bán' },
   binh_ban: { label: 'Bình Bán' },
   binh_demo: { label: 'Bình Demo' },
-  binh_thu_hoi: { label: 'Bình Thu Hồi' }
+  binh_thu_hoi: { label: 'Bình Thu Hồi' },
+  may_ban: { label: 'Máy Bán' },
+  may_dang_su_dung: { label: 'Máy Đang Dùng' }
 };
 
 const defaultColOrder = Object.keys(COLUMN_DEFS);
@@ -165,7 +167,12 @@ const SalespersonReport = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [activeDropdown]);
 
-  const handleExport = () => exportSalespersonReport(data);
+  const handleExport = () => {
+    const dataToExport = selectedIds.length > 0
+      ? filteredData.filter((_, index) => selectedIds.includes(index))
+      : filteredData;
+    exportSalespersonReport(dataToExport);
+  };
 
   const filteredData = data.filter(item =>
     item.ten_nhan_vien?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -211,6 +218,7 @@ const SalespersonReport = () => {
     totalCustomers: filteredData.reduce((sum, item) => sum + (item.tong_khach_hang || 0), 0),
     totalBan: filteredData.reduce((sum, item) => sum + (item.binh_ban || 0), 0),
     totalDemo: filteredData.reduce((sum, item) => sum + (item.binh_demo || 0), 0),
+    totalMayBan: filteredData.reduce((sum, item) => sum + (item.may_ban || 0), 0),
   };
 
   const getWarehouseStats = () => {
@@ -342,6 +350,8 @@ const SalespersonReport = () => {
                         if (colKey === 'binh_ban') return <td key={colKey} className="px-4 py-4 text-right"><span className="text-[13px] font-bold text-emerald-600">{formatNumber(item.binh_ban)}</span></td>;
                         if (colKey === 'binh_demo') return <td key={colKey} className="px-4 py-4 text-right"><span className="text-[13px] font-bold text-orange-600">{formatNumber(item.binh_demo)}</span></td>;
                         if (colKey === 'binh_thu_hoi') return <td key={colKey} className="px-4 py-4 text-right"><span className="text-[13px] font-bold text-violet-600">{formatNumber(item.binh_thu_hoi)}</span></td>;
+                        if (colKey === 'may_ban') return <td key={colKey} className="px-4 py-4 text-right"><span className="text-[13px] font-bold text-rose-600">{formatNumber(item.may_ban)}</span></td>;
+                        if (colKey === 'may_dang_su_dung') return <td key={colKey} className="px-4 py-4 text-right"><span className="text-[13px] font-bold text-indigo-600">{formatNumber(item.may_dang_su_dung)}</span></td>;
                         return null;
                       })}
                     </tr>
@@ -369,11 +379,13 @@ const SalespersonReport = () => {
                     <Phone size={14} className="text-muted-foreground/60" />
                     <span>{item.so_dien_thoai || '-'}</span>
                   </div>
-                  <div className="grid grid-cols-4 gap-2 bg-muted/10 rounded-xl p-2.5 border border-border/60">
+                  <div className="grid grid-cols-3 gap-2 bg-muted/10 rounded-xl p-2.5 border border-border/60">
                     <div className="text-center"><p className="text-[9px] text-muted-foreground font-bold uppercase mb-0.5">KH</p><p className="text-[12px] font-bold text-primary">{formatNumber(item.tong_khach_hang)}</p></div>
-                    <div className="text-center border-l border-border/60"><p className="text-[9px] text-muted-foreground font-bold uppercase mb-0.5">Đơn</p><p className="text-[12px] font-bold text-blue-600">{formatNumber(item.don_xuat_ban)}</p></div>
-                    <div className="text-center border-l border-border/60"><p className="text-[9px] text-muted-foreground font-bold uppercase mb-0.5">Bán</p><p className="text-[12px] font-bold text-emerald-600">{formatNumber(item.binh_ban)}</p></div>
-                    <div className="text-center border-l border-border/60"><p className="text-[9px] text-muted-foreground font-bold uppercase mb-0.5">Demo</p><p className="text-[12px] font-bold text-orange-600">{formatNumber(item.binh_demo)}</p></div>
+                    <div className="text-center border-l border-border/60"><p className="text-[9px] text-muted-foreground font-bold uppercase mb-0.5">Đơn Bán</p><p className="text-[12px] font-bold text-blue-600">{formatNumber(item.don_xuat_ban)}</p></div>
+                    <div className="text-center border-l border-border/60"><p className="text-[9px] text-muted-foreground font-bold uppercase mb-0.5">Bình Bán</p><p className="text-[12px] font-bold text-emerald-600">{formatNumber(item.binh_ban)}</p></div>
+                    <div className="text-center pt-2 mt-2 border-t border-border/60"><p className="text-[9px] text-muted-foreground font-bold uppercase mb-0.5">Bình Demo</p><p className="text-[12px] font-bold text-orange-600">{formatNumber(item.binh_demo)}</p></div>
+                    <div className="text-center pt-2 mt-2 border-t border-l border-border/60"><p className="text-[9px] text-muted-foreground font-bold uppercase mb-0.5">Máy Bán</p><p className="text-[12px] font-bold text-rose-600">{formatNumber(item.may_ban)}</p></div>
+                    <div className="text-center pt-2 mt-2 border-t border-l border-border/60"><p className="text-[9px] text-muted-foreground font-bold uppercase mb-0.5">Máy Dùng</p><p className="text-[12px] font-bold text-indigo-600">{formatNumber(item.may_dang_su_dung)}</p></div>
                   </div>
                 </div>
               ))
@@ -432,7 +444,7 @@ const SalespersonReport = () => {
 
           <div className="w-full p-4 md:p-6 space-y-6">
             {/* Summary Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
               <div className="bg-blue-50/70 border border-blue-100 rounded-2xl p-4 md:p-5 shadow-sm">
                 <div className="flex flex-col md:flex-row items-center md:items-center justify-center md:justify-start text-center md:text-left gap-3 md:gap-4">
                   <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-100/80 rounded-full flex items-center justify-center shrink-0 ring-1 ring-blue-200/70">
@@ -474,6 +486,17 @@ const SalespersonReport = () => {
                   <div>
                     <p className="text-[10px] md:text-[11px] font-semibold text-orange-600 uppercase tracking-wider">Tổng Bình Demo</p>
                     <p className="text-2xl md:text-3xl font-bold text-foreground mt-0.5 md:mt-1 leading-none">{formatNumber(stats_summary.totalDemo)}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-rose-50/70 border border-rose-100 rounded-2xl p-4 md:p-5 shadow-sm">
+                <div className="flex flex-col md:flex-row items-center md:items-center justify-center md:justify-start text-center md:text-left gap-3 md:gap-4">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-rose-100/80 rounded-full flex items-center justify-center shrink-0 ring-1 ring-rose-200/70">
+                    <TrendingUp className="w-5 h-5 md:w-6 md:h-6 text-rose-600" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] md:text-[11px] font-semibold text-rose-600 uppercase tracking-wider">Tổng Máy Bán</p>
+                    <p className="text-2xl md:text-3xl font-bold text-foreground mt-0.5 md:mt-1 leading-none">{formatNumber(stats_summary.totalMayBan)}</p>
                   </div>
                 </div>
               </div>

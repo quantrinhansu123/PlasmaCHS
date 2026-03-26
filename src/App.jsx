@@ -41,6 +41,7 @@ import CustomerCylinderReport from './pages/CustomerCylinderReport';
 import MachineInventoryReport from './pages/MachineInventoryReport';
 import SalesReport from './pages/SalesReport';
 import ErrorReport from './pages/ErrorReport';
+import MachineRecoveries from './pages/MachineRecoveries';
 
 const moduleRoutes = ['/don-hang-kinh-doanh', '/quan-ly-thiet-bi', '/van-chuyen', '/thu-hoi', '/mua-hang-nha-cung-cap', '/kho', '/he-thong', '/vat-tu', '/thong-ke'];
 
@@ -115,21 +116,32 @@ function App() {
               ))}
               <Route path="/don-hang" element={<Orders />} />
               <Route path="/binh" element={<Cylinders />} />
+              <Route path="/binh/tao" element={<Cylinders />} />
               <Route path="/may" element={<Machines />} />
+              <Route path="/may/tao" element={<Machines />} />
               <Route path="/kho/danh-sach" element={<Warehouses />} />
+              <Route path="/kho/tao" element={<Warehouses />} />
               <Route path="/khach-hang" element={<Customers />} />
+              <Route path="/khach-hang/tao" element={<Customers />} />
               <Route path="/don-vi-van-chuyen" element={<Shippers />} />
+              <Route path="/don-vi-van-chuyen/tao" element={<Shippers />} />
               <Route path="/nhap-hang" element={<GoodsReceipts />} />
               <Route path="/xuat-tra-ncc" element={<GoodsIssues />} />
               <Route path="/thu-hoi-vo" element={<CylinderRecoveries />} />
+              <Route path="/thu-hoi-may" element={<MachineRecoveries />} />
 
               <Route path="/nha-cung-cap" element={<Suppliers />} />
+              <Route path="/nha-cung-cap/tao" element={<Suppliers />} />
               <Route path="/vat-tu/danh-sach" element={<Materials />} />
+              <Route path="/vat-tu/tao" element={<Materials />} />
               <Route path="/nguoi-dung" element={<Users />} />
+              <Route path="/nguoi-dung/tao" element={<Users />} />
               <Route path="/phan-quyen" element={<Permissions />} />
+              <Route path="/phan-quyen/tao" element={<Permissions />} />
               <Route path="/khuyen-mai" element={<Promotions />} />
+              <Route path="/khuyen-mai/tao" element={<Promotions />} />
               <Route path="/phieu-sua-chua" element={<RepairTickets />} />
-              <Route path="/phieu-sua-chuatao" element={<CreateRepairTicket />} />
+              <Route path="/phieu-sua-chua/tao" element={<CreateRepairTicket />} />
               <Route path="/de-nghi-xuat-may/tao" element={<CreateMachineIssueRequest />} />
               {legacyRedirects.map(([from, to]) => (
                 <Route key={from} path={from} element={<Navigate to={to} replace />} />

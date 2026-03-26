@@ -120,6 +120,14 @@ const Suppliers = () => {
     }, []);
 
     useEffect(() => {
+        if (location.pathname === '/nha-cung-cap/tao') {
+            setSelectedSupplier(null);
+            setIsFormModalOpen(true);
+            navigate('/nha-cung-cap', { replace: true });
+        }
+    }, [location.pathname, navigate]);
+
+    useEffect(() => {
         localStorage.setItem('columns_suppliers', JSON.stringify(visibleColumns));
     }, [visibleColumns]);
 

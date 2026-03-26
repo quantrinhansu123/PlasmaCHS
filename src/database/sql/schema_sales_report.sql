@@ -12,13 +12,20 @@ SELECT
     o.customer_name,
     o.sales_person as nvkd,
     o.customer_category as loai_khach,
-    COALESCE(w.name, o.warehouse) as kho,
+    CASE 
+        WHEN w.name IS NOT NULL THEN w.name
+        WHEN o.warehouse = 'HN' THEN 'Kho Hà Nội'
+        WHEN o.warehouse = 'TP.HCM' THEN 'Kho TP.HCM'
+        WHEN o.warehouse = 'TH' THEN 'Kho Thanh Hóa'
+        WHEN o.warehouse = 'DN' THEN 'Kho Đà Nẵng'
+        ELSE o.warehouse 
+    END::VARCHAR(50) AS kho,
     EXTRACT(YEAR FROM o.created_at)::int as nam,
     EXTRACT(MONTH FROM o.created_at)::int as thang,
     SUM(o.total_amount) as doanh_so,
     COUNT(o.id) as so_don_hang
 FROM orders o
-LEFT JOIN warehouses w ON w.id::text = o.warehouse
+LEFT JOIN warehouses w ON (w.id::text = o.warehouse OR w.name = o.warehouse)
 WHERE o.order_type = 'THUONG'
 AND o.status IN (
     'DA_DUYET', 
@@ -32,7 +39,14 @@ GROUP BY
     o.customer_name, 
     o.sales_person, 
     o.customer_category, 
-    COALESCE(w.name, o.warehouse), 
+    CASE 
+        WHEN w.name IS NOT NULL THEN w.name
+        WHEN o.warehouse = 'HN' THEN 'Kho Hà Nội'
+        WHEN o.warehouse = 'TP.HCM' THEN 'Kho TP.HCM'
+        WHEN o.warehouse = 'TH' THEN 'Kho Thanh Hóa'
+        WHEN o.warehouse = 'DN' THEN 'Kho Đà Nẵng'
+        ELSE o.warehouse 
+    END::VARCHAR(50), 
     EXTRACT(YEAR FROM o.created_at), 
     EXTRACT(MONTH FROM o.created_at);
 

@@ -25,7 +25,14 @@ SELECT
     c.code AS ma_khach_hang,
     c.name AS ten_khach_hang,
     c.customer_type AS loai_khach_hang,
-    COALESCE(w.name, c.warehouse_id) AS kho,
+    CASE 
+        WHEN w.name IS NOT NULL THEN w.name
+        WHEN c.warehouse_id = 'HN' THEN 'Kho Hà Nội'
+        WHEN c.warehouse_id = 'TP.HCM' THEN 'Kho TP.HCM'
+        WHEN c.warehouse_id = 'TH' THEN 'Kho Thanh Hóa'
+        WHEN c.warehouse_id = 'DN' THEN 'Kho Đà Nẵng'
+        ELSE c.warehouse_id 
+    END::VARCHAR(50) AS kho,
     c.category AS loai_khach,
     (SELECT COUNT(*) FROM machines m WHERE m.customer_name = c.name) AS may_dang_su_dung,
     (SELECT COUNT(*) FROM cylinders cy WHERE cy.customer_name = c.name) AS binh_hien_co,
@@ -73,7 +80,7 @@ SELECT
     (SELECT STRING_AGG(serial_number, ', ') FROM cylinders cy WHERE cy.customer_name = c.name) AS danh_sach_binh
     
 FROM customers c
-LEFT JOIN warehouses w ON w.id::text = c.warehouse_id;
+LEFT JOIN warehouses w ON (w.id::text = c.warehouse_id OR w.name = c.warehouse_id);
 
 -- ==============================================================================
 -- View: Thống kê theo nhân viên kinh doanh
@@ -114,6 +121,12 @@ SELECT
     -- Số bình thu hồi
     (SELECT COALESCE(SUM(cr.total_items), 0) FROM cylinder_recoveries cr JOIN customers c ON c.id = cr.customer_id WHERE c.care_by = sn.name AND cr.status = 'HOAN_THANH') AS binh_thu_hoi,
     
+    -- Số máy bán (thuộc khách hàng)
+    (SELECT COUNT(*) FROM machines m JOIN customers c ON c.name = m.customer_name WHERE c.care_by = sn.name AND m.status = 'thuộc khách hàng') AS may_ban,
+    
+    -- Số máy đang sử dụng (cho thuê/demo)
+    (SELECT COUNT(*) FROM machines m JOIN customers c ON c.name = m.customer_name WHERE c.care_by = sn.name AND m.status = 'đang sử dụng') AS may_dang_su_dung,
+
     -- Tổng tồn kho (bình tại các kho mà nhân viên phụ trách KH)
     (SELECT COALESCE(SUM(inv.quantity), 0) FROM inventory inv WHERE inv.item_type = 'BINH' AND inv.warehouse_id IN (SELECT DISTINCT warehouse_id FROM customers WHERE care_by = sn.name)) AS binh_ton_kho
     
@@ -138,10 +151,17 @@ SELECT
     cy.expiry_date AS ngay_het_han,
     GREATEST(0, CURRENT_DATE - cy.expiry_date) AS so_ngay_ton,
     c.care_by AS nhan_vien_kinh_doanh,
-    COALESCE(w.name, c.warehouse_id) AS kho
+    CASE 
+        WHEN w.name IS NOT NULL THEN w.name
+        WHEN c.warehouse_id = 'HN' THEN 'Kho Hà Nội'
+        WHEN c.warehouse_id = 'TP.HCM' THEN 'Kho TP.HCM'
+        WHEN c.warehouse_id = 'TH' THEN 'Kho Thanh Hóa'
+        WHEN c.warehouse_id = 'DN' THEN 'Kho Đà Nẵng'
+        ELSE c.warehouse_id 
+    END AS kho
 FROM cylinders cy
 LEFT JOIN customers c ON c.name = cy.customer_name
-LEFT JOIN warehouses w ON w.id::text = c.warehouse_id
+LEFT JOIN warehouses w ON (w.id::text = c.warehouse_id OR w.name = c.warehouse_id)
 WHERE cy.expiry_date IS NOT NULL 
 AND cy.expiry_date < CURRENT_DATE;
 
@@ -193,10 +213,17 @@ SELECT
         ELSE NULL 
     END AS thoi_gian_xu_ly_ngay,
     c.care_by AS nhan_vien_kinh_doanh,
-    COALESCE(w.name, c.warehouse_id) AS kho
+    CASE 
+        WHEN w.name IS NOT NULL THEN w.name
+        WHEN c.warehouse_id = 'HN' THEN 'Kho Hà Nội'
+        WHEN c.warehouse_id = 'TP.HCM' THEN 'Kho TP.HCM'
+        WHEN c.warehouse_id = 'TH' THEN 'Kho Thanh Hóa'
+        WHEN c.warehouse_id = 'DN' THEN 'Kho Đà Nẵng'
+        ELSE c.warehouse_id 
+    END AS kho
 FROM cylinders cy
 LEFT JOIN customers c ON c.name = cy.customer_name
-LEFT JOIN warehouses w ON w.id::text = c.warehouse_id
+LEFT JOIN warehouses w ON (w.id::text = c.warehouse_id OR w.name = c.warehouse_id)
 WHERE cy.status = 'hỏng';
 
 -- ==============================================================================
@@ -211,7 +238,14 @@ SELECT
     m.status AS trang_thai,
     m.customer_name AS khach_hang,
     m.department_in_charge AS khoa_phu_trach,
-    m.warehouse AS kho,
+    CASE 
+        WHEN w.name IS NOT NULL THEN w.name
+        WHEN m.warehouse = 'HN' THEN 'Kho Hà Nội'
+        WHEN m.warehouse = 'TP.HCM' THEN 'Kho TP.HCM'
+        WHEN m.warehouse = 'TH' THEN 'Kho Thanh Hóa'
+        WHEN m.warehouse = 'DN' THEN 'Kho Đà Nẵng'
+        ELSE m.warehouse 
+    END::VARCHAR(50) AS kho,
     m.gas_type AS loai_khi,
     m.maintenance_date AS ngay_bao_tri_gan_nhat,
     m.maintenance_type AS loai_bao_tri,
@@ -226,7 +260,8 @@ SELECT
     CASE WHEN m.status = 'đang sửa' THEN 1 ELSE 0 END AS is_sua_chua
     
 FROM machines m
-LEFT JOIN customers c ON c.name = m.customer_name;
+LEFT JOIN customers c ON c.name = m.customer_name
+LEFT JOIN warehouses w ON (w.id::text = m.warehouse OR w.name = m.warehouse);
 
 -- ==============================================================================
 -- View: Thống kê máy tổng hợp (theo loại và trạng thái)
@@ -234,7 +269,14 @@ LEFT JOIN customers c ON c.name = m.customer_name;
 CREATE OR REPLACE VIEW view_machine_summary AS
 SELECT 
     m.machine_type AS loai_may,
-    COALESCE(w.name, m.warehouse) AS kho,
+    CASE 
+        WHEN w.name IS NOT NULL THEN w.name
+        WHEN m.warehouse = 'HN' THEN 'Kho Hà Nội'
+        WHEN m.warehouse = 'TP.HCM' THEN 'Kho TP.HCM'
+        WHEN m.warehouse = 'TH' THEN 'Kho Thanh Hóa'
+        WHEN m.warehouse = 'DN' THEN 'Kho Đà Nẵng'
+        ELSE m.warehouse 
+    END::VARCHAR(50) AS kho,
     COUNT(*) AS tong_so_may,
     COUNT(CASE WHEN m.status = 'thuộc khách hàng' THEN 1 END) AS may_ban,
     COUNT(CASE WHEN m.status = 'sẵn sàng' AND m.customer_name IS NULL THEN 1 END) AS may_ton_kho,
@@ -242,8 +284,16 @@ SELECT
     COUNT(CASE WHEN m.status = 'đang sửa' THEN 1 END) AS may_sua_chua,
     COUNT(CASE WHEN m.status = 'đang sử dụng' THEN 1 END) AS may_dang_su_dung
 FROM machines m
-LEFT JOIN warehouses w ON w.id::text = m.warehouse
-GROUP BY m.machine_type, COALESCE(w.name, m.warehouse);
+LEFT JOIN warehouses w ON (w.id::text = m.warehouse OR w.name = m.warehouse)
+GROUP BY m.machine_type, 
+    CASE 
+        WHEN w.name IS NOT NULL THEN w.name
+        WHEN m.warehouse = 'HN' THEN 'Kho Hà Nội'
+        WHEN m.warehouse = 'TP.HCM' THEN 'Kho TP.HCM'
+        WHEN m.warehouse = 'TH' THEN 'Kho Thanh Hóa'
+        WHEN m.warehouse = 'DN' THEN 'Kho Đà Nẵng'
+        ELSE m.warehouse 
+    END::VARCHAR(50);
 
 -- ==============================================================================
 -- View: Đơn hàng theo tháng/năm
@@ -254,7 +304,14 @@ SELECT
     o.id,
     o.order_code AS ma_don,
     o.customer_category AS loai_khach_hang,
-    COALESCE(w.name, o.warehouse) AS kho,
+    CASE 
+        WHEN w.name IS NOT NULL THEN w.name
+        WHEN o.warehouse = 'HN' THEN 'Kho Hà Nội'
+        WHEN o.warehouse = 'TP.HCM' THEN 'Kho TP.HCM'
+        WHEN o.warehouse = 'TH' THEN 'Kho Thanh Hóa'
+        WHEN o.warehouse = 'DN' THEN 'Kho Đà Nẵng'
+        ELSE o.warehouse 
+    END::VARCHAR(50) AS kho,
     o.customer_name AS ten_khach_hang,
     o.recipient_name AS nguoi_nhan,
     o.recipient_address AS dia_chi_nhan,
@@ -272,7 +329,7 @@ SELECT
     EXTRACT(YEAR FROM o.created_at)::INT AS nam,
     EXTRACT(MONTH FROM o.created_at)::INT AS thang
 FROM orders o
-LEFT JOIN warehouses w ON w.id::text = o.warehouse
+LEFT JOIN warehouses w ON (w.id::text = o.warehouse OR w.name = o.warehouse)
 WHERE o.status IN (
     'DA_DUYET', 
     'CHO_GIAO_HANG', 
@@ -306,7 +363,14 @@ SELECT
     m.serial_number AS serial_may,
     m.customer_name AS khach_hang,
     m.department_in_charge AS khoa,
-    m.warehouse AS kho,
+    CASE 
+        WHEN w.name IS NOT NULL THEN w.name
+        WHEN m.warehouse = 'HN' THEN 'Kho Hà Nội'
+        WHEN m.warehouse = 'TP.HCM' THEN 'Kho TP.HCM'
+        WHEN m.warehouse = 'TH' THEN 'Kho Thanh Hóa'
+        WHEN m.warehouse = 'DN' THEN 'Kho Đà Nẵng'
+        ELSE m.warehouse 
+    END::VARCHAR(50) AS kho,
     c.customer_type AS loai_khach_hang,
     c.care_by AS nhan_vien_kinh_doanh,
     COUNT(o.id) AS so_don_hang,
@@ -316,7 +380,17 @@ LEFT JOIN orders o ON o.customer_name = m.customer_name
     AND o.product_type LIKE '%' || m.machine_type || '%'
     AND o.status IN ('DA_DUYET', 'CHO_GIAO_HANG', 'DANG_GIAO_HANG', 'HOAN_THANH')
 LEFT JOIN customers c ON c.name = m.customer_name
-GROUP BY m.id, m.machine_type, m.serial_number, m.customer_name, m.department_in_charge, m.warehouse, c.customer_type, c.care_by;
+LEFT JOIN warehouses w ON (w.id::text = m.warehouse OR w.name = m.warehouse)
+GROUP BY m.id, m.machine_type, m.serial_number, m.customer_name, m.department_in_charge, 
+    CASE 
+        WHEN w.name IS NOT NULL THEN w.name
+        WHEN m.warehouse = 'HN' THEN 'Kho Hà Nội'
+        WHEN m.warehouse = 'TP.HCM' THEN 'Kho TP.HCM'
+        WHEN m.warehouse = 'TH' THEN 'Kho Thanh Hóa'
+        WHEN m.warehouse = 'DN' THEN 'Kho Đà Nẵng'
+        ELSE m.warehouse 
+    END, 
+    c.customer_type, c.care_by;
 
 -- ==============================================================================
 -- Comments for views

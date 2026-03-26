@@ -188,7 +188,7 @@ const CylinderRecoveries = () => {
 
     const fetchCustomers = async () => {
         try {
-            const { data, error } = await supabase.from('customers').select('id, name').order('name');
+            const { data, error } = await supabase.from('customers').select('id, name, address').order('name');
             if (error) throw error;
             setCustomers(data || []);
         } catch (error) {
@@ -275,6 +275,7 @@ const CylinderRecoveries = () => {
 
     // Helpers
     const getCustomerName = (id) => customers.find(c => c.id === id)?.name || '---';
+    const getCustomerAddress = (id) => customers.find(c => c.id === id)?.address || '---';
     const getOrderCode = (id) => orders.find(o => o.id === id)?.order_code || '---';
     const getWarehouseLabel = (id) => warehousesList.find(w => w.id === id)?.name || '---';
 
@@ -846,57 +847,71 @@ const CylinderRecoveries = () => {
                                                     />
                                                 </div>
                                             </td>
-                                            {isColumnVisible('recovery_code') && (
-                                                <td className="px-4 py-4 whitespace-nowrap border-l border-r border-primary/5">
-                                                    <span className="text-[13px] font-bold text-primary hover:underline cursor-pointer tracking-tight" onClick={() => handleEdit(recovery)}>
-                                                        {recovery.recovery_code}
-                                                    </span>
-                                                </td>
-                                            )}
-                                            {isColumnVisible('recovery_date') && (
-                                                <td className="px-4 py-4 whitespace-nowrap text-[13px] text-foreground font-medium">
-                                                    {recovery.recovery_date ? new Date(recovery.recovery_date).toLocaleDateString('vi-VN') : '—'}
-                                                </td>
-                                            )}
-                                            {isColumnVisible('customer_name') && (
-                                                <td className="px-4 py-4 max-w-[200px] truncate text-[13px] font-bold text-foreground">
-                                                    {getCustomerName(recovery.customer_id)}
-                                                </td>
-                                            )}
-                                            {isColumnVisible('order_id') && (
-                                                <td className="px-4 py-4 whitespace-nowrap">
-                                                    {recovery.order_id ? (
-                                                        <span className="text-[11px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 italic">
-                                                            {getOrderCode(recovery.order_id)}
-                                                        </span>
-                                                    ) : '—'}
-                                                </td>
-                                            )}
-                                            {isColumnVisible('warehouse_id') && (
-                                                <td className="px-4 py-4 whitespace-nowrap text-[13px] text-muted-foreground">
-                                                    {getWarehouseLabel(recovery.warehouse_id)}
-                                                </td>
-                                            )}
-                                            {isColumnVisible('driver_name') && (
-                                                <td className="px-4 py-4 text-[13px] text-muted-foreground font-normal">
-                                                    {recovery.driver_name || '—'}
-                                                </td>
-                                            )}
-                                            {isColumnVisible('total_items') && (
-                                                <td className="px-4 py-4">
-                                                    <span className="text-[13px] font-bold text-foreground flex items-center gap-1.5">
-                                                        <Package className="w-4 h-4 text-blue-500" />
-                                                        {recovery.total_items || 0}
-                                                    </span>
-                                                </td>
-                                            )}
-                                            {isColumnVisible('status') && (
-                                                <td className="px-4 py-4">
-                                                    <span className={clsx(getStatusBadgeClass(status.color), "uppercase text-[10px] tracking-wider")}>
-                                                        {status.label}
-                                                    </span>
-                                                </td>
-                                            )}
+                                            {visibleTableColumns.map(col => {
+                                                switch (col.key) {
+                                                    case 'recovery_code':
+                                                        return (
+                                                            <td key={col.key} className="px-4 py-4 whitespace-nowrap border-l border-r border-primary/5">
+                                                                <span className="text-[13px] font-bold text-primary hover:underline cursor-pointer tracking-tight" onClick={() => handleEdit(recovery)}>
+                                                                    {recovery.recovery_code}
+                                                                </span>
+                                                            </td>
+                                                        );
+                                                    case 'recovery_date':
+                                                        return (
+                                                            <td key={col.key} className="px-4 py-4 whitespace-nowrap text-[13px] text-foreground font-medium">
+                                                                {recovery.recovery_date ? new Date(recovery.recovery_date).toLocaleDateString('vi-VN') : '—'}
+                                                            </td>
+                                                        );
+                                                    case 'customer_name':
+                                                        return (
+                                                            <td key={col.key} className="px-4 py-4 max-w-[200px] truncate text-[13px] font-bold text-foreground">
+                                                                {getCustomerName(recovery.customer_id)}
+                                                            </td>
+                                                        );
+                                                    case 'order_id':
+                                                        return (
+                                                            <td key={col.key} className="px-4 py-4 whitespace-nowrap">
+                                                                {recovery.order_id ? (
+                                                                    <span className="text-[11px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 italic">
+                                                                        {getOrderCode(recovery.order_id)}
+                                                                    </span>
+                                                                ) : '—'}
+                                                            </td>
+                                                        );
+                                                    case 'warehouse_id':
+                                                        return (
+                                                            <td key={col.key} className="px-4 py-4 whitespace-nowrap text-[13px] text-muted-foreground">
+                                                                {getWarehouseLabel(recovery.warehouse_id)}
+                                                            </td>
+                                                        );
+                                                    case 'driver_name':
+                                                        return (
+                                                            <td key={col.key} className="px-4 py-4 text-[13px] text-muted-foreground font-normal">
+                                                                {recovery.driver_name || '—'}
+                                                            </td>
+                                                        );
+                                                    case 'total_items':
+                                                        return (
+                                                            <td key={col.key} className="px-4 py-4">
+                                                                <span className="text-[13px] font-bold text-foreground flex items-center gap-1.5">
+                                                                    <Package className="w-4 h-4 text-blue-500" />
+                                                                    {recovery.total_items || 0}
+                                                                </span>
+                                                            </td>
+                                                        );
+                                                    case 'status':
+                                                        return (
+                                                            <td key={col.key} className="px-4 py-4">
+                                                                <span className={clsx(getStatusBadgeClass(status.color), "uppercase text-[10px] tracking-wider")}>
+                                                                    {status.label}
+                                                                </span>
+                                                            </td>
+                                                        );
+                                                    default:
+                                                        return <td key={col.key} className="px-4 py-4">—</td>;
+                                                }
+                                            })}
                                             <td className="sticky right-0 z-20 bg-white group-hover:bg-blue-50/40 px-4 py-4 text-center shadow-[-6px_0_10px_-8px_rgba(15,23,42,0.25)] before:content-[''] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:bg-slate-300">
                                                 <div className="flex items-center justify-center gap-2">
                                                     <button
@@ -1205,6 +1220,8 @@ const CylinderRecoveries = () => {
                             <CylinderRecoveryPrintTemplate
                                 recovery={rec}
                                 customerName={getCustomerName(rec.customer_id)}
+                                customerAddress={getCustomerAddress(rec.customer_id)}
+                                warehouseName={getWarehouseLabel(rec.warehouse_id)}
                                 onPrinted={idx === recoveriesToPrint.length - 1 ? () => setRecoveriesToPrint(null) : null}
                             />
                             {idx < recoveriesToPrint.length - 1 && <div style={{ pageBreakAfter: 'always' }} />}

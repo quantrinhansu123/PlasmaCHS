@@ -124,11 +124,16 @@ const Users = () => {
     const statsDropdownRef = useRef(null);
 
     useEffect(() => {
-        if (location.state?.openCreateModal) {
+        if (location.state?.openCreateModal || location.pathname === '/nguoi-dung/tao') {
             handleCreateNew();
-            navigate(location.pathname, { replace: true, state: {} });
+            // Cleanup navigation
+            if (location.pathname === '/nguoi-dung/tao') {
+                navigate('/nguoi-dung', { replace: true });
+            } else {
+                navigate(location.pathname, { replace: true, state: {} });
+            }
         }
-    }, [location.state, navigate]);
+    }, [location.state, location.pathname, navigate]);
 
     useEffect(() => {
         localStorage.setItem('columns_users', JSON.stringify(visibleColumns));

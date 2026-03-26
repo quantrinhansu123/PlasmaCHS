@@ -1,22 +1,22 @@
 import { clsx } from 'clsx';
-import { 
+import {
     Calendar,
-    Camera, 
-    CheckCircle2, 
+    Camera,
+    Check,
     ChevronDown,
-    Clock, 
-    Edit3, 
+    Clock,
+    Edit3,
     FileText,
-    Link2, 
+    Link2,
     MapPin,
-    PackageCheck, 
-    Plus, 
-    Save, 
-    ScanLine, 
-    Search, 
-    Trash2, 
+    PackageCheck,
+    Plus,
+    Save,
+    ScanLine,
+    Search,
+    Trash2,
     Truck,
-    X 
+    X
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -24,6 +24,7 @@ import { toast } from 'react-toastify';
 import { ITEM_CONDITIONS } from '../../constants/recoveryConstants';
 import { supabase } from '../../supabase/config';
 import BarcodeScanner from '../Common/BarcodeScanner';
+import { SearchableSelect } from '../ui/SearchableSelect';
 
 export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess, initialMode = 'edit' }) {
     const isEdit = !!recovery;
@@ -74,8 +75,8 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
         loadCustomers();
         fetchWarehouses();
         if (recovery) {
-            setFormData({ 
-                ...recovery, 
+            setFormData({
+                ...recovery,
                 order_id: recovery.order_id || '',
                 driver_name: recovery.driver_name || '',
                 notes: recovery.notes || ''
@@ -162,9 +163,20 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
 
         const safeTime = time || new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 
-        setItems(prev => [...prev, { _id: crypto.randomUUID(), serial_number: decodedText, condition: 'tot', note: '', scan_time: safeTime }]);
+        // Add item first with loading state
+        const newItemId = crypto.randomUUID();
+        setItems(prev => [...prev, { 
+            _id: newItemId, 
+            serial_number: decodedText, 
+            condition: 'tot', 
+            note: '', 
+            scan_time: safeTime,
+            isValidating: true,
+            isValid: null,
+            error: null
+        }]);
 
-        const fetchInfo = async () => {
+        const validateCylinder = async () => {
             const currentFormData = formDataRef.current;
             const currentCustomers = customersRef.current;
 
@@ -175,39 +187,63 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                     .eq('serial_number', decodedText)
                     .maybeSingle();
 
-                if (cylData?.customer_name) {
-                    const matchedCustomer = currentCustomers.find(c => c.name === cylData.customer_name);
-                    if (matchedCustomer) {
-                        if (!currentFormData.customer_id) {
-                            setFormData(prev => ({ ...prev, customer_id: matchedCustomer.id }));
-                            toast.success(`Đã tự động chọn KH: ${matchedCustomer.name}`);
-                        } else if (currentFormData.customer_id !== matchedCustomer.id) {
-                            toast.warning(`Lưu ý: Bình ${decodedText} thuộc về KH ${matchedCustomer.name}, khác với KH đang chọn!`);
-                        }
+                if (!cylData) {
+                    setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: 'Không tồn tại' } : i));
+                    toast.error(`Mã bình ${decodedText} không tồn tại!`);
+                    return;
+                }
 
-                        if (!currentFormData.order_id || currentFormData.customer_id !== matchedCustomer.id) {
-                            const { data: orderData } = await supabase
-                                .from('orders')
-                                .select('id, order_code')
-                                .eq('customer_name', cylData.customer_name)
-                                .contains('assigned_cylinders', [decodedText])
-                                .order('created_at', { ascending: false })
-                                .limit(1)
-                                .maybeSingle();
+                if (!cylData.customer_name) {
+                    setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: 'Đang ở kho' } : i));
+                    toast.warning(`Bình ${decodedText} đang ở kho (chưa giao cho khách).`);
+                    return;
+                }
 
-                            if (orderData) {
-                                setFormData(prev => ({ ...prev, order_id: orderData.id, customer_id: matchedCustomer.id }));
-                                toast.success(`Đã tự động liên kết đơn hàng: ĐH ${orderData.order_code}`);
-                            }
-                        }
+                const matchedCustomer = currentCustomers.find(c => c.name === cylData.customer_name);
+                if (!matchedCustomer) {
+                    setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: `Của KH: ${cylData.customer_name}` } : i));
+                    return;
+                }
+
+                // Scenario A: No customer selected
+                if (!currentFormData.customer_id) {
+                    setFormData(prev => ({ ...prev, customer_id: matchedCustomer.id }));
+                    setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: true, error: null } : i));
+                    toast.success(`Đã tự động chọn KH: ${matchedCustomer.name}`);
+                } 
+                // Scenario B: Customer already selected
+                else if (currentFormData.customer_id === matchedCustomer.id) {
+                    setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: true, error: null } : i));
+                } 
+                // Scenario C: Mismatch
+                else {
+                    setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: `Của: ${matchedCustomer.name}` } : i));
+                    toast.error(`Bình ${decodedText} thuộc về KH "${matchedCustomer.name}", không khớp với KH đang chọn!`);
+                }
+
+                // Auto-link order if valid
+                if (matchedCustomer && (!currentFormData.order_id || currentFormData.customer_id !== matchedCustomer.id)) {
+                    const { data: orderData } = await supabase
+                        .from('orders')
+                        .select('id, order_code')
+                        .eq('customer_name', cylData.customer_name)
+                        .contains('assigned_cylinders', [decodedText])
+                        .order('created_at', { ascending: false })
+                        .limit(1)
+                        .maybeSingle();
+
+                    if (orderData) {
+                        setFormData(prev => ({ ...prev, order_id: orderData.id }));
+                        toast.success(`Đã tự động liên kết đơn hàng: ĐH ${orderData.order_code}`);
                     }
                 }
             } catch (err) {
-                console.error('Auto-fetch failed:', err);
+                console.error('Validation failed:', err);
+                setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: 'Lỗi kiểm tra' } : i));
             }
         };
 
-        fetchInfo();
+        validateCylinder();
     }, []);
 
     const handlePhotoCapture = async (e) => {
@@ -233,10 +269,66 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
     const removePhoto = (idx) => setPhotoUrls(prev => prev.filter((_, i) => i !== idx));
 
     const addItemManual = () => {
-        setItems(prev => [...prev, { _id: Date.now(), serial_number: '', condition: 'tot', note: '' }]);
+        setItems(prev => [...prev, { 
+            _id: crypto.randomUUID(), 
+            serial_number: '', 
+            condition: 'tot', 
+            note: '',
+            isValidating: false,
+            isValid: null,
+            error: null
+        }]);
     };
+
     const updateItem = (id, field, value) => {
         setItems(prev => prev.map(i => i._id === id ? { ...i, [field]: value } : i));
+        
+        // If serial number changed, trigger re-validation
+        if (field === 'serial_number' && value.length >= 3) {
+            triggerItemValidation(id, value);
+        }
+    };
+
+    const triggerItemValidation = async (id, serial) => {
+        setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: true, error: null } : i));
+        
+        try {
+            const currentFormData = formDataRef.current;
+            const currentCustomers = customersRef.current;
+
+            const { data: cylData } = await supabase
+                .from('cylinders')
+                .select('customer_name')
+                .eq('serial_number', serial)
+                .maybeSingle();
+
+            if (!cylData) {
+                setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: false, isValid: false, error: 'Không tồn tại' } : i));
+                return;
+            }
+
+            if (!cylData.customer_name) {
+                setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: false, isValid: false, error: 'Đang ở kho' } : i));
+                return;
+            }
+
+            const matchedCustomer = currentCustomers.find(c => c.name === cylData.customer_name);
+            if (!matchedCustomer) {
+                setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: false, isValid: false, error: `Của: ${cylData.customer_name}` } : i));
+                return;
+            }
+
+            if (!currentFormData.customer_id) {
+                setFormData(prev => ({ ...prev, customer_id: matchedCustomer.id }));
+                setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: false, isValid: true, error: null } : i));
+            } else if (currentFormData.customer_id === matchedCustomer.id) {
+                setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: false, isValid: true, error: null } : i));
+            } else {
+                setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: false, isValid: false, error: `Của: ${matchedCustomer.name}` } : i));
+            }
+        } catch (err) {
+            setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: false, isValid: false, error: 'Lỗi' } : i));
+        }
     };
     const removeItem = (id) => setItems(prev => prev.filter(i => i._id !== id));
 
@@ -250,12 +342,19 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
         if (!formData.customer_id) { setErrorMsg('Vui lòng chọn khách hàng!'); return; }
         if (items.length === 0) { setErrorMsg('Vui lòng quét hoặc nhập ít nhất 1 vỏ bình!'); return; }
         if (items.some(i => !i.serial_number)) { setErrorMsg('Có dòng chưa điền mã serial!'); return; }
+        
+        // Final ownership check
+        const invalidItems = items.filter(i => !i.isValid);
+        if (invalidItems.length > 0) {
+            setErrorMsg(`Có ${invalidItems.length} bình không hợp lệ (sai khách hàng hoặc không tồn tại). Vui lòng kiểm tra lại danh sách!`);
+            return;
+        }
 
         setIsLoading(true);
         try {
             const payload = { ...formData, photos: photoUrls };
             if (!payload.order_id) delete payload.order_id;
-            
+
             // Format data for saving
             const dbPayload = {
                 recovery_code: payload.recovery_code,
@@ -469,20 +568,14 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                         Khách hàng <span className="text-red-500">*</span>
                                     </label>
                                     <div className="relative">
-                                        <select
+                                        <SearchableSelect
+                                            options={customers.map(c => ({ label: c.name, value: c.id }))}
                                             value={formData.customer_id}
-                                            onChange={(e) => setFormData({ ...formData, customer_id: e.target.value, order_id: '' })}
+                                            onValueChange={(val) => setFormData({ ...formData, customer_id: val, order_id: '' })}
+                                            placeholder="-- Chọn khách hàng --"
+                                            searchPlaceholder="Tìm tên khách hàng..."
                                             disabled={isReadOnly}
-                                            required
-                                            className={clsx(
-                                                "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold appearance-none transition-all",
-                                                isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
-                                            )}
-                                        >
-                                            <option value="">-- Chọn khách hàng --</option>
-                                            {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                        </select>
-                                        {!isReadOnly && <ChevronDown className="w-4 h-4 text-primary/70 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />}
+                                        />
                                     </div>
                                 </div>
 
@@ -564,9 +657,9 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                         <h4 className="text-[18px] !font-extrabold !text-primary uppercase tracking-tight">Danh sách vỏ ({items.length})</h4>
                                     </div>
                                     {!isReadOnly && (
-                                        <button 
-                                            type="button" 
-                                            onClick={() => setIsScannerOpen(true)} 
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsScannerOpen(true)}
                                             className="flex items-center gap-1.5 px-3 py-1.5 bg-primary hover:bg-primary/90 text-white font-bold rounded-xl text-xs transition-all shadow-lg shadow-primary/20"
                                         >
                                             <ScanLine size={14} strokeWidth={2.5} /> Quét
@@ -590,42 +683,66 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                                         <span className="text-[11px] font-black text-slate-300 mt-2.5 w-4 shrink-0">{idx + 1}</span>
                                                         <div className="flex-1 space-y-2.5">
                                                             <div className="flex gap-2">
-                                                                <input
-                                                                    value={item.serial_number}
-                                                                    onChange={(e) => updateItem(item._id, 'serial_number', e.target.value)}
-                                                                    placeholder="Mã serial..."
-                                                                    disabled={isReadOnly}
-                                                                    className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl font-black text-[14px] text-slate-800 focus:ring-2 focus:ring-primary outline-none"
-                                                                />
-                                                                <select 
-                                                                    value={item.condition} 
-                                                                    onChange={(e) => updateItem(item._id, 'condition', e.target.value)} 
+                                                                <div className="flex-1 relative">
+                                                                    <input
+                                                                        value={item.serial_number}
+                                                                        onChange={(e) => updateItem(item._id, 'serial_number', e.target.value)}
+                                                                        placeholder="Mã serial..."
+                                                                        disabled={isReadOnly}
+                                                                        className={clsx(
+                                                                            "w-full px-3 py-2 bg-white border rounded-xl font-black text-[14px] outline-none transition-all",
+                                                                            item.isValid === true ? "border-green-200 focus:ring-green-500 text-green-700 bg-green-50/30" :
+                                                                            item.isValid === false ? "border-red-200 focus:ring-red-500 text-red-700 bg-red-50/30" :
+                                                                            "border-slate-200 focus:ring-primary text-slate-800"
+                                                                        )}
+                                                                    />
+                                                                    {item.isValidating && (
+                                                                        <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                                                                            <div className="w-3.5 h-3.5 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                                <select
+                                                                    value={item.condition}
+                                                                    onChange={(e) => updateItem(item._id, 'condition', e.target.value)}
                                                                     disabled={isReadOnly}
                                                                     className="w-32 px-2 py-2 bg-white border border-slate-200 rounded-xl font-bold text-[12px] text-slate-800 focus:ring-2 focus:ring-primary outline-none cursor-pointer"
                                                                 >
                                                                     {ITEM_CONDITIONS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                                                                 </select>
                                                             </div>
-                                                            <div className="flex items-center gap-2">
-                                                                <input 
-                                                                    value={item.note || ''} 
-                                                                    onChange={(e) => updateItem(item._id, 'note', e.target.value)} 
-                                                                    placeholder="Ghi chú SP..." 
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <input
+                                                                    value={item.note || ''}
+                                                                    onChange={(e) => updateItem(item._id, 'note', e.target.value)}
+                                                                    placeholder="Ghi chú SP..."
                                                                     disabled={isReadOnly}
-                                                                    className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl font-medium text-[12px] text-slate-600 focus:ring-2 focus:ring-primary outline-none" 
+                                                                    className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl font-medium text-[12px] text-slate-600 focus:ring-2 focus:ring-primary outline-none"
                                                                 />
-                                                                {item.scan_time && (
-                                                                    <div className="flex items-center gap-1 px-2 py-0.5 bg-primary rounded-md shadow-sm">
-                                                                        <Clock size={12} className="text-white" strokeWidth={2.5} />
-                                                                        <span className="text-[10px] font-black tracking-wider text-white uppercase">ĐÃ QUÉT: {item.scan_time}</span>
-                                                                    </div>
-                                                                )}
+                                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                                    {item.error && (
+                                                                        <div className="px-2 py-0.5 bg-red-100 text-red-600 rounded-lg text-[10px] font-black uppercase flex items-center gap-1">
+                                                                            <X size={10} strokeWidth={3} /> {item.error}
+                                                                        </div>
+                                                                    )}
+                                                                    {item.isValid === true && (
+                                                                        <div className="px-2 py-0.5 bg-green-100 text-green-600 rounded-lg text-[10px] font-black uppercase flex items-center gap-1">
+                                                                            <Check size={10} strokeWidth={3} /> Hợp lệ
+                                                                        </div>
+                                                                    )}
+                                                                    {item.scan_time && (
+                                                                        <div className="flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary rounded-lg">
+                                                                            <Clock size={10} strokeWidth={2.5} />
+                                                                            <span className="text-[10px] font-black uppercase">{item.scan_time}</span>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                         </div>
                                                         {!isReadOnly && (
-                                                            <button 
-                                                                type="button" 
-                                                                onClick={() => removeItem(item._id)} 
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => removeItem(item._id)}
                                                                 className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all shrink-0 mt-1"
                                                             >
                                                                 <Trash2 className="w-4 h-4" />
@@ -637,9 +754,9 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                         </div>
                                     )}
                                     {!isReadOnly && (
-                                        <button 
-                                            type="button" 
-                                            onClick={addItemManual} 
+                                        <button
+                                            type="button"
+                                            onClick={addItemManual}
                                             className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-slate-100 text-slate-400 font-bold rounded-2xl hover:bg-blue-50 hover:border-blue-200 hover:text-blue-500 transition-all text-sm mt-2"
                                         >
                                             <Plus className="w-4 h-4" /> Thêm thủ công
@@ -659,9 +776,9 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                         <div key={idx} className="relative w-20 h-20 rounded-2xl overflow-hidden border border-slate-100 group shadow-sm">
                                             <img src={url} alt={`Ảnh ${idx + 1}`} className="w-full h-full object-cover" />
                                             {!isReadOnly && (
-                                                <button 
-                                                    type="button" 
-                                                    onClick={() => removePhoto(idx)} 
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removePhoto(idx)}
                                                     className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
                                                 >
                                                     <X className="w-2.5 h-2.5" />
@@ -711,8 +828,8 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                     disabled={isLoading}
                                     className={clsx(
                                         "flex-1 md:flex-none px-6 py-3 rounded-xl font-bold text-[14px] flex items-center justify-center gap-2 shadow-lg transition-all active:scale-[0.98] border whitespace-nowrap",
-                                        isLoading 
-                                            ? "bg-slate-200 text-slate-400 cursor-not-allowed border-slate-300 shadow-none" 
+                                        isLoading
+                                            ? "bg-slate-200 text-slate-400 cursor-not-allowed border-slate-300 shadow-none"
                                             : "bg-primary text-white border-primary-700/40 hover:bg-primary-700 shadow-primary-200"
                                     )}
                                 >

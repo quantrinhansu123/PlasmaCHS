@@ -364,7 +364,7 @@ const OrdersMonthlyReport = () => {
     loadData(newFilters);
   };
 
-  const handleExport = () => exportOrdersMonthlyReport(data);
+  const handleExport = () => exportOrdersMonthlyReport(filteredData);
 
   const filteredData = data.filter(item => {
     const matchesSearch = !searchTerm || 

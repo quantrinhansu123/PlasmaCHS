@@ -53,6 +53,8 @@ export const exportSalespersonReport = (data) => {
     'Bình demo': item.binh_demo,
     'Đơn thu hồi': item.don_thu_hoi,
     'Bình thu hồi': item.binh_thu_hoi,
+    'Máy bán': item.may_ban,
+    'Máy đang dùng': item.may_dang_su_dung,
     'Bình tồn kho': item.binh_ton_kho
   }));
   exportToExcel(formattedData, 'BaoCao_NhanVienKD', 'NVKD');

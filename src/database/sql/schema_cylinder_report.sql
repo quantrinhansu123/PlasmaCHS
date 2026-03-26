@@ -3,6 +3,10 @@
 -- Purpose: Calculate monthly inventory (balance) of cylinders at customers
 -- ==============================================================================
 
+-- Drop existing views
+DROP VIEW IF EXISTS view_customer_cylinder_monthly_balance CASCADE;
+DROP VIEW IF EXISTS view_customer_cylinder_movements CASCADE;
+
 -- 1. Combine all cylinder movements (Orders and Recoveries)
 CREATE OR REPLACE VIEW view_customer_cylinder_movements AS
 WITH monthly_movements AS (
@@ -39,17 +43,34 @@ WITH monthly_movements AS (
     GROUP BY c.id, c.name, c.warehouse_id, c.category, nam, thang
 )
 SELECT 
-    customer_id,
-    customer_name,
-    kho,
-    loai_khach,
-    nam,
-    thang,
-    SUM(xuat) as xuat,
-    SUM(thu_hoi) as thu_hoi,
-    SUM(xuat - thu_hoi) as chenh_lech
-FROM monthly_movements
-GROUP BY customer_id, customer_name, kho, loai_khach, nam, thang;
+    m.customer_id,
+    m.customer_name,
+    CASE 
+        WHEN w.name IS NOT NULL THEN w.name
+        WHEN m.kho = 'HN' THEN 'Kho Hà Nội'
+        WHEN m.kho = 'TP.HCM' THEN 'Kho TP.HCM'
+        WHEN m.kho = 'TH' THEN 'Kho Thanh Hóa'
+        WHEN m.kho = 'DN' THEN 'Kho Đà Nẵng'
+        ELSE m.kho 
+    END::VARCHAR(50) AS kho,
+    m.loai_khach,
+    m.nam,
+    m.thang,
+    SUM(m.xuat) as xuat,
+    SUM(m.thu_hoi) as thu_hoi,
+    SUM(m.xuat - m.thu_hoi) as chenh_lech
+FROM monthly_movements m
+LEFT JOIN warehouses w ON (w.id::text = m.kho OR w.name = m.kho)
+GROUP BY m.customer_id, m.customer_name, 
+    CASE 
+        WHEN w.name IS NOT NULL THEN w.name
+        WHEN m.kho = 'HN' THEN 'Kho Hà Nội'
+        WHEN m.kho = 'TP.HCM' THEN 'Kho TP.HCM'
+        WHEN m.kho = 'TH' THEN 'Kho Thanh Hóa'
+        WHEN m.kho = 'DN' THEN 'Kho Đà Nẵng'
+        ELSE m.kho 
+    END::VARCHAR(50), 
+    m.loai_khach, m.nam, m.thang;
 
 -- 2. View with cumulative balances (Opening/Closing)
 CREATE OR REPLACE VIEW view_customer_cylinder_monthly_balance AS

@@ -133,6 +133,14 @@ const Shippers = () => {
     }, []);
 
     useEffect(() => {
+        if (location.pathname === '/don-vi-van-chuyen/tao') {
+            setSelectedShipper(null);
+            setIsFormModalOpen(true);
+            navigate('/don-vi-van-chuyen', { replace: true });
+        }
+    }, [location.pathname, navigate]);
+
+    useEffect(() => {
         const managers = [...new Set(shippers.map(shipper => shipper.manager_name).filter(Boolean))];
         setUniqueManagers(managers);
     }, [shippers]);

@@ -1,7 +1,8 @@
 import { clsx } from 'clsx';
-import { Printer } from 'lucide-react';
+import { Printer, Save, Eye, EyeOff } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../../supabase/config';
+import { toast } from 'react-toastify';
 
 const MachineIssueRequestForm = () => {
     const [formData, setFormData] = useState({
@@ -105,8 +106,69 @@ const MachineIssueRequestForm = () => {
     const currentMonth = String(new Date().getMonth() + 1).padStart(2, '0');
     const currentDay = String(new Date().getDate()).padStart(2, '0');
 
+    const [showPreview, setShowPreview] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+
     const handlePrint = () => {
         window.print();
+    };
+
+    const handleSave = async () => {
+        if (!formData.customerName) {
+            toast.error('Vui lòng điền tên khách hàng');
+            return;
+        }
+
+        setIsSaving(true);
+        try {
+            // Determine machine type from checkboxes
+            const selectedMachineTypes = Object.entries(formData.machineType)
+                .filter(([_, checked]) => checked)
+                .map(([type]) => type)
+                .join(', ');
+
+            const selectedColors = Object.entries(formData.machineColor)
+                .filter(([_, checked]) => checked)
+                .map(([color]) => color)
+                .join(', ');
+
+            const issueTypes = Object.entries(formData.issueType)
+                .filter(([_, checked]) => checked)
+                .map(([type]) => type)
+                .join(', ');
+
+            // Map ĐNXM fields to orders table
+            const orderData = {
+                order_code: formData.orangeNumber || `DNXM-${Date.now().toString().slice(-6)}`,
+                customer_name: formData.customerName,
+                recipient_address: formData.placementAddress || '',
+                product_type: selectedMachineTypes || 'MAY',
+                quantity: parseInt(formData.quantity) || 1,
+                order_type: issueTypes || 'ĐNXM',
+                note: `Màu máy: ${selectedColors}. 
+                       Ngày cần: ${formData.dateNeeded}. 
+                       Giao: ${formData.dateDelivery}. 
+                       Thu hồi dự kiến: ${formData.dateRecall}. 
+                       Ghi chú: ${formData.notes}`,
+                status: 'CHO_DUYET',
+                ordered_by: formData.requesterName,
+                created_at: new Date().toISOString(),
+                customer_category: 'TM' 
+            };
+
+            const { data, error } = await supabase
+                .from('orders')
+                .insert([orderData]);
+
+            if (error) throw error;
+            toast.success('Đã lưu Phiếu Đề Nghị Xuất Máy vào hệ thống!');
+            setShowPreview(false);
+        } catch (error) {
+            console.error('Error saving DNXM:', error);
+            toast.error('Lỗi khi lưu phiếu: ' + error.message);
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     return (
@@ -349,21 +411,42 @@ const MachineIssueRequestForm = () => {
                 </div>
 
                 {/* Print Action / Inline button */}
-                <div className="no-print mt-8 px-4 flex justify-center w-full z-10 md:justify-end md:px-0">
+                {/* ACTION BUTTONS */}
+                <div className="no-print mt-8 px-4 flex flex-wrap justify-center gap-4 w-full z-10 md:justify-end md:px-0">
+                    <button
+                        onClick={() => setShowPreview(!showPreview)}
+                        className="flex items-center justify-center gap-2 bg-slate-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-slate-700 transition-all font-bold text-sm"
+                    >
+                        {showPreview ? <EyeOff size={18} /> : <Eye size={18} />}
+                        {showPreview ? 'QUAY LẠI NHẬP LIỆU' : 'XEM TRƯỚC VĂN BẢN'}
+                    </button>
+
+                    <button
+                        onClick={handleSave}
+                        disabled={isSaving}
+                        className="flex items-center justify-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-blue-700 transition-all font-bold text-sm disabled:opacity-50"
+                    >
+                        {isSaving ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" /> : <Save size={18} />}
+                        LƯU HỆ THỐNG
+                    </button>
+
                     <button
                         onClick={handlePrint}
-                        className="flex w-full md:w-auto items-center justify-center gap-2 bg-emerald-600 text-white px-8 py-4 md:py-3 rounded-xl shadow-lg shadow-emerald-600/30 hover:bg-emerald-700 transition-all font-bold text-[16px] md:text-sm transform active:scale-[0.98]"
+                        className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-8 py-3 rounded-xl shadow-lg shadow-emerald-600/30 hover:bg-emerald-700 transition-all font-bold text-sm transform active:scale-[0.98]"
                     >
                         <Printer size={20} />
-                        XEM TRƯỚC VÀ IN
+                        IN PHIẾU
                     </button>
                 </div>
                 {/* Spacer to allow scrolling past the button on mobile with bottom nav */}
                 <div className="h-32 md:h-10 w-full no-print"></div>
             </div>
 
-            {/* PRINT VIEW (CHỈ HIỆN KHI ẤN IN) */}
-            <div id="print-area" className="hidden print:block max-w-4xl mx-auto bg-white p-8 md:p-12 shadow-lg mb-10 text-black print:shadow-none print:p-0">
+            {/* PRINT VIEW (HIỆN KHI ẤN IN HOẶC KHI BẬT PREVIEW) */}
+            <div id="print-area" className={clsx(
+                "print:block font-serif text-black p-8 bg-white max-w-[210mm] mx-auto min-h-[297mm] shadow-2xl my-10",
+                showPreview ? "block scale-90 origin-top" : "hidden"
+            )}>
                 {/* Header section */}
                 <div className="flex justify-between items-start mb-6">
                     <div className="text-sm text-center">

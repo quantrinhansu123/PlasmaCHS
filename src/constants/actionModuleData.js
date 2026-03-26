@@ -244,6 +244,13 @@ export const actionModuleGroups = [
         href: '/thu-hoi-vo',
         colorScheme: 'teal',
       },
+      {
+        icon: Monitor,
+        title: 'Thu hồi máy',
+        description: 'Quản lý phiếu thu hồi máy từ khách hàng, quét barcode và xuất PDF.',
+        href: '/thu-hoi-may',
+        colorScheme: 'indigo',
+      },
 
     ],
   },

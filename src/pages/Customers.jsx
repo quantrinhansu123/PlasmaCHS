@@ -157,6 +157,14 @@ const Customers = () => {
     }, []);
 
     useEffect(() => {
+        if (location.pathname === '/khach-hang/tao') {
+            setSelectedCustomer(null);
+            setIsFormModalOpen(true);
+            navigate('/khach-hang', { replace: true });
+        }
+    }, [location.pathname, navigate]);
+
+    useEffect(() => {
         if (isSearchExpanded && searchInputRef.current) {
             searchInputRef.current.focus();
         }

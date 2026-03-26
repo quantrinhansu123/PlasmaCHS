@@ -15,11 +15,16 @@ import {
     X,
     LayoutGrid,
     StickyNote,
-    Calendar
+    Calendar,
+    Search,
+    CheckSquare,
+    Square
 } from 'lucide-react';
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import BarcodeScanner from '../Common/BarcodeScanner';
+import InventoryPickerModal from './InventoryPickerModal';
+import InventorySearchableSelect from './InventorySearchableSelect';
 import { ISSUE_TYPES } from '../../constants/goodsIssueConstants';
 import { PRODUCT_TYPES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
@@ -32,6 +37,11 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
     const [warehousesList, setWarehousesList] = useState([]);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
     const [activeScanningIndex, setActiveScanningIndex] = useState(null);
+    const [isInventoryPickerOpen, setIsInventoryPickerOpen] = useState(false);
+    const [inventoryItems, setInventoryItems] = useState([]);
+    const [isInventoryLoading, setIsInventoryLoading] = useState(false);
+    const [inventorySearchTerm, setInventorySearchTerm] = useState('');
+    const [selectedInventoryIds, setSelectedInventoryIds] = useState([]);
 
     const [formData, setFormData] = useState({
         issue_code: '',
@@ -73,6 +83,12 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
             }
         }
     }, [issue, forcedType]);
+
+    useEffect(() => {
+        if (formData.warehouse_id && ['TRA_VO', 'TRA_BINH_LOI', 'TRA_MAY'].includes(formData.issue_type)) {
+            fetchInventory();
+        }
+    }, [formData.warehouse_id, formData.issue_type]);
 
     const fetchItems = async (issueId) => {
         const { data } = await supabase
@@ -139,8 +155,141 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
     };
 
     const addItem = () => {
-        setItems([...items, { id: Date.now(), item_type: 'BINH', item_id: '', item_code: '', quantity: 1, _search: '' }]);
+        setItems([...items, { id: Date.now(), item_type: formData.issue_type === 'TRA_MAY' ? 'MAY' : 'BINH', item_id: '', item_code: '', quantity: 1, _search: '' }]);
     };
+
+    const fetchInventory = async () => {
+        if (!formData.warehouse_id) return;
+
+        setIsInventoryLoading(true);
+        // We don't necessarily open the picker modal here, just load the items
+        // setIsInventoryPickerOpen(true); 
+
+        try {
+            if (formData.issue_type === 'TRA_MAY') {
+                const { data, error } = await supabase
+                    .from('machines')
+                    .select('*')
+                    .eq('warehouse', formData.warehouse_id)
+                    .not('status', 'in', '("thuộc khách hàng")');
+                if (error) throw error;
+                setInventoryItems(data || []);
+            } else {
+                const { data, error } = await supabase
+                    .from('cylinders')
+                    .select('*')
+                    .eq('warehouse_id', formData.warehouse_id)
+                    .not('status', 'in', '("đang sử dụng", "thuộc khách hàng")');
+                if (error) throw error;
+                setInventoryItems(data || []);
+            }
+        } catch (error) {
+            console.error('Error fetching inventory:', error);
+        } finally {
+            setIsInventoryLoading(false);
+        }
+    };
+
+    const updateItemWithInventory = (id, serial) => {
+        const inventoryItem = inventoryItems.find(i => i.serial_number === serial);
+        if (!inventoryItem) {
+            updateItem(id, 'item_code', serial);
+            return;
+        }
+
+        const productType = mapToProductType(inventoryItem);
+        
+        setItems(items.map(it => it.id === id ? { 
+            ...it, 
+            item_code: serial, 
+            item_id: inventoryItem.id,
+            item_type: productType 
+        } : it));
+    };
+
+    const mapToProductType = (item) => {
+        if (formData.issue_type === 'TRA_MAY') {
+            if (item.machine_type === 'BV') return 'MAY_MED';
+            if (item.machine_type === 'TM') return 'MAY_ROSY';
+            return 'MAY_MED'; // Default
+        } else {
+            if (item.volume?.includes('4L')) return 'BINH_4L';
+            if (item.volume?.includes('8L')) return 'BINH_8L';
+            return 'BINH_4L'; // Default
+        }
+    };
+
+    const toggleInventoryItem = (inventoryItem) => {
+        const isSelected = items.some(it => it.item_id === inventoryItem.id);
+        
+        if (isSelected) {
+            // Remove
+            setItems(items.filter(it => it.item_id !== inventoryItem.id));
+        } else {
+            // Add
+            const productType = mapToProductType(inventoryItem);
+            const newItem = {
+                id: Date.now() + Math.random(),
+                item_type: productType,
+                item_id: inventoryItem.id,
+                item_code: inventoryItem.serial_number,
+                quantity: 1,
+                _search: ''
+            };
+            
+            // Remove any empty row if it's the only one
+            if (items.length === 1 && !items[0].item_code) {
+                setItems([newItem]);
+            } else {
+                setItems([...items, newItem]);
+            }
+        }
+    };
+
+    const handleConfirmInventorySelection = (selectedIds) => {
+        const selectedItems = inventoryItems.filter(item => selectedIds.includes(item.id));
+        if (selectedItems.length === 0) {
+            setIsInventoryPickerOpen(false);
+            return;
+        }
+
+        const mapToProductType = (item) => {
+            if (formData.issue_type === 'TRA_MAY') {
+                if (item.machine_type === 'BV') return 'MAY_MED';
+                if (item.machine_type === 'TM') return 'MAY_ROSY';
+                return 'MAY_MED'; // Default
+            } else {
+                if (item.volume?.includes('4L')) return 'BINH_4L';
+                if (item.volume?.includes('8L')) return 'BINH_8L';
+                return 'BINH_4L'; // Default
+            }
+        };
+
+        const newItems = selectedItems.map(item => ({
+            id: Date.now() + Math.random(),
+            item_type: mapToProductType(item),
+            item_id: item.id,
+            item_code: item.serial_number,
+            quantity: 1,
+            _search: ''
+        }));
+
+        // Filter out empty items from current list
+        const currentValidItems = items.filter(i => i.item_code || i.item_id);
+        
+        setItems([...currentValidItems, ...newItems]);
+        setIsInventoryPickerOpen(false);
+    };
+
+    const filteredInventory = useMemo(() => {
+        if (!inventorySearchTerm) return inventoryItems;
+        const s = inventorySearchTerm.toLowerCase();
+        return inventoryItems.filter(item => 
+            item.serial_number?.toLowerCase().includes(s) || 
+            item.machine_type?.toLowerCase().includes(s) ||
+            item.volume?.toLowerCase().includes(s)
+        );
+    }, [inventoryItems, inventorySearchTerm]);
 
     const removeItem = (id) => {
         if (items.length <= 1) return;
@@ -398,6 +547,125 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                                 </div>
                             </div>
 
+                            {/* Bảng chọn nhanh (Chỉ hiện khi là loại Trả NCC) */}
+                            {(formData.issue_type === 'TRA_VO' || formData.issue_type === 'TRA_BINH_LOI' || formData.issue_type === 'TRA_MAY') && formData.warehouse_id && (
+                                <div className="rounded-3xl border border-emerald-200 bg-emerald-50/30 p-5 sm:p-6 space-y-4 shadow-sm">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2.5">
+                                            <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-sm border border-emerald-200">
+                                                <CheckSquare size={20} />
+                                            </div>
+                                            <div>
+                                                <h4 className="text-[16px] font-black text-emerald-800 tracking-tight">Chọn nhanh tài sản từ kho</h4>
+                                                <p className="text-[11px] font-bold text-emerald-600/70 uppercase">Có {inventoryItems.length} sản phẩm khả dụng trong kho này</p>
+                                            </div>
+                                        </div>
+                                        {inventoryItems.length > 0 && (
+                                            <div className="flex items-center gap-3">
+                                                <div className="relative group">
+                                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-400 group-focus-within:text-emerald-600 transition-colors" size={14} />
+                                                    <input 
+                                                        type="text"
+                                                        placeholder="Tìm serial/loại bình..."
+                                                        value={inventorySearchTerm}
+                                                        onChange={(e) => setInventorySearchTerm(e.target.value)}
+                                                        className="h-9 pl-9 pr-4 bg-white border border-emerald-100 rounded-xl text-[12px] font-bold text-emerald-900 focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500/40 transition-all w-[180px] sm:w-[240px]"
+                                                    />
+                                                </div>
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const allIds = inventoryItems.map(i => i.id);
+                                                        const currentIds = items.map(it => it.item_id).filter(Boolean);
+                                                        const areAllSelected = allIds.every(id => currentIds.includes(id));
+                                                        
+                                                        if (areAllSelected) {
+                                                            // Clear all returned items that belong to this warehouse inventory
+                                                            setItems(items.filter(it => !allIds.includes(it.item_id)));
+                                                        } else {
+                                                            // Add missing items
+                                                            const newItems = inventoryItems
+                                                                .filter(i => !currentIds.includes(i.id))
+                                                                .map(i => ({
+                                                                    id: Date.now() + Math.random(),
+                                                                    item_type: mapToProductType(i),
+                                                                    item_id: i.id,
+                                                                    item_code: i.serial_number,
+                                                                    quantity: 1,
+                                                                    _search: ''
+                                                                }));
+                                                            setItems([...items.filter(it => it.item_code), ...newItems]);
+                                                        }
+                                                    }}
+                                                    className="px-4 py-1.5 bg-white border border-emerald-200 rounded-lg text-[12px] font-black text-emerald-700 hover:bg-emerald-600 hover:text-white transition-all shadow-sm whitespace-nowrap"
+                                                >
+                                                    {inventoryItems.length > 0 && inventoryItems.every(i => items.some(it => it.item_id === i.id)) ? 'Bỏ chọn hàng loạt' : 'Chọn toàn bộ list'}
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {isInventoryLoading ? (
+                                        <div className="py-12 text-center bg-white/40 rounded-2xl border border-dashed border-emerald-100">
+                                            <div className="w-8 h-8 border-4 border-emerald-100 border-t-emerald-500 rounded-full animate-spin mx-auto mb-3" />
+                                            <p className="text-[12px] font-bold text-emerald-600/60 uppercase tracking-widest">Đang đồng bộ list hàng...</p>
+                                        </div>
+                                    ) : inventoryItems.length === 0 ? (
+                                        <div className="py-12 text-center bg-white/50 rounded-2xl border border-dashed border-emerald-200">
+                                            <Package size={32} className="mx-auto text-emerald-200 mb-3" />
+                                            <p className="text-[13px] font-bold text-emerald-800/40">Kho này hiện không có tài sản để trả về</p>
+                                        </div>
+                                    ) : filteredInventory.length === 0 ? (
+                                        <div className="py-10 text-center bg-white/30 rounded-2xl border border-dashed border-emerald-100">
+                                            <p className="text-[12px] font-bold text-emerald-400">Không tìm thấy mã trùng khớp với "{inventorySearchTerm}"</p>
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 max-h-[300px] overflow-y-auto p-1 custom-scrollbar">
+                                            {filteredInventory.map(invItem => {
+                                                const isSelected = items.some(it => it.item_id === invItem.id);
+                                                return (
+                                                    <button
+                                                        key={invItem.id}
+                                                        type="button"
+                                                        onClick={() => toggleInventoryItem(invItem)}
+                                                        className={clsx(
+                                                            "flex flex-col items-start p-3 rounded-2xl border transition-all text-left group relative ring-offset-2",
+                                                            isSelected 
+                                                                ? "bg-emerald-600 border-emerald-600 text-white shadow-xl shadow-emerald-200 ring-2 ring-emerald-500 scale-[0.98]" 
+                                                                : "bg-white border-slate-100 text-slate-600 hover:border-emerald-400 hover:bg-emerald-50/50 hover:shadow-md"
+                                                        )}
+                                                    >
+                                                        <div className="flex items-center justify-between w-full mb-2">
+                                                            <div className={clsx(
+                                                                "w-5 h-5 rounded-md border flex items-center justify-center transition-all",
+                                                                isSelected ? "bg-white border-white text-emerald-600" : "bg-slate-50 border-slate-200 group-hover:border-emerald-300"
+                                                            )}>
+                                                                {isSelected && <CheckCircle2 size={14} strokeWidth={3} />}
+                                                            </div>
+                                                            <span className={clsx(
+                                                                "text-[9px] font-black px-1.5 py-0.5 rounded-md",
+                                                                isSelected ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
+                                                            )}>
+                                                                {formData.issue_type === 'TRA_MAY' ? 'MÁY' : 'BÌNH'}
+                                                            </span>
+                                                        </div>
+                                                        <div className="font-mono text-[12px] font-black truncate w-full mb-0.5 tracking-tight">
+                                                            {invItem.serial_number}
+                                                        </div>
+                                                        <div className={clsx(
+                                                            "text-[10px] font-bold truncate w-full opacity-70",
+                                                            isSelected ? "text-white" : "text-slate-400"
+                                                        )}>
+                                                            {formData.issue_type === 'TRA_MAY' ? invItem.machine_type : invItem.volume}
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
                             {/* Chi tiết sản phẩm */}
                             <div className="rounded-3xl border border-primary/20 bg-white p-5 sm:p-6 space-y-5 shadow-sm">
                                 <div className="flex items-center justify-between pb-3 border-b border-primary/10">
@@ -405,14 +673,24 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                                         <LayoutGrid className="w-4 h-4 text-primary" />
                                         <h4 className="text-[18px] !font-extrabold !text-primary">Chi tiết xuất</h4>
                                     </div>
-                                    <button
-                                        type="button"
-                                        onClick={addItem}
-                                        className="p-2 bg-primary/10 text-primary rounded-xl hover:bg-primary/20 transition-all flex items-center gap-1.5 text-[13px] font-bold"
-                                    >
-                                        <Plus size={16} />
-                                        Thêm dòng
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={fetchInventory}
+                                            className="p-2 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl hover:bg-emerald-100 transition-all flex items-center gap-1.5 text-[13px] font-bold"
+                                        >
+                                            <Package size={16} />
+                                            Chọn từ kho
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={addItem}
+                                            className="p-2 bg-primary/10 text-primary rounded-xl hover:bg-primary/20 transition-all flex items-center gap-1.5 text-[13px] font-bold"
+                                        >
+                                            <Plus size={16} />
+                                            Thêm dòng
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <div className="space-y-4">
@@ -434,19 +712,24 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                                                 </div>
                                                 <div className="col-span-12 sm:col-span-5">
                                                     <label className="text-[10px] font-bold uppercase text-slate-400 mb-1 block">Số Serial / RFID</label>
-                                                    <div className="relative">
-                                                        <input
-                                                            value={item.item_code}
-                                                            onChange={(e) => updateItem(item.id, 'item_code', e.target.value)}
-                                                            placeholder="Mã máy / Bình"
-                                                            className="w-full h-10 px-3 pr-10 bg-white border border-slate-200 rounded-xl text-[13px] font-bold text-slate-800 outline-none focus:border-primary/40"
-                                                        />
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="flex-1 min-w-0">
+                                                            <InventorySearchableSelect
+                                                                items={inventoryItems}
+                                                                value={item.item_code}
+                                                                onSelect={(serial) => updateItemWithInventory(item.id, serial)}
+                                                                isMachine={formData.issue_type === 'TRA_MAY'}
+                                                                isLoading={isInventoryLoading}
+                                                                isEmpty={!formData.warehouse_id}
+                                                            />
+                                                        </div>
                                                         <button
                                                             type="button"
                                                             onClick={() => openScanner(index)}
-                                                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-primary hover:bg-primary/5 rounded-lg transition-all"
+                                                            className="p-2.5 text-primary bg-primary/5 hover:bg-primary/10 rounded-xl transition-all shadow-sm border border-primary/10"
+                                                            title="Quét mã"
                                                         >
-                                                            <ScanLine size={16} />
+                                                            <ScanLine size={18} />
                                                         </button>
                                                     </div>
                                                 </div>
@@ -524,6 +807,15 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                 onClose={() => setIsScannerOpen(false)}
                 onScanSuccess={handleScanSuccess}
                 title="Quét mã tài sản"
+            />
+
+            <InventoryPickerModal
+                isOpen={isInventoryPickerOpen}
+                onClose={() => setIsInventoryPickerOpen(false)}
+                onConfirm={handleConfirmInventorySelection}
+                items={inventoryItems}
+                isLoading={isInventoryLoading}
+                type={formData.issue_type === 'TRA_MAY' ? 'MAY' : 'BINH'}
             />
         </>,
         document.body
