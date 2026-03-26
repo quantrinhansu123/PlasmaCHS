@@ -15,12 +15,17 @@ import {
     X,
     Receipt,
     Mail,
-    Building
+    Building,
+    Download,
+    Edit,
+    Trash2,
+    MoreVertical
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
 import { supabase } from '../../supabase/config';
+import * as XLSX from 'xlsx';
 
 export default function CustomerDetailsModal({ customer, onClose }) {
     const [activeTab, setActiveTab] = useState('overview'); // overview, orders, transactions
@@ -47,11 +52,17 @@ export default function CustomerDetailsModal({ customer, onClose }) {
     const [billImageFile, setBillImageFile] = useState(null);
     const [previewImage, setPreviewImage] = useState(null);
 
+    // Edit Transaction States
+    const [editingTxId, setEditingTxId] = useState(null);
+    const [editingTxCode, setEditingTxCode] = useState('');
+
     const [stats, setStats] = useState({
         totalOrderValue: 0,
         totalPaid: 0,
         currentDebt: 0
     });
+
+
 
     useEffect(() => {
         if (!customer) return;
@@ -126,31 +137,39 @@ export default function CustomerDetailsModal({ customer, onClose }) {
 
         setIsSubmittingPayment(true);
         try {
-            // Generate next PT code (Phiếu Thu)
-            const { data: latestTx } = await supabase
-                .from('customer_transactions')
-                .select('transaction_code')
-                .order('created_at', { ascending: false })
-                .limit(1);
+            let nextCode = editingTxCode;
 
-            let nextCode = 'PT00001';
-            if (latestTx && latestTx.length > 0 && latestTx[0].transaction_code?.startsWith('PT')) {
-                const numStr = latestTx[0].transaction_code.replace(/[^0-9]/g, '');
-                const nextNum = numStr ? parseInt(numStr, 10) + 1 : 1;
-                nextCode = `PT${nextNum.toString().padStart(5, '0')}`;
+            if (!editingTxId) {
+                // Generate next PT code (Phiếu Thu) only if creating new
+                const { data: latestTx } = await supabase
+                    .from('customer_transactions')
+                    .select('transaction_code')
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+
+                nextCode = 'PT00001';
+                if (latestTx && latestTx.length > 0 && latestTx[0].transaction_code?.startsWith('PT')) {
+                    const numStr = latestTx[0].transaction_code.replace(/[^0-9]/g, '');
+                    const nextNum = numStr ? parseInt(numStr, 10) + 1 : 1;
+                    nextCode = `PT${nextNum.toString().padStart(5, '0')}`;
+                }
             }
 
             const payload = {
-                transaction_code: nextCode,
                 customer_id: customer.id,
                 customer_name: customer.name,
                 amount: amountNum,
-                transaction_type: 'THU',
                 transaction_date: paymentDate,
                 payment_method: paymentMethod,
                 note: paymentNote,
-                created_by: 'Kế toán'
             };
+
+            // Only set these for NEW transactions
+            if (!editingTxId) {
+                payload.transaction_code = nextCode;
+                payload.transaction_type = 'THU';
+                payload.created_by = 'Kế toán';
+            }
 
             // Upload bill image if provided
             if (billImageFile) {
@@ -164,14 +183,17 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                 }
             }
 
-            const { error } = await supabase.from('customer_transactions').insert([payload]);
-            if (error) throw error;
+            if (editingTxId) {
+                const { error } = await supabase.from('customer_transactions').update(payload).eq('id', editingTxId);
+                if (error) throw error;
+                alert('✅ Đã cập nhật giao dịch thành công!');
+            } else {
+                const { error } = await supabase.from('customer_transactions').insert([payload]);
+                if (error) throw error;
+                alert('✅ Đã lập Phiếu Thu tiền thành công!');
+            }
 
-            alert('✅ Đã lập Phiếu Thu tiền thành công!');
-            setShowPaymentForm(false);
-            setPaymentAmount('');
-            setPaymentNote('');
-            setBillImageFile(null);
+            resetPaymentForm();
             fetchCustomerData(); // refresh data
         } catch (error) {
             console.error('Lỗi khi lập phiếu thu:', error);
@@ -179,6 +201,73 @@ export default function CustomerDetailsModal({ customer, onClose }) {
         } finally {
             setIsSubmittingPayment(false);
         }
+    };
+
+    const resetPaymentForm = () => {
+        setShowPaymentForm(false);
+        setEditingTxId(null);
+        setEditingTxCode('');
+        setPaymentAmount('');
+        setPaymentDate(new Date().toISOString().split('T')[0]);
+        setPaymentMethod('CHUYEN_KHOAN');
+        setPaymentNote('');
+        setBillImageFile(null);
+    };
+
+    const handleEditTransaction = (tx) => {
+        setEditingTxId(tx.id);
+        setEditingTxCode(tx.transaction_code);
+        setPaymentAmount(Math.round(tx.amount).toString());
+        setPaymentDate(tx.transaction_date || new Date().toISOString().split('T')[0]);
+        setPaymentMethod(tx.payment_method || 'CHUYEN_KHOAN');
+        setPaymentNote(tx.note || '');
+        setBillImageFile(null);
+        
+        setShowPaymentForm(true);
+        setActiveTab('overview');
+    };
+
+    const handleDeleteTransaction = async (id, code) => {
+        if (!window.confirm(`Bạn có chắc chắn muốn xóa giao dịch ${code} không? Thao tác này có thể ảnh hưởng đến công nợ chung và không thể hoàn tác.`)) {
+            return;
+        }
+        try {
+            const { error } = await supabase.from('customer_transactions').delete().eq('id', id);
+            if (error) throw error;
+            alert('✅ Đã xóa giao dịch thành công!');
+            fetchCustomerData();
+        } catch (error) {
+            console.error('Lỗi khi xóa giao dịch:', error);
+            alert('❌ Có lỗi xảy ra khi xóa giao dịch: ' + error.message);
+        }
+    };
+
+    const handleExportTransactions = () => {
+        if (!transactions || transactions.length === 0) {
+            alert('Không có giao dịch nào để xuất!');
+            return;
+        }
+
+        const exportData = transactions.map(tx => ({
+            'Mã Giao Dịch': tx.transaction_code,
+            'Ngày Giao Dịch': new Date(tx.transaction_date).toLocaleDateString('vi-VN'),
+            'Loại Giao Dịch': tx.transaction_type === 'THU' ? 'Khách Trả Tiền (Cộng)' : 'Hoàn Tiền (Trừ)',
+            'Số Tiền (VNĐ)': tx.amount,
+            'Hình Thức': tx.payment_method,
+            'Nội Dung': tx.note || '',
+            'Phụ Trách': tx.created_by || ''
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const colWidths = [
+            { wch: 15 }, { wch: 15 }, { wch: 25 }, { wch: 18 }, { wch: 18 }, { wch: 30 }, { wch: 15 }
+        ];
+        ws['!cols'] = colWidths;
+
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Lịch Sử Giao Dịch");
+        const safeName = customer.name.replace(/[^a-zA-Z0-9\s-]/g, '').trim().replace(/\s+/g, '_');
+        XLSX.writeFile(wb, `LichSu_GiaoDich_${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
     };
 
     const formatCurrency = (amount) => {
@@ -358,8 +447,11 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                         ) : (
                                             <div className="w-full bg-slate-50 border border-slate-200 rounded-3xl p-4 md:p-6 animate-in slide-in-from-top-4 duration-300">
                                                 <div className="flex items-start md:items-center justify-between gap-3 mb-5 md:mb-6">
-                                                    <h3 className="text-base md:text-lg font-black text-slate-900 flex items-center gap-2"><CreditCard className="w-5 h-5 text-primary" /> TẠO PHIẾU THU TIỀN</h3>
-                                                    <button onClick={() => setShowPaymentForm(false)} className="text-slate-400 hover:text-rose-500 font-bold text-sm">Hủy bỏ</button>
+                                                    <h3 className="text-base md:text-lg font-black text-slate-900 flex items-center gap-2">
+                                                        <CreditCard className="w-5 h-5 text-primary" /> 
+                                                        {editingTxId ? `CHỈNH SỬA PHIẾU ${editingTxCode}` : 'TẠO PHIẾU THU TIỀN'}
+                                                    </h3>
+                                                    <button onClick={resetPaymentForm} className="text-slate-400 hover:text-rose-500 font-bold text-sm text-[11px] uppercase tracking-widest bg-white border border-slate-200 px-3 py-1.5 rounded-lg transition-all hover:bg-rose-50 shadow-sm">Thoát</button>
                                                 </div>
                                                 <form onSubmit={handlePaymentSubmit} className="space-y-5">
                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -430,7 +522,7 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                                             disabled={isSubmittingPayment}
                                                             className="w-full md:w-auto px-6 md:px-8 py-3 bg-primary hover:bg-primary/90 text-white rounded-xl font-black text-sm shadow-xl shadow-primary/20 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                                                         >
-                                                            {isSubmittingPayment ? 'Đang lưu Phiếu thu...' : 'Xác nhận Đã Nhận Tiền'}
+                                                            {isSubmittingPayment ? 'Đang lưu...' : (editingTxId ? 'Cập nhật thay đổi' : 'Xác nhận Đã Nhận Tiền')}
                                                         </button>
                                                     </div>
                                                 </form>
@@ -529,6 +621,15 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                         </div>
                                     ) : (
                                         <>
+                                            <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                                                <h5 className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Lịch sử giao dịch</h5>
+                                                <button 
+                                                    onClick={handleExportTransactions}
+                                                    className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-emerald-600 font-black text-[10px] uppercase tracking-wider hover:bg-emerald-50 hover:border-emerald-200 transition-all shadow-sm"
+                                                >
+                                                    <Download className="w-3.5 h-3.5" /> Xuất Excel (Backup)
+                                                </button>
+                                            </div>
                                             <div className="md:hidden divide-y divide-slate-100">
                                                 {transactions.map(tx => (
                                                     <div key={tx.id} className="p-4 space-y-3">
@@ -557,17 +658,33 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                                             </div>
                                                             <p className="text-sm font-black text-slate-900">{formatCurrency(tx.amount)}</p>
                                                         </div>
-                                                        <div className="pt-1">
-                                                            {tx.bill_image_url ? (
-                                                                <button
-                                                                    onClick={() => setPreviewImage(tx.bill_image_url)}
-                                                                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary/5 text-primary rounded-lg hover:bg-primary/10 transition-colors text-xs font-bold"
+                                                        <div className="pt-2 border-t border-slate-50 flex items-center justify-between gap-2">
+                                                            <div className="flex items-center gap-2">
+                                                                {tx.bill_image_url ? (
+                                                                    <button
+                                                                        onClick={() => setPreviewImage(tx.bill_image_url)}
+                                                                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary/5 text-primary rounded-lg hover:bg-primary/10 transition-colors text-xs font-bold"
+                                                                    >
+                                                                        <ImageIcon className="w-3.5 h-3.5" /> Bill
+                                                                    </button>
+                                                                ) : (
+                                                                    <span className="text-slate-300 text-xs">Không bill</span>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex items-center gap-1.5">
+                                                                <button 
+                                                                    onClick={() => handleEditTransaction(tx)}
+                                                                    className="p-2 bg-slate-100 text-slate-500 rounded-lg hover:bg-primary/10 hover:text-primary transition-all"
                                                                 >
-                                                                    <ImageIcon className="w-3.5 h-3.5" /> Xem bill
+                                                                    <Edit className="w-4 h-4" />
                                                                 </button>
-                                                            ) : (
-                                                                <span className="text-slate-300 text-xs">Không có bill</span>
-                                                            )}
+                                                                <button 
+                                                                    onClick={() => handleDeleteTransaction(tx.id, tx.transaction_code)}
+                                                                    className="p-2 bg-slate-100 text-slate-500 rounded-lg hover:bg-rose-50 hover:text-rose-600 transition-all"
+                                                                >
+                                                                    <Trash2 className="w-4 h-4" />
+                                                                </button>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 ))}
@@ -583,6 +700,7 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                                         <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-right">Số tiền</th>
                                                         <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Người lập</th>
                                                         <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-center">Bill</th>
+                                                        <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-right">Thao tác</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-50">
@@ -611,6 +729,24 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                                                 ) : (
                                                                     <span className="text-slate-300 text-xs">—</span>
                                                                 )}
+                                                            </td>
+                                                            <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                                                                <div className="flex items-center justify-end gap-1">
+                                                                    <button 
+                                                                        onClick={() => handleEditTransaction(tx)}
+                                                                        className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-all"
+                                                                        title="Sửa giao dịch"
+                                                                    >
+                                                                        <Edit className="w-4 h-4" />
+                                                                    </button>
+                                                                    <button 
+                                                                        onClick={() => handleDeleteTransaction(tx.id, tx.transaction_code)}
+                                                                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                                                                        title="Xóa giao dịch"
+                                                                    >
+                                                                        <Trash2 className="w-4 h-4" />
+                                                                    </button>
+                                                                </div>
                                                             </td>
                                                         </tr>
                                                     ))}

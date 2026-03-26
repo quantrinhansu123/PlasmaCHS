@@ -440,6 +440,8 @@ const Customers = () => {
         }
     };
 
+
+
     const handleBulkDelete = async () => {
         const count = selectedIds.length;
         if (count === 0) return;
@@ -463,6 +465,62 @@ const Customers = () => {
         } catch (error) {
             console.error('Error bulk deleting customers:', error);
             alert('❌ Lỗi khi xóa hàng loạt: ' + error.message);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleExportTransactionsBulk = async () => {
+        const targetIds = selectedIds.length > 0 ? selectedIds : filteredCustomers.map(c => c.id);
+        
+        if (targetIds.length === 0) {
+            alert('Không có khách hàng nào để xuất giao dịch!');
+            return;
+        }
+
+        const confirmMsg = selectedIds.length > 0 
+            ? `Bạn muốn sao lưu lịch sử giao dịch cho ${selectedIds.length} khách hàng đã chọn?`
+            : `Bạn muốn sao lưu toàn bộ lịch sử giao dịch cho ${filteredCustomers.length} khách hàng đang hiển thị?`;
+
+        if (!window.confirm(confirmMsg)) return;
+
+        setIsLoading(true);
+        try {
+            const { data, error } = await supabase
+                .from('customer_transactions')
+                .select('*')
+                .in('customer_id', targetIds)
+                .order('transaction_date', { ascending: false });
+
+            if (error) throw error;
+
+            if (!data || data.length === 0) {
+                alert('Không tìm thấy giao dịch nào để sao lưu!');
+                setIsLoading(false);
+                return;
+            }
+
+            const exportData = data.map(tx => ({
+                'Tên Khách Hàng': tx.customer_name,
+                'Mã Giao Dịch': tx.transaction_code,
+                'Ngày': tx.transaction_date,
+                'Loại': tx.transaction_type === 'THU' ? 'Thu (Khách trả)' : 'Chi (Hoàn tiền)',
+                'Số Tiền': tx.amount,
+                'Hình Thức': tx.payment_method === 'TIEN_MAT' ? 'Tiền mặt' : 'Chuyển khoản',
+                'Ghi Chú': tx.note,
+                'Người Lập': tx.created_by
+            }));
+
+            const ws = XLSX.utils.json_to_sheet(exportData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Lịch sử Thu Chi');
+            XLSX.writeFile(wb, `SaoLuu_GD_KhachHang_${new Date().toISOString().split('T')[0]}.xlsx`);
+            
+            alert(`✅ Đã sao lưu thành công ${data.length} giao dịch.`);
+            setShowMoreActions(false);
+        } catch (error) {
+            console.error('Error exporting transactions:', error);
+            alert('❌ Lỗi khi sao lưu giao dịch: ' + error.message);
         } finally {
             setIsLoading(false);
         }
@@ -851,6 +909,14 @@ const Customers = () => {
                                                     />
                                                 </label>
 
+                                                <button
+                                                    onClick={handleExportTransactionsBulk}
+                                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-[14px] font-bold text-emerald-600 hover:bg-emerald-50 transition-colors"
+                                                >
+                                                    <Download size={18} className="text-emerald-500" />
+                                                    Sao lưu Giao dịch
+                                                </button>
+
                                                 {selectedIds.length > 0 && (
                                                     <button
                                                         onClick={() => { handleBulkDelete(); setShowMoreActions(false); }}
@@ -1023,6 +1089,14 @@ const Customers = () => {
                                         className="hidden"
                                     />
                                 </label>
+
+                                <button
+                                    onClick={handleExportTransactionsBulk}
+                                    className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 text-[13px] font-bold transition-all shadow-sm"
+                                >
+                                    <Download size={16} />
+                                    Sao lưu GD
+                                </button>
 
                                 <button
                                     onClick={() => {
