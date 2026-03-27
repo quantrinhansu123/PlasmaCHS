@@ -9,7 +9,7 @@ export const usePermissions = () => {
     useEffect(() => {
         const fetchPermissions = async () => {
             try {
-                const userRole = 'Admin';
+                const userRole = localStorage.getItem('user_role') || 'Admin';
 
                 const { data, error } = await supabase
                     .from('app_roles')

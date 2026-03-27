@@ -1,5 +1,7 @@
 export const RECOVERY_STATUSES = [
     { id: 'ALL', label: 'Tất cả', color: 'gray' },
+    { id: 'CHO_PHAN_CONG', label: 'Chờ phân công', color: 'blue' },
+    { id: 'DANG_THU_HOI', label: 'Đang thu hồi', color: 'amber' },
     { id: 'CHO_DUYET', label: 'Chờ duyệt', color: 'yellow' },
     { id: 'HOAN_THANH', label: 'Hoàn thành', color: 'green' },
     { id: 'HUY', label: 'Đã hủy', color: 'red' }

@@ -6,6 +6,7 @@ export const USER_ROLES = [
     { id: 'Nhân viên kỹ thuật', label: 'Nhân viên kỹ thuật' },
     { id: 'Kế toán', label: 'Kế toán' },
     { id: 'Thủ kho', label: 'Thủ kho' },
+    { id: 'Shipper', label: 'Nhân viên giao hàng (Shipper)' },
     { id: 'Quản lý CSKH', label: 'Quản lý CSKH' },
     { id: 'Nhân viên CSKH', label: 'Nhân viên CSKH' }
 ];

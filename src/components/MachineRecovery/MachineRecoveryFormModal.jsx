@@ -40,6 +40,7 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
     const [isScannerOpen, setIsScannerOpen] = useState(false);
     const [scannerType, setScannerType] = useState('item'); 
     const [photoUrls, setPhotoUrls] = useState([]);
+    const [shippers, setShippers] = useState([]);
     const [uploadingPhoto, setUploadingPhoto] = useState(false);
     const photoInputRef = useRef(null);
 
@@ -49,10 +50,10 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
         customer_id: '',
         order_id: '',
         warehouse_id: '',
-        driver_name: localStorage.getItem('user_name') || '',
+        driver_name: '',
         notes: '',
         total_items: 0,
-        status: 'CHO_DUYET'
+        status: 'CHO_PHAN_CONG'
     });
 
     const [items, setItems] = useState([]);
@@ -75,6 +76,7 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
     useEffect(() => {
         loadCustomers();
         fetchWarehouses();
+        fetchShippers();
         if (recovery) {
             setFormData({
                 ...recovery,
@@ -126,6 +128,15 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
             setCustomerOrders([]);
         }
     }, [formData.customer_id, customers]);
+
+    const fetchShippers = async () => {
+        const { data } = await supabase
+            .from('app_users')
+            .select('name')
+            .eq('role', 'Shipper')
+            .eq('status', 'Hoạt động');
+        if (data) setShippers(data.map(u => u.name));
+    };
 
     const fetchItems = async (recoveryId) => {
         const { data } = await supabase.from('machine_recovery_items').select('*').eq('recovery_id', recoveryId);
@@ -381,7 +392,8 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                 notes: formData.notes,
                 total_items: formData.total_items,
                 status: formData.status,
-                photos: photoUrls
+                photos: photoUrls,
+                created_by: recovery?.created_by || localStorage.getItem('user_name')
             };
 
             let recoveryId;
@@ -554,15 +566,35 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                                         )}
                                     </div>
                                 </div>
-
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="space-y-1.5">
                                         <label className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800"><Truck size={16} /> NV vận chuyển</label>
-                                        <input value={formData.driver_name} onChange={e => setFormData({...formData, driver_name: e.target.value})} disabled={isReadOnly} placeholder="..." className="w-full h-11 px-4 border border-slate-200 rounded-xl font-bold bg-slate-50 outline-none" />
+                                        <div className="relative group">
+                                            <input
+                                                list="shipper-list-machine"
+                                                value={formData.driver_name}
+                                                onChange={(e) => {
+                                                    const name = e.target.value;
+                                                    setFormData(prev => ({ 
+                                                        ...prev, 
+                                                        driver_name: name,
+                                                        status: (prev.status === 'CHO_PHAN_CONG' && name) ? 'DANG_THU_HOI' : prev.status
+                                                    }));
+                                                }}
+                                                placeholder="Chọn Shipper"
+                                                disabled={isReadOnly}
+                                                className="w-full h-11 px-4 border border-slate-200 rounded-xl font-bold bg-slate-50 outline-none focus:ring-2 focus:ring-primary focus:bg-white transition-all"
+                                            />
+                                            <datalist id="shipper-list-machine">
+                                                {shippers.map((name, idx) => (
+                                                    <option key={idx} value={name} />
+                                                ))}
+                                            </datalist>
+                                        </div>
                                     </div>
                                     <div className="space-y-1.5">
                                         <label className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800"><FileText size={16} /> Ghi chú</label>
-                                        <input value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} disabled={isReadOnly} placeholder="..." className="w-full h-11 px-4 border border-slate-200 rounded-xl font-bold bg-slate-50 outline-none" />
+                                        <input value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} disabled={isReadOnly} placeholder="" className="w-full h-11 px-4 border border-slate-200 rounded-xl font-bold bg-slate-50 outline-none" />
                                     </div>
                                 </div>
                             </div>
@@ -594,7 +626,7 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                                                     <div className="flex items-center justify-between gap-2">
                                                         <span className="text-[11px] font-black text-slate-300">{idx + 1}</span>
                                                         <div className="flex-1 relative">
-                                                            <input value={item.serial_number} onChange={e => updateItem(item._id, 'serial_number', e.target.value)} disabled={isReadOnly} placeholder="Mã Serial..." className={clsx("w-full px-3 py-2 border rounded-xl font-black text-[14px] outline-none", item.isValid === true ? "text-green-700 bg-green-50 border-green-200" : item.isValid === false ? "text-red-700 bg-red-50 border-red-200" : "bg-white border-slate-100")} />
+                                                            <input value={item.serial_number} onChange={e => updateItem(item._id, 'serial_number', e.target.value)} disabled={isReadOnly} placeholder="Mã Serial" className={clsx("w-full px-3 py-2 border rounded-xl font-black text-[14px] outline-none", item.isValid === true ? "text-green-700 bg-green-50 border-green-200" : item.isValid === false ? "text-red-700 bg-red-50 border-red-200" : "bg-white border-slate-100")} />
                                                         </div>
                                                         <select value={item.condition} onChange={e => updateItem(item._id, 'condition', e.target.value)} disabled={isReadOnly} className="w-28 px-2 py-2 bg-white border border-slate-200 rounded-xl font-bold text-[11px] outline-none">
                                                             {MACHINE_ITEM_CONDITIONS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
@@ -602,7 +634,7 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                                                         {!isReadOnly && <button type="button" onClick={() => removeItem(item._id)} className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg"><Trash2 size={16} /></button>}
                                                     </div>
                                                     <div className="flex items-center justify-between gap-2">
-                                                        <input value={item.note || ''} onChange={e => updateItem(item._id, 'note', e.target.value)} placeholder="Chi tiết lỗi/tình trạng..." className="flex-1 px-3 py-1.5 bg-white border border-slate-100 rounded-xl text-[11px] font-medium text-slate-600 outline-none" />
+                                                        <input value={item.note || ''} onChange={e => updateItem(item._id, 'note', e.target.value)} placeholder="Chi tiết lỗi/tình trạng" className="flex-1 px-3 py-1.5 bg-white border border-slate-100 rounded-xl text-[11px] font-medium text-slate-600 outline-none" />
                                                         {item.error && <span className="text-[10px] font-black text-red-500 uppercase">{item.error}</span>}
                                                         {item.isValid && <span className="text-[10px] font-black text-green-600 uppercase">Hợp lệ</span>}
                                                     </div>

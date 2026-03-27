@@ -195,10 +195,13 @@ export default function MachineRecoveryPrintTemplate({ recovery, items: initialI
 
             <div style={S.infoGrid}>
                 <div style={S.infoItem}>Khách hàng: <b>{customerName}</b></div>
-                <div style={S.infoItem}>Địa chỉ: {customerAddress || '—'}</div>
-                <div style={S.infoItem}>NV vận chuyển: {recovery.driver_name || '—'}</div>
+                <div style={S.infoItem}>Địa chỉ: {customerAddress || ''}</div>
+                <div style={S.infoItem}>NV tạo phiếu: {recovery.created_by || ''}</div>
                 <div style={S.infoItem}>Kho nhận: {warehouseName || recovery.warehouse_id}</div>
-                <div style={S.infoItem}>Tổng số máy: <b>{items.length}</b></div>
+                <div style={S.infoItem}>NV vận chuyển: {recovery.driver_name || ''}</div>
+                <div style={S.infoItem}>Tổng số máy thu yêu cầu: <b>{recovery.total_items}</b></div>
+                <div style={S.infoItem}>Tổng số máy thu thực tế: </div>
+                <div style={S.infoItem}>Tình trạng: </div>
             </div>
 
             {recovery.notes && (
@@ -227,7 +230,7 @@ export default function MachineRecoveryPrintTemplate({ recovery, items: initialI
                                 <td style={S.td}>{idx + 1}</td>
                                 <td style={{ ...S.td, fontWeight: 'bold' }}>{item.serial_number}</td>
                                 <td style={S.td}>{getConditionLabel(item.condition)}</td>
-                                <td style={S.tdLeft}>{item.note || '—'}</td>
+                                <td style={S.tdLeft}>{item.note || ''}</td>
                             </tr>
                         ))
                     )}

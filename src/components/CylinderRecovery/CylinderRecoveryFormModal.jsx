@@ -40,6 +40,7 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
     const [isScannerOpen, setIsScannerOpen] = useState(false);
     const [scannerType, setScannerType] = useState('item'); 
     const [photoUrls, setPhotoUrls] = useState([]);
+    const [shippers, setShippers] = useState([]);
     const [uploadingPhoto, setUploadingPhoto] = useState(false);
     const photoInputRef = useRef(null);
 
@@ -49,10 +50,10 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
         customer_id: '',
         order_id: '',
         warehouse_id: '',
-        driver_name: localStorage.getItem('user_name') || '',
+        driver_name: '',
         notes: '',
         total_items: 0,
-        status: 'CHO_DUYET'
+        status: 'CHO_PHAN_CONG'
     });
 
     const [items, setItems] = useState([]);
@@ -75,6 +76,7 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
     useEffect(() => {
         loadCustomers();
         fetchWarehouses();
+        fetchShippers();
         if (recovery) {
             setFormData({
                 ...recovery,
@@ -126,6 +128,15 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
             setCustomerOrders([]);
         }
     }, [formData.customer_id, customers]);
+
+    const fetchShippers = async () => {
+        const { data } = await supabase
+            .from('app_users')
+            .select('name')
+            .eq('role', 'Shipper')
+            .eq('status', 'Hoạt động');
+        if (data) setShippers(data.map(u => u.name));
+    };
 
     const fetchItems = async (recoveryId) => {
         const { data } = await supabase.from('cylinder_recovery_items').select('*').eq('recovery_id', recoveryId);
@@ -409,7 +420,8 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                 notes: payload.notes,
                 total_items: payload.total_items,
                 status: payload.status,
-                photos: payload.photos
+                photos: payload.photos,
+                created_by: recovery?.created_by || localStorage.getItem('user_name')
             };
 
             let recoveryId;
@@ -677,16 +689,32 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                             <Truck className="w-4 h-4 text-primary/70" />
                                             Nhân viên vận chuyển
                                         </label>
-                                        <input
-                                            value={formData.driver_name}
-                                            onChange={(e) => setFormData({ ...formData, driver_name: e.target.value })}
-                                            placeholder="Tên nhân viên..."
-                                            disabled={isReadOnly}
-                                            className={clsx(
-                                                "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold transition-all",
-                                                isReadOnly ? "text-slate-500 cursor-default" : "text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
-                                            )}
-                                        />
+                                        <div className="relative group">
+                                            <Truck className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary/50 group-focus-within:text-primary transition-colors z-10" />
+                                            <input
+                                                list="shipper-list"
+                                                value={formData.driver_name}
+                                                onChange={(e) => {
+                                                    const name = e.target.value;
+                                                    setFormData(prev => ({ 
+                                                        ...prev, 
+                                                        driver_name: name,
+                                                        status: (prev.status === 'CHO_PHAN_CONG' && name) ? 'DANG_THU_HOI' : prev.status
+                                                    }));
+                                                }}
+                                                placeholder="Chọn Shipper"
+                                                disabled={isReadOnly}
+                                                className={clsx(
+                                                    "w-full h-12 pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold transition-all",
+                                                    isReadOnly ? "text-slate-500 cursor-default" : "text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                                )}
+                                            />
+                                            <datalist id="shipper-list">
+                                                {shippers.map((name, idx) => (
+                                                    <option key={idx} value={name} />
+                                                ))}
+                                            </datalist>
+                                        </div>
                                     </div>
                                     <div className="space-y-1.5">
                                         <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
@@ -696,7 +724,7 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                         <input
                                             value={formData.notes}
                                             onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                                            placeholder="Ghi chú thêm..."
+                                            placeholder="Ghi chú thêm"
                                             disabled={isReadOnly}
                                             className={clsx(
                                                 "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold transition-all",
@@ -748,7 +776,7 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                                                     <input
                                                                         value={item.serial_number}
                                                                         onChange={(e) => updateItem(item._id, 'serial_number', e.target.value)}
-                                                                        placeholder="Mã serial..."
+                                                                        placeholder="Mã serial"
                                                                         disabled={isReadOnly}
                                                                         className={clsx(
                                                                             "w-full px-3 py-2 bg-white border rounded-xl font-black text-[14px] outline-none transition-all",
