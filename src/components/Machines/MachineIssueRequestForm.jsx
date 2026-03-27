@@ -58,6 +58,19 @@ const MachineIssueRequestForm = () => {
     }, [location.search]);
 
     const [isSearching, setIsSearching] = useState(false);
+    const [staffList, setStaffList] = useState([]);
+
+    useEffect(() => {
+        const fetchStaff = async () => {
+            try {
+                const { data } = await supabase.from('app_users').select('id, name, role').order('name');
+                if (data) setStaffList(data);
+            } catch (err) {
+                console.error('Error fetching staff:', err);
+            }
+        };
+        fetchStaff();
+    }, []);
 
     // Auto-fill logic when phone changes
     useEffect(() => {
@@ -207,12 +220,18 @@ const MachineIssueRequestForm = () => {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-foreground mb-1.5">Người đề nghị</label>
-                                <input
-                                    type="text"
+                                <select
                                     value={formData.requesterName}
                                     onChange={(e) => handleInputChange('requesterName', e.target.value)}
-                                    className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                                />
+                                    className="w-full h-10 px-4 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer font-semibold"
+                                >
+                                    <option value="">-- Chọn Người đề nghị --</option>
+                                    {staffList.map(u => (
+                                        <option key={u.id} value={u.name}>
+                                            {u.name}{u.role ? ` (${u.role})` : ''}
+                                        </option>
+                                    ))}
+                                </select>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-foreground mb-1.5">Nhân viên phụ trách máy</label>
@@ -395,16 +414,18 @@ const MachineIssueRequestForm = () => {
                                     className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
                                 />
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-foreground mb-1.5">Thu hồi dự kiến</label>
-                                <input
-                                    type="text"
-                                    value={formData.dateRecall}
-                                    onChange={(e) => handleInputChange('dateRecall', e.target.value)}
-                                    placeholder="dd/MM/yyyy"
-                                    className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                                />
-                            </div>
+                            {!formData.issueType['Bán'] && (
+                                <div>
+                                    <label className="block text-sm font-medium text-foreground mb-1.5">Thu hồi dự kiến</label>
+                                    <input
+                                        type="text"
+                                        value={formData.dateRecall}
+                                        onChange={(e) => handleInputChange('dateRecall', e.target.value)}
+                                        placeholder="dd/MM/yyyy"
+                                        className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                    />
+                                </div>
+                            )}
                         </div>
 
                         {/* Ghi chú */}
@@ -454,19 +475,19 @@ const MachineIssueRequestForm = () => {
 
             {/* PRINT VIEW (HIỆN KHI ẤN IN HOẶC KHI BẬT PREVIEW) */}
             <div id="print-area" className={clsx(
-                "print:block font-serif text-black p-8 bg-white max-w-[210mm] mx-auto min-h-[297mm] shadow-2xl my-10",
+                "print:block text-black p-8 bg-white max-w-[210mm] mx-auto min-h-[297mm] shadow-2xl my-10",
                 showPreview ? "block scale-90 origin-top" : "hidden"
-            )}>
+            )} style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}>
                 {/* Header section */}
                 <div className="flex justify-between items-start mb-6">
                     <div className="text-sm text-center">
                         <h2 className="font-bold text-blue-800 uppercase print:text-black">CÔNG TY TNHH DỊCH VỤ Y TẾ CỘNG ĐỒNG CHS</h2>
                         <p>ADD: Hải Âu 02-57 Vinhomes Ocean Park,</p>
-                        <p>Xã Gia Lâm, Hà Nội</p>
+                        <p>Xã Đa Tốn, Huyện Gia Lâm, Hà Nội</p>
                     </div>
                     <div className="flex items-start gap-3">
                         <div className="flex flex-col items-center">
-                            <span className="font-medium text-sm">Mẫu số: 02/XM-CHS</span>
+                            <span className="text-sm">Mẫu số: 02/XM-CHS</span>
                             <span className="italic text-sm">Đề nghị xuất máy</span>
                         </div>
                         <input
@@ -482,47 +503,47 @@ const MachineIssueRequestForm = () => {
                 <div className="text-center mb-6">
                     <h1 className="text-xl font-bold uppercase mb-2">GIẤY ĐỀ NGHỊ XUẤT MÁY</h1>
                     <div className="text-center">
-                        <span className="font-bold">Số: ĐNXM</span>
+                        <span>Số: ĐNXM{formData.orangeNumber || ''}</span>
                     </div>
                 </div>
 
                 {/* Form Fields */}
                 <div className="space-y-4 text-[15px] leading-relaxed">
                     <div className="flex items-center">
-                        <span className="font-bold min-w-[200px]">1. Họ và tên người đề nghị:</span>
+                        <span className="min-w-[200px]">1. Họ và tên người đề nghị:</span>
                         <input
                             type="text"
                             value={formData.requesterName}
                             readOnly
-                            className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 font-medium print:text-black"
+                            className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 print:text-black"
                             placeholder=""
                         />
                     </div>
 
                     <div className="flex items-center">
-                        <span className="font-bold min-w-[200px]">2. Nhân viên phụ trách máy:</span>
+                        <span className="min-w-[200px]">2. Nhân viên phụ trách máy:</span>
                         <input
                             type="text"
                             value={formData.machineManager}
                             readOnly
-                            className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 font-medium print:text-black"
+                            className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 print:text-black"
                             placeholder=""
                         />
                     </div>
 
                     <div className="flex items-start md:items-center print:items-center flex-col md:flex-row print:flex-row gap-6 md:gap-0">
                         <div className="flex items-center flex-1 w-full">
-                            <span className="font-bold min-w-[200px]">3. Tên khách hàng / Tên cơ sở:</span>
+                            <span className="min-w-[200px]">3. Tên khách hàng / Tên cơ sở:</span>
                             <input
                                 type="text"
                                 value={formData.customerName}
                                 readOnly
-                                className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 font-medium print:text-black"
+                                className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 print:text-black"
                                 placeholder=""
                             />
                         </div>
                         <div className="flex items-center w-full md:w-auto print:w-auto md:ml-4 print:ml-4">
-                            <span className="font-bold whitespace-nowrap mr-2">Điện Thoại:</span>
+                            <span className="whitespace-nowrap mr-2">Điện Thoại:</span>
                             <div className="relative">
                                 <input
                                     type="text"
@@ -535,37 +556,37 @@ const MachineIssueRequestForm = () => {
                     </div>
 
                     <div className="flex items-center">
-                        <span className="font-bold min-w-[200px]">4. Tên Cơ Sở:</span>
+                        <span className="min-w-[200px]">4. Tên Cơ Sở:</span>
                         <input
                             type="text"
                             value={formData.facilityName}
                             readOnly
-                            className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 font-medium print:text-black"
+                            className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 print:text-black"
                             placeholder=""
                         />
                     </div>
 
                     <div className="flex items-center">
-                        <span className="font-bold min-w-[200px]">5. Địa chỉ đặt máy:</span>
+                        <span className="min-w-[200px]">5. Địa chỉ đặt máy:</span>
                         <input
                             type="text"
                             value={formData.placementAddress}
                             readOnly
-                            className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 font-medium print:text-black"
+                            className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 print:text-black"
                             placeholder=""
                         />
                     </div>
 
                     {/* Machine Type */}
                     <div className="flex flex-col md:flex-row print:flex-row md:items-center print:items-center mt-6">
-                        <span className="font-bold min-w-[200px] mb-4 md:mb-0 print:mb-0">6. Loại máy đề xuất:</span>
+                        <span className="min-w-[200px] mb-4 md:mb-0 print:mb-0">6. Loại máy đề xuất:</span>
                         <div className="flex flex-wrap gap-6 flex-1 items-center">
                             {Object.keys(formData.machineType).map(type => (
                                 <label key={type} className="flex items-center gap-6 cursor-default">
                                     <div className={`w-4 h-4 border border-gray-500 flex items-center justify-center bg-white ${formData.machineType[type] ? 'bg-gray-100' : ''}`}>
                                         {formData.machineType[type] && <span className="text-gray-800 text-xs font-bold font-sans">v</span>}
                                     </div>
-                                    <span className="font-medium">{type === 'Khac' ? 'Khác(NK, IoT)' : type}</span>
+                                    <span className="font-medium">{type === 'Khac' ? 'Khác (NK, IoT)' : type}</span>
                                 </label>
                             ))}
                         </div>
@@ -573,7 +594,7 @@ const MachineIssueRequestForm = () => {
 
                     {/* Machine Color */}
                     <div className="mt-6 mb-2">
-                        <span className="font-bold block mb-2">7. Màu máy yêu cầu dành cho TM</span>
+                        <span className="block mb-2 font-bold">7. Màu máy yêu cầu dành cho TM</span>
                         <div className="grid grid-cols-1 md:grid-cols-3 print:grid-cols-3 gap-y-1 gap-x-4 pl-8 md:pl-24 print:pl-24">
                             {Object.keys(formData.machineColor).map(color => (
                                 <label key={color} className="flex items-center gap-6 cursor-default">
@@ -589,16 +610,16 @@ const MachineIssueRequestForm = () => {
                     {/* Quantity and Code */}
                     <div className="flex flex-col md:flex-row print:flex-row md:items-center print:items-center gap-6 mt-4">
                         <div className="flex items-center">
-                            <span className="font-bold mr-2">8. Số lượng máy:</span>
+                            <span className="mr-2">8. Số lượng máy:</span>
                             <input
                                 type="text"
                                 value={formData.quantity}
                                 readOnly
-                                className="focus:outline-none w-16 px-1 font-bold bg-transparent print:border-none print:p-0"
+                                className="focus:outline-none w-16 px-1 bg-transparent print:border-none print:p-0"
                             />
                         </div>
                         <div className="flex items-center flex-1">
-                            <span className="font-bold mr-2">Mã máy:</span>
+                            <span className="mr-2">Mã máy:</span>
                             <input
                                 type="text"
                                 value={formData.machineCode}
@@ -610,49 +631,51 @@ const MachineIssueRequestForm = () => {
 
                     {/* Dates */}
                     <div className="flex items-center mt-4">
-                        <span className="font-bold min-w-[200px]">9. Ngày CHS cần máy:</span>
+                        <span className="min-w-[200px]">9. Ngày CHS cần máy:</span>
                         <input
                             type="text"
                             value={formData.dateNeeded}
                             readOnly
-                            className="focus:outline-none w-32 px-2 font-bold bg-transparent print:border-none print:p-0"
+                            className="focus:outline-none w-32 px-2 bg-transparent print:border-none print:p-0"
                             placeholder="dd/MM/yyyy"
                         />
                     </div>
 
                     <div className="flex flex-col md:flex-row print:flex-row md:items-center print:items-center gap-6 mt-4">
                         <div className="flex items-center">
-                            <span className="font-bold min-w-[200px]">10. Ngày giao cho Khách hàng:</span>
+                            <span className="min-w-[200px]">10. Ngày giao cho Khách hàng:</span>
                             <input
                                 type="text"
                                 value={formData.dateDelivery}
                                 readOnly
-                                className="focus:outline-none w-32 px-2 font-bold bg-transparent print:border-none print:p-0"
+                                className="focus:outline-none w-32 px-2 bg-transparent print:border-none print:p-0"
                                 placeholder="dd/MM/yyyy"
                             />
                         </div>
-                        <div className="flex items-center">
-                            <span className="font-bold mr-2">11. Thời gian thu hồi:</span>
-                            <input
-                                type="text"
-                                value={formData.dateRecall}
-                                readOnly
-                                className="focus:outline-none w-32 px-2 font-bold bg-transparent print:border-none print:p-0"
-                                placeholder="dd/MM/yyyy"
-                            />
-                        </div>
+                        {!formData.issueType['Bán'] && (
+                            <div className="flex items-center">
+                                <span className="mr-2">11. Thời gian thu hồi:</span>
+                                <input
+                                    type="text"
+                                    value={formData.dateRecall}
+                                    readOnly
+                                    className="focus:outline-none w-32 px-2 bg-transparent print:border-none print:p-0"
+                                    placeholder="dd/MM/yyyy"
+                                />
+                            </div>
+                        )}
                     </div>
 
                     {/* Shipping Method */}
                     <div className="flex flex-col md:flex-row print:flex-row md:items-center print:items-center mt-4">
-                        <span className="font-bold min-w-[200px] mb-4 md:mb-0 print:mb-0">12. Phương thức vận chuyển:</span>
+                        <span className="min-w-[200px] mb-4 md:mb-0 print:mb-0">12. Phương thức vận chuyển:</span>
                         <div className="flex gap-10">
                             {Object.keys(formData.shippingMethod).map(method => (
                                 <label key={method} className="flex items-center gap-6 cursor-default">
                                     <div className={`w-4 h-4 border border-gray-500 flex items-center justify-center bg-white ${formData.shippingMethod[method] ? 'bg-gray-100' : ''}`}>
                                         {formData.shippingMethod[method] && <span className="text-gray-800 text-xs font-bold font-sans">v</span>}
                                     </div>
-                                    <span className={method === 'KD tự vận chuyển' ? 'font-medium' : ''}>{method}</span>
+                                    <span>{method}</span>
                                 </label>
                             ))}
                         </div>
@@ -660,7 +683,7 @@ const MachineIssueRequestForm = () => {
 
                     {/* Issue Type */}
                     <div className="flex flex-col md:flex-row print:flex-row md:items-center print:items-center mt-4">
-                        <span className="font-bold min-w-[200px] mb-4 md:mb-0 print:mb-0">13. Dạng xuất:</span>
+                        <span className="min-w-[200px] mb-4 md:mb-0 print:mb-0">13. Dạng xuất:</span>
                         <div className="flex flex-wrap gap-10">
                             {Object.keys(formData.issueType).map(type => (
                                 <label key={type} className="flex items-center gap-6 cursor-default">
@@ -675,7 +698,7 @@ const MachineIssueRequestForm = () => {
 
                     {/* Notes */}
                     <div className="mt-6 flex flex-col">
-                        <span className="font-bold mb-2">14. Ghi chú khác (nếu có):</span>
+                        <span className="mb-2">14. Ghi chú khác (nếu có):</span>
                         <textarea
                             value={formData.notes}
                             readOnly
@@ -690,16 +713,16 @@ const MachineIssueRequestForm = () => {
                 {/* Signatures */}
                 <div className="flex justify-between mt-4">
                     <div className="text-center w-[25%]">
-                        <p className="font-bold mb-16">Người đề nghị</p>
-                        <p className="font-bold italic text-red-700 print:text-black"></p>
+                        <p className="mb-16">Người đề nghị</p>
+                        <p className="italic text-red-700 print:text-black">{formData.requesterName || ''}</p>
                     </div>
                     <div className="text-center w-[25%]">
-                        <p className="font-bold mb-16">Thủ kho</p>
+                        <p className="mb-16">Thủ kho</p>
                     </div>
                     <div className="text-center w-[50%]">
                         <p className="italic mb-1 whitespace-nowrap">Hà Nội, ngày {currentDay} tháng {currentMonth} năm {currentYear}</p>
-                        <p className="font-bold mb-16">Giám đốc</p>
-                        <p className="font-bold italic">Bùi Xuân Đức</p>
+                        <p className="mb-16">Giám đốc</p>
+                        <p className="italic">Bùi Xuân Đức</p>
                     </div>
                 </div>
 
@@ -723,6 +746,7 @@ const MachineIssueRequestForm = () => {
                         overflow: visible !important;
                         position: static !important;
                         display: block !important;
+                        font-family: Arial, Helvetica, sans-serif !important;
                     }
                     header, nav, aside, footer, .no-print { display: none !important; }
                     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: #fff !important; margin: 0; }
