@@ -1,10 +1,12 @@
 import { clsx } from 'clsx';
 import { Printer, Save, Eye, EyeOff } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { supabase } from '../../supabase/config';
 import { toast } from 'react-toastify';
 
 const MachineIssueRequestForm = () => {
+    const location = useLocation();
     const [formData, setFormData] = useState({
         orangeNumber: '',
         formNumber: '',
@@ -46,6 +48,14 @@ const MachineIssueRequestForm = () => {
         },
         notes: ''
     });
+
+    useEffect(() => {
+        const queryParams = new URLSearchParams(location.search);
+        const phone = queryParams.get('phone');
+        if (phone) {
+            setFormData(prev => ({ ...prev, phone }));
+        }
+    }, [location.search]);
 
     const [isSearching, setIsSearching] = useState(false);
 

@@ -31,7 +31,8 @@ import {
     Upload,
     Ticket,
     X,
-    MoreVertical
+    MoreVertical,
+    FilePlus
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
@@ -1046,6 +1047,15 @@ const Customers = () => {
                                             <span>{c.managed_by || '—'}</span>
                                         </div>
                                         <div className="flex items-center gap-3">
+                                            {c.status === 'Thành công' && (
+                                                <button 
+                                                    onClick={() => navigate(`/de-nghi-xuat-may/tao?phone=${c.phone || ''}`)} 
+                                                    className="p-2 text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg" 
+                                                    title="Mẫu đề nghị máy"
+                                                >
+                                                    <FilePlus size={16} />
+                                                </button>
+                                            )}
                                             <button onClick={() => { setSelectedCustomer(c); setIsRepairModalOpen(true); }} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg" title="Báo hỏng"><Ticket size={16} /></button>
                                             <button onClick={() => handleViewCustomer(c)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg"><Eye size={16} /></button>
                                             <button onClick={() => handleEditCustomer(c)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
@@ -1216,34 +1226,36 @@ const Customers = () => {
                                 )}
                             </div>
 
-                            <div className="relative">
-                                <button
-                                    onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
-                                    className={clsx(
-                                        'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        getFilterButtonClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)
+                            {filterType !== 'lead' && (
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
+                                        className={clsx(
+                                            'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
+                                            getFilterButtonClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)
+                                        )}
+                                    >
+                                        <List size={14} className={getFilterIconClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)} />
+                                        Trạng thái
+                                        {selectedStatuses.length > 0 && (
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('status'))}>
+                                                {selectedStatuses.length}
+                                            </span>
+                                        )}
+                                        <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'status' ? 'rotate-180' : '')} />
+                                    </button>
+                                    {activeDropdown === 'status' && (
+                                        <FilterDropdown
+                                            options={statusOptions}
+                                            selected={selectedStatuses}
+                                            setSelected={setSelectedStatuses}
+                                            filterSearch={filterSearch}
+                                            setFilterSearch={setFilterSearch}
+                                            showSearch={false}
+                                        />
                                     )}
-                                >
-                                    <List size={14} className={getFilterIconClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)} />
-                                    Trạng thái
-                                    {selectedStatuses.length > 0 && (
-                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('status'))}>
-                                            {selectedStatuses.length}
-                                        </span>
-                                    )}
-                                    <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'status' ? 'rotate-180' : '')} />
-                                </button>
-                                {activeDropdown === 'status' && (
-                                    <FilterDropdown
-                                        options={statusOptions}
-                                        selected={selectedStatuses}
-                                        setSelected={setSelectedStatuses}
-                                        filterSearch={filterSearch}
-                                        setFilterSearch={setFilterSearch}
-                                        showSearch={false}
-                                    />
-                                )}
-                            </div>
+                                </div>
+                            )}
 
                             {hasActiveFilters && (
                                 <button
@@ -1346,6 +1358,15 @@ const Customers = () => {
                                         )}
                                         <td className="px-4 py-4 text-center border-l border-r border-primary/20">
                                             <div className="flex items-center justify-center gap-3">
+                                                {c.status === 'Thành công' && (
+                                                    <button 
+                                                        onClick={() => navigate(`/de-nghi-xuat-may/tao?phone=${c.phone || ''}`)} 
+                                                        className="text-indigo-600/80 hover:text-indigo-700 transition-colors p-1 rounded hover:bg-indigo-50" 
+                                                        title="Mẫu đề nghị máy"
+                                                    >
+                                                        <FilePlus size={16} className="w-4 h-4" />
+                                                    </button>
+                                                )}
                                                 <button onClick={() => { setSelectedCustomer(c); setIsRepairModalOpen(true); }} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Báo hỏng">
                                                     <Ticket size={16} className="w-4 h-4" />
                                                 </button>
@@ -1731,7 +1752,7 @@ const Customers = () => {
                             selectedValues: pendingStatuses,
                             onSelectionChange: setPendingStatuses,
                         },
-                    ]}
+                    ].filter(section => filterType !== 'lead' || section.id !== 'status')}
                 />
             )}
 
