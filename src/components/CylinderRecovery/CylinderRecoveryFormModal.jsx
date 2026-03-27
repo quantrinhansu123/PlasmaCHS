@@ -38,6 +38,7 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
     const [customerOrders, setCustomerOrders] = useState([]);
     const [warehousesList, setWarehousesList] = useState([]);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
+    const [scannerType, setScannerType] = useState('item'); 
     const [photoUrls, setPhotoUrls] = useState([]);
     const [uploadingPhoto, setUploadingPhoto] = useState(false);
     const photoInputRef = useRef(null);
@@ -48,7 +49,7 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
         customer_id: '',
         order_id: '',
         warehouse_id: '',
-        driver_name: '',
+        driver_name: localStorage.getItem('user_name') || '',
         notes: '',
         total_items: 0,
         status: 'CHO_DUYET'
@@ -155,6 +156,11 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
     };
 
     const handleScanSuccess = useCallback(async (decodedText, time) => {
+        if (scannerType === 'order') {
+            await handleOrderScanSuccess(decodedText);
+            return;
+        }
+
         const currentItems = itemsRef.current;
         if (currentItems.some(i => i.serial_number === decodedText)) {
             toast.info(`Mã ${decodedText} đã được quét!`);
@@ -234,7 +240,7 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
 
                     if (orderData) {
                         setFormData(prev => ({ ...prev, order_id: orderData.id }));
-                        toast.success(`Đã tự động liên kết đơn hàng: ĐH ${orderData.order_code}`);
+                        toast.success(`Đã tự động quét mã QR đơn hàng: ĐH ${orderData.order_code}`);
                     }
                 }
             } catch (err) {
@@ -244,7 +250,44 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
         };
 
         validateCylinder();
-    }, []);
+    }, [scannerType]);
+
+    const handleOrderScanSuccess = async (orderCode) => {
+        setIsScannerOpen(false);
+
+        try {
+            const { data: orderData, error } = await supabase
+                .from('orders')
+                .select('id, order_code, customer_name')
+                .eq('order_code', orderCode)
+                .maybeSingle();
+
+            if (error) throw error;
+            if (!orderData) {
+                toast.error(`Không tìm thấy đơn hàng "${orderCode}"`);
+                return;
+            }
+
+            // Find customer by name
+            const currentCustomers = customersRef.current;
+            const matchedCustomer = currentCustomers.find(c => c.name === orderData.customer_name);
+            
+            if (matchedCustomer) {
+                setFormData(prev => ({ 
+                    ...prev, 
+                    customer_id: matchedCustomer.id,
+                    order_id: orderData.id 
+                }));
+                toast.success(`Đã quét được đơn hàng ${orderCode} của KH ${orderData.customer_name}`);
+            } else {
+                setFormData(prev => ({ ...prev, order_id: orderData.id }));
+                toast.success(`Đã quét được đơn hàng ${orderCode}`);
+            }
+        } catch (err) {
+            console.error(err);
+            toast.error('Lỗi khi quét đơn hàng: ' + err.message);
+        }
+    };
 
     const handlePhotoCapture = async (e) => {
         const file = e.target.files[0];
@@ -581,26 +624,41 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
 
                                 <div className="space-y-1.5">
                                     <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
-                                        <Link2 className="w-4 h-4 text-primary/70" /> Liên kết Đơn hàng
+                                        <ScanLine className="w-4 h-4 text-primary/70" /> Quét mã QR
                                     </label>
-                                    <div className="relative">
-                                        <select
-                                            value={formData.order_id}
-                                            onChange={(e) => setFormData({ ...formData, order_id: e.target.value })}
-                                            disabled={isReadOnly || !formData.customer_id}
-                                            className={clsx(
-                                                "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold appearance-none transition-all",
-                                                (isReadOnly || !formData.customer_id) ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
-                                            )}
-                                        >
-                                            <option value="">-- Không liên kết --</option>
-                                            {customerOrders.map(o => (
-                                                <option key={o.id} value={o.id}>
-                                                    ĐH {o.order_code} — {o.quantity} {o.product_type?.startsWith('BINH') ? 'bình' : 'máy'} ({o.status})
-                                                </option>
-                                            ))}
-                                        </select>
-                                        {!isReadOnly && formData.customer_id && <ChevronDown className="w-4 h-4 text-primary/70 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />}
+                                    <div className="flex gap-2 items-center">
+                                        <div className="relative flex-1">
+                                            <select
+                                                value={formData.order_id}
+                                                onChange={(e) => setFormData({ ...formData, order_id: e.target.value })}
+                                                disabled={isReadOnly || !formData.customer_id}
+                                                className={clsx(
+                                                    "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold appearance-none transition-all",
+                                                    (isReadOnly || !formData.customer_id) ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                                )}
+                                            >
+                                                <option value=""></option>
+                                                {customerOrders.map(o => (
+                                                    <option key={o.id} value={o.id}>
+                                                        ĐH {o.order_code} — {o.quantity} {o.product_type?.startsWith('BINH') ? 'bình' : 'máy'} ({o.status})
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            {!isReadOnly && formData.customer_id && <ChevronDown className="w-4 h-4 text-primary/70 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />}
+                                        </div>
+                                        {!isReadOnly && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setScannerType('order');
+                                                    setIsScannerOpen(true);
+                                                }}
+                                                className="w-12 h-12 flex items-center justify-center bg-primary/10 text-primary border border-primary/20 rounded-2xl hover:bg-primary/20 transition-all shadow-sm"
+                                                title="Quét mã đơn hàng"
+                                            >
+                                                <ScanLine size={20} />
+                                            </button>
+                                        )}
                                     </div>
                                     {formData.order_id && (() => {
                                         const selectedOrder = customerOrders.find(o => o.id === formData.order_id);
@@ -659,7 +717,10 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                     {!isReadOnly && (
                                         <button
                                             type="button"
-                                            onClick={() => setIsScannerOpen(true)}
+                                            onClick={() => {
+                                                setScannerType('item');
+                                                setIsScannerOpen(true);
+                                            }}
                                             className="flex items-center gap-1.5 px-3 py-1.5 bg-primary hover:bg-primary/90 text-white font-bold rounded-xl text-xs transition-all shadow-lg shadow-primary/20"
                                         >
                                             <ScanLine size={14} strokeWidth={2.5} /> Quét
@@ -859,7 +920,7 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                 isOpen={isScannerOpen}
                 onClose={() => setIsScannerOpen(false)}
                 onScanSuccess={handleScanSuccess}
-                title={`Quét mã vạch (${items.length} đã thêm)`}
+                title={scannerType === 'order' ? 'Quét mã QR đơn hàng' : `Quét mã vạch (${items.length} đã thêm)`}
                 currentCount={items.length}
                 allowDuplicateScans={true}
             />

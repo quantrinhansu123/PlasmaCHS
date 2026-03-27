@@ -6,7 +6,8 @@ export default function Header() {
     const navigate = useNavigate();
     const location = useLocation();
     const isAuthenticated = true;
-    const username = "Lê Minh Công";
+    const username = localStorage.getItem('user_name') || "Lê Minh Công";
+    const userRole = localStorage.getItem('user_role') || "Quản trị viên";
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
     const isActive = (path) => location.pathname === path;
@@ -53,7 +54,7 @@ export default function Header() {
                                     </div>
                                     <div className="hidden xs:flex flex-col items-start leading-tight">
                                         <span className="text-sm font-black text-slate-800 tracking-tight">{username}</span>
-                                        <span className="text-[10px] text-slate-400 font-bold tracking-wider uppercase">Quản trị viên</span>
+                                        <span className="text-[10px] text-slate-400 font-bold tracking-wider uppercase">{userRole}</span>
                                     </div>
                                 </div>
                                 <button

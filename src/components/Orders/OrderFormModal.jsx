@@ -201,9 +201,29 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 shipperId: order.shipper_id || '',
                 shippingFee: order.shipping_fee || 0
             });
-            if (order.assigned_cylinders) {
-                setAssignedCylinders(order.assigned_cylinders);
+            const isCylinder = order.product_type?.toUpperCase().startsWith('BINH') || order.product_type?.toUpperCase().startsWith('BÌNH');
+            let initialCylinders = [];
+            
+            if (order.assigned_cylinders && Array.isArray(order.assigned_cylinders)) {
+                initialCylinders = order.assigned_cylinders.map(s => {
+                    if (typeof s === 'string') return { serial: s, scan_time: 'Đã lưu' };
+                    return s;
+                });
             }
+
+            // Always ensure the array matches the quantity for cylinder products
+            if (isCylinder) {
+                const qty = order.quantity || 0;
+                while (initialCylinders.length < qty) {
+                    initialCylinders.push({ serial: '', scan_time: null });
+                }
+                // Truncate if somehow larger
+                if (initialCylinders.length > qty) {
+                    initialCylinders = initialCylinders.slice(0, qty);
+                }
+            }
+            
+            setAssignedCylinders(initialCylinders);
         }
     }, [order, isEdit, customers]);
 
@@ -327,7 +347,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
     };
 
     const startScanAll = () => {
-        const firstEmpty = assignedCylinders.findIndex(s => !s);
+        const firstEmpty = assignedCylinders.findIndex(s => !(typeof s === 'string' ? s : s?.serial));
         if (firstEmpty === -1) {
             alert('Đã gán đủ mã bình!');
             return;
@@ -875,7 +895,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                     />
                                 </div>
 
-                                {formData.productType.startsWith('MAY') && (
+                                {formData.productType?.toUpperCase().match(/^(MAY|MÁY)/) && (
                                     <div className="space-y-1.5">
                                         <label className="text-[14px] font-semibold text-slate-800">Khoa sử dụng máy / Mã máy</label>
                                         <input
@@ -922,7 +942,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                     )}
                                 </div>
 
-                                {formData.productType.startsWith('BINH') && formData.quantity > 0 && (
+                                {(formData.productType?.toUpperCase().startsWith('BINH') || formData.productType?.toUpperCase().startsWith('BÌNH')) && formData.quantity > 0 && (
                                     <div className="pt-3 mt-2 border-t border-primary/10 space-y-4">
                                         <div className="flex items-center justify-between">
                                             <h5 className="text-[13px] !font-bold !text-primary flex items-center gap-2">

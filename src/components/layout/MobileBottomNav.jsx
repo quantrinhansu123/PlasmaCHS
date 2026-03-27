@@ -1,11 +1,13 @@
 import React from 'react';
-import { ArrowLeft, Home, Bell } from 'lucide-react';
+import { ArrowLeft, Home, Bell, ClipboardList } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { clsx } from 'clsx';
 import { supabase } from '../../supabase/config';
+import { usePermissions } from '../../hooks/usePermissions';
 
 function MobileBottomNav() {
   const navigate = useNavigate();
+  const { role } = usePermissions();
   const location = useLocation();
   const [unreadCount, setUnreadCount] = React.useState(0);
 
@@ -53,6 +55,18 @@ function MobileBottomNav() {
       >
         <Home size={18} strokeWidth={2.2} />
       </button>
+
+      {(role === 'Admin' || role === 'Shipper') && (
+        <button
+          onClick={() => navigate('/nhiem-vu-giao-hang')}
+          className={clsx(
+            'p-1.5 transition-colors',
+            location.pathname === '/nhiem-vu-giao-hang' ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <ClipboardList size={22} />
+        </button>
+      )}
 
       <button 
         onClick={() => {

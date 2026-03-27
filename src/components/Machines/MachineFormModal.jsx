@@ -72,7 +72,7 @@ export default function MachineFormModal({ machine, onClose, onSuccess }) {
                 // Fetch Warehouses
                 const { data: whData } = await supabase
                     .from('warehouses')
-                    .select('id, name, branch_office')
+                    .select('*')
                     .eq('status', 'Đang hoạt động')
                     .order('name');
                 if (whData) setWarehousesList(whData);

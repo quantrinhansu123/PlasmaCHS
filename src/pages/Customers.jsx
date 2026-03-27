@@ -208,7 +208,7 @@ const Customers = () => {
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
+    }, [activeDropdown, showColumnPicker, showMoreActions]);
 
     useEffect(() => {
         localStorage.setItem('columns_customers', JSON.stringify(visibleColumns));

@@ -42,6 +42,7 @@ import MachineInventoryReport from './pages/MachineInventoryReport';
 import SalesReport from './pages/SalesReport';
 import ErrorReport from './pages/ErrorReport';
 import MachineRecoveries from './pages/MachineRecoveries';
+import ShippingTasks from './pages/ShippingTasks';
 
 const moduleRoutes = ['/don-hang-kinh-doanh', '/quan-ly-thiet-bi', '/van-chuyen', '/thu-hoi', '/mua-hang-nha-cung-cap', '/kho', '/he-thong', '/vat-tu', '/thong-ke'];
 
@@ -130,6 +131,7 @@ function App() {
               <Route path="/xuat-tra-ncc" element={<GoodsIssues />} />
               <Route path="/thu-hoi-vo" element={<CylinderRecoveries />} />
               <Route path="/thu-hoi-may" element={<MachineRecoveries />} />
+              <Route path="/nhiem-vu-giao-hang" element={<ShippingTasks />} />
 
               <Route path="/nha-cung-cap" element={<Suppliers />} />
               <Route path="/nha-cung-cap/tao" element={<Suppliers />} />

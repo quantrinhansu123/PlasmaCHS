@@ -147,17 +147,17 @@ const Shippers = () => {
 
     useEffect(() => {
         const handleClickOutside = (event) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+            if (activeDropdown && dropdownRef.current && !dropdownRef.current.contains(event.target)) {
                 setActiveDropdown(null);
             }
-            if (columnPickerRef.current && !columnPickerRef.current.contains(event.target)) {
+            if (showColumnPicker && columnPickerRef.current && !columnPickerRef.current.contains(event.target)) {
                 setShowColumnPicker(false);
             }
         };
 
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
+    }, [activeDropdown, showColumnPicker]);
 
     useEffect(() => {
         localStorage.setItem('columns_shippers', JSON.stringify(visibleColumns));

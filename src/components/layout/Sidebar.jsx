@@ -5,8 +5,10 @@ import { clsx } from 'clsx';
 
 import { sidebarMenu } from '../../constants/sidebarMenu';
 import { actionModuleGroups } from '../../constants/actionModuleData';
+import { usePermissions } from '../../hooks/usePermissions';
 
 function Sidebar({ isOpen, setIsOpen }) {
+  const { role } = usePermissions();
   return (
     <>
       {isOpen && (
@@ -43,7 +45,9 @@ function Sidebar({ isOpen, setIsOpen }) {
         </div>
 
         <nav className="flex-1 overflow-y-auto py-6 space-y-2 custom-scrollbar flex flex-col items-center lg:items-stretch">
-          {sidebarMenu.map((item) => (
+          {sidebarMenu
+            .filter(item => !item.roles || item.roles.includes(role))
+            .map((item) => (
             <NavItem
               key={item.path}
               item={item}

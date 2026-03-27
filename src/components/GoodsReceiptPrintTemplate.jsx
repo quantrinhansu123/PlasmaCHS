@@ -341,7 +341,7 @@ const ReceiptItem = ({ receipt, items, warehousesList }) => {
                     Số: <span style={{ fontWeight: 'bold' }}>{receipt.receipt_code}</span>
                 </div>
                 <div style={S.debitCredit}>
-                    <div style={{ marginBottom: '2px' }}>Nợ: <span style={S.dots}>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></div>
+                    <div style={{ marginBottom: '2px' }}>Nợ vỏ: <span style={S.dots}>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></div>
                     <div>Có: <span style={S.dots}>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></div>
                 </div>
             </div>

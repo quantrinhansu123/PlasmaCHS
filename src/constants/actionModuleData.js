@@ -235,6 +235,13 @@ export const actionModuleGroups = [
         href: '/don-vi-van-chuyen',
         colorScheme: 'cyan',
       },
+      {
+        icon: PackageCheck,
+        title: 'Nhiệm vụ giao hàng',
+        description: 'Danh sách các đơn hàng cần giao, xác nhận thành công và tải ảnh bằng chứng.',
+        href: '/nhiem-vu-giao-hang',
+        colorScheme: 'indigo',
+      },
     ],
   },
   {

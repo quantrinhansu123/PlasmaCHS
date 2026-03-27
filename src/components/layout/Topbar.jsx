@@ -106,7 +106,10 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const defaultAvatar = 'https://ui-avatars.com/api/?name=Le+Minh+Cong&background=random&color=random';
+  const username = localStorage.getItem('user_name') || "Lê Minh Công";
+  const userRole = localStorage.getItem('user_role') || "Quản trị viên (Admin)";
+  const displayName = username.split(' ').map(n => n.charAt(0)).join('+');
+  const defaultAvatar = `https://ui-avatars.com/api/?name=${displayName}&background=random&color=random`;
 
   // Real-time Fetching Notifications
   const fetchNotifications = async () => {
@@ -524,14 +527,14 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
             <div className="hidden sm:flex flex-col">
               <div className="flex items-center gap-1">
                 <span className="text-[13px] font-bold leading-tight text-foreground group-hover:text-primary transition-colors">
-                  Lê Minh Công
+                  {username}
                 </span>
                 <ChevronDown
                   size={12}
                   className={clsx('text-muted-foreground transition-transform duration-200', showUserDropdown && 'rotate-180')}
                 />
               </div>
-              <span className="text-[10px] text-muted-foreground leading-tight font-medium">Quản trị viên (Admin)</span>
+              <span className="text-[10px] text-muted-foreground leading-tight font-medium">{userRole}</span>
             </div>
           </div>
 

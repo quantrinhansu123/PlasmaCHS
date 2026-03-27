@@ -104,11 +104,14 @@ const GoodsIssues = () => {
             if (columnPickerRef.current && !columnPickerRef.current.contains(event.target)) {
                 setShowColumnPicker(false);
             }
+            if (activeDropdown && !event.target.closest('.filter-dropdown-container')) {
+                setActiveDropdown(null);
+            }
         };
 
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
+    }, [activeDropdown, showColumnPicker]);
 
     const fetchData = async () => {
         setLoading(true);

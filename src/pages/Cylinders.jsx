@@ -166,7 +166,7 @@ const Cylinders = () => {
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
+    }, [activeDropdown, showColumnPicker]);
 
     useEffect(() => {
         localStorage.setItem('columns_cylinders', JSON.stringify(visibleColumns));

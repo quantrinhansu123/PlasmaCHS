@@ -38,6 +38,7 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
     const [customerOrders, setCustomerOrders] = useState([]);
     const [warehousesList, setWarehousesList] = useState([]);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
+    const [scannerType, setScannerType] = useState('item'); 
     const [photoUrls, setPhotoUrls] = useState([]);
     const [uploadingPhoto, setUploadingPhoto] = useState(false);
     const photoInputRef = useRef(null);
@@ -48,7 +49,7 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
         customer_id: '',
         order_id: '',
         warehouse_id: '',
-        driver_name: '',
+        driver_name: localStorage.getItem('user_name') || '',
         notes: '',
         total_items: 0,
         status: 'CHO_DUYET'
@@ -155,6 +156,11 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
     };
 
     const handleScanSuccess = useCallback(async (decodedText, time) => {
+        if (scannerType === 'order') {
+            await handleOrderScanSuccess(decodedText);
+            return;
+        }
+
         const currentItems = itemsRef.current;
         if (currentItems.some(i => i.serial_number === decodedText)) {
             toast.info(`Mã ${decodedText} đã được quét!`);
@@ -223,7 +229,43 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
         };
 
         validateMachine();
-    }, []);
+    }, [scannerType]);
+
+    const handleOrderScanSuccess = async (orderCode) => {
+        setIsScannerOpen(false);
+
+        try {
+            const { data: orderData, error } = await supabase
+                .from('orders')
+                .select('id, order_code, customer_name')
+                .eq('order_code', orderCode)
+                .maybeSingle();
+
+            if (error) throw error;
+            if (!orderData) {
+                toast.error(`Không tìm thấy đơn hàng "${orderCode}"`);
+                return;
+            }
+
+            const currentCustomers = customersRef.current;
+            const matchedCustomer = currentCustomers.find(c => c.name === orderData.customer_name);
+            
+            if (matchedCustomer) {
+                setFormData(prev => ({ 
+                    ...prev, 
+                    customer_id: matchedCustomer.id,
+                    order_id: orderData.id 
+                }));
+                toast.success(`Đã quét được đơn hàng ${orderCode} của KH ${orderData.customer_name}`);
+            } else {
+                setFormData(prev => ({ ...prev, order_id: orderData.id }));
+                toast.success(`Đã quét được đơn hàng ${orderCode}`);
+            }
+        } catch (err) {
+            console.error(err);
+            toast.error('Lỗi khi quét đơn hàng: ' + err.message);
+        }
+    };
 
     const handlePhotoCapture = async (e) => {
         const file = e.target.files[0];
@@ -488,11 +530,29 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                                 </div>
 
                                 <div className="space-y-1.5">
-                                    <label className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800"><Link2 size={16} /> Đơn hàng</label>
-                                    <select value={formData.order_id} onChange={e => setFormData({...formData, order_id: e.target.value})} disabled={isReadOnly || !formData.customer_id} className="w-full h-11 px-4 border border-slate-200 rounded-xl font-bold bg-slate-50 outline-none appearance-none">
-                                        <option value="">-- Không liên kết --</option>
-                                        {customerOrders.map(o => <option key={o.id} value={o.id}>ĐH {o.order_code} ({o.status})</option>)}
-                                    </select>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800"><ScanLine size={16} /> Quét mã QR</label>
+                                    <div className="flex gap-2 items-center">
+                                        <div className="relative flex-1">
+                                            <select value={formData.order_id} onChange={e => setFormData({...formData, order_id: e.target.value})} disabled={isReadOnly || !formData.customer_id} className="w-full h-11 px-4 border border-slate-200 rounded-xl font-bold bg-slate-50 outline-none appearance-none">
+                                                <option value=""></option>
+                                                {customerOrders.map(o => <option key={o.id} value={o.id}>ĐH {o.order_code} ({o.status})</option>)}
+                                            </select>
+                                            {!isReadOnly && formData.customer_id && <ChevronDown className="w-4 h-4 text-primary absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />}
+                                        </div>
+                                        {!isReadOnly && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setScannerType('order');
+                                                    setIsScannerOpen(true);
+                                                }}
+                                                className="w-11 h-11 flex items-center justify-center bg-primary text-white border border-primary/20 rounded-xl hover:bg-primary-700 transition-all shadow-lg shadow-primary/20"
+                                                title="Quét mã đơn hàng"
+                                            >
+                                                <ScanLine size={18} />
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -515,7 +575,10 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                                         <h4 className="text-[18px] font-extrabold text-primary">Danh sách máy ({items.length})</h4>
                                     </div>
                                     {!isReadOnly && (
-                                        <button type="button" onClick={() => setIsScannerOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white font-bold rounded-xl text-xs shadow-lg shadow-primary/20 transition-all"><ScanLine size={14} strokeWidth={2.5} /> Quét barcode</button>
+                                        <button type="button" onClick={() => {
+                                            setScannerType('item');
+                                            setIsScannerOpen(true);
+                                        }} className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white font-bold rounded-xl text-xs shadow-lg shadow-primary/20 transition-all"><ScanLine size={14} strokeWidth={2.5} /> Quét barcode</button>
                                     )}
                                 </div>
 
@@ -588,7 +651,14 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                 </div>
             </div>
 
-            {isScannerOpen && <BarcodeScanner onScan={handleScanSuccess} onClose={() => setIsScannerOpen(false)} />}
+           {isScannerOpen && (
+                <BarcodeScanner 
+                    isOpen={isScannerOpen}
+                    onClose={() => setIsScannerOpen(false)}
+                    onScanSuccess={handleScanSuccess} 
+                    title={scannerType === 'order' ? 'Quét mã QR đơn hàng' : 'Quét mã máy'}
+                />
+            )}
         </>
     , document.body);
 }

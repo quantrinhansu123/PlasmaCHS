@@ -26,11 +26,13 @@ const Dashboard = () => {
     .flatMap((section) => section.items)
     .filter((item) => bookmarkedPaths.includes(item.path));
 
+  const username = localStorage.getItem('user_name') || "Lê Minh Công";
+  
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pb-10">
       <div className="mb-4 lg:mb-5">
         <h1 className="text-xl lg:text-2xl font-bold flex items-center gap-2 text-foreground">
-          Chào buổi sáng, <span className="text-primary">Lê Minh Công</span> 👋
+          Chào buổi sáng, <span className="text-primary">{username}</span> 👋
         </h1>
       </div>
 
