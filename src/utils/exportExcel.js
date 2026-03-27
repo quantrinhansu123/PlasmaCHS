@@ -26,7 +26,7 @@ export const exportToExcel = (data, filename, sheetName = 'Báo cáo') => {
 export const exportCustomerReport = (data) => {
   const formattedData = data.map(item => ({
     'Mã KH': item.ma_khach_hang,
-    'Tên khách hàng': item.ten_khach_hang,
+    'Tên khách hàng / Tên cơ sở': item.ten_khach_hang,
     'Loại KH': item.loai_khach_hang === 'công' ? 'Bệnh viện công' : 'Bệnh viện tư',
     'Kho': item.kho,
     'Máy đang dùng': item.may_dang_su_dung,
@@ -182,7 +182,7 @@ export const exportErrorReport = (data, filters) => {
     'Tên lỗi': item.ten_loi,
     'Serial': item.serial_thiet_bi,
     'Tên thiết bị': item.ten_thiet_bi,
-    'Khách hàng': item.ten_khach_hang,
+    'Khách hàng / Cơ sở': item.ten_khach_hang,
     'Kho': item.kho,
     'Người báo': item.nguoi_bao_loi,
     'Kỹ thuật xử lý': item.ky_thuat_xu_ly,
@@ -195,7 +195,7 @@ export const exportErrorReport = (data, filters) => {
 
 export const exportCustomerCylinderReport = (data, filters) => {
   const formattedData = data.map(item => ({
-    'Tên khách hàng': item.customer_name,
+    'Tên khách hàng / Tên cơ sở': item.customer_name,
     'Loại': item.loai_khach,
     'Kho': item.kho,
     'Năm': item.nam,
@@ -227,7 +227,7 @@ export const exportMachineInventoryReport = (data, filters) => {
 
 export const exportSalesReport = (data, filters) => {
     const filename = `bao_cao_doanh_so_${filters.month || 'all'}_${filters.year || 'all'}.xlsx`;
-    const headers = ['Khách hàng', 'NVKD', 'Loại khách', 'Kho', 'Tháng', 'Năm', 'Doanh số', 'Số đơn hàng'];
+    const headers = ['Khách hàng / Cơ sở', 'NVKD', 'Loại khách', 'Kho', 'Tháng', 'Năm', 'Doanh số', 'Số đơn hàng'];
     const rows = data.map(item => [
         item.customer_name,
         item.nvkd,

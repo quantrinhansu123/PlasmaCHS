@@ -410,7 +410,7 @@ const SalesReport = () => {
             <table className="w-full text-left border-collapse">
               <thead className="bg-[#F8FAFC] sticky top-0 z-10">
                 <tr>
-                  <th className="px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase border-b border-border">Khách hàng</th>
+                  <th className="px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase border-b border-border">Khách hàng / Cơ sở</th>
                   <th className="px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase border-b border-border text-right">Doanh số</th>
                 </tr>
               </thead>

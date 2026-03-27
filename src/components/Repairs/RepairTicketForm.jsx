@@ -407,7 +407,7 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {/* Khách hàng */}
                                 <div className="space-y-2">
-                                    <label className="flex items-center gap-1.5 text-[14px] font-bold text-primary"><Search className="w-4 h-4 text-primary/80" />Khách hàng <span className="text-red-500">*</span></label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-bold text-primary"><Search className="w-4 h-4 text-primary/80" />Khách hàng / Cơ sở <span className="text-red-500">*</span></label>
                                     <div className="relative" ref={customerDropdownRef}>
                                         <div
                                             className={`w-full h-12 px-5 border rounded-2xl text-[14px] transition-all cursor-pointer flex justify-between items-center ${isFetchingData ? 'bg-slate-50 text-slate-400 border-slate-200' : 'bg-slate-50 border-slate-200 text-slate-900 hover:border-primary/40 hover:bg-white shadow-sm font-semibold'}`}

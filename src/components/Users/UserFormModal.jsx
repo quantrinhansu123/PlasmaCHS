@@ -52,8 +52,8 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
     };
 
     const handlePhoneChange = (e) => {
-        const value = e.target.value.replace(/[^0-9]/g, '');
-        setFormData(prev => ({ ...prev, phone: value }));
+        const formatted = formatPhoneNumber(e.target.value);
+        setFormData(prev => ({ ...prev, phone: formatted }));
     };
 
     const handleSubmit = async (e) => {
@@ -62,6 +62,11 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
 
         if (!formData.name.trim() || !formData.username.trim() || !formData.phone.trim()) {
             setErrorMsg('Vui lòng điền đầy đủ các thông tin bắt buộc (*)');
+            return;
+        }
+
+        if (!validatePhone(formData.phone)) {
+            setErrorMsg('Số điện thoại không đúng định dạng Việt Nam (10 chữ số).');
             return;
         }
 

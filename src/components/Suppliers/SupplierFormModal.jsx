@@ -44,11 +44,14 @@ export default function SupplierFormModal({ supplier, onClose, onSuccess }) {
         const { name, value } = e.target;
         if (name === 'tax_id') {
             setTaxError(value ? !validateMST(value) : false);
+            setFormData(prev => ({ ...prev, [name]: value }));
+        } else if (name === 'phone') {
+            const formatted = formatPhoneNumber(value);
+            setFormData(prev => ({ ...prev, [name]: formatted }));
+            setPhoneError(formatted ? !validatePhone(formatted) : false);
+        } else {
+            setFormData(prev => ({ ...prev, [name]: value }));
         }
-        if (name === 'phone') {
-            setPhoneError(value ? !validatePhone(value) : false);
-        }
-        setFormData(prev => ({ ...prev, [name]: value }));
     };
 
     const handleSubmit = async (e) => {

@@ -247,7 +247,7 @@ const MachineIssueRequestForm = () => {
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-foreground mb-1.5">Tên khách hàng</label>
+                                    <label className="block text-sm font-medium text-foreground mb-1.5">Tên khách hàng / Tên cơ sở</label>
                                     <input
                                         type="text"
                                         value={formData.customerName}
@@ -512,7 +512,7 @@ const MachineIssueRequestForm = () => {
 
                     <div className="flex items-start md:items-center print:items-center flex-col md:flex-row print:flex-row gap-6 md:gap-0">
                         <div className="flex items-center flex-1 w-full">
-                            <span className="font-bold min-w-[200px]">3. Tên khách hàng:</span>
+                            <span className="font-bold min-w-[200px]">3. Tên khách hàng / Tên cơ sở:</span>
                             <input
                                 type="text"
                                 value={formData.customerName}

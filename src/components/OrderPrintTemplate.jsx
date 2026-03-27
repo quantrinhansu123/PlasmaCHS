@@ -364,7 +364,7 @@ const OrderItem = ({ order, warehousesList }) => {
             {/* ===== INFO FIELDS ===== */}
             <div style={S.infoSection}>
                 <div style={S.infoRow}>
-                    <span style={S.infoLabel}>Tên khách hàng:</span>
+                    <span style={S.infoLabel}>Tên khách hàng / Cơ sở:</span>
                     <span style={S.infoValue}>{order.recipient_name || ''}</span>
                 </div>
                 <div style={S.infoRow}>

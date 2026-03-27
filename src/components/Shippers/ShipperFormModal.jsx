@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { SHIPPING_TYPES } from '../../constants/shipperConstants';
 import { supabase } from '../../supabase/config';
 import { cn } from '../../lib/utils';
+import { validatePhone, formatPhoneNumber } from '../../utils/taxUtils';
 
 export default function ShipperFormModal({ shipper, onClose, onSuccess }) {
     const isEdit = !!shipper;
@@ -44,7 +45,12 @@ export default function ShipperFormModal({ shipper, onClose, onSuccess }) {
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
+        if (name === 'phone') {
+            const formatted = formatPhoneNumber(value);
+            setFormData(prev => ({ ...prev, [name]: formatted }));
+        } else {
+            setFormData(prev => ({ ...prev, [name]: value }));
+        }
     };
 
     const handleSubmit = async (e) => {
@@ -53,6 +59,11 @@ export default function ShipperFormModal({ shipper, onClose, onSuccess }) {
 
         if (!formData.name.trim() || !formData.manager_name.trim() || !formData.phone.trim()) {
             setErrorMsg('Vui lòng điền đầy đủ các trường thông tin bắt buộc.');
+            return;
+        }
+
+        if (!validatePhone(formData.phone)) {
+            setErrorMsg('Số điện thoại không đúng định dạng Việt Nam (10 chữ số).');
             return;
         }
 

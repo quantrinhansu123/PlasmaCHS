@@ -35,7 +35,7 @@ import {
     MoreVertical,
     FilePlus
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -98,9 +98,19 @@ const Customers = () => {
     const dropdownRef = useRef(null);
     const columnPickerRef = useRef(null);
 
+    const searchParams = new URLSearchParams(location.search);
+    const filterType = searchParams.get('filter') || (location.pathname === '/khach-hang-lead' ? 'lead' : null);
+
+    const baseCustomers = useMemo(() => {
+        if (filterType === 'lead') {
+            return customers.filter(c => c.status === 'Thành công');
+        }
+        return customers;
+    }, [customers, filterType]);
+
     const TABLE_COLUMNS_DEF = [
         { key: 'code', label: 'Mã khách hàng' },
-        { key: 'name', label: 'Tên khách hàng' },
+        { key: 'name', label: 'Tên khách hàng / Tên cơ sở' },
         { key: 'phone', label: 'Số điện thoại' },
         { key: 'address', label: 'Địa chỉ' },
         { key: 'legal_rep', label: 'Người đại diện pháp luật' },
@@ -178,11 +188,11 @@ const Customers = () => {
     }, [isSearchExpanded]);
 
     useEffect(() => {
-        const managedBy = [...new Set(customers.map(c => c.managed_by).filter(Boolean))];
-        const careBy = [...new Set(customers.map(c => c.care_by).filter(Boolean))];
+        const managedBy = [...new Set(baseCustomers.map(c => c.managed_by).filter(Boolean))];
+        const careBy = [...new Set(baseCustomers.map(c => c.care_by).filter(Boolean))];
         setUniqueManagedBy(managedBy);
         setUniqueCareBy(careBy);
-    }, [customers]);
+    }, [baseCustomers]);
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -352,10 +362,8 @@ const Customers = () => {
         !categoryId && 'border-l-transparent'
     );
 
-    const searchParams = new URLSearchParams(location.search);
-    const filterType = searchParams.get('filter') || (location.pathname === '/khach-hang-lead' ? 'lead' : null);
 
-    const filteredCustomers = customers.filter(c => {
+    const filteredCustomers = baseCustomers.filter(c => {
         const search = searchTerm.toLowerCase();
         const matchesSearch = (
             (c.code?.toLowerCase().includes(search)) ||
@@ -364,17 +372,15 @@ const Customers = () => {
             (c.address?.toLowerCase().includes(search))
         );
 
-        const matchesCategory = selectedCategories.length === 0 || selectedCategories.includes(c.category);
+        const matchesCategory = selectedCategories.length === 0 || selectedCategories.some(catId => {
+            const catDef = CUSTOMER_CATEGORIES.find(def => def.id === catId);
+            return c.category === catId || (catDef && c.category === catDef.label);
+        });
         const matchesManagedBy = selectedManagedBy.length === 0 || selectedManagedBy.includes(c.managed_by);
         const matchesCareBy = selectedCareBy.length === 0 || selectedCareBy.includes(c.care_by);
         const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(c.status);
 
-        let matchesLeadFilter = true;
-        if (filterType === 'lead') {
-            matchesLeadFilter = c.status === 'Thành công';
-        }
-
-        return matchesSearch && matchesCategory && matchesManagedBy && matchesCareBy && matchesStatus && matchesLeadFilter;
+        return matchesSearch && matchesCategory && matchesManagedBy && matchesCareBy && matchesStatus;
     });
 
     const filteredCustomersCount = filteredCustomers.length;
@@ -388,24 +394,24 @@ const Customers = () => {
     const categoryOptions = CUSTOMER_CATEGORIES.map(c => ({
         id: c.id,
         label: c.label,
-        count: customers.filter(x => x.category === c.id).length
+        count: baseCustomers.filter(x => x.category === c.id || x.category === c.label).length
     }));
 
     const managedByOptions = uniqueManagedBy.map(name => ({
         id: name,
         label: name,
-        count: customers.filter(x => x.managed_by === name).length
+        count: baseCustomers.filter(x => x.managed_by === name).length
     }));
 
     const careByOptions = uniqueCareBy.map(name => ({
         id: name,
         label: name,
-        count: customers.filter(x => x.care_by === name).length
+        count: baseCustomers.filter(x => x.care_by === name).length
     }));
 
     const statusOptions = [
-        { id: 'Thành công', label: 'Thành công', count: customers.filter(x => x.status === 'Thành công').length },
-        { id: 'Chưa thành công', label: 'Chưa thành công', count: customers.filter(x => x.status === 'Chưa thành công').length },
+        { id: 'Thành công', label: 'Thành công', count: baseCustomers.filter(x => x.status === 'Thành công').length },
+        { id: 'Chưa thành công', label: 'Chưa thành công', count: baseCustomers.filter(x => x.status === 'Chưa thành công').length },
     ];
 
     const handleEditCustomer = (customer) => {
@@ -832,7 +838,9 @@ const Customers = () => {
                                 >
                                     <ChevronLeft size={20} />
                                 </button>
-                                <h1 className="text-lg font-black text-slate-900 tracking-tight">Khách hàng</h1>
+                                <h2 className="text-xl font-black text-slate-800 tracking-tight">
+                                    {filterType === 'lead' ? 'Form đăng kí khách hàng mới' : 'Danh sách khách hàng'}
+                                </h2>
                             </div>
                             <div className="flex items-center gap-2">
                                 <button

@@ -56,19 +56,42 @@ export const validateMST = (mst) => {
 
 /**
  * Vietnamese Phone Number Validation
- * Supports mobile (10 digits) and landline (10-11 digits)
+ * Supports mobile (03, 05, 07, 08, 09) and landline (02)
+ * Standard length is 10 digits
  */
 export const validatePhone = (phone) => {
-    if (!phone) return true; // Optional field
-    
+    if (!phone) return true;
+
     // Remove spaces, dots, hyphens
     const cleanPhone = phone.toString().replace(/[ .()-]/g, '');
-    
-    // Basic regex for Vietnamese numbers:
-    // Starts with 0 or +84
-    // Next digit is 3, 5, 7, 8, 9 (mobile) or 2 (landline)
-    // Followed by 8 or 9 digits
-    const phoneRegex = /^(\+84|0)(3|5|7|8|9|2)([0-9]{8,9})$/;
-    
+
+    // Vietnam phone numbers: starts with 0 or +84
+    // Mobile prefixes: 3, 5, 7, 8, 9
+    // Landline prefix: 2
+    // Total digits after 0/+84 must be 9 digits (total 10 for 0-prefix)
+    const phoneRegex = /^(0|\+84)(2|3|5|7|8|9)([0-9]{8})$/;
+
     return phoneRegex.test(cleanPhone);
+};
+
+/**
+ * Format phone number to standard 0XXX XXX XXX
+ */
+export const formatPhoneNumber = (phone) => {
+    if (!phone) return '';
+
+    // Strip everything except digits
+    let cleaned = phone.toString().replace(/\D/g, '');
+
+    // If starts with 84, replace with 0
+    if (cleaned.startsWith('84')) {
+        cleaned = '0' + cleaned.substring(2);
+    }
+
+    // Format if it's 10 digits
+    if (cleaned.length === 10) {
+        return `${cleaned.slice(0, 4)} ${cleaned.slice(4, 7)} ${cleaned.slice(7)}`;
+    }
+
+    return cleaned;
 };

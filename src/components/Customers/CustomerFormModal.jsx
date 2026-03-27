@@ -115,14 +115,16 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
         
         if (name === 'phone') {
-            setPhoneError(value ? !validatePhone(value) : false);
-        }
-
-        if (name === 'tax_code') {
+            const formatted = formatPhoneNumber(value);
+            setFormData(prev => ({ ...prev, [name]: formatted }));
+            setPhoneError(formatted ? !validatePhone(formatted) : false);
+        } else if (name === 'tax_code') {
+            setFormData(prev => ({ ...prev, [name]: value }));
             setTaxError(value ? !validateMST(value) : false);
+        } else {
+            setFormData(prev => ({ ...prev, [name]: value }));
         }
     };
 
@@ -229,7 +231,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5 ml-1 text-slate-600"><User className="w-4 h-4" /> Tên khách hàng *</label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5 ml-1 text-slate-600"><User className="w-4 h-4" /> Tên khách hàng / Tên cơ sở *</label>
                                     <input
                                         type="text"
                                         name="name"
@@ -274,7 +276,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                     )}
                                 </div>
                                 <div className="md:col-span-2 space-y-2">
-                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5 ml-1 text-slate-600"><MapPin className="w-4 h-4" /> Địa chỉ chi tiết</label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5 ml-1 text-slate-600"><MapPin className="w-4 h-4" /> Địa chỉ đặt máy</label>
                                     <input
                                         type="text"
                                         name="address"
@@ -361,16 +363,16 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                     </datalist>
                                 </div>
                                 <div>
-                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5 ml-1 text-slate-600"><User className="w-4 h-4" /> Đại lý phụ trách (NVKD)</label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5 ml-1 text-slate-600"><User className="w-4 h-4" /> Nhân viên phụ trách (Sale/Chốt đơn)</label>
                                     <select
                                         name="managed_by"
                                         value={formData.managed_by}
                                         onChange={handleChange}
                                         className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white outline-none transition-all font-semibold text-slate-900 cursor-pointer"
                                     >
-                                        <option value="">-- Chọn Kho phụ trách --</option>
-                                        {warehouses && warehouses.map(w => (
-                                            <option key={w.id} value={w.name}>{w.name}</option>
+                                        <option value="">-- Chọn Nhân viên --</option>
+                                        {staffList.map(u => (
+                                            <option key={u.id} value={u.name}>{u.name}{u.role ? ` (${u.role})` : ''}</option>
                                         ))}
                                     </select>
                                 </div>
