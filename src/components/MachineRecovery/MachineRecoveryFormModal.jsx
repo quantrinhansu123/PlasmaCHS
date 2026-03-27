@@ -2,15 +2,11 @@ import { clsx } from 'clsx';
 import {
     Calendar,
     Camera,
-    Check,
     ChevronDown,
-    Clock,
     Edit3,
     FileText,
-    Link2,
     MapPin,
     Monitor,
-    Plus,
     Save,
     ScanLine,
     Search,
@@ -38,7 +34,7 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
     const [customerOrders, setCustomerOrders] = useState([]);
     const [warehousesList, setWarehousesList] = useState([]);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
-    const [scannerType, setScannerType] = useState('item'); 
+    const [scannerType, setScannerType] = useState('item');
     const [photoUrls, setPhotoUrls] = useState([]);
     const [shippers, setShippers] = useState([]);
     const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -130,12 +126,22 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
     }, [formData.customer_id, customers]);
 
     const fetchShippers = async () => {
-        const { data } = await supabase
+        const { data: internalShippers } = await supabase
             .from('app_users')
             .select('name')
             .eq('role', 'Shipper')
             .eq('status', 'Hoạt động');
-        if (data) setShippers(data.map(u => u.name));
+
+        const { data: externalShippers } = await supabase
+            .from('shippers')
+            .select('name')
+            .eq('status', 'Đang hoạt động');
+
+        const combined = [
+            ...(internalShippers?.map(u => `[Nội bộ] ${u.name}`) || []),
+            ...(externalShippers?.map(s => `[Đối tác] ${s.name}`) || [])
+        ];
+        setShippers(combined);
     };
 
     const fetchItems = async (recoveryId) => {
@@ -181,11 +187,11 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
         const safeTime = time || new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 
         const newItemId = crypto.randomUUID();
-        setItems(prev => [...prev, { 
-            _id: newItemId, 
-            serial_number: decodedText, 
-            condition: 'tot', 
-            note: '', 
+        setItems(prev => [...prev, {
+            _id: newItemId,
+            serial_number: decodedText,
+            condition: 'tot',
+            note: '',
             scan_time: safeTime,
             isValidating: true,
             isValid: null,
@@ -225,10 +231,10 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                     setFormData(prev => ({ ...prev, customer_id: matchedCustomer.id }));
                     setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: true, error: null } : i));
                     toast.success(`Đã tự động chọn KH: ${matchedCustomer.name}`);
-                } 
+                }
                 else if (currentFormData.customer_id === matchedCustomer.id) {
                     setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: true, error: null } : i));
-                } 
+                }
                 else {
                     setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: `Của: ${matchedCustomer.name}` } : i));
                     toast.error(`Máy ${decodedText} thuộc về KH "${matchedCustomer.name}", không khớp với KH đang chọn!`);
@@ -260,12 +266,12 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
 
             const currentCustomers = customersRef.current;
             const matchedCustomer = currentCustomers.find(c => c.name === orderData.customer_name);
-            
+
             if (matchedCustomer) {
-                setFormData(prev => ({ 
-                    ...prev, 
+                setFormData(prev => ({
+                    ...prev,
                     customer_id: matchedCustomer.id,
-                    order_id: orderData.id 
+                    order_id: orderData.id
                 }));
                 toast.success(`Đã quét được đơn hàng ${orderCode} của KH ${orderData.customer_name}`);
             } else {
@@ -301,10 +307,10 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
     const removePhoto = (idx) => setPhotoUrls(prev => prev.filter((_, i) => i !== idx));
 
     const addItemManual = () => {
-        setItems(prev => [...prev, { 
-            _id: crypto.randomUUID(), 
-            serial_number: '', 
-            condition: 'tot', 
+        setItems(prev => [...prev, {
+            _id: crypto.randomUUID(),
+            serial_number: '',
+            condition: 'tot',
             note: '',
             isValidating: false,
             isValid: null,
@@ -314,7 +320,7 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
 
     const updateItem = (id, field, value) => {
         setItems(prev => prev.map(i => i._id === id ? { ...i, [field]: value } : i));
-        
+
         if (field === 'serial_number' && value.length >= 3) {
             triggerItemValidation(id, value);
         }
@@ -322,7 +328,7 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
 
     const triggerItemValidation = async (id, serial) => {
         setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: true, error: null } : i));
-        
+
         try {
             const currentFormData = formDataRef.current;
             const currentCustomers = customersRef.current;
@@ -373,7 +379,7 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
         if (!formData.customer_id) { setErrorMsg('Vui lòng chọn khách hàng!'); return; }
         if (items.length === 0) { setErrorMsg('Vui lòng quét hoặc nhập ít nhất 1 máy!'); return; }
         if (items.some(i => !i.serial_number)) { setErrorMsg('Có dòng chưa điền mã serial!'); return; }
-        
+
         const invalidItems = items.filter(i => !i.isValid);
         if (invalidItems.length > 0) {
             setErrorMsg(`Có ${invalidItems.length} máy không hợp lệ. Vui lòng kiểm tra lại danh sách!`);
@@ -419,7 +425,7 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
 
             // Automation for inventory and machine status
             if (!isEdit && dbPayload.status === 'HOAN_THANH') {
-                 // Update each machine
+                // Update each machine
                 for (const item of items) {
                     await supabase
                         .from('machines')
@@ -526,11 +532,11 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="space-y-1.5">
                                         <label className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800"><Calendar size={16} /> Ngày thu hồi</label>
-                                        <input type="date" value={formData.recovery_date} onChange={e => setFormData({...formData, recovery_date: e.target.value})} disabled={isReadOnly} className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:ring-2 focus:ring-primary focus:bg-white transition-all outline-none" />
+                                        <input type="date" value={formData.recovery_date} onChange={e => setFormData({ ...formData, recovery_date: e.target.value })} disabled={isReadOnly} className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:ring-2 focus:ring-primary focus:bg-white transition-all outline-none" />
                                     </div>
                                     <div className="space-y-1.5">
                                         <label className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800"><MapPin size={16} /> Kho nhận máy</label>
-                                        <select value={formData.warehouse_id} onChange={e => setFormData({...formData, warehouse_id: e.target.value})} disabled={isReadOnly} className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl font-bold transition-all outline-none appearance-none">
+                                        <select value={formData.warehouse_id} onChange={e => setFormData({ ...formData, warehouse_id: e.target.value })} disabled={isReadOnly} className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl font-bold transition-all outline-none appearance-none">
                                             {warehousesList.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                                         </select>
                                     </div>
@@ -545,7 +551,7 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                                     <label className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800"><ScanLine size={16} /> Quét mã QR</label>
                                     <div className="flex gap-2 items-center">
                                         <div className="relative flex-1">
-                                            <select value={formData.order_id} onChange={e => setFormData({...formData, order_id: e.target.value})} disabled={isReadOnly || !formData.customer_id} className="w-full h-11 px-4 border border-slate-200 rounded-xl font-bold bg-slate-50 outline-none appearance-none">
+                                            <select value={formData.order_id} onChange={e => setFormData({ ...formData, order_id: e.target.value })} disabled={isReadOnly || !formData.customer_id} className="w-full h-11 px-4 border border-slate-200 rounded-xl font-bold bg-slate-50 outline-none appearance-none">
                                                 <option value=""></option>
                                                 {customerOrders.map(o => <option key={o.id} value={o.id}>ĐH {o.order_code} ({o.status})</option>)}
                                             </select>
@@ -566,7 +572,7 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                                         )}
                                     </div>
                                 </div>
-                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="space-y-1.5">
                                         <label className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800"><Truck size={16} /> NV vận chuyển</label>
                                         <div className="relative group">
@@ -575,8 +581,8 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                                                 value={formData.driver_name}
                                                 onChange={(e) => {
                                                     const name = e.target.value;
-                                                    setFormData(prev => ({ 
-                                                        ...prev, 
+                                                    setFormData(prev => ({
+                                                        ...prev,
                                                         driver_name: name,
                                                         status: (prev.status === 'CHO_PHAN_CONG' && name) ? 'DANG_THU_HOI' : prev.status
                                                     }));
@@ -594,7 +600,7 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                                     </div>
                                     <div className="space-y-1.5">
                                         <label className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800"><FileText size={16} /> Ghi chú</label>
-                                        <input value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} disabled={isReadOnly} placeholder="" className="w-full h-11 px-4 border border-slate-200 rounded-xl font-bold bg-slate-50 outline-none" />
+                                        <input value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} disabled={isReadOnly} placeholder="" className="w-full h-11 px-4 border border-slate-200 rounded-xl font-bold bg-slate-50 outline-none" />
                                     </div>
                                 </div>
                             </div>
@@ -683,14 +689,14 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                 </div>
             </div>
 
-           {isScannerOpen && (
-                <BarcodeScanner 
+            {isScannerOpen && (
+                <BarcodeScanner
                     isOpen={isScannerOpen}
                     onClose={() => setIsScannerOpen(false)}
-                    onScanSuccess={handleScanSuccess} 
+                    onScanSuccess={handleScanSuccess}
                     title={scannerType === 'order' ? 'Quét mã QR đơn hàng' : 'Quét mã máy'}
                 />
             )}
         </>
-    , document.body);
+        , document.body);
 }

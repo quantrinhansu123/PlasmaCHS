@@ -10,42 +10,40 @@ import {
     PointElement,
     Title
 } from 'chart.js';
+import { clsx } from 'clsx';
 import {
     BarChart2,
     CheckCircle,
     CheckSquare,
     ChevronDown,
     ChevronLeft,
-    ChevronRight,
+    Download,
     Edit,
     Filter,
     List,
+    MoreVertical,
     Package,
     Plus,
     Printer,
     Search,
     SlidersHorizontal,
     Trash2,
-    User,
-    X,
-    Download,
     Upload,
-    MoreVertical
+    X
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { clsx } from 'clsx';
+import { toast } from 'react-toastify';
+import * as XLSX from 'xlsx';
 import GoodsReceiptPrintTemplate from '../components/GoodsReceiptPrintTemplate';
+import GoodsReceiptFormModal from '../components/GoodsReceipts/GoodsReceiptFormModal';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
-import GoodsReceiptFormModal from '../components/GoodsReceipts/GoodsReceiptFormModal';
 import { RECEIPT_STATUSES, TABLE_COLUMNS } from '../constants/goodsReceiptConstants';
 import { supabase } from '../supabase/config';
-import { toast } from 'react-toastify';
 
 // Register Chart.js components
 ChartJS.register(
@@ -232,7 +230,7 @@ const GoodsReceipts = () => {
                 .in('id', selectedIds);
 
             if (error) throw error;
-            
+
             setSelectedIds([]);
             fetchReceipts();
             alert(`✅ Đã xóa ${selectedIds.length} phiếu nhập thành công!`);
@@ -349,7 +347,7 @@ const GoodsReceipts = () => {
                         received_by: row['Người nhận hàng']?.toString() || '',
                         deliverer_name: row['Người giao hàng']?.toString() || '',
                         deliverer_address: row['Địa chỉ người giao']?.toString() || '',
-                        
+
                         item_type: row['Loại hàng (MAY/BINH/VAT_TU)']?.toString().toUpperCase() || 'VAT_TU',
                         item_name: row['Tên hàng hóa']?.toString() || '',
                         serial_number: row['Mã serial (nếu có)']?.toString() || null,
@@ -399,7 +397,7 @@ const GoodsReceipts = () => {
                     groups[item.groupId].total_amount += (item.quantity * item.unit_price);
                 });
 
-                let nextCodeNum = Date.now() % 100000; 
+                let nextCodeNum = Date.now() % 100000;
                 let importedReceipts = 0;
                 let importedItems = 0;
 
@@ -853,15 +851,15 @@ const GoodsReceipts = () => {
                                     />
                                     <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
                                         {searchTerm && (
-                                            <button 
-                                                onClick={() => setSearchTerm('')} 
+                                            <button
+                                                onClick={() => setSearchTerm('')}
                                                 className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-rose-500 transition-all"
                                             >
                                                 <X size={15} />
                                             </button>
                                         )}
-                                        <button 
-                                            onClick={() => setIsSearchExpanded(false)} 
+                                        <button
+                                            onClick={() => setIsSearchExpanded(false)}
                                             className="px-2 py-1 text-[12px] font-black text-primary hover:bg-primary/5 rounded-lg transition-all"
                                         >
                                             Đóng

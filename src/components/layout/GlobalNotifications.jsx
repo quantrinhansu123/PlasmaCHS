@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { supabase } from '../../supabase/config';
@@ -18,14 +18,14 @@ const GlobalNotifications = () => {
                 },
                 async (payload) => {
                     const newTicket = payload.new;
-                    
+
                     // Fetch customer name for better context
                     const { data: customerData } = await supabase
                         .from('customers')
                         .select('name')
                         .eq('id', newTicket.customer_id)
                         .single();
-                    
+
                     const customerName = customerData?.name || 'Khách hàng mới';
 
                     toast.info(

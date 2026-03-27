@@ -7,7 +7,6 @@ import {
     Clock,
     Edit3,
     FileText,
-    Link2,
     MapPin,
     PackageCheck,
     Plus,
@@ -38,7 +37,7 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
     const [customerOrders, setCustomerOrders] = useState([]);
     const [warehousesList, setWarehousesList] = useState([]);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
-    const [scannerType, setScannerType] = useState('item'); 
+    const [scannerType, setScannerType] = useState('item');
     const [photoUrls, setPhotoUrls] = useState([]);
     const [shippers, setShippers] = useState([]);
     const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -130,12 +129,22 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
     }, [formData.customer_id, customers]);
 
     const fetchShippers = async () => {
-        const { data } = await supabase
+        const { data: internalShippers } = await supabase
             .from('app_users')
             .select('name')
             .eq('role', 'Shipper')
             .eq('status', 'Hoạt động');
-        if (data) setShippers(data.map(u => u.name));
+
+        const { data: externalShippers } = await supabase
+            .from('shippers')
+            .select('name')
+            .eq('status', 'Đang hoạt động');
+
+        const combined = [
+            ...(internalShippers?.map(u => `[Nội bộ] ${u.name}`) || []),
+            ...(externalShippers?.map(s => `[Đối tác] ${s.name}`) || [])
+        ];
+        setShippers(combined);
     };
 
     const fetchItems = async (recoveryId) => {
@@ -182,11 +191,11 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
 
         // Add item first with loading state
         const newItemId = crypto.randomUUID();
-        setItems(prev => [...prev, { 
-            _id: newItemId, 
-            serial_number: decodedText, 
-            condition: 'tot', 
-            note: '', 
+        setItems(prev => [...prev, {
+            _id: newItemId,
+            serial_number: decodedText,
+            condition: 'tot',
+            note: '',
             scan_time: safeTime,
             isValidating: true,
             isValid: null,
@@ -227,11 +236,11 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                     setFormData(prev => ({ ...prev, customer_id: matchedCustomer.id }));
                     setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: true, error: null } : i));
                     toast.success(`Đã tự động chọn KH: ${matchedCustomer.name}`);
-                } 
+                }
                 // Scenario B: Customer already selected
                 else if (currentFormData.customer_id === matchedCustomer.id) {
                     setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: true, error: null } : i));
-                } 
+                }
                 // Scenario C: Mismatch
                 else {
                     setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: `Của: ${matchedCustomer.name}` } : i));
@@ -282,12 +291,12 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
             // Find customer by name
             const currentCustomers = customersRef.current;
             const matchedCustomer = currentCustomers.find(c => c.name === orderData.customer_name);
-            
+
             if (matchedCustomer) {
-                setFormData(prev => ({ 
-                    ...prev, 
+                setFormData(prev => ({
+                    ...prev,
                     customer_id: matchedCustomer.id,
-                    order_id: orderData.id 
+                    order_id: orderData.id
                 }));
                 toast.success(`Đã quét được đơn hàng ${orderCode} của KH ${orderData.customer_name}`);
             } else {
@@ -323,10 +332,10 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
     const removePhoto = (idx) => setPhotoUrls(prev => prev.filter((_, i) => i !== idx));
 
     const addItemManual = () => {
-        setItems(prev => [...prev, { 
-            _id: crypto.randomUUID(), 
-            serial_number: '', 
-            condition: 'tot', 
+        setItems(prev => [...prev, {
+            _id: crypto.randomUUID(),
+            serial_number: '',
+            condition: 'tot',
             note: '',
             isValidating: false,
             isValid: null,
@@ -336,7 +345,7 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
 
     const updateItem = (id, field, value) => {
         setItems(prev => prev.map(i => i._id === id ? { ...i, [field]: value } : i));
-        
+
         // If serial number changed, trigger re-validation
         if (field === 'serial_number' && value.length >= 3) {
             triggerItemValidation(id, value);
@@ -345,7 +354,7 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
 
     const triggerItemValidation = async (id, serial) => {
         setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: true, error: null } : i));
-        
+
         try {
             const currentFormData = formDataRef.current;
             const currentCustomers = customersRef.current;
@@ -396,7 +405,7 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
         if (!formData.customer_id) { setErrorMsg('Vui lòng chọn khách hàng!'); return; }
         if (items.length === 0) { setErrorMsg('Vui lòng quét hoặc nhập ít nhất 1 vỏ bình!'); return; }
         if (items.some(i => !i.serial_number)) { setErrorMsg('Có dòng chưa điền mã serial!'); return; }
-        
+
         // Final ownership check
         const invalidItems = items.filter(i => !i.isValid);
         if (invalidItems.length > 0) {
@@ -696,8 +705,8 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                                 value={formData.driver_name}
                                                 onChange={(e) => {
                                                     const name = e.target.value;
-                                                    setFormData(prev => ({ 
-                                                        ...prev, 
+                                                    setFormData(prev => ({
+                                                        ...prev,
                                                         driver_name: name,
                                                         status: (prev.status === 'CHO_PHAN_CONG' && name) ? 'DANG_THU_HOI' : prev.status
                                                     }));
@@ -781,8 +790,8 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                                                         className={clsx(
                                                                             "w-full px-3 py-2 bg-white border rounded-xl font-black text-[14px] outline-none transition-all",
                                                                             item.isValid === true ? "border-green-200 focus:ring-green-500 text-green-700 bg-green-50/30" :
-                                                                            item.isValid === false ? "border-red-200 focus:ring-red-500 text-red-700 bg-red-50/30" :
-                                                                            "border-slate-200 focus:ring-primary text-slate-800"
+                                                                                item.isValid === false ? "border-red-200 focus:ring-red-500 text-red-700 bg-red-50/30" :
+                                                                                    "border-slate-200 focus:ring-primary text-slate-800"
                                                                         )}
                                                                     />
                                                                     {item.isValidating && (

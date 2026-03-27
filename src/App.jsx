@@ -43,6 +43,8 @@ import SalesReport from './pages/SalesReport';
 import ErrorReport from './pages/ErrorReport';
 import MachineRecoveries from './pages/MachineRecoveries';
 import ShippingTasks from './pages/ShippingTasks';
+import InventoryReport from './pages/InventoryReport';
+import InventoryTransfer from './pages/InventoryTransfer';
 
 const moduleRoutes = ['/don-hang-kinh-doanh', '/quan-ly-thiet-bi', '/van-chuyen', '/thu-hoi', '/mua-hang-nha-cung-cap', '/kho', '/he-thong', '/vat-tu', '/thong-ke'];
 
@@ -112,6 +114,7 @@ function App() {
               <Route path="/bao-cao/doanh-so-may" element={<MachineRevenueReport />} />
               <Route path="/bao-cao/bao-cao-quy" element={<QuarterlyReport />} />
               <Route path="/bao-cao/binh-theo-khach" element={<CustomerCylinderReport />} />
+              <Route path="/bao-cao/kho" element={<InventoryReport />} />
               {moduleRoutes.map((path) => (
                 <Route key={path} path={path} element={<ModulePage />} />
               ))}
@@ -131,6 +134,7 @@ function App() {
               <Route path="/xuat-tra-ncc" element={<GoodsIssues />} />
               <Route path="/thu-hoi-vo" element={<CylinderRecoveries />} />
               <Route path="/thu-hoi-may" element={<MachineRecoveries />} />
+              <Route path="/kho/dieu-chuyen" element={<InventoryTransfer />} />
               <Route path="/nhiem-vu-giao-hang" element={<ShippingTasks />} />
 
               <Route path="/nha-cung-cap" element={<Suppliers />} />

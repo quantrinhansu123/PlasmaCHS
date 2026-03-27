@@ -182,6 +182,20 @@ export const actionModuleGroups = [
         href: '/kho/danh-sach',
         colorScheme: 'amber',
       },
+      {
+        icon: FileText,
+        title: 'Báo cáo kho',
+        description: 'Xem chi tiết số lượng tồn kho từng loại máy, bình, vật tư.',
+        href: '/bao-cao/kho',
+        colorScheme: 'blue',
+      },
+      {
+        icon: RefreshCw,
+        title: 'Điều chuyển kho',
+        description: 'Thực hiện chuyển hàng hóa giữa các kho nội bộ.',
+        href: '/kho/dieu-chuyen',
+        colorScheme: 'emerald',
+      },
     ],
   },
   {
