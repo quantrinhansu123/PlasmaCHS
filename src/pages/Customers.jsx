@@ -19,6 +19,7 @@ import {
     Eye,
     Filter,
     List,
+    Mail,
     MapPin,
     Phone,
     Plus,

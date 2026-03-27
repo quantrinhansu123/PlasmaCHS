@@ -92,7 +92,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
     useEffect(() => {
         const fetchStaff = async () => {
             try {
-                const { data } = await supabase.from('profiles').select('id, name, role').order('name');
+                const { data } = await supabase.from('app_users').select('id, name, role').order('name');
                 if (data) setStaffList(data);
             } catch (err) {
                 console.error(err);
