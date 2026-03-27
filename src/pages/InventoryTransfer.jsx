@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { supabase } from '../supabase/config';
+import { notificationService } from '../utils/notificationService';
 
 const InventoryTransfer = () => {
     const navigate = useNavigate();
@@ -163,6 +164,14 @@ const InventoryTransfer = () => {
                     }
                 ]);
             if (txError) throw txError;
+
+            // Log notification
+            await notificationService.add({
+                title: 'Điều chuyển kho',
+                description: `Đã chuyển ${formData.quantity} ${formData.item_name} từ ${warehouses.find(w => w.id === formData.from_warehouse_id)?.name} tới ${warehouses.find(w => w.id === formData.to_warehouse_id)?.name}`,
+                type: 'success',
+                link: '/bao-cao/kho'
+            });
 
             toast.success('Điều chuyển kho thành công!');
             navigate('/bao-cao/kho');

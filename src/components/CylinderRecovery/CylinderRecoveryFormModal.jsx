@@ -22,6 +22,7 @@ import { createPortal } from 'react-dom';
 import { toast } from 'react-toastify';
 import { ITEM_CONDITIONS } from '../../constants/recoveryConstants';
 import { supabase } from '../../supabase/config';
+import { notificationService } from '../../utils/notificationService';
 import BarcodeScanner from '../Common/BarcodeScanner';
 import { SearchableSelect } from '../ui/SearchableSelect';
 
@@ -508,6 +509,22 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                         .update({ quantity: (invRecord?.quantity || 0) + items.length })
                         .eq('id', inventoryId);
                 }
+            }
+
+            // Log notification for shipping assignment
+            if (formData.shipper_id) {
+                const { data: shipperData } = await supabase
+                    .from('shipping_partners')
+                    .select('name')
+                    .eq('id', formData.shipper_id)
+                    .single();
+                
+                await notificationService.add({
+                    title: 'Phân công thu hồi vỏ',
+                    description: `Phiếu #${formData.recovery_code} đã được gán cho đơn vị vận chuyển: ${shipperData?.name || 'Đối tác'}`,
+                    type: 'info',
+                    link: '/thu-hoi/vo-binh'
+                });
             }
 
             toast.success('🎉 Lưu phiếu thu hồi thành công!');

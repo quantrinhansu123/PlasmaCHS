@@ -70,7 +70,8 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
         technicalFeedback: '',
         technicalImages: [],
         status: 'Mới',
-        errorCategory: '' // Tên lỗi: Máy/Bình
+        errorCategory: '', // Tên lỗi: Máy/Bình
+        expectedCompletionDate: '' 
     };
 
     const [formData, setFormData] = useState(defaultState);
@@ -98,7 +99,8 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                 technicalFeedback: ticket.technical_feedback || '',
                 technicalImages: ticket.technical_images || [],
                 status: ticket.status || 'Mới',
-                errorCategory: ticket.loai_loi || ''
+                errorCategory: ticket.loai_loi || '',
+                expectedCompletionDate: ticket.expected_completion_date || ''
             });
         } else {
             // New Ticket: Handle initial customer if provided
@@ -316,7 +318,8 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                 technical_feedback: formData.technicalFeedback,
                 technical_images: newTechImgUrls,
                 status: formData.status,
-                loai_loi: formData.errorCategory
+                loai_loi: formData.errorCategory,
+                expected_completion_date: formData.expectedCompletionDate || null
             };
 
             if (isEdit) {
@@ -397,6 +400,23 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                         )}
 
                         <form id="ticketForm" onSubmit={handleSubmit} className="space-y-6">
+
+                        {/* Section 0: Nhân viên phụ trách - PINNED TO TOP */}
+                        <div className="scroll-mt-6 rounded-2xl border-2 border-primary/20 bg-primary/5 p-4 sm:p-5 space-y-4 shadow-md hover:shadow-lg transition-all animate-in zoom-in-95">
+                            <h4 className="flex items-center gap-2 text-[16px] !font-black !text-primary pb-2 border-b border-primary/20">
+                                <User className="w-5 h-5 text-primary" /> PHỤ TRÁCH KINH DOANH
+                            </h4>
+                            <div className="space-y-2">
+                                <label className="text-[14px] font-black text-primary flex items-center gap-1.5 uppercase tracking-wider">Nhân viên kinh doanh phụ trách <span className="text-red-500 font-black">*</span></label>
+                                <div className="relative">
+                                    <select name="salesId" value={formData.salesId} onChange={handleChange} className="w-full h-14 px-6 bg-white border-2 border-primary/40 rounded-2xl text-[16px] font-black text-primary appearance-none focus:border-primary focus:ring-8 focus:ring-primary/10 outline-none shadow-xl hover:shadow-primary/5 transition-all cursor-pointer ring-4 ring-primary/5">
+                                        <option value="">-- CHỌN NHÂN VIÊN KINH DOANH --</option>
+                                        {salesUsers.map(u => <option key={u.id} value={u.id} className="font-bold text-slate-800">{u.name}</option>)}
+                                    </select>
+                                    <ChevronDown className="w-6 h-6 text-primary absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                </div>
+                            </div>
+                        </div>
 
                         {/* Section 1: Thông tin thiết bị */}
                         <div id="section-device" className="scroll-mt-6 rounded-2xl border border-primary/10 bg-white p-4 sm:p-5 space-y-4 shadow-sm hover:shadow-md transition-shadow [&_label]:text-primary [&_label_svg]:text-primary/80">
@@ -605,20 +625,10 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                         {/* Section 3: Xử lý Kỹ thuật */}
                         <div id="section-technical" className="scroll-mt-6 rounded-2xl border border-primary/10 bg-white p-4 sm:p-5 space-y-4 shadow-sm hover:shadow-md transition-shadow [&_label]:text-primary [&_label_svg]:text-primary/80">
                             <h4 className="flex items-center gap-2 text-[16px] !font-black !text-primary pb-2 border-b border-primary/10">
-                                <Wrench className="w-4 h-4 text-primary/80" /> 3. Phản hồi & Kỹ thuật
+                                <Wrench className="w-4 h-4 text-primary/80" /> 3. Phân công & Xử lý
                             </h4>
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <label className="text-[14px] font-bold text-primary flex items-center gap-1.5"><User className="w-4 h-4 text-primary/80" />Nhân viên kinh doanh</label>
-                                    <div className="relative">
-                                        <select name="salesId" value={formData.salesId} onChange={handleChange} className="w-full h-12 px-5 bg-slate-50 border border-slate-200 rounded-2xl text-[14px] font-semibold text-slate-800 appearance-none focus:border-primary/40 focus:ring-4 focus:ring-primary/10 outline-none hover:bg-white shadow-sm transition-all cursor-pointer">
-                                            <option value="">-- Chọn nhân viên --</option>
-                                            {salesUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                                        </select>
-                                        <ChevronDown className="w-5 h-5 text-primary/60 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
-                                    </div>
-                                </div>
                                 <div className="space-y-2">
                                     <label className="text-[14px] font-bold text-primary flex items-center gap-1.5"><Wrench className="w-4 h-4 text-primary/80" />Nhân viên kỹ thuật</label>
                                     <div className="relative">
@@ -629,9 +639,6 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                         <ChevronDown className="w-5 h-5 text-primary/60 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
                                     </div>
                                 </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <label className="text-[14px] font-bold text-primary flex items-center gap-1.5"><User className="w-4 h-4 text-primary/80" />Nhân viên CSKH</label>
                                     <div className="relative">
@@ -655,6 +662,16 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                         </select>
                                         <ChevronDown className="w-5 h-5 text-primary/60 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
                                     </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-[14px] font-bold text-primary flex items-center gap-1.5"><Activity className="w-4 h-4 text-primary/80" />Ngày dự kiến hoàn thành</label>
+                                    <input
+                                        type="date"
+                                        name="expectedCompletionDate"
+                                        value={formData.expectedCompletionDate}
+                                        onChange={handleChange}
+                                        className="w-full h-12 px-5 bg-emerald-50 border border-emerald-200 rounded-2xl text-[14px] font-bold text-emerald-800 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 outline-none hover:bg-white shadow-sm transition-all cursor-pointer"
+                                    />
                                 </div>
                             </div>
 

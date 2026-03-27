@@ -10,6 +10,7 @@ import {
     Package,
     PackageMinus,
     Plus,
+    Printer,
     Search,
     Settings2,
     SlidersHorizontal,
@@ -39,6 +40,7 @@ import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import GoodsIssueFormModal from '../components/GoodsIssues/GoodsIssueFormModal';
+import GoodsIssuePrintTemplate from '../components/GoodsIssues/GoodsIssuePrintTemplate';
 import { supabase } from '../supabase/config';
 import { ISSUE_STATUSES, ISSUE_TABLE_COLUMNS, ISSUE_TYPES } from '../constants/goodsIssueConstants';
 
@@ -95,6 +97,11 @@ const GoodsIssues = () => {
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [selectedIssue, setSelectedIssue] = useState(null);
     const [initialForcedType, setInitialForcedType] = useState(null);
+
+    // Printing state
+    const [isPrinting, setIsPrinting] = useState(false);
+    const [printData, setPrintData] = useState({ issue: null, items: [], warehouse: '', supplier: '' });
+    const printRef = useRef(null);
 
     useEffect(() => {
         fetchData();
@@ -307,6 +314,36 @@ const GoodsIssues = () => {
     const handleFormSuccess = () => {
         setIsFormModalOpen(false);
         fetchData();
+    };
+
+    const handlePrint = async (issue) => {
+        try {
+            toast.loading(`Đang chuẩn bị dữ liệu in cho phiếu ${issue.issue_code}...`);
+            
+            const [itemsRes, warehouseRes, supplierRes] = await Promise.all([
+                supabase.from('goods_issue_items').select('*').eq('issue_id', issue.id),
+                supabase.from('warehouses').select('name').eq('id', issue.warehouse_id).single(),
+                supabase.from('suppliers').select('name').eq('id', issue.supplier_id).single()
+            ]);
+
+            setPrintData({
+                issue,
+                items: itemsRes.data || [],
+                warehouse: warehouseRes.data?.name || 'N/A',
+                supplier: supplierRes.data?.name || 'N/A'
+            });
+
+            toast.dismiss();
+            
+            // Trigger print after state update
+            setTimeout(() => {
+                window.print();
+            }, 500);
+
+        } catch (error) {
+            console.error('Lỗi khi in phiếu:', error);
+            toast.error('Không thể tải dữ liệu in');
+        }
     };
 
     // Filter UI components
@@ -700,6 +737,13 @@ const GoodsIssues = () => {
                                                     ))}
                                                     <td className="px-4 py-3.5 text-right">
                                                         <div className="flex items-center justify-end gap-1.5">
+                                                            <button 
+                                                                onClick={() => handlePrint(issue)} 
+                                                                className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                                                                title="In phiếu"
+                                                            >
+                                                                <Printer size={16} />
+                                                            </button>
                                                             <button onClick={() => openFormModal(issue)} className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-all"><Edit size={16} /></button>
                                                             <button onClick={() => handleDeleteIssue(issue.id, issue.issue_code)} className="p-2 text-muted-foreground hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><Trash2 size={16} /></button>
                                                         </div>
@@ -730,6 +774,7 @@ const GoodsIssues = () => {
                                     <div className="flex justify-between items-center pt-3 border-t border-border">
                                         <div className="text-[13px] font-medium">SL: <span className="font-black text-primary">{issue.total_items}</span></div>
                                         <div className="flex gap-2">
+                                            <button onClick={() => handlePrint(issue)} className="p-2 border border-border rounded-xl text-indigo-600"><Printer size={18} /></button>
                                             <button onClick={() => openFormModal(issue)} className="p-2 border border-border rounded-xl text-primary"><Edit size={18} /></button>
                                             <button onClick={() => handleDeleteIssue(issue.id, issue.issue_code)} className="p-2 border border-border rounded-xl text-red-500"><Trash2 size={18} /></button>
                                         </div>
@@ -787,7 +832,7 @@ const GoodsIssues = () => {
                         </div>
 
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            <div className="bg-white p-6 rounded-3xl border border-border shadow-sm">
+                            {/* <div className="bg-white p-6 rounded-3xl border border-border shadow-sm">
                                 <h3 className="text-[14px] font-black text-foreground uppercase mb-6">Trạng thái phiếu</h3>
                                 <div className="h-[300px]"><PieChartJS data={{ labels: getStatusStats().map(s => s.name), datasets: [{ data: getStatusStats().map(s => s.value), backgroundColor: chartColors, borderWidth: 0 }] }} options={{ maintainAspectRatio: false }} /></div>
                             </div>
@@ -798,7 +843,7 @@ const GoodsIssues = () => {
                             <div className="lg:col-span-2 bg-white p-6 rounded-3xl border border-border shadow-sm">
                                 <h3 className="text-[14px] font-black text-foreground uppercase mb-6">Top Nhà Cung Cấp</h3>
                                 <div className="h-[350px]"><BarChartJS data={{ labels: getSupplierStats().map(s => s.name), datasets: [{ label: 'Số phiếu', data: getSupplierStats().map(s => s.value), backgroundColor: '#3b82f6', borderRadius: 12 }] }} options={{ maintainAspectRatio: false, indexAxis: 'y' }} /></div>
-                            </div>
+                            </div> */}
                         </div>
                     </div>
                 )}
@@ -825,6 +870,19 @@ const GoodsIssues = () => {
                     onClose={() => setIsFormModalOpen(false)}
                     onSuccess={handleFormSuccess}
                 />
+            )}
+
+            {/* Hidden Print Container */}
+            {printData.issue && (
+                <div className="hidden print:block">
+                    <GoodsIssuePrintTemplate 
+                        ref={printRef}
+                        issue={printData.issue}
+                        items={printData.items}
+                        warehouseName={printData.warehouse}
+                        supplierName={printData.supplier}
+                    />
+                </div>
             )}
         </div>
     );

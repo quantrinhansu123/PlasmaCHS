@@ -29,7 +29,8 @@ import {
     SlidersHorizontal,
     Trash2,
     Upload,
-    X
+    X,
+    Hash
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
@@ -44,6 +45,7 @@ import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import { RECEIPT_STATUSES, TABLE_COLUMNS } from '../constants/goodsReceiptConstants';
 import { supabase } from '../supabase/config';
+import { notificationService } from '../utils/notificationService';
 
 // Register Chart.js components
 ChartJS.register(
@@ -66,6 +68,7 @@ const GoodsReceipts = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedStatuses, setSelectedStatuses] = useState([]);
     const [selectedWarehouses, setSelectedWarehouses] = useState([]);
+    const [selectedTypes, setSelectedTypes] = useState([]);
     const [selectedIds, setSelectedIds] = useState([]);
     const [printData, setPrintData] = useState(null);
     const [warehousesList, setWarehousesList] = useState([]);
@@ -173,7 +176,7 @@ const GoodsReceipts = () => {
         try {
             const { data, error } = await supabase
                 .from('goods_receipts')
-                .select('*, items:goods_receipt_items(item_name)')
+                .select('*, items:goods_receipt_items(item_name, item_type)')
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
@@ -590,6 +593,14 @@ const GoodsReceipts = () => {
 
             if (updateReceiptError) throw updateReceiptError;
 
+            // Log notification
+            await notificationService.add({
+                title: 'Nhập kho thành công',
+                description: `Phiếu nhập ${receipt.receipt_code} đã được phê duyệt và cập nhật tồn kho.`,
+                type: 'success',
+                link: '/bao-cao/kho'
+            });
+
             alert('✅ Đã duyệt phiếu nhập và cập nhật tồn kho thành công!');
             fetchReceipts();
         } catch (error) {
@@ -664,11 +675,15 @@ const GoodsReceipts = () => {
             r.deliverer_address?.toLowerCase().includes(search);
         const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(r.status);
         const matchesWarehouse = selectedWarehouses.length === 0 || selectedWarehouses.includes(r.warehouse_id);
-        return matchesSearch && matchesStatus && matchesWarehouse;
+        
+        const receiptType = r.items?.[0]?.item_type || 'MAY';
+        const matchesType = selectedTypes.length === 0 || selectedTypes.includes(receiptType);
+
+        return matchesSearch && matchesStatus && matchesWarehouse && matchesType;
     });
 
-    const hasActiveFilters = selectedStatuses.length > 0 || selectedWarehouses.length > 0;
-    const totalActiveFilters = selectedStatuses.length + selectedWarehouses.length;
+    const hasActiveFilters = selectedStatuses.length > 0 || selectedWarehouses.length > 0 || selectedTypes.length > 0;
+    const totalActiveFilters = selectedStatuses.length + selectedWarehouses.length + selectedTypes.length;
 
     // Filter options
     const statusOptions = RECEIPT_STATUSES.filter(s => s.id !== 'ALL').map(s => ({
@@ -682,6 +697,11 @@ const GoodsReceipts = () => {
         label: w.name,
         count: receipts.filter(r => r.warehouse_id === w.id).length
     }));
+
+    const typeOptions = [
+        { id: 'MAY', label: 'Hàng MÁY', count: receipts.filter(r => r.items?.[0]?.item_type === 'MAY').length },
+        { id: 'BINH', label: 'Hàng BÌNH', count: receipts.filter(r => r.items?.[0]?.item_type === 'BINH').length },
+    ];
 
     const getStatusStats = () => {
         const stats = {};
@@ -713,6 +733,7 @@ const GoodsReceipts = () => {
         switch (filterKey) {
             case 'status': return 'border-blue-200 bg-blue-50 text-blue-700';
             case 'warehouse': return 'border-blue-200 bg-blue-50 text-blue-700';
+            case 'type': return 'border-indigo-200 bg-indigo-50 text-indigo-700';
             default: return 'border-primary bg-primary/5 text-primary';
         }
     };
@@ -721,6 +742,7 @@ const GoodsReceipts = () => {
         switch (filterKey) {
             case 'status': return 'bg-blue-600 text-white';
             case 'warehouse': return 'bg-blue-600 text-white';
+            case 'type': return 'bg-indigo-600 text-white';
             default: return 'bg-primary text-white';
         }
     };
@@ -729,6 +751,7 @@ const GoodsReceipts = () => {
         switch (filterKey) {
             case 'status': return isActive ? 'text-blue-700' : 'text-blue-500';
             case 'warehouse': return isActive ? 'text-blue-700' : 'text-blue-500';
+            case 'type': return isActive ? 'text-indigo-700' : 'text-indigo-500';
             default: return isActive ? 'text-primary' : 'text-primary/80';
         }
     };
@@ -737,10 +760,12 @@ const GoodsReceipts = () => {
     const [mobileFilterClosing, setMobileFilterClosing] = useState(false);
     const [pendingStatuses, setPendingStatuses] = useState([]);
     const [pendingWarehouses, setPendingWarehouses] = useState([]);
+    const [pendingTypes, setPendingTypes] = useState([]);
 
     const openMobileFilter = () => {
         setPendingStatuses(selectedStatuses);
         setPendingWarehouses(selectedWarehouses);
+        setPendingTypes(selectedTypes || []);
         setShowMobileFilter(true);
     };
 
@@ -755,6 +780,7 @@ const GoodsReceipts = () => {
     const applyMobileFilter = () => {
         setSelectedStatuses(pendingStatuses);
         setSelectedWarehouses(pendingWarehouses);
+        setSelectedTypes(pendingTypes);
         closeMobileFilter();
     };
 
@@ -1045,6 +1071,37 @@ const GoodsReceipts = () => {
                                         options={statusOptions}
                                         selected={selectedStatuses}
                                         setSelected={setSelectedStatuses}
+                                        filterSearch={filterSearch}
+                                        setFilterSearch={setFilterSearch}
+                                    />
+                                )}
+                            </div>
+
+                            <div className="relative">
+                                <button
+                                    onClick={() => {
+                                        if (activeDropdown !== 'type') setFilterSearch('');
+                                        setActiveDropdown(activeDropdown === 'type' ? null : 'type');
+                                    }}
+                                    className={clsx(
+                                        "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
+                                        getFilterButtonClass('type', activeDropdown === 'type' || selectedTypes.length > 0)
+                                    )}
+                                >
+                                    <Hash size={14} className={getFilterIconClass('type', activeDropdown === 'type' || selectedTypes.length > 0)} />
+                                    Loại hàng
+                                    {selectedTypes.length > 0 && (
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('type'))}>
+                                            {selectedTypes.length}
+                                        </span>
+                                    )}
+                                    <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'type' ? "rotate-180" : "")} />
+                                </button>
+                                {activeDropdown === 'type' && (
+                                    <FilterDropdown
+                                        options={typeOptions}
+                                        selected={selectedTypes}
+                                        setSelected={setSelectedTypes}
                                         filterSearch={filterSearch}
                                         setFilterSearch={setFilterSearch}
                                     />
@@ -1490,6 +1547,14 @@ const GoodsReceipts = () => {
                             options: warehouseOptions,
                             selectedValues: pendingWarehouses,
                             onSelectionChange: setPendingWarehouses
+                        },
+                        {
+                            id: 'type',
+                            label: 'Loại hàng',
+                            icon: <Hash size={16} className="text-indigo-600" />,
+                            options: typeOptions,
+                            selectedValues: pendingTypes,
+                            onSelectionChange: setPendingTypes
                         }
                     ]}
                 />

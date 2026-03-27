@@ -2,6 +2,7 @@ import { clsx } from 'clsx';
 import {
     ChevronLeft,
     ChevronDown,
+    Clock,
     List,
     BarChart2,
     Search,
@@ -37,13 +38,13 @@ const TICKET_COLUMNS = [
     { key: 'created_at', label: 'Ngày báo' },
     { key: 'created_by', label: 'Người báo lỗi' },
     { key: 'customer', label: 'Khách hàng' },
+    { key: 'sales', label: 'Kinh doanh' },
     { key: 'machine_serial', label: 'Mã thiết bị' },
     { key: 'machine_name', label: 'Tên thiết bị' },
     { key: 'loai_loi', label: 'Tên lỗi' },
     { key: 'error_type', label: 'Loại lỗi' },
     { key: 'error_details', label: 'Lỗi chi tiết' },
     { key: 'error_images', label: 'Hình ảnh chi tiết' },
-    { key: 'sales', label: 'Kinh doanh' },
     { key: 'technician', label: 'Kỹ thuật' },
     { key: 'cskh', label: 'CSKH' },
     { key: 'technical_feedback', label: 'Phản hồi kỹ thuật' },
@@ -601,7 +602,7 @@ export default function RepairTickets() {
                                                             </div>
                                                         ) : <span className="text-slate-300">---</span>; break;
                                                     case 'sales':
-                                                        content = <span className="text-slate-600 font-semibold">{getUserName(ticket.sales_id)}</span>; break;
+                                                        content = <span className="text-primary font-black bg-primary/5 px-2 py-1 rounded-lg border border-primary/10 shadow-sm">{getUserName(ticket.sales_id)}</span>; break;
                                                     case 'technician':
                                                         content = <span className="text-slate-600 font-semibold">{getUserName(ticket.technician_id)}</span>; break;
                                                     case 'cskh':
@@ -615,7 +616,17 @@ export default function RepairTickets() {
                                                             </div>
                                                         ) : <span className="text-slate-300">---</span>; break;
                                                     case 'status':
-                                                        content = getStatusBadge(ticket.status); break;
+                                                        content = (
+                                                            <div className="flex flex-col items-center gap-1">
+                                                                {getStatusBadge(ticket.status)}
+                                                                {ticket.expected_completion_date && (
+                                                                    <div className="text-[10px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 flex items-center gap-1 shadow-sm">
+                                                                        <Clock size={10} />
+                                                                        {new Date(ticket.expected_completion_date).toLocaleDateString('vi-VN')}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        ); break;
                                                     default: content = null;
                                                 }
                                                 return <td key={key} className={cellClasses}>{content}</td>;

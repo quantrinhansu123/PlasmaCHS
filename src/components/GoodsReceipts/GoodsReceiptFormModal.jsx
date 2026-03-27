@@ -15,7 +15,8 @@ import {
     User,
     Calendar,
     Warehouse,
-    FileText
+    FileText,
+    Package
 } from 'lucide-react';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -68,10 +69,11 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
         received_by: '',
         deliverer_name: '',
         deliverer_address: '',
-        note: ''
+        note: '',
+        receipt_type: 'MAY' // Default to Machine
     });
 
-    const [items, setItems] = useState([{ ...emptyItem }]);
+    const [items, setItems] = useState([{ ...emptyItem, item_type: 'MAY' }]);
 
     // Auto-generate receipt code or load edit data
     useEffect(() => {
@@ -94,6 +96,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                     .eq('receipt_id', receipt.id);
                 if (data && data.length > 0) {
                     setItems(data);
+                    setFormData(prev => ({ ...prev, receipt_type: data[0].item_type }));
                 }
             };
             fetchItems();
@@ -153,7 +156,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
     }, [isEdit]);
 
     const addItem = () => {
-        setItems(prev => [...prev, { ...emptyItem }]);
+        setItems(prev => [...prev, { ...emptyItem, item_type: formData.receipt_type }]);
     };
 
     const removeItem = (index) => {
@@ -316,6 +319,38 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                 <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100">
                                     <FileText className="w-5 h-5 text-primary" />
                                     <h4 className="text-lg font-extrabold !text-primary">Thông tin phiếu nhập</h4>
+                                </div>
+
+                                <div className="p-4 bg-primary/5 rounded-2xl border border-primary/10 space-y-3">
+                                    <label className="text-xs font-black text-primary uppercase tracking-widest flex items-center gap-2">
+                                        <Package className="w-4 h-4" /> Loại hàng nhập cho toàn phiếu
+                                    </label>
+                                    <div className="flex gap-2">
+                                        {[
+                                            { id: 'MAY', label: 'Hàng MÁY', icon: '⚡' },
+                                            { id: 'BINH', label: 'Hàng BÌNH', icon: '🛢️' }
+                                        ].map(type => (
+                                            <button
+                                                key={type.id}
+                                                type="button"
+                                                disabled={isReadOnly || (isEdit && items.length > 0)}
+                                                onClick={() => {
+                                                    setFormData(prev => ({ ...prev, receipt_type: type.id }));
+                                                    setItems(prev => prev.map(item => ({ ...item, item_type: type.id })));
+                                                }}
+                                                className={clsx(
+                                                    "flex-1 py-3 px-4 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2 border-2",
+                                                    formData.receipt_type === type.id
+                                                        ? "bg-primary border-primary text-white shadow-md shadow-primary/20 scale-[1.02]"
+                                                        : "bg-white border-slate-200 text-slate-500 hover:border-primary/40 hover:text-primary"
+                                                )}
+                                            >
+                                                <span>{type.icon}</span>
+                                                {type.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    {isEdit && <p className="text-[10px] text-slate-400 italic text-center">Lưu ý: Không thể đổi loại hàng khi đang sửa phiếu đã có dữ liệu.</p>}
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -521,17 +556,9 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div className="space-y-1.5">
                                                         <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">Loại</label>
-                                                        <select
-                                                            disabled={isReadOnly}
-                                                            value={item.item_type}
-                                                            onChange={(e) => {
-                                                                const newType = e.target.value;
-                                                                setItems(prev => prev.map((it, i) => i === idx ? { ...it, item_type: newType, serial_number: '', item_status: '' } : it));
-                                                            }}
-                                                            className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-sm font-bold outline-none cursor-pointer"
-                                                        >
-                                                            {ITEM_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
-                                                        </select>
+                                                        <div className="w-full h-11 px-4 bg-slate-100 border border-slate-200 rounded-xl text-xs font-black text-slate-500 flex items-center">
+                                                            {formData.receipt_type === 'MAY' ? 'MÁY' : 'BÌNH'}
+                                                        </div>
                                                     </div>
                                                     <div className="space-y-1.5">
                                                         <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">Trạng thái</label>
@@ -542,7 +569,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                                             className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-sm font-bold outline-none"
                                                         >
                                                             <option value="">--</option>
-                                                            {item.item_type === 'MAY' ? MACHINE_STATUSES.map(s => <option key={s.id} value={s.id}>{s.label}</option>) : CYLINDER_STATUSES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                                                            {formData.receipt_type === 'MAY' ? MACHINE_STATUSES.map(s => <option key={s.id} value={s.id}>{s.label}</option>) : CYLINDER_STATUSES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
                                                         </select>
                                                     </div>
                                                 </div>
@@ -555,8 +582,8 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                                                 disabled={isReadOnly}
                                                                 value={item.serial_number}
                                                                 onChange={(val) => updateItem(idx, 'serial_number', val)}
-                                                                options={item.item_type === 'MAY' ? machinesList : (['BINH', 'BINH_CO_KHI'].includes(item.item_type) ? cylindersList : [])}
-                                                                placeholder="Mã gán cho bình/máy..."
+                                                                options={formData.receipt_type === 'MAY' ? machinesList : (['BINH', 'BINH_CO_KHI'].includes(formData.receipt_type) ? cylindersList : [])}
+                                                                placeholder={formData.receipt_type === 'VAT_TU' ? "Không bắt dắt cho vật tư" : "Mã gán cho bình/máy..."}
                                                                 className="h-11 font-bold text-sm"
                                                             />
                                                         </div>

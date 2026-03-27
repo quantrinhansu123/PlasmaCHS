@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import clsx from 'clsx';
 import {
     CheckCircle2,
     ChevronDown,
@@ -311,6 +311,19 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
             updateItem(itemToUpdate.id, 'item_code', code);
             setIsScannerOpen(false);
             setActiveScanningIndex(null);
+        } else {
+            // Batch scanning for "Chọn nhanh"
+            const invItem = inventoryItems.find(i => i.serial_number === code);
+            if (invItem) {
+                toggleInventoryItem(invItem);
+                toast.success(`Đã chọn: ${code}`);
+            } else {
+                toast.error(`Không tìm thấy mã ${code} trong kho này`);
+            }
+            // Keep scanner open for continuous scanning if desired, 
+            // but usually users scan one by one. Let's close it to be safe or keep it?
+            // User said "nút quét qr cạnh chọn toàn bộ list" which implies batch.
+            // Let's keep it open if it's batch scan.
         }
     };
 
@@ -575,6 +588,17 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                                                 <button 
                                                     type="button"
                                                     onClick={() => {
+                                                        setActiveScanningIndex(null);
+                                                        setIsScannerOpen(true);
+                                                    }}
+                                                    className="p-2 bg-white border border-emerald-200 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-all shadow-sm"
+                                                    title="Quét mã chọn nhanh"
+                                                >
+                                                    <ScanLine size={18} />
+                                                </button>
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => {
                                                         const allIds = inventoryItems.map(i => i.id);
                                                         const currentIds = items.map(it => it.item_id).filter(Boolean);
                                                         const areAllSelected = allIds.every(id => currentIds.includes(id));
@@ -620,47 +644,59 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                                             <p className="text-[12px] font-bold text-emerald-400">Không tìm thấy mã trùng khớp với "{inventorySearchTerm}"</p>
                                         </div>
                                     ) : (
-                                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 max-h-[300px] overflow-y-auto p-1 custom-scrollbar">
-                                            {filteredInventory.map(invItem => {
-                                                const isSelected = items.some(it => it.item_id === invItem.id);
-                                                return (
-                                                    <button
-                                                        key={invItem.id}
-                                                        type="button"
-                                                        onClick={() => toggleInventoryItem(invItem)}
-                                                        className={clsx(
-                                                            "flex flex-col items-start p-3 rounded-2xl border transition-all text-left group relative ring-offset-2",
-                                                            isSelected 
-                                                                ? "bg-emerald-600 border-emerald-600 text-white shadow-xl shadow-emerald-200 ring-2 ring-emerald-500 scale-[0.98]" 
-                                                                : "bg-white border-slate-100 text-slate-600 hover:border-emerald-400 hover:bg-emerald-50/50 hover:shadow-md"
-                                                        )}
-                                                    >
-                                                        <div className="flex items-center justify-between w-full mb-2">
-                                                            <div className={clsx(
-                                                                "w-5 h-5 rounded-md border flex items-center justify-center transition-all",
-                                                                isSelected ? "bg-white border-white text-emerald-600" : "bg-slate-50 border-slate-200 group-hover:border-emerald-300"
-                                                            )}>
-                                                                {isSelected && <CheckCircle2 size={14} strokeWidth={3} />}
-                                                            </div>
-                                                            <span className={clsx(
-                                                                "text-[9px] font-black px-1.5 py-0.5 rounded-md",
-                                                                isSelected ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
-                                                            )}>
-                                                                {formData.issue_type === 'TRA_MAY' ? 'MÁY' : 'BÌNH'}
-                                                            </span>
-                                                        </div>
-                                                        <div className="font-mono text-[12px] font-black truncate w-full mb-0.5 tracking-tight">
-                                                            {invItem.serial_number}
-                                                        </div>
-                                                        <div className={clsx(
-                                                            "text-[10px] font-bold truncate w-full opacity-70",
-                                                            isSelected ? "text-white" : "text-slate-400"
-                                                        )}>
-                                                            {formData.issue_type === 'TRA_MAY' ? invItem.machine_type : invItem.volume}
-                                                        </div>
-                                                    </button>
-                                                );
-                                            })}
+                                        <div className="max-h-[350px] overflow-auto custom-scrollbar border border-emerald-100 rounded-2xl bg-white shadow-inner">
+                                            <table className="w-full text-left border-collapse">
+                                                <thead className="sticky top-0 z-10 bg-emerald-50 shadow-sm">
+                                                    <tr>
+                                                        <th className="px-4 py-3 text-[11px] font-black text-emerald-800 uppercase tracking-wider w-10 text-center">Chọn</th>
+                                                        <th className="px-4 py-3 text-[11px] font-black text-emerald-800 uppercase tracking-wider">Số Serial / Barcode</th>
+                                                        <th className="px-4 py-3 text-[11px] font-black text-emerald-800 uppercase tracking-wider text-center">Loại</th>
+                                                        <th className="px-4 py-3 text-[11px] font-black text-emerald-800 uppercase tracking-wider">Thông tin</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-emerald-50">
+                                                    {filteredInventory.map(invItem => {
+                                                        const isSelected = items.some(it => it.item_id === invItem.id);
+                                                        return (
+                                                            <tr 
+                                                                key={invItem.id}
+                                                                onClick={() => toggleInventoryItem(invItem)}
+                                                                className={clsx(
+                                                                    "group cursor-pointer transition-all hover:bg-emerald-50/50",
+                                                                    isSelected ? "bg-emerald-50/70" : "bg-white"
+                                                                )}
+                                                            >
+                                                                <td className="px-4 py-3 text-center">
+                                                                    <div className={clsx(
+                                                                        "w-5 h-5 mx-auto rounded-md border flex items-center justify-center transition-all",
+                                                                        isSelected ? "bg-emerald-600 border-emerald-600 text-white shadow-md" : "bg-white border-slate-200 group-hover:border-emerald-300"
+                                                                    )}>
+                                                                        {isSelected && <CheckCircle2 size={12} strokeWidth={4} />}
+                                                                    </div>
+                                                                </td>
+                                                                <td className="px-4 py-3">
+                                                                    <div className={clsx("font-mono text-[13px] font-black tracking-tight", isSelected ? "text-emerald-700" : "text-slate-700")}>
+                                                                        {invItem.serial_number}
+                                                                    </div>
+                                                                </td>
+                                                                <td className="px-4 py-3 text-center">
+                                                                    <span className={clsx(
+                                                                        "text-[9px] font-black px-2 py-0.5 rounded-md",
+                                                                        isSelected ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                                                                    )}>
+                                                                        {formData.issue_type === 'TRA_MAY' ? 'MÁY' : 'BÌNH'}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="px-4 py-3">
+                                                                    <div className={clsx("text-[12px] font-bold", isSelected ? "text-emerald-800/70" : "text-slate-500")}>
+                                                                        {formData.issue_type === 'TRA_MAY' ? invItem.machine_type : invItem.volume}
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
                                         </div>
                                     )}
                                 </div>
