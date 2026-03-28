@@ -542,7 +542,11 @@ const CylinderRecoveries = () => {
                                             <div className="space-y-1">
                                                 <p className="text-muted-foreground font-medium flex items-center gap-1.5">
                                                     <Package className="w-3.5 h-3.5 text-blue-600" />
-                                                    <span className="text-foreground font-bold leading-none mt-0.5">SL Vỏ: {recovery.total_items || 0}</span>
+                                                    <span className="text-foreground font-bold leading-none mt-0.5">Yêu cầu: {recovery.requested_quantity || 0}</span>
+                                                </p>
+                                                <p className="text-muted-foreground font-medium flex items-center gap-1.5">
+                                                    <PackageCheck className="w-3.5 h-3.5 text-emerald-600" />
+                                                    <span className="text-foreground font-bold leading-none mt-0.5">Thực tế: {recovery.total_items || 0}</span>
                                                 </p>
                                             </div>
                                             <div className="space-y-1 pl-2 border-l border-border">
@@ -891,25 +895,40 @@ const CylinderRecoveries = () => {
                                                                 {recovery.driver_name || '—'}
                                                             </td>
                                                         );
-                                                    case 'total_items':
-                                                        return (
-                                                            <td key={col.key} className="px-4 py-4">
-                                                                <span className="text-[13px] font-bold text-foreground flex items-center gap-1.5">
-                                                                    <Package className="w-4 h-4 text-blue-500" />
-                                                                    {recovery.total_items || 0}
-                                                                </span>
-                                                            </td>
-                                                        );
-                                                    case 'status':
-                                                        return (
-                                                            <td key={col.key} className="px-4 py-4">
-                                                                <span className={clsx(getStatusBadgeClass(status.color), "uppercase text-[10px] tracking-wider")}>
-                                                                    {status.label}
-                                                                </span>
-                                                            </td>
-                                                        );
-                                                    default:
-                                                        return <td key={col.key} className="px-4 py-4">—</td>;
+                                            case 'requested_quantity':
+                                                return (
+                                                    <td key={col.key} className="px-4 py-4">
+                                                        <span className="text-[13px] font-bold text-slate-500 flex items-center gap-1.5">
+                                                            <Package className="w-4 h-4 text-slate-400" />
+                                                            {recovery.requested_quantity || 0}
+                                                        </span>
+                                                    </td>
+                                                );
+                                            case 'total_items':
+                                                return (
+                                                    <td key={col.key} className="px-4 py-4">
+                                                        <span className="text-[13px] font-bold text-emerald-600 flex items-center gap-1.5">
+                                                            <PackageCheck className="w-4 h-4 text-emerald-500" />
+                                                            {recovery.total_items || 0}
+                                                        </span>
+                                                    </td>
+                                                );
+                                            case 'created_by':
+                                                return (
+                                                    <td key={col.key} className="px-4 py-4 text-[12px] text-muted-foreground font-medium truncate max-w-[120px]">
+                                                        {recovery.created_by || '—'}
+                                                    </td>
+                                                );
+                                            case 'status':
+                                                return (
+                                                    <td key={col.key} className="px-4 py-4">
+                                                        <span className={clsx(getStatusBadgeClass(status.color), "uppercase text-[10px] tracking-wider")}>
+                                                            {status.label}
+                                                        </span>
+                                                    </td>
+                                                );
+                                            default:
+                                                return <td key={col.key} className="px-4 py-4">—</td>;
                                                 }
                                             })}
                                             <td className="sticky right-0 z-20 bg-white group-hover:bg-blue-50/40 px-4 py-4 text-center shadow-[-6px_0_10px_-8px_rgba(15,23,42,0.25)] before:content-[''] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:bg-slate-300">

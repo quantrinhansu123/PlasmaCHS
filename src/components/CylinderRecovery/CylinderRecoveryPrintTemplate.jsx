@@ -104,7 +104,13 @@ const S = {
 };
 
 const getConditionLabel = (cond) => {
-    const map = { tot: 'Tốt', hong: 'Hỏng', meo: 'Méo/Móp', khac: 'Khác' };
+    const map = { 
+        tot: 'Tốt', 
+        hong: 'Hỏng', 
+        rong: 'Rỗng', 
+        moi: 'Mới không dùng',
+        khac: 'Khác' 
+    };
     return map[cond] || cond;
 };
 
@@ -199,9 +205,9 @@ export default function CylinderRecoveryPrintTemplate({ recovery, items: initial
                 <div style={S.infoItem}>NV tạo phiếu: {recovery.created_by || ''}</div>
                 <div style={S.infoItem}>Kho nhận: {warehouseName || recovery.warehouse_id}</div>
                 <div style={S.infoItem}>NV vận chuyển: {recovery.driver_name || ''}</div>
-                <div style={S.infoItem}>Tổng số vỏ thu yêu cầu: <b>{recovery.total_items}</b></div>
-                <div style={S.infoItem}>Tổng số vỏ thu thực tế: </div>
-                <div style={S.infoItem}>Tình trạng: </div>
+                <div style={S.infoItem}>Số vỏ thu yêu cầu: <b>{recovery.requested_quantity || 0}</b></div>
+                <div style={S.infoItem}>Số vỏ thu thực tế: <b>{recovery.total_items || 0}</b></div>
+                <div style={S.infoItem}>Ghi chú: {recovery.notes || '...'}</div>
             </div>
 
             {recovery.notes && (

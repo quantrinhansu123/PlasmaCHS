@@ -10,7 +10,8 @@ export const RECOVERY_STATUSES = [
 export const ITEM_CONDITIONS = [
     { id: 'tot', label: 'Tốt' },
     { id: 'hong', label: 'Hỏng' },
-    { id: 'meo', label: 'Méo / Móp' },
+    { id: 'rong', label: 'Rỗng' },
+    { id: 'moi', label: 'Mới không dùng' },
     { id: 'khac', label: 'Khác' }
 ];
 
@@ -21,6 +22,8 @@ export const RECOVERY_TABLE_COLUMNS = [
     { key: 'order_id', label: 'Đơn hàng liên kết' },
     { key: 'warehouse_id', label: 'Kho nhận' },
     { key: 'driver_name', label: 'NV vận chuyển' },
-    { key: 'total_items', label: 'SL vỏ' },
+    { key: 'requested_quantity', label: 'SL yêu cầu' },
+    { key: 'total_items', label: 'SL thực tế' },
+    { key: 'created_by', label: 'Người tạo' },
     { key: 'status', label: 'Trạng thái' }
 ];

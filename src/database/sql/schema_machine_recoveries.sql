@@ -10,7 +10,9 @@ CREATE TABLE IF NOT EXISTS machine_recoveries (
     driver_name VARCHAR(255),
     notes TEXT,
     total_items INTEGER DEFAULT 0,
-    status VARCHAR(50) NOT NULL DEFAULT 'CHO_DUYET',
+    requested_quantity INTEGER DEFAULT 0, -- Tổng số máy thu yêu cầu
+    created_by VARCHAR(255),              -- NV tạo phiếu
+    status VARCHAR(50) NOT NULL DEFAULT 'CHO_PHAN_CONG',
     order_id UUID REFERENCES orders(id) ON DELETE SET NULL, -- Đơn hàng liên kết nếu có
     photos TEXT[] DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -31,13 +33,13 @@ DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'check_machine_recovery_status') THEN
         ALTER TABLE machine_recoveries ADD CONSTRAINT check_machine_recovery_status CHECK (
-            status IN ('CHO_DUYET', 'HOAN_THANH', 'HUY')
+            status IN ('CHO_PHAN_CONG', 'DANG_THU_HOI', 'CHO_DUYET', 'HOAN_THANH', 'HUY')
         );
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'check_machine_item_condition') THEN
         ALTER TABLE machine_recovery_items ADD CONSTRAINT check_machine_item_condition CHECK (
-            condition IN ('tot', 'hong', 'loi', 'khac')
+            condition IN ('tot', 'hong', 'loi', 'rong', 'moi', 'khac')
         );
     END IF;
 END $$;

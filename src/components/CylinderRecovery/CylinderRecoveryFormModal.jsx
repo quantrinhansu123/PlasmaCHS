@@ -53,6 +53,8 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
         driver_name: '',
         notes: '',
         total_items: 0,
+        requested_quantity: 0,
+        created_by: localStorage.getItem('user_name') || 'Admin hệ thống',
         status: 'CHO_PHAN_CONG'
     });
 
@@ -82,7 +84,9 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                 ...recovery,
                 order_id: recovery.order_id || '',
                 driver_name: recovery.driver_name || '',
-                notes: recovery.notes || ''
+                notes: recovery.notes || '',
+                requested_quantity: recovery.requested_quantity || 0,
+                created_by: recovery.created_by || ''
             });
             setPhotoUrls(recovery.photos || []);
             fetchItems(recovery.id);
@@ -431,7 +435,8 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                 total_items: payload.total_items,
                 status: payload.status,
                 photos: payload.photos,
-                created_by: recovery?.created_by || localStorage.getItem('user_name')
+                requested_quantity: payload.requested_quantity || 0,
+                created_by: payload.created_by || 'Admin hệ thống'
             };
 
             let recoveryId;
@@ -641,6 +646,35 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                             {!isReadOnly && <ChevronDown className="w-4 h-4 text-primary/70 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />}
                                         </div>
                                     </div>
+                                    <div className="space-y-1.5">
+                                        <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                            <PackageCheck className="w-4 h-4 text-primary/70" />
+                                            Tổng số vỏ thu yêu cầu
+                                        </label>
+                                        <input
+                                            type="number"
+                                            value={formData.requested_quantity}
+                                            onChange={(e) => setFormData({ ...formData, requested_quantity: parseInt(e.target.value) || 0 })}
+                                            disabled={isReadOnly}
+                                            placeholder="SL yêu cầu..."
+                                            className={clsx(
+                                                "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold transition-all",
+                                                isReadOnly ? "text-slate-500 cursor-default" : "text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                            )}
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                            <Edit3 className="w-4 h-4 text-primary/70" />
+                                            NV tạo phiếu
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={formData.created_by}
+                                            disabled
+                                            className="w-full h-12 px-4 bg-slate-100 border border-slate-200 rounded-2xl text-[15px] font-bold text-slate-500 cursor-not-allowed"
+                                        />
+                                    </div>
                                 </div>
 
                                 <div className="space-y-1.5">
@@ -767,6 +801,9 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                     <div className="flex items-center gap-2.5">
                                         <ScanLine className="w-4 h-4 text-primary/80" strokeWidth={2.5} />
                                         <h4 className="text-[18px] !font-extrabold !text-primary uppercase tracking-tight">Danh sách vỏ ({items.length})</h4>
+                                        <div className="px-2 py-0.5 bg-emerald-50 text-emerald-600 rounded-lg text-[10px] font-black border border-emerald-100">
+                                            THỰC TẾ: {items.length}
+                                        </div>
                                     </div>
                                     {!isReadOnly && (
                                         <button

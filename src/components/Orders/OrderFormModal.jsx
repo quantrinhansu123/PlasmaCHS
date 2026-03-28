@@ -394,7 +394,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
 
         try {
             const customerName = customers.find(c => c.id.toString() === formData.customerId.toString())?.name || '';
-            const currentUser = user?.name || user?.email || 'Hệ thống';
+            const currentUser = user?.name || user?.email || localStorage.getItem('user_name') || 'Admin hệ thống';
 
             let initialStatus = 'CHO_DUYET';
             if (!isEdit && (role === 'admin' || role === 'thu_kho')) {

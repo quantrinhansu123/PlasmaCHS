@@ -50,6 +50,8 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
         driver_name: '',
         notes: '',
         total_items: 0,
+        requested_quantity: 0,
+        created_by: localStorage.getItem('user_name') || 'Admin hệ thống',
         status: 'CHO_PHAN_CONG'
     });
 
@@ -79,7 +81,9 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                 ...recovery,
                 order_id: recovery.order_id || '',
                 driver_name: recovery.driver_name || '',
-                notes: recovery.notes || ''
+                notes: recovery.notes || '',
+                requested_quantity: recovery.requested_quantity || 0,
+                created_by: recovery.created_by || 'Admin hệ thống'
             });
             setPhotoUrls(recovery.photos || []);
             fetchItems(recovery.id);
@@ -400,7 +404,7 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                 total_items: formData.total_items,
                 status: formData.status,
                 photos: photoUrls,
-                created_by: recovery?.created_by || localStorage.getItem('user_name')
+                created_by: recovery?.created_by || formData.created_by || 'Admin hệ thống'
             };
 
             let recoveryId;
