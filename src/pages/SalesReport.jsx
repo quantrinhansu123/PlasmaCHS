@@ -273,7 +273,7 @@ const SalesReport = () => {
               placeholder="Tên khách hàng..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-8 py-2 bg-muted/30 border border-border rounded-xl text-[13px] font-medium outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
+              className="w-full pl-10 pr-8 py-2 bg-muted/30 border border-border rounded-xl text-[13px] font-medium outline-none focus:ring-2 focus:ring-primary/10 transition-all"
             />
             {searchTerm && <button onClick={() => setSearchTerm('')} className="absolute right-3 bottom-2.5 text-muted-foreground"><X size={14} /></button>}
           </div>

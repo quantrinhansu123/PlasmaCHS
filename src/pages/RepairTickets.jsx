@@ -30,6 +30,7 @@ import RepairTicketForm from '../components/Repairs/RepairTicketForm';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
+import { ERROR_LEVELS, getErrorLevelColor } from '../constants/repairConstants';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 
@@ -43,6 +44,7 @@ const TICKET_COLUMNS = [
     { key: 'machine_name', label: 'Tên thiết bị' },
     { key: 'loai_loi', label: 'Tên lỗi' },
     { key: 'error_type', label: 'Loại lỗi' },
+    { key: 'error_level', label: 'Cấp độ lỗi' },
     { key: 'error_details', label: 'Lỗi chi tiết' },
     { key: 'error_images', label: 'Hình ảnh chi tiết' },
     { key: 'technician', label: 'Kỹ thuật' },
@@ -76,6 +78,7 @@ export default function RepairTickets() {
     const [selectedErrorTypes, setSelectedErrorTypes] = useState([]);
     const [selectedTechnicians, setSelectedTechnicians] = useState([]);
     const [selectedCskhStaff, setSelectedCskhStaff] = useState([]);
+    const [selectedErrorLevels, setSelectedErrorLevels] = useState([]);
 
     const [selectedIds, setSelectedIds] = useState([]);
 
@@ -92,16 +95,66 @@ export default function RepairTickets() {
     // Columns config
     const defaultColOrder = TICKET_COLUMNS.map(c => c.key);
     const columnDefs = TICKET_COLUMNS.reduce((acc, col) => { acc[col.key] = { label: col.label }; return acc; }, {});
+    
     const [columnOrder, setColumnOrder] = useState(() => {
-        try { const s = JSON.parse(localStorage.getItem('columns_repair_tickets_order')); return Array.isArray(s) && s.length ? [...s.filter(k => defaultColOrder.includes(k)), ...defaultColOrder.filter(k => !s.includes(k))] : defaultColOrder; } catch { return defaultColOrder; }
+        try { 
+            const s = JSON.parse(localStorage.getItem('columns_repair_tickets_order')); 
+            if (Array.isArray(s) && s.length) {
+                const filtered = s.filter(k => defaultColOrder.includes(k));
+                const missing = defaultColOrder.filter(k => !filtered.includes(k));
+                
+                let result = [...filtered];
+                missing.forEach(m => {
+                    const defaultIdx = defaultColOrder.indexOf(m);
+                    // Find the best place to insert: after the nearest preceding column that's already in result
+                    let insertIdx = 0;
+                    for (let i = defaultIdx - 1; i >= 0; i--) {
+                        const prevKey = defaultColOrder[i];
+                        const idxInResult = result.indexOf(prevKey);
+                        if (idxInResult !== -1) {
+                            insertIdx = idxInResult + 1;
+                            break;
+                        }
+                    }
+                    result.splice(insertIdx, 0, m);
+                });
+                return result;
+            }
+            return defaultColOrder;
+        } catch { return defaultColOrder; }
     });
+
     const [visibleColumns, setVisibleColumns] = useState(() => {
-        try { const s = JSON.parse(localStorage.getItem('columns_repair_tickets')); return Array.isArray(s) && s.length ? s.filter(k => defaultColOrder.includes(k)) : defaultColOrder; } catch { return defaultColOrder; }
+        try { 
+            const s = JSON.parse(localStorage.getItem('columns_repair_tickets')); 
+            if (Array.isArray(s) && s.length) {
+                const filtered = s.filter(k => defaultColOrder.includes(k));
+                const missing = defaultColOrder.filter(k => !filtered.includes(k));
+                return [...filtered, ...missing]; 
+            }
+            return defaultColOrder; 
+        } catch { return defaultColOrder; }
     });
     const [showColumnPicker, setShowColumnPicker] = useState(false);
     const columnPickerRef = useRef(null);
 
     const isColumnVisible = (key) => visibleColumns.includes(key);
+
+    useEffect(() => {
+        // Force migration for error_level position if it's already in localStorage but misplaced
+        const levelIdx = columnOrder.indexOf('error_level');
+        const typeIdx = columnOrder.indexOf('error_type');
+        if (levelIdx !== -1 && typeIdx !== -1 && levelIdx !== typeIdx + 1) {
+            setColumnOrder(prev => {
+                const filtered = prev.filter(k => k !== 'error_level');
+                const newTypeIdx = filtered.indexOf('error_type');
+                const result = [...filtered];
+                result.splice(newTypeIdx + 1, 0, 'error_level');
+                return result;
+            });
+            setVisibleColumns(prev => prev.includes('error_level') ? prev : [...prev, 'error_level']);
+        }
+    }, [columnOrder.length]); // Run when length changes or on mount
 
     useEffect(() => { localStorage.setItem('columns_repair_tickets', JSON.stringify(visibleColumns)); }, [visibleColumns]);
     useEffect(() => { localStorage.setItem('columns_repair_tickets_order', JSON.stringify(columnOrder)); }, [columnOrder]);
@@ -165,8 +218,9 @@ export default function RepairTickets() {
         const matchesErrorType = selectedErrorTypes.length === 0 || selectedErrorTypes.includes(ticket.error_type_id);
         const matchesTech = selectedTechnicians.length === 0 || selectedTechnicians.includes(ticket.technician_id);
         const matchesCskh = selectedCskhStaff.length === 0 || selectedCskhStaff.includes(ticket.cskh_id);
+        const matchesErrorLevel = selectedErrorLevels.length === 0 || selectedErrorLevels.includes(ticket.error_level);
 
-        return matchesSearch && matchesStatus && matchesCustomer && matchesErrorType && matchesTech && matchesCskh;
+        return matchesSearch && matchesStatus && matchesCustomer && matchesErrorType && matchesTech && matchesCskh && matchesErrorLevel;
     });
 
     const getStatusBadge = (status) => {
@@ -245,6 +299,7 @@ export default function RepairTickets() {
             'Chi tiết thêm',
             'Kinh doanh phụ trách',
             'Kỹ thuật phụ trách',
+            'Cấp độ lỗi (Thấp/Trung bình/Cao/Nghiêm trọng)',
             'Trạng thái (Mới/Đang xử lý/Chờ linh kiện/Hoàn thành/Đã hủy)'
         ];
 
@@ -259,6 +314,7 @@ export default function RepairTickets() {
                 'Chi tiết thêm': 'Xì khí',
                 'Kinh doanh phụ trách': 'Nguyễn Văn Kinh Doanh',
                 'Kỹ thuật phụ trách': 'Trần Văn Kỹ Thuật',
+                'Cấp độ lỗi (Thấp/Trung bình/Cao/Nghiêm trọng)': 'Trung bình',
                 'Trạng thái (Mới/Đang xử lý/Chờ linh kiện/Hoàn thành/Đã hủy)': 'Mới'
             }
         ];
@@ -323,6 +379,7 @@ export default function RepairTickets() {
                         error_details: row['Chi tiết thêm']?.toString() || '',
                         sales_id: sName ? userMap[sName] || null : null,
                         technician_id: tName ? userMap[tName] || null : null,
+                        error_level: row['Cấp độ lỗi (Thấp/Trung bình/Cao/Nghiêm trọng)']?.toString().trim() || 'Trung bình',
                         status: validStatuses.includes(statusVal) ? statusVal : 'Mới',
                         error_images: [],
                         technical_images: [],
@@ -504,6 +561,14 @@ export default function RepairTickets() {
                             </button>
                             {activeDropdown === 'cskh' && <FilterDropdown options={cskhUsers.map(u => ({id: u.id, label: u.name}))} selected={selectedCskhStaff} setSelected={setSelectedCskhStaff} filterSearch={filterSearch} setFilterSearch={setFilterSearch} />}
                         </div>
+                        <div className="relative">
+                            <button onClick={() => handleDropdownChange('errorLevel')} className={clsx("flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all", selectedErrorLevels.length > 0 || activeDropdown === 'errorLevel' ? "border-rose-500 bg-rose-50/40 text-rose-700" : "border-slate-200 text-slate-600 hover:bg-slate-50")}>
+                                <AlertCircle size={14} className={selectedErrorLevels.length > 0 || activeDropdown === 'errorLevel' ? "text-rose-500" : "text-slate-500"} /> Cấp độ lỗi
+                                {selectedErrorLevels.length > 0 && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white">{selectedErrorLevels.length}</span>}
+                                <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'errorLevel' ? "rotate-180" : "")} />
+                            </button>
+                            {activeDropdown === 'errorLevel' && <FilterDropdown options={ERROR_LEVELS.map(l => ({id: l.id, label: l.label}))} selected={selectedErrorLevels} setSelected={setSelectedErrorLevels} filterSearch={filterSearch} setFilterSearch={setFilterSearch} />}
+                        </div>
                     </div>
 
                     {/* MOBILE FILTER TRIGGER */}
@@ -593,6 +658,8 @@ export default function RepairTickets() {
                                                         )}>{ticket.loai_loi || '---'}</span>; break;
                                                     case 'error_type':
                                                         content = <span className="font-bold text-rose-600">{getErrorTypeName(ticket.error_type_id)}</span>; break;
+                                                    case 'error_level':
+                                                        content = <span className={clsx("px-2 py-0.5 rounded-full text-[11px] font-bold border", getErrorLevelColor(ticket.error_level))}>{ticket.error_level || 'Trung bình'}</span>; break;
                                                     case 'error_details':
                                                         content = <div className="max-w-[250px] truncate text-slate-500 italic" title={ticket.error_details}>{ticket.error_details || '---'}</div>; break;
                                                     case 'error_images':

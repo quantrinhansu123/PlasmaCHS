@@ -330,7 +330,7 @@ const Cylinders = () => {
                 'Hạn kiểm định': '2026-12-31',
                 'Khách hàng': 'Phòng khám đa khoa VH',
             },
-];
+        ];
 
         const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
         const wb = XLSX.utils.book_new();
@@ -376,12 +376,12 @@ const Cylinders = () => {
                     // Try to find status value regardless of header case
                     const statusKey = Object.keys(row).find(k => k.toLowerCase() === 'trạng thái');
                     const statusVal = statusKey ? row[statusKey]?.toString().trim() : null;
-                    
+
                     let cylinderStatus = 'sẵn sàng';
-                    
+
                     if (statusVal) {
-                        const foundStatus = CYLINDER_STATUSES.find(s => 
-                            s.label.toLowerCase() === statusVal.toLowerCase() || 
+                        const foundStatus = CYLINDER_STATUSES.find(s =>
+                            s.label.toLowerCase() === statusVal.toLowerCase() ||
                             s.id.toLowerCase() === statusVal.toLowerCase()
                         );
                         cylinderStatus = foundStatus ? foundStatus.id : statusVal.toLowerCase();
@@ -416,9 +416,9 @@ const Cylinders = () => {
                 // Use upsert to handle duplicates and updates
                 const { error } = await supabase
                     .from('cylinders')
-                    .upsert(cylindersToInsert, { 
+                    .upsert(cylindersToInsert, {
                         onConflict: 'serial_number',
-                        ignoreDuplicates: false 
+                        ignoreDuplicates: false
                     });
 
                 if (error) {
@@ -809,11 +809,11 @@ const Cylinders = () => {
                         ) : filteredCylinders.length === 0 ? (
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy kết quả phù hợp</div>
                         ) : (
-                             filteredCylinders.map((cylinder, index) => (
+                            filteredCylinders.map((cylinder, index) => (
                                 <div key={cylinder.id} className={clsx(
                                     "rounded-2xl border shadow-sm p-4 transition-all duration-200",
-                                    selectedIds.includes(cylinder.id) 
-                                        ? "border-primary bg-primary/[0.05] ring-1 ring-primary/20" 
+                                    selectedIds.includes(cylinder.id)
+                                        ? "border-primary bg-primary/[0.05] ring-1 ring-primary/20"
                                         : "border-primary/15 bg-white"
                                 )}>
                                     <div className="flex items-start justify-between gap-2 mb-2">
@@ -880,7 +880,7 @@ const Cylinders = () => {
                                     <div className="flex items-center justify-between pt-2 border-t border-border/70">
                                         <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                                             <Warehouse size={12} />
-                                            <span>{cylinder.warehouses?.name || '—'}</span>
+                                            <span>{cylinder.status === 'sẵn sàng' ? (cylinder.warehouses?.name || '—') : '—'}</span>
                                         </div>
                                         <div className="flex items-center gap-3">
                                             <button onClick={() => handleViewCylinder(cylinder)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg"><Eye size={16} /></button>
@@ -1214,7 +1214,7 @@ const Cylinders = () => {
                                                 {cylinder.customer_name?.split(' / ')[1] || '—'}
                                             </td>
                                         )}
-                                        {isColumnVisible('warehouse') && <td className="px-4 py-4 text-sm text-muted-foreground">{cylinder.warehouses?.name || '—'}</td>}
+                                        {isColumnVisible('warehouse') && <td className="px-4 py-4 text-sm text-muted-foreground">{cylinder.status === 'sẵn sàng' ? (cylinder.warehouses?.name || '—') : '—'}</td>}
                                         {isColumnVisible('status') && (
                                             <td className="px-4 py-4">
                                                 <span className={clsx('inline-flex items-center px-3 py-1 text-[11px] font-bold rounded-full border', getStatusBadgeClass(cylinder.status))}>

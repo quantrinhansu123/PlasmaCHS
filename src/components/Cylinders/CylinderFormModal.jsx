@@ -184,6 +184,8 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                 payload.net_weight = parseFloat(payload.net_weight);
             }
             payload.customer_id = payload.customer_id || null;
+            payload.expiry_date = payload.expiry_date || null;
+            payload.cylinder_code = payload.cylinder_code || null;
             // Remove local only field
             delete payload.department;
 

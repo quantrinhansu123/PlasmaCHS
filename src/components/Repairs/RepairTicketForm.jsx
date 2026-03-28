@@ -1,8 +1,9 @@
 import { clsx } from 'clsx';
-import { Activity, Camera, ChevronDown, Edit3, HeartPulse, Image as ImageIcon, MapPin, Save, Search, Ticket, Trash2, User, Wrench, X, Plus } from 'lucide-react';
+import { Activity, AlertCircle, Camera, ChevronDown, Edit3, HeartPulse, Image as ImageIcon, MapPin, Save, Search, Ticket, Trash2, User, Wrench, X, Plus } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'react-toastify';
+import { ERROR_LEVELS } from '../../constants/repairConstants';
 import usePermissions from '../../hooks/usePermissions';
 import { supabase } from '../../supabase/config';
 
@@ -71,7 +72,8 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
         technicalImages: [],
         status: 'Mới',
         errorCategory: '', // Tên lỗi: Máy/Bình
-        expectedCompletionDate: '' 
+        expectedCompletionDate: '',
+        errorLevel: 'Trung bình' 
     };
 
     const [formData, setFormData] = useState(defaultState);
@@ -100,7 +102,8 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                 technicalImages: ticket.technical_images || [],
                 status: ticket.status || 'Mới',
                 errorCategory: ticket.loai_loi || '',
-                expectedCompletionDate: ticket.expected_completion_date || ''
+                expectedCompletionDate: ticket.expected_completion_date || '',
+                errorLevel: ticket.error_level || 'Trung bình'
             });
         } else {
             // New Ticket: Handle initial customer if provided
@@ -319,7 +322,8 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                 technical_images: newTechImgUrls,
                 status: formData.status,
                 loai_loi: formData.errorCategory,
-                expected_completion_date: formData.expectedCompletionDate || null
+                expected_completion_date: formData.expectedCompletionDate || null,
+                error_level: formData.errorLevel
             };
 
             if (isEdit) {
@@ -579,6 +583,28 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                     </div>
                                 </div>
 
+                                {/* Cấp độ lỗi */}
+                                <div className="space-y-2">
+                                    <label className="text-[14px] font-bold text-primary flex items-center gap-1.5"><AlertCircle className="w-4 h-4" />Cấp độ lỗi <span className="text-red-500">*</span></label>
+                                    <div className="flex flex-wrap gap-2">
+                                        {ERROR_LEVELS.map(level => (
+                                            <button
+                                                key={level.id}
+                                                type="button"
+                                                onClick={() => setFormData(prev => ({ ...prev, errorLevel: level.id }))}
+                                                className={clsx(
+                                                    "px-4 py-2 rounded-xl text-[12px] font-bold transition-all border-2",
+                                                    formData.errorLevel === level.id 
+                                                        ? `${level.color.replace('bg-', 'bg-').replace('text-', 'text-')} border-transparent shadow-md scale-105` 
+                                                        : "bg-white border-slate-100 text-slate-400 hover:border-slate-200 hover:text-slate-600"
+                                                )}
+                                            >
+                                                {level.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
                                 {/* Lỗi chi tiết (Long Text) */}
                                 <div className="space-y-2">
                                     <label className="text-[14px] font-bold text-primary flex items-center gap-1.5"><Edit3 className="w-4 h-4" />Mô tả lỗi chi tiết</label>
@@ -603,7 +629,7 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                         ))}
                                         {/* File Previews */}
                                         {newDetailFiles.map((file, idx) => (
-                                            <div key={`nd-${idx}`} className="relative w-24 h-24 rounded-2xl overflow-hidden border-primary/20 rounded-2xl overflow-hidden border-2 border-primary/10 shadow-sm transition-transform hover:scale-105">
+                                            <div key={`nd-${idx}`} className="relative w-24 h-24 rounded-2xl overflow-hidden border-2 border-primary/10 shadow-sm transition-transform hover:scale-105">
                                                 <img src={URL.createObjectURL(file)} alt="preview" className="w-full h-full object-cover" />
                                                 <button type="button" onClick={() => setNewDetailFiles(prev => prev.filter((_, i) => i !== idx))} className="absolute top-1.5 right-1.5 p-1.5 bg-rose-600 text-white rounded-lg shadow-lg hover:bg-rose-700 transition-colors"><Trash2 size={12} /></button>
                                             </div>
