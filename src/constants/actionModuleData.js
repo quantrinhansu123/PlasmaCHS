@@ -279,7 +279,13 @@ export const actionModuleGroups = [
         href: '/thu-hoi-may',
         colorScheme: 'indigo',
       },
-
+      {
+        icon: PackageMinus,
+        title: 'Đơn hàng trả về',
+        description: 'Theo dõi các đơn hàng bị khách hàng hoàn trả và cần xử lý thu hồi.',
+        href: '/don-hang-tra-ve',
+        colorScheme: 'rose',
+      },
     ],
   },
   {

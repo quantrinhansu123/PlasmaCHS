@@ -54,6 +54,7 @@ ALTER TABLE orders ADD CONSTRAINT check_order_status CHECK (
         'CHO_DOI_SOAT',      -- Chờ đối soát
         'DOI_SOAT_THAT_BAI', -- Đối soát thất bại
         'HOAN_THANH',        -- Hoàn thành
+        'TRA_HANG',          -- Đơn hàng trả về (Sales Returns)
         'HUY_DON'            -- Hủy đơn
     )
 );

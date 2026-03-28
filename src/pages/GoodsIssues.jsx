@@ -22,6 +22,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
+import { createPortal } from 'react-dom';
 import {
     BarElement,
     CategoryScale,
@@ -334,11 +335,7 @@ const GoodsIssues = () => {
             });
 
             toast.dismiss();
-            
-            // Trigger print after state update
-            setTimeout(() => {
-                window.print();
-            }, 500);
+            // Printing is now handled internally by the template via useEffect
 
         } catch (error) {
             console.error('Lỗi khi in phiếu:', error);
@@ -872,17 +869,19 @@ const GoodsIssues = () => {
                 />
             )}
 
-            {/* Hidden Print Container */}
-            {printData.issue && (
-                <div className="hidden print:block">
+            {/* Hidden Print Container via Portal */}
+            {printData.issue && createPortal(
+                <div className="pvn-goods-issue-print-portal">
                     <GoodsIssuePrintTemplate 
                         ref={printRef}
                         issue={printData.issue}
                         items={printData.items}
                         warehouseName={printData.warehouse}
                         supplierName={printData.supplier}
+                        onPrinted={() => setPrintData({ issue: null, items: [], warehouse: '', supplier: '' })}
                     />
-                </div>
+                </div>,
+                document.body
             )}
         </div>
     );

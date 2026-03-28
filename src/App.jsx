@@ -45,6 +45,7 @@ import MachineRecoveries from './pages/MachineRecoveries';
 import ShippingTasks from './pages/ShippingTasks';
 import InventoryReport from './pages/InventoryReport';
 import InventoryTransfer from './pages/InventoryTransfer';
+import ReturnOrders from './pages/ReturnOrders';
 
 const moduleRoutes = ['/don-hang-kinh-doanh', '/quan-ly-thiet-bi', '/van-chuyen', '/thu-hoi', '/mua-hang-nha-cung-cap', '/kho', '/he-thong', '/vat-tu', '/thong-ke'];
 
@@ -115,6 +116,7 @@ function App() {
               <Route path="/bao-cao/bao-cao-quy" element={<QuarterlyReport />} />
               <Route path="/bao-cao/binh-theo-khach" element={<CustomerCylinderReport />} />
               <Route path="/bao-cao/kho" element={<InventoryReport />} />
+              <Route path="/don-hang-tra-ve" element={<ReturnOrders />} />
               {moduleRoutes.map((path) => (
                 <Route key={path} path={path} element={<ModulePage />} />
               ))}

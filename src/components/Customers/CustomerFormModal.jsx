@@ -39,6 +39,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
         invoice_company_name: '',
         invoice_address: '',
         invoice_email: '',
+        care_expiry_date: '',
         status: 'Chưa thành công'
     });
 
@@ -61,6 +62,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                 invoice_company_name: customer.invoice_company_name || '',
                 invoice_address: customer.invoice_address || '',
                 invoice_email: customer.invoice_email || '',
+                care_expiry_date: customer.care_expiry_date || '',
                 status: customer.status || 'Chưa thành công'
             });
         } else {
@@ -86,6 +88,11 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                 }
             };
             generateCode();
+
+            // Set default care_expiry_date (60 days from now)
+            const expiry = new Date();
+            expiry.setDate(expiry.getDate() + 60);
+            setFormData(prev => ({ ...prev, care_expiry_date: expiry.toISOString().split('T')[0] }));
         }
     }, [isEdit, customer, warehouses]);
 
@@ -166,12 +173,14 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                 checkQuery.neq('id', customer.id);
             }
 
-            const { data: existing, error: checkError } = await checkQuery;
+            const { data: existing, error: checkError } = await checkQuery
+                .select('id, name, care_expiry_date')
+                .gte('care_expiry_date', new Date().toISOString().split('T')[0]); // Only active care periods
 
             if (checkError) throw checkError;
 
             if (existing && existing.length > 0) {
-                setErrorMsg('❌ Khách hàng trùng lặp: Đã tồn tại khách hàng có cùng Tên, SĐT và Loại này!');
+                setErrorMsg('❌ Khách hàng sở hữu: Đã tồn tại khách hàng này và vẫn trong thời hạn chăm sóc (60 ngày)!');
                 setIsLoading(false);
                 return;
             }
@@ -351,6 +360,19 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                         <option value="Thành công">Thành công</option>
                                         <option value="Chưa thành công">Chưa thành công</option>
                                     </select>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="flex items-center gap-1.5 text-[14px] font-bold mb-1.5 ml-1 text-primary">
+                                        <Receipt className="w-4 h-4" /> Thời hạn chăm sóc
+                                    </label>
+                                    <input
+                                        type="date"
+                                        name="care_expiry_date"
+                                        value={formData.care_expiry_date}
+                                        onChange={handleChange}
+                                        className="w-full h-12 px-4 bg-primary/5 border border-primary/20 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white outline-none transition-all font-black text-primary"
+                                    />
+                                    <p className="text-[10px] font-bold text-primary/60 ml-1 italic">* Mặc định 60 ngày kể từ lúc tạo</p>
                                 </div>
                             </div>
                         </div>

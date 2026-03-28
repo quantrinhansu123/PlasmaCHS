@@ -66,6 +66,7 @@ export const extraMenuItems = [
   { path: '/phieu-xuat/tao', label: 'Tạo phiếu xuất trả', icon: PackageMinus },
   { path: '/thu-hoi-vo', label: 'Thu hồi vỏ bình', icon: PackageCheck },
   { path: '/thu-hoi-may', label: 'Thu hồi máy', icon: Monitor },
+  { path: '/don-hang-tra-ve', label: 'Đơn hàng trả về', icon: PackageMinus },
   { path: '/don-vi-van-chuyen', label: 'Đơn vị vận chuyển', icon: Truck },
   { path: '/don-vi-van-chuyen/tao', label: 'Thêm ĐVVC mới', icon: Truck },
   { path: '/nhiem-vu-giao-hang', label: 'Danh sách nhiệm vụ giao hàng', icon: PackageCheck },

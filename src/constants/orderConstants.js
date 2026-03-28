@@ -50,6 +50,7 @@ export const ORDER_STATUSES = [
     { id: 'CHO_DOI_SOAT', label: 'Chờ đối soát', color: 'cyan' },
     { id: 'DOI_SOAT_THAT_BAI', label: 'Đối soát thất bại', color: 'red' },
     { id: 'HOAN_THANH', label: 'Hoàn thành', color: 'green' },
+    { id: 'TRA_HANG', label: 'Đơn hàng trả về', color: 'red' },
     { id: 'HUY_DON', label: 'Hủy đơn', color: 'red' },
 ];
 

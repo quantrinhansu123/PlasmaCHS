@@ -21,6 +21,7 @@ CREATE TABLE customers (
     invoice_email VARCHAR(255), -- Email nhận hoá đơn điện tử
     customer_type VARCHAR(50), -- Loại khách hàng: công (BV công), tư (BV tư, TM, PK, NG, SP)
     last_order_date DATE, -- Ngày đặt hàng gần nhất (dùng tính KH quá hạn)
+    care_expiry_date DATE, -- Ngày hết hạn chăm sóc (mặc định 60 ngày)
     status VARCHAR(50) DEFAULT 'Chưa thành công', -- Trạng thái: Thành công, Chưa thành công
     
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
