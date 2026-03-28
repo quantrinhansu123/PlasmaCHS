@@ -157,18 +157,22 @@ const MachineIssueRequestForm = () => {
 
         setIsSaving(true);
         try {
-            // Determine machine type from checkboxes
+            // Determine machine types
             const selectedMachineTypes = Object.entries(formData.machineType)
                 .filter(([_, checked]) => checked)
-                .map(([type]) => type)
-                .join(', ');
+                .map(([type]) => type);
+            
+            // For DB product_type constraint, use a single value
+            const dbProductType = selectedMachineTypes.length === 1 
+                ? selectedMachineTypes[0] 
+                : 'MAY';
 
             const selectedColors = Object.entries(formData.machineColor)
                 .filter(([_, checked]) => checked)
                 .map(([color]) => color)
                 .join(', ');
 
-            const issueTypes = Object.entries(formData.issueType)
+            const issueTypesList = Object.entries(formData.issueType)
                 .filter(([_, checked]) => checked)
                 .map(([type]) => type)
                 .join(', ');
@@ -180,12 +184,14 @@ const MachineIssueRequestForm = () => {
                 recipient_name: formData.customerName, // Required NOT NULL
                 recipient_address: formData.placementAddress || 'N/A', // Required NOT NULL
                 recipient_phone: formData.phone || 'N/A', // Required NOT NULL
-                product_type: selectedMachineTypes || 'MAY',
+                product_type: dbProductType,
                 quantity: parseInt(formData.quantity) || 1,
                 unit_price: 0, // Required NOT NULL
                 total_amount: 0, // Required NOT NULL
-                order_type: issueTypes || 'ĐNXM',
-                note: `Màu máy: ${selectedColors}. 
+                order_type: 'DNXM',
+                note: `Loại máy: ${selectedMachineTypes.join(', ')}. 
+                       Hình thức: ${issueTypesList || 'Chưa chọn'}.
+                       Màu máy: ${selectedColors}. 
                        Ngày cần: ${formData.dateNeeded}. 
                        Giao: ${formData.dateDelivery}. 
                        Thu hồi dự kiến: ${formData.dateRecall}. 

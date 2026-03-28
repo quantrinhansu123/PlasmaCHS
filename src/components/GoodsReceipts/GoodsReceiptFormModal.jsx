@@ -201,8 +201,9 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
         try {
             const totalAmount = items.reduce((sum, item) => sum + (item.total_price || 0), 0);
 
+            const { receipt_type, ...dbFormData } = formData;
             const receiptPayload = {
-                ...formData,
+                ...dbFormData,
                 total_items: items.length,
                 total_amount: totalAmount,
                 status: isEdit ? receipt.status : 'CHO_DUYET'

@@ -15,6 +15,7 @@ CREATE TABLE warehouses (
     address TEXT NOT NULL, -- 3. Địa chỉ
     capacity INTEGER NOT NULL, -- 4. Sức chứa
     status VARCHAR(100) NOT NULL DEFAULT 'Đang hoạt động', -- 5. Trạng thái hoạt động
+    branch_office VARCHAR(255),                            -- 6. Chi nhánh / Văn phòng đại diện
     
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP

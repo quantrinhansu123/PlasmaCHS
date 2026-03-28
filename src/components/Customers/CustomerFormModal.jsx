@@ -39,7 +39,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
         invoice_company_name: '',
         invoice_address: '',
         invoice_email: '',
-        status: ''
+        status: 'Chưa thành công'
     });
 
     useEffect(() => {

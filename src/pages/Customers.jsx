@@ -103,9 +103,9 @@ const Customers = () => {
 
     const baseCustomers = useMemo(() => {
         if (filterType === 'lead') {
-            return customers.filter(c => c.status === 'Thành công');
+            return customers.filter(c => c.status !== 'Thành công');
         }
-        return customers;
+        return customers.filter(c => c.status === 'Thành công');
     }, [customers, filterType]);
 
     const TABLE_COLUMNS_DEF = [

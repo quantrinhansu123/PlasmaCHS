@@ -13,6 +13,7 @@ export const ORDER_TYPES = [
     { id: 'DEMO', label: 'Đơn dùng thử (Demo)' },
     { id: 'NGOAI_GIAO', label: 'Đơn ngoại giao' },
     { id: 'NGHIEN_CUU', label: 'Đơn nghiên cứu' },
+    { id: 'DNXM', label: 'Đề Nghị Xuất Máy' },
 ];
 
 export const CUSTOMER_CATEGORIES = [
@@ -29,6 +30,12 @@ export const PRODUCT_TYPES = [
     { id: 'BINH_8L', label: 'Bình 8L' },
     { id: 'MAY_ROSY', label: 'Máy PlasmaRosy' },
     { id: 'MAY_MED', label: 'Máy PlasmaMed-BV' },
+    { id: 'TM', label: 'Máy Thẩm Mỹ' },
+    { id: 'SD', label: 'Máy Sử Dụng' },
+    { id: 'FM', label: 'Máy FM' },
+    { id: 'Khac', label: 'Loại Máy Khác' },
+    { id: 'MAY', label: 'Máy Plasma (Chung)' },
+    { id: 'DNXM', label: 'Đề Nghị Xuất Máy' },
 ];
 
 export const ORDER_STATUSES = [

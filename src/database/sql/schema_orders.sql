@@ -70,7 +70,7 @@ ALTER TABLE orders ADD CONSTRAINT check_warehouse CHECK (
 
 -- Constraint for product types
 ALTER TABLE orders ADD CONSTRAINT check_product_type CHECK (
-    product_type IN ('BINH', 'MAY', 'MAY_ROSY', 'MAY_MED', 'BINH_4L', 'BINH_8L')
+    product_type IN ('BINH', 'MAY', 'MAY_ROSY', 'MAY_MED', 'BINH_4L', 'BINH_8L', 'TM', 'SD', 'FM', 'Khac', 'DNXM')
 );
 
 -- Comments for clarity
