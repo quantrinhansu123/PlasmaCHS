@@ -484,6 +484,15 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                         .update({ quantity: (invRecord?.quantity || 0) + items.length })
                         .eq('id', inventoryId);
                 }
+
+                // Global notification for every new machine recovery
+                const customerName = customersRef.current.find(c => c.id === formData.customer_id)?.name || 'Khách hàng';
+                notificationService.add({
+                    title: `🔧 Thu hồi máy mới: #${formData.recovery_code}`,
+                    description: `${customerName} - ${items.length} máy - ${formData.driver_name || 'Tự do'}`,
+                    type: 'info',
+                    link: '/thu-hoi/may-moc'
+                });
             }
 
             // Log notification for shipping assignment

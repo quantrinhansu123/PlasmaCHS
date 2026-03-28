@@ -6,6 +6,7 @@ import { toast } from 'react-toastify';
 import { ERROR_LEVELS } from '../../constants/repairConstants';
 import usePermissions from '../../hooks/usePermissions';
 import { supabase } from '../../supabase/config';
+import { notificationService } from '../../utils/notificationService';
 
 export default function RepairTicketForm({ ticket, initialCustomer, onClose, onSuccess, fullPage = false }) {
     const { role, user } = usePermissions();
@@ -333,8 +334,18 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                 toast.success('Cập nhật phiếu thành công');
             } else {
                 if (user?.id) payload.created_by = user.id;
-                const { error } = await supabase.from('repair_tickets').insert([payload]);
+                const { data: newTicket, error } = await supabase.from('repair_tickets').insert([payload]).select().single();
                 if (error) throw error;
+
+                // Create system notification
+                const customerName = customers.find(c => c.id === formData.customerId)?.name || 'Khách hàng';
+                notificationService.add({
+                    title: `🎫 Ticket mới: #${newTicket.stt || ''}`,
+                    description: `${customerName} - ${formData.machineSerial} - ${formData.errorLevel}`,
+                    type: 'info',
+                    link: '/phieu-sua-chua'
+                });
+
                 toast.success('Tạo phiếu sửa chữa mới thành công');
             }
             onSuccess();

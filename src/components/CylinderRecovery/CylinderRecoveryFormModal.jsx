@@ -407,15 +407,20 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
     const handleSubmit = async (e) => {
         e.preventDefault();
         setErrorMsg('');
-        if (!formData.customer_id) { setErrorMsg('Vui lòng chọn khách hàng!'); return; }
-        if (items.length === 0) { setErrorMsg('Vui lòng quét hoặc nhập ít nhất 1 vỏ bình!'); return; }
-        if (items.some(i => !i.serial_number)) { setErrorMsg('Có dòng chưa điền mã serial!'); return; }
+        const isCompleting = formData.status === 'HOAN_THANH';
 
-        // Final ownership check
-        const invalidItems = items.filter(i => !i.isValid);
-        if (invalidItems.length > 0) {
-            setErrorMsg(`Có ${invalidItems.length} bình không hợp lệ (sai khách hàng hoặc không tồn tại). Vui lòng kiểm tra lại danh sách!`);
-            return;
+        if (!formData.customer_id) { setErrorMsg('Vui lòng chọn khách hàng!'); return; }
+        
+        if (isCompleting) {
+            if (items.length === 0) { setErrorMsg('Khi hoàn thành phiếu, vui lòng quét hoặc nhập ít nhất 1 vỏ bình!'); return; }
+            if (items.some(i => !i.serial_number)) { setErrorMsg('Có dòng chưa điền mã serial!'); return; }
+
+            // Final ownership check
+            const invalidItems = items.filter(i => !i.isValid);
+            if (invalidItems.length > 0) {
+                setErrorMsg(`Có ${invalidItems.length} bình không hợp lệ (sai khách hàng hoặc không tồn tại). Vui lòng kiểm tra lại danh sách!`);
+                return;
+            }
         }
 
         setIsLoading(true);
@@ -444,24 +449,27 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                 const { error } = await supabase.from('cylinder_recoveries').update(dbPayload).eq('id', recovery.id);
                 if (error) throw error;
                 recoveryId = recovery.id;
-                await supabase.from('cylinder_recovery_items').delete().eq('recovery_id', recoveryId);
             } else {
                 const { data, error } = await supabase.from('cylinder_recoveries').insert([dbPayload]).select().single();
                 if (error) throw error;
                 recoveryId = data.id;
             }
-
-            const itemPayloads = items.map(i => ({
-                recovery_id: recoveryId,
-                serial_number: i.serial_number,
-                condition: i.condition,
-                note: i.note || ''
-            }));
-            const { error: itemsError } = await supabase.from('cylinder_recovery_items').insert(itemPayloads);
+            const { error: itemsError } = await supabase.from('cylinder_recovery_items').delete().eq('recovery_id', recoveryId);
             if (itemsError) throw itemsError;
 
-            // Post-save automation
-            if (!isEdit) {
+            if (items.length > 0) {
+                const itemPayloads = items.map(i => ({
+                    recovery_id: recoveryId,
+                    serial_number: i.serial_number,
+                    condition: i.condition,
+                    note: i.note || ''
+                }));
+                const { error: insertItemsError } = await supabase.from('cylinder_recovery_items').insert(itemPayloads);
+                if (insertItemsError) throw insertItemsError;
+            }
+
+            // Post-save automation: ONLY for HOAN_THANH
+            if (isCompleting) {
                 const serialNumbers = items.map(i => i.serial_number);
                 for (const serial of serialNumbers) {
                     await supabase
@@ -516,18 +524,28 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                 }
             }
 
-            // Log notification for shipping assignment
-            if (formData.shipper_id) {
-                const { data: shipperData } = await supabase
-                    .from('shipping_partners')
-                    .select('name')
-                    .eq('id', formData.shipper_id)
-                    .single();
-                
-                await notificationService.add({
-                    title: 'Phân công thu hồi vỏ',
-                    description: `Phiếu #${formData.recovery_code} đã được gán cho đơn vị vận chuyển: ${shipperData?.name || 'Đối tác'}`,
+            // Notifications
+            const customerName = customersRef.current.find(c => c.id === formData.customer_id)?.name || 'Khách hàng';
+            if (!isEdit) {
+                // Global notification for every new demand
+                notificationService.add({
+                    title: `🛢️ Yêu cầu thu hồi vỏ mới: #${formData.recovery_code}`,
+                    description: `${customerName} - Yêu cầu: ${formData.requested_quantity} vỏ - Chờ phân công`,
                     type: 'info',
+                    link: '/thu-hoi/vo-binh'
+                });
+            } else if (payload.status === 'DANG_THU_HOI' && recovery.status === 'CHO_PHAN_CONG') {
+                notificationService.add({
+                    title: `🚚 Phân công thu hồi: #${formData.recovery_code}`,
+                    description: `Phiếu của ${customerName} đã được gán cho: ${formData.driver_name}`,
+                    type: 'success',
+                    link: '/thu-hoi/vo-binh'
+                });
+            } else if (isCompleting && recovery.status !== 'HOAN_THANH') {
+                notificationService.add({
+                    title: `✅ Đã thu hồi xong: #${formData.recovery_code}`,
+                    description: `${customerName} - Đã thu ${items.length} vỏ về kho.`,
+                    type: 'success',
                     link: '/thu-hoi/vo-binh'
                 });
             }

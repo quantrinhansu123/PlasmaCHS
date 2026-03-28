@@ -30,6 +30,7 @@ import {
 } from '../../constants/machineConstants';
 import { PRODUCT_TYPES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
+import { notificationService } from '../../utils/notificationService';
 
 export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
     const isEdit = !!receipt;
@@ -250,6 +251,17 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                 .insert(itemsPayload);
 
             if (itemsError) throw itemsError;
+
+            // Global notification for new goods receipt
+            if (!isEdit) {
+                const totalQty = items.reduce((sum, i) => sum + (parseFloat(i.quantity) || 0), 0);
+                notificationService.add({
+                    title: `📥 Nhập kho mới: #${formData.receipt_code}`,
+                    description: `${formData.supplier_name} - ${totalQty} ${formData.receipt_type === 'MAY' ? 'máy' : 'bình'} - ${formData.received_by || 'NV Kho'}`,
+                    type: 'success',
+                    link: '/nhap-kho'
+                });
+            }
 
             onSuccess();
             handleClose();

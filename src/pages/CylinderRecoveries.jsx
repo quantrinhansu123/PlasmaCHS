@@ -563,6 +563,24 @@ const CylinderRecoveries = () => {
                                                 <span className="text-[12px] font-bold text-foreground tracking-tight">{recovery.driver_name || '—'}</span>
                                             </div>
                                             <div className="flex items-center gap-1.5">
+                                                {recovery.status === 'CHO_PHAN_CONG' && (
+                                                    <button
+                                                        onClick={() => handleEdit(recovery)}
+                                                        className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-xl flex items-center gap-1 font-bold text-[11px]"
+                                                        title="Phân công"
+                                                    >
+                                                        Phân công
+                                                    </button>
+                                                )}
+                                                {recovery.status === 'DANG_THU_HOI' && (
+                                                    <button
+                                                        onClick={() => handleEdit(recovery)}
+                                                        className="p-2 text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl flex items-center gap-1 font-bold text-[11px]"
+                                                        title="Hoàn thành"
+                                                    >
+                                                        Hoàn thành
+                                                    </button>
+                                                )}
                                                 <button
                                                     onClick={() => handlePrintSingle(recovery)}
                                                     className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/5 rounded-xl transition-colors bg-slate-50 border border-slate-100"
@@ -574,12 +592,6 @@ const CylinderRecoveries = () => {
                                                     className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-xl"
                                                 >
                                                     <Edit className="w-4 h-4" />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDelete(recovery.id, recovery.recovery_code)}
-                                                    className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-xl"
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
                                                 </button>
                                             </div>
                                         </div>
@@ -933,6 +945,22 @@ const CylinderRecoveries = () => {
                                             })}
                                             <td className="sticky right-0 z-20 bg-white group-hover:bg-blue-50/40 px-4 py-4 text-center shadow-[-6px_0_10px_-8px_rgba(15,23,42,0.25)] before:content-[''] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:bg-slate-300">
                                                 <div className="flex items-center justify-center gap-2">
+                                                    {recovery.status === 'CHO_PHAN_CONG' && (
+                                                        <button
+                                                            onClick={() => handleEdit(recovery)}
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-100 rounded-lg text-[11px] font-bold hover:bg-blue-100 transition-all"
+                                                        >
+                                                            Phân công
+                                                        </button>
+                                                    )}
+                                                    {recovery.status === 'DANG_THU_HOI' && (
+                                                        <button
+                                                            onClick={() => handleEdit(recovery)}
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-lg text-[11px] font-bold hover:bg-emerald-100 transition-all"
+                                                        >
+                                                            Hoàn thành
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={() => handlePrintSingle(recovery)}
                                                         className="text-muted-foreground hover:text-primary transition-colors p-1.5 rounded-lg hover:bg-primary/10 bg-slate-50 border border-slate-100"
@@ -949,7 +977,7 @@ const CylinderRecoveries = () => {
                                                     </button>
                                                     <button
                                                         onClick={() => handleDelete(recovery.id, recovery.recovery_code)}
-                                                        className="text-red-600 hover:text-red-700 transition-colors p-1.5 rounded-lg hover:bg-red-100 bg-red-50 border border-red-100"
+                                                        className="text-red-500 hover:text-red-600 transition-colors p-1.5 rounded-lg hover:bg-red-50 bg-red-50/50 border border-red-100"
                                                         title="Xóa"
                                                     >
                                                         <Trash2 className="w-4 h-4" />

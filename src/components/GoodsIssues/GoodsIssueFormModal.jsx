@@ -28,6 +28,7 @@ import InventorySearchableSelect from './InventorySearchableSelect';
 import { ISSUE_TYPES } from '../../constants/goodsIssueConstants';
 import { PRODUCT_TYPES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
+import { notificationService } from '../../utils/notificationService';
 
 export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedType }) {
     const isEdit = !!issue;
@@ -396,6 +397,18 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                 .insert(itemPayloads);
 
             if (itemsError) throw itemsError;
+
+            // Global notification for new goods issue
+            if (!isEdit) {
+                const typeLabel = ISSUE_TYPES.find(t => t.id === formData.issue_type)?.label || 'Xuất kho';
+                const supplierName = suppliers.find(s => s.id === formData.supplier_id)?.name || '';
+                notificationService.add({
+                    title: `📤 ${typeLabel}: #${formData.issue_code}`,
+                    description: `${supplierName ? supplierName + ' - ' : ''}${validItems.length} mặt hàng - ${formData.total_items} đơn vị`,
+                    type: 'warning',
+                    link: '/xuat-kho'
+                });
+            }
             
             onSuccess();
         } catch (error) {

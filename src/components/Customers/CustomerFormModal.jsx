@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../../supabase/config';
 import { validateMST, validatePhone, formatPhoneNumber } from '../../utils/taxUtils';
+import { notificationService } from '../../utils/notificationService';
 
 export default function CustomerFormModal({ customer, onClose, onSuccess, categories, warehouses }) {
     const isEdit = !!customer;
@@ -196,6 +197,14 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                     .from('customers')
                     .insert([formData]);
                 if (error) throw error;
+
+                // Notification for new customer
+                notificationService.add({
+                    title: `👤 Khách hàng mới: ${formData.name}`,
+                    description: `Phụ trách: ${formData.care_by || 'Chưa gán'} - Mã: ${formData.code}`,
+                    type: 'info',
+                    link: '/khach-hang'
+                });
             }
             onSuccess();
         } catch (error) {

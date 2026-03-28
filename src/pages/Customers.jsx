@@ -121,6 +121,7 @@ const Customers = () => {
         { key: 'borrowed_cylinders', label: 'Vỏ bình đang mượn' },
         { key: 'machines_in_use', label: 'Mã máy đang sử dụng' },
         { key: 'care_by', label: 'KD chăm sóc' },
+        { key: 'care_expiry_date', label: 'Thời hạn chăm sóc' },
         { key: 'status', label: 'Trạng thái' },
         { key: 'invoice_email', label: 'Email hóa đơn' },
     ];
@@ -1346,6 +1347,21 @@ const Customers = () => {
                                         {isColumnVisible('borrowed_cylinders') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.borrowed_cylinders || 0)}</td>}
                                         {isColumnVisible('machines_in_use') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.machines_in_use || '—'}</td>}
                                         {isColumnVisible('care_by') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.care_by || '—'}</td>}
+                                        {isColumnVisible('care_expiry_date') && (
+                                            <td className="px-4 py-4 text-sm">
+                                                {c.care_expiry_date ? (
+                                                    <div className="flex flex-col">
+                                                        <span className="font-bold text-slate-700">{new Date(c.care_expiry_date).toLocaleDateString('vi-VN')}</span>
+                                                        {(() => {
+                                                            const diff = Math.ceil((new Date(c.care_expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
+                                                            if (diff <= 0) return <span className="text-[10px] font-bold text-rose-500 uppercase">Đã hết hạn</span>;
+                                                            if (diff <= 10) return <span className="text-[10px] font-bold text-amber-500 uppercase">Còn {diff} ngày</span>;
+                                                            return <span className="text-[10px] font-bold text-emerald-500 uppercase">Còn {diff} ngày</span>;
+                                                        })()}
+                                                    </div>
+                                                ) : '—'}
+                                            </td>
+                                        )}
                                         {isColumnVisible('invoice_email') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.invoice_email || '—'}</td>}
                                         {isColumnVisible('status') && (
                                             <td className="px-4 py-4 text-sm">
