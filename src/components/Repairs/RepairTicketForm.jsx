@@ -31,6 +31,7 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
     const [techUsers, setTechUsers] = useState([]);
     const [cskhUsers, setCskhUsers] = useState([]);
     const [allUsers, setAllUsers] = useState([]);
+    const [isFetchingDevices, setIsFetchingDevices] = useState(false);
 
     // Custom dropdown states for Customer
     const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
@@ -179,11 +180,13 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
 
     const fetchCustomerDevices = async (customerName) => {
         if (!customerName) return;
+        setIsFetchingDevices(true);
         try {
+            const trimmedName = customerName.trim();
             const { data: orderData } = await supabase
                 .from('orders')
                 .select('department, assigned_cylinders, product_type')
-                .eq('customer_name', customerName);
+                .ilike('customer_name', `%${trimmedName}%`);
 
             if (orderData) {
                 const formatProdName = (name) => {
@@ -194,29 +197,93 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                     return f;
                 };
 
-                const serialMap = new Map(); // serial -> product_type
+                const serialMap = new Map(); // serial -> {name, category}
                 orderData.forEach(o => {
                     const readableName = formatProdName(o.product_type);
                     if (o.department?.trim()) {
-                        serialMap.set(o.department.trim(), readableName || 'Máy');
+                        serialMap.set(o.department.trim(), {
+                            name: readableName || 'Máy',
+                            category: (readableName || 'Máy').includes('Máy') ? 'Máy' : 'Bình'
+                        });
                     }
                     if (o.assigned_cylinders) {
                         o.assigned_cylinders.forEach(s => {
                             if (s?.trim()) {
-                                serialMap.set(s.trim(), readableName || 'Bình');
+                                serialMap.set(s.trim(), {
+                                    name: readableName || 'Bình',
+                                    category: (readableName || 'Bình').includes('Máy') ? 'Máy' : 'Bình'
+                                });
                             }
                         });
                     }
                 });
 
-                setAvailableDevices(Array.from(serialMap.entries()).map(([s, name]) => ({
+                setAvailableDevices(Array.from(serialMap.entries()).map(([s, info]) => ({
                     serial_number: s,
-                    name: name,
-                    category: name.includes('Máy') ? 'Máy' : (name.includes('Bình') ? 'Bình' : '')
+                    name: info.name,
+                    category: info.category
                 })));
             }
         } catch (err) {
             console.error('Lỗi fetch đơn hàng:', err);
+        } finally {
+            setIsFetchingDevices(false);
+        }
+    };
+
+    const fetchAnyDeviceBySerial = async (serialPart) => {
+        if (!serialPart || serialPart.length < 2) return;
+        setIsFetchingDevices(true);
+        try {
+            const { data: orderData } = await supabase
+                .from('orders')
+                .select('department, assigned_cylinders, product_type')
+                .or(`department.ilike.%${serialPart}%,assigned_cylinders.cs.{${serialPart.toUpperCase()}}`)
+                .limit(20);
+
+            if (orderData) {
+                const serialMap = new Map();
+                // Add existing ones first to avoid duplicates
+                availableDevices.forEach(d => serialMap.set(d.serial_number, { name: d.name, category: d.category }));
+
+                orderData.forEach(o => {
+                    const formatProdName = (name) => {
+                        if (!name) return '';
+                        let f = name.toString().replace(/_/g, ' ');
+                        if (f.toUpperCase().startsWith('BINH')) f = f.replace(/BINH/i, 'Bình');
+                        if (f.toUpperCase().startsWith('MAY')) f = f.replace(/MAY/i, 'Máy');
+                        return f;
+                    };
+                    const readableName = formatProdName(o.product_type);
+
+                    if (o.department?.trim() && o.department.toUpperCase().includes(serialPart.toUpperCase())) {
+                        serialMap.set(o.department.trim(), {
+                            name: readableName || 'Máy',
+                            category: (readableName || 'Máy').includes('Máy') ? 'Máy' : 'Bình'
+                        });
+                    }
+                    if (o.assigned_cylinders) {
+                        o.assigned_cylinders.forEach(s => {
+                            if (s?.trim() && s.toUpperCase().includes(serialPart.toUpperCase())) {
+                                serialMap.set(s.trim(), {
+                                    name: readableName || 'Bình',
+                                    category: (readableName || 'Bình').includes('Máy') ? 'Máy' : 'Bình'
+                                });
+                            }
+                        });
+                    }
+                });
+
+                setAvailableDevices(Array.from(serialMap.entries()).map(([s, info]) => ({
+                    serial_number: s,
+                    name: info.name,
+                    category: info.category
+                })));
+            }
+        } catch (err) {
+            console.error('Lỗi tìm kiếm thiết bị mở rộng:', err);
+        } finally {
+            setIsFetchingDevices(false);
         }
     };
 
@@ -249,6 +316,7 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
         }));
         setIsMachineDropdownOpen(false);
         setMachineSearchTerm('');
+        toast.success(`Đã chọn: ${m.serial_number}`, { autoClose: 1000, position: 'top-center' });
     };
 
     const mFilteredMachines = availableDevices.filter(m =>
@@ -445,12 +513,11 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                         name="salesId"
                                         value={formData.salesId}
                                         onChange={handleChange}
-                                        className={clsx(
-                                            "w-full h-14 px-6 border-2 rounded-2xl text-[16px] font-black appearance-none focus:ring-8 outline-none shadow-xl transition-all ring-4 ring-primary/5",
-                                            !isEdit ? "bg-slate-100 border-slate-300 text-slate-400 cursor-not-allowed" : "bg-white border-primary/40 text-primary hover:shadow-primary/5 cursor-pointer focus:border-primary focus:ring-primary/10"
-                                        )}
-                                        disabled={!isEdit}
-                                    >
+                                            className={clsx(
+                                                "w-full h-14 px-6 border-2 rounded-2xl text-[16px] font-black appearance-none focus:ring-8 outline-none shadow-xl transition-all ring-4 ring-primary/5",
+                                                "bg-white border-primary/40 text-primary hover:shadow-primary/5 cursor-pointer focus:border-primary focus:ring-primary/10"
+                                            )}
+                                        >
                                         <option value="">-- CHỌN NHÂN VIÊN KINH DOANH --</option>
                                         {salesUsers.map(u => <option key={u.id} value={u.id} className="font-bold text-slate-800">{u.name}</option>)}
                                     </select>
@@ -506,10 +573,17 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                     <label className="flex items-center gap-1.5 text-[14px] font-bold text-primary"><MapPin className="w-4 h-4 text-primary/80" />Mã thiết bị <span className="text-red-500">*</span></label>
                                     <div className="relative" ref={machineDropdownRef}>
                                         <div
-                                            className={`w-full h-12 px-5 border rounded-2xl text-[14px] transition-all cursor-pointer flex justify-between items-center ${!formData.customerId ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'bg-slate-50 border-slate-200 text-slate-900 hover:border-primary/40 hover:bg-white shadow-sm font-semibold'}`}
-                                            onClick={() => formData.customerId && setIsMachineDropdownOpen(!isMachineDropdownOpen)}
+                                            className={`w-full h-12 px-5 border rounded-2xl text-[14px] transition-all cursor-pointer flex justify-between items-center ${!formData.customerId ? 'bg-slate-50 border-slate-200 text-slate-400 font-medium' : 'bg-slate-50 border-slate-200 text-slate-900 hover:border-primary/40 hover:bg-white shadow-sm font-semibold'}`}
+                                            onClick={() => {
+                                                if (!formData.customerId) {
+                                                    toast.info('Vui lòng chọn khách hàng trước', { position: 'top-center' });
+                                                    return;
+                                                }
+                                                setIsMachineDropdownOpen(!isMachineDropdownOpen);
+                                            }}
                                         >
-                                            <span>
+                                            <span className="flex items-center gap-2">
+                                                {isFetchingDevices && <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div>}
                                                 {formData.machineSerial || '-- Chọn mã thiết bị --'}
                                             </span>
                                             <ChevronDown className="w-5 h-5 text-primary/60" />
@@ -519,10 +593,23 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                             <div className="absolute z-50 w-full mt-2 top-full bg-white border border-slate-200 shadow-2xl max-h-64 overflow-hidden flex flex-col rounded-2xl animate-in fade-in zoom-in-95 duration-200">
                                                 <div className="p-3 border-b border-slate-100 bg-slate-50 flex items-center gap-3 sticky top-0 z-10">
                                                     <Search className="w-4 h-4 text-primary/40" />
-                                                    <input
-                                                        type="text" className="w-full bg-transparent border-none outline-none text-[14px] font-bold placeholder-slate-400" placeholder="Tìm mã hoặc tên máy..."
-                                                        value={machineSearchTerm} onChange={(e) => setMachineSearchTerm(e.target.value)} onClick={(e) => e.stopPropagation()} autoFocus
-                                                    />
+                                                    <div className="flex-1 flex items-center gap-2">
+                                                        <input
+                                                            type="text" className="w-full bg-transparent border-none outline-none text-[14px] font-bold placeholder-slate-400" placeholder="Tìm mã hoặc tên máy..."
+                                                            value={machineSearchTerm} 
+                                                            onChange={(e) => setMachineSearchTerm(e.target.value)} 
+                                                            onClick={(e) => e.stopPropagation()} autoFocus
+                                                        />
+                                                        {machineSearchTerm.length >= 2 && (
+                                                            <button 
+                                                                type="button"
+                                                                onClick={(e) => { e.stopPropagation(); fetchAnyDeviceBySerial(machineSearchTerm); }}
+                                                                className="px-2 py-1 bg-primary/10 text-primary text-[10px] font-black rounded-lg hover:bg-primary hover:text-white transition-all shrink-0"
+                                                            >
+                                                                Tìm toàn hệ thống
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 </div>
                                                 <div className="overflow-y-auto custom-scrollbar flex-1 py-1">
                                                     {mFilteredMachines.length > 0 ? mFilteredMachines.map(m => (
@@ -530,7 +617,20 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                                             <div className="font-black text-[14px] text-slate-800 group-hover:text-primary">{m.serial_number}</div>
                                                             <div className="text-[12px] text-primary font-bold">{m.name}</div>
                                                         </div>
-                                                    )) : <div className="px-5 py-6 text-center text-sm text-slate-500 font-semibold italic">Không tìm thấy thiết bị nào</div>}
+                                                    )) : (
+                                                        <div className="px-5 py-6 text-center">
+                                                            <p className="text-sm text-slate-500 font-semibold italic mb-2">Không tìm thấy thiết bị nào của khách hàng này</p>
+                                                            {machineSearchTerm.length >= 2 && (
+                                                                <button 
+                                                                    type="button"
+                                                                    onClick={(e) => { e.stopPropagation(); fetchAnyDeviceBySerial(machineSearchTerm); }}
+                                                                    className="text-xs font-black text-primary hover:underline"
+                                                                >
+                                                                    Thử tìm kiếm trên toàn bộ đơn hàng?
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         )}

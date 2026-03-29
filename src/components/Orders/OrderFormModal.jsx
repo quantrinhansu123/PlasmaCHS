@@ -80,6 +80,8 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         quantity: 0,
         unitPrice: 0,
         department: '',
+        tempDept: '',
+        tempSerial: '',
         promotion: '',
         shipperId: '',
         shippingFee: 0,
@@ -183,6 +185,25 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
 
     useEffect(() => {
         if (isEdit) {
+            const productType = order.product_type?.toUpperCase() || '';
+            const isCylinder = productType.startsWith('BINH') || productType.startsWith('BÌNH');
+            const isMachine = productType.match(/^(MAY|MÁY)/) || ['TM', 'SD', 'FM', 'KHAC', 'DNXM'].includes(productType);
+            
+            // Tách mã máy và khoa sử dụng từ cột department (Ví dụ: "Khoa Nội / PR-01")
+            const rawDept = order.department || '';
+            let tDept = '';
+            let tSerial = '';
+            if (rawDept.includes(' / ')) {
+                const parts = rawDept.split(' / ');
+                tDept = parts[0];
+                tSerial = parts[1];
+            } else if (isMachine) {
+                // Nếu chỉ có một vế trong cột và là máy, coi đó là mã Serial
+                tSerial = rawDept;
+            } else {
+                tDept = rawDept;
+            }
+
             setFormData({
                 orderCode: order.order_code,
                 customerCategory: order.customer_category || 'TM',
@@ -197,11 +218,13 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 quantity: order.quantity || 0,
                 unitPrice: order.unit_price || 0,
                 department: order.department || '',
+                tempDept: tDept,
+                tempSerial: tSerial,
                 promotion: order.promotion_code || '',
                 shipperId: order.shipper_id || '',
                 shippingFee: order.shipping_fee || 0
             });
-            const isCylinder = order.product_type?.toUpperCase().startsWith('BINH') || order.product_type?.toUpperCase().startsWith('BÌNH');
+            
             let initialCylinders = [];
             
             if (order.assigned_cylinders && Array.isArray(order.assigned_cylinders)) {
@@ -494,7 +517,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 quantity: formData.quantity,
                 unit_price: formData.unitPrice || 0,
                 total_amount: calculatedTotalAmount,
-                department: formData.department,
+                department: (formData.tempDept || formData.tempSerial) ? `${formData.tempDept}${formData.tempDept && formData.tempSerial ? ' / ' : ''}${formData.tempSerial}`.trim() : '',
                 promotion_code: formData.promotion,
                 shipper_id: formData.shipperId || null,
                 shipping_fee: formData.shippingFee || 0,
@@ -895,20 +918,36 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                     />
                                 </div>
 
-                                {formData.productType?.toUpperCase().match(/^(MAY|MÁY)/) && (
-                                    <div className="space-y-1.5">
-                                        <label className="text-[14px] font-semibold text-slate-800">Khoa sử dụng máy / Mã máy</label>
-                                        <input
-                                            name="department"
-                                            value={formData.department}
-                                            onChange={handleChange}
-                                            readOnly={isReadOnly}
-                                            placeholder="Ví dụ: Máy PlasmaRosy PR-01"
-                                            className={clsx(
-                                                "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold transition-all",
-                                                isReadOnly ? "text-slate-500 cursor-default" : "text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
-                                            )}
-                                        />
+                                {((formData.productType?.toUpperCase().match(/^(MAY|MÁY)/) || ['TM', 'SD', 'FM', 'KHAC', 'DNXM', 'MAY_ROSY', 'MAY_MED'].includes(formData.productType?.toUpperCase())) || !!formData.tempSerial) && (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div className="space-y-1.5">
+                                            <label className="text-[14px] font-semibold text-slate-800">Khoa sử dụng máy</label>
+                                            <input
+                                                name="tempDept"
+                                                value={formData.tempDept}
+                                                onChange={handleChange}
+                                                readOnly={isReadOnly}
+                                                placeholder="Ví dụ: Khoa Da Liễu"
+                                                className={clsx(
+                                                    "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold transition-all",
+                                                    isReadOnly ? "text-slate-500 cursor-default" : "text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                                )}
+                                            />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-[14px] font-semibold text-primary">Mã máy (Serial) <span className="text-red-500">*</span></label>
+                                            <input
+                                                name="tempSerial"
+                                                value={formData.tempSerial}
+                                                onChange={handleChange}
+                                                readOnly={isReadOnly}
+                                                placeholder="Ví dụ: PR-01"
+                                                className={clsx(
+                                                    "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-bold transition-all",
+                                                    isReadOnly ? "text-slate-500 cursor-default" : "text-primary border-primary/20 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                                )}
+                                            />
+                                        </div>
                                     </div>
                                 )}
 
@@ -942,7 +981,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                     )}
                                 </div>
 
-                                {(formData.productType?.toUpperCase().startsWith('BINH') || formData.productType?.toUpperCase().startsWith('BÌNH')) && formData.quantity > 0 && (
+                                {(formData.productType?.toUpperCase().startsWith('BINH') || formData.productType?.toUpperCase().startsWith('BÌNH') || (assignedCylinders && assignedCylinders.length > 0)) && formData.quantity > 0 && (
                                     <div className="pt-3 mt-2 border-t border-primary/10 space-y-4">
                                         <div className="flex items-center justify-between">
                                             <h5 className="text-[13px] !font-bold !text-primary flex items-center gap-2">
