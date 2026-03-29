@@ -1179,13 +1179,13 @@ const Cylinders = () => {
                             <tbody className="divide-y divide-primary/10">
                                 {isLoading ? (
                                     <tr>
-                                        <td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center text-muted-foreground">
+                                        <td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center text-muted-foreground">
                                             Đang tải dữ liệu...
                                         </td>
                                     </tr>
                                 ) : filteredCylinders.length === 0 ? (
                                     <tr>
-                                        <td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center text-muted-foreground">
+                                        <td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center text-muted-foreground">
                                             Không tìm thấy bình nào
                                         </td>
                                     </tr>
@@ -1202,26 +1202,51 @@ const Cylinders = () => {
                                                 className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
                                             />
                                         </td>
-                                        {isColumnVisible('serial_number') && <td className={getSerialCellClass(cylinder.status)}>{cylinder.serial_number}</td>}
-                                        {isColumnVisible('volume') && <td className="px-4 py-4 text-sm text-muted-foreground">{cylinder.volume || '—'}</td>}
-                                        {isColumnVisible('customer_name') && (
-                                            <td className="px-4 py-4 text-sm font-semibold text-foreground">
-                                                {cylinder.customers?.name || cylinder.customer_name?.split(' / ')[0] || '—'}
-                                            </td>
-                                        )}
-                                        {isColumnVisible('department') && (
-                                            <td className="px-4 py-4 text-sm font-medium text-muted-foreground">
-                                                {cylinder.customer_name?.split(' / ')[1] || '—'}
-                                            </td>
-                                        )}
-                                        {isColumnVisible('warehouse') && <td className="px-4 py-4 text-sm text-muted-foreground">{cylinder.status === 'sẵn sàng' ? (cylinder.warehouses?.name || '—') : '—'}</td>}
-                                        {isColumnVisible('status') && (
-                                            <td className="px-4 py-4">
-                                                <span className={clsx('inline-flex items-center px-3 py-1 text-[11px] font-bold rounded-full border', getStatusBadgeClass(cylinder.status))}>
-                                                    {getStatusLabel(cylinder.status)}
-                                                </span>
-                                            </td>
-                                        )}
+                                        {visibleTableColumns.map((col) => {
+                                            if (col.key === 'serial_number') {
+                                                return <td key={col.key} className={getSerialCellClass(cylinder.status)}>{cylinder.serial_number}</td>;
+                                            }
+                                            if (col.key === 'cylinder_code') {
+                                                return <td key={col.key} className="px-4 py-4 text-sm font-medium text-slate-700">{cylinder.cylinder_code || '—'}</td>;
+                                            }
+                                            if (col.key === 'volume') {
+                                                return <td key={col.key} className="px-4 py-4 text-sm text-muted-foreground">{cylinder.volume || '—'}</td>;
+                                            }
+                                            if (col.key === 'customer_name') {
+                                                return (
+                                                    <td key={col.key} className="px-4 py-4 text-sm font-semibold text-foreground">
+                                                        {cylinder.customers?.name || cylinder.customer_name?.split(' / ')[0] || '—'}
+                                                    </td>
+                                                );
+                                            }
+                                            if (col.key === 'department') {
+                                                return (
+                                                    <td key={col.key} className="px-4 py-4 text-sm font-medium text-muted-foreground">
+                                                        {cylinder.customer_name?.split(' / ')[1] || '—'}
+                                                    </td>
+                                                );
+                                            }
+                                            if (col.key === 'warehouse') {
+                                                return (
+                                                    <td key={col.key} className="px-4 py-4 text-sm text-muted-foreground">
+                                                        {cylinder.status === 'sẵn sàng' ? (cylinder.warehouses?.name || '—') : '—'}
+                                                    </td>
+                                                );
+                                            }
+                                            if (col.key === 'status') {
+                                                return (
+                                                    <td key={col.key} className="px-4 py-4 text-[13px] font-bold">
+                                                        <span className={clsx('inline-flex items-center px-3 py-1 text-[11px] font-bold rounded-full border', getStatusBadgeClass(cylinder.status))}>
+                                                            {getStatusLabel(cylinder.status)}
+                                                        </span>
+                                                    </td>
+                                                );
+                                            }
+                                            if (col.key === 'expiry_date') {
+                                                return <td key={col.key} className="px-4 py-4 text-sm text-muted-foreground">{cylinder.expiry_date || '—'}</td>;
+                                            }
+                                            return <td key={col.key} className="px-4 py-4 text-sm">—</td>;
+                                        })}
                                         <td className="px-4 py-4 text-center border-l border-r border-primary/20">
                                             <div className="flex items-center justify-center gap-3">
                                                 <button onClick={() => handleViewCylinder(cylinder)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="Xem chi tiết">

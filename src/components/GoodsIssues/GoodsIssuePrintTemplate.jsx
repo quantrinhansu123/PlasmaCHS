@@ -209,19 +209,10 @@ const GoodsIssuePrintTemplate = React.forwardRef(({ issue, items = [], warehouse
                             </tr>
                         ))
                     )}
-                    {/* Add empty rows to fill A4 if few items */}
-                    {[...Array(Math.max(0, 8 - items.length))].map((_, i) => (
-                        <tr key={`empty-${i}`} style={{ height: '25px' }}>
-                            <td style={S.td}></td>
-                            <td style={S.td}></td>
-                            <td style={S.td}></td>
-                            <td style={S.td}></td>
-                        </tr>
-                    ))}
                 </tbody>
                 <tfoot>
                     <tr style={{ fontWeight: 'bold' }}>
-                        <td colSpan="3" style={{ ...S.td, textAlign: 'right', paddingRight: '15px' }}>TỔNG CỘNG</td>
+                        <td colSpan="3" style={{ ...S.td, textAlign: 'center' }}>TỔNG CỘNG</td>
                         <td style={S.td}>{items.length} mặt hàng</td>
                     </tr>
                 </tfoot>

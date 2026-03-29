@@ -437,7 +437,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                             disabled={isReadOnly}
                                             value={formData.deliverer_name || ''}
                                             onChange={(e) => setFormData(prev => ({ ...prev, deliverer_name: e.target.value }))}
-                                            placeholder="Tên người giao hàng..."
+                                            placeholder="Tên người giao hàng"
                                             className={clsx(
                                                 "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] transition-all outline-none",
                                                 isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
@@ -454,7 +454,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                             disabled={isReadOnly}
                                             value={formData.deliverer_address || ''}
                                             onChange={(e) => setFormData(prev => ({ ...prev, deliverer_address: e.target.value }))}
-                                            placeholder="Địa chỉ/Số điện thoại người giao..."
+                                            placeholder="Địa chỉ/Số điện thoại người giao"
                                             className={clsx(
                                                 "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] transition-all outline-none",
                                                 isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
@@ -471,7 +471,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                             disabled={isReadOnly}
                                             value={formData.received_by || ''}
                                             onChange={(e) => setFormData(prev => ({ ...prev, received_by: e.target.value }))}
-                                            placeholder="Tên người nhận..."
+                                            placeholder="Tên người nhận"
                                             className={clsx(
                                                 "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] transition-all outline-none",
                                                 isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
@@ -488,7 +488,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                             disabled={isReadOnly}
                                             value={formData.note || ''}
                                             onChange={(e) => setFormData(prev => ({ ...prev, note: e.target.value }))}
-                                            placeholder="Ghi chú thêm về phiếu nhập này..."
+                                            placeholder="Ghi chú thêm về phiếu nhập này"
                                             className={clsx(
                                                 "w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] transition-all outline-none min-h-[80px] resize-none",
                                                 isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
@@ -552,14 +552,14 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                                         >
                                                             <option value="">-- Chọn --</option>
                                                             {PRODUCT_TYPES.map(p => <option key={p.id} value={p.label}>{p.label}</option>)}
-                                                            <option value="KHAC">Nhập tay...</option>
+                                                            <option value="KHAC">Nhập tay</option>
                                                         </select>
                                                         {(!PRODUCT_TYPES.some(p => p.label === item.item_name) && item.item_name !== '') && (
                                                             <input
                                                                 disabled={isReadOnly}
                                                                 value={item.item_name === 'Sản phẩm khác...' ? '' : item.item_name}
                                                                 onChange={(e) => updateItem(idx, 'item_name', e.target.value)}
-                                                                placeholder="Nhập tên sản phẩm..."
+                                                                placeholder="Nhập tên sản phẩm"
                                                                 className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-sm font-bold outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 transition-all"
                                                             />
                                                         )}

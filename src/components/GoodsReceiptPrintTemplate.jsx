@@ -147,10 +147,10 @@ const S = {
         flex: '1',
         fontFamily: '"Times New Roman", Times, serif',
         fontSize: '11pt',
-        padding: '0 4px',
+        padding: '0 12px',
         minHeight: '20px',
         fontWeight: 'normal',
-        borderBottom: '1px dotted #000',
+        borderBottom: 'none',
     },
     infoFixedValue: {
         fontFamily: '"Times New Roman", Times, serif',
@@ -159,7 +159,7 @@ const S = {
         minHeight: '20px',
         fontWeight: 'normal',
         textAlign: 'center',
-        borderBottom: '1px dotted #000',
+        borderBottom: 'none',
     },
     infoRowSplit: {
         display: 'flex',
@@ -274,7 +274,7 @@ const S = {
         height: '60px',
     },
     dots: {
-        borderBottom: '1px dotted #000',
+        borderBottom: 'none',
         display: 'inline-block',
         minWidth: '60px',
         textAlign: 'center',
@@ -340,9 +340,9 @@ const ReceiptItem = ({ receipt, items, warehousesList }) => {
                 <div style={S.titleCenter}>
                     Số: <span style={{ fontWeight: 'bold' }}>{receipt.receipt_code}</span>
                 </div>
-                <div style={S.debitCredit}>
-                    <div style={{ marginBottom: '2px' }}>Nợ vỏ: <span style={S.dots}>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></div>
-                    <div>Có: <span style={S.dots}>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></div>
+                <div className="debitCredit">
+                    <div style={{ marginBottom: '2px' }}>Nợ vỏ: <span style={{ ...S.dots, borderBottom: 'none' }}></span></div>
+                    <div>Có: <span style={{ ...S.dots, borderBottom: 'none' }}></span></div>
                 </div>
             </div>
 
@@ -358,20 +358,6 @@ const ReceiptItem = ({ receipt, items, warehousesList }) => {
                         <span style={S.infoValue}>{receipt.deliverer_address}</span>
                     </div>
                 )}
-                <div style={S.infoRow}>
-                    <span style={S.infoLabel}>- Theo</span>
-                    <span style={{ ...S.infoFixedValue, width: '120px', flex: '0 0 120px' }}></span>
-                    <span style={S.infoLabel}>&nbsp;số</span>
-                    <span style={{ ...S.infoFixedValue, width: '100px', flex: '0 0 100px' }}>{receipt.receipt_code}</span>
-                    <span style={S.infoLabel}>&nbsp;ngày</span>
-                    <span style={{ ...S.infoFixedValue, width: '40px', flex: '0 0 40px' }}>{day}</span>
-                    <span style={S.infoLabel}>&nbsp;tháng</span>
-                    <span style={{ ...S.infoFixedValue, width: '40px', flex: '0 0 40px' }}>{month}</span>
-                    <span style={S.infoLabel}>&nbsp;năm</span>
-                    <span style={{ ...S.infoFixedValue, width: '60px', flex: '0 0 60px' }}>{year}</span>
-                    <span style={S.infoLabel}>&nbsp;của</span>
-                    <span style={S.infoValue}>{receipt.supplier_name || ''}</span>
-                </div>
                 <div style={S.infoRowSplit}>
                     <div style={S.splitHalf}>
                         <span style={S.infoLabel}>- Nhập tại kho:</span>
@@ -388,19 +374,19 @@ const ReceiptItem = ({ receipt, items, warehousesList }) => {
             <table style={S.table}>
                 <thead>
                     <tr>
-                        <th style={{ ...S.th, width: '5%' }} rowSpan={2}>STT</th>
+                        <th style={{ ...S.th, width: '3%' }} rowSpan={2}>STT</th>
                         <th style={{ ...S.th, width: '28%' }} rowSpan={2}>
                             Tên, nhãn hiệu, quy cách,<br />phẩm chất vật tư, dụng cụ<br />sản phẩm, hàng hóa
                         </th>
-                        <th style={{ ...S.th, width: '8%' }} rowSpan={2}>Mã số</th>
-                        <th style={{ ...S.th, width: '7%' }} rowSpan={2}>Đơn vị<br />tính</th>
+                        <th style={{ ...S.th, width: '30%' }} rowSpan={2}>Mã số</th>
+                        <th style={{ ...S.th, width: '4%' }} rowSpan={2}>Đơn vị<br />tính</th>
                         <th style={{ ...S.th }} colSpan={2}>Số lượng</th>
-                        <th style={{ ...S.th, width: '14%' }} rowSpan={2}>Đơn giá</th>
-                        <th style={{ ...S.th, width: '18%' }} rowSpan={2}>Thành tiền</th>
+                        <th style={{ ...S.th, width: '10%' }} rowSpan={2}>Đơn giá</th>
+                        <th style={{ ...S.th, width: '13%' }} rowSpan={2}>Thành tiền</th>
                     </tr>
                     <tr>
-                        <th style={{ ...S.th, width: '10%' }}>Yêu cầu</th>
-                        <th style={{ ...S.th, width: '10%' }}>Thực nhập</th>
+                        <th style={{ ...S.th, width: '6%' }}>Yêu cầu</th>
+                        <th style={{ ...S.th, width: '6%' }}>Thực nhập</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -419,7 +405,7 @@ const ReceiptItem = ({ receipt, items, warehousesList }) => {
                     {/* Total row */}
                     <tr>
                         <td style={S.tdBold}></td>
-                        <td style={S.tdBold}>Cộng</td>
+                        <td style={S.tdBold}>TỔNG CỘNG</td>
                         <td style={S.tdBold}></td>
                         <td style={S.tdBold}></td>
                         <td style={S.tdBoldRight}>{String(totalQty).padStart(2, '0')}</td>

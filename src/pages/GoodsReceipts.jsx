@@ -1275,7 +1275,7 @@ const GoodsReceipts = () => {
                                                         <td key={col.key} className={clsx(
                                                             "px-4 py-4",
                                                             col.key === 'items' && "text-center",
-                                                            col.key === 'code' && "whitespace-nowrap",
+                                                            col.key === 'code' && "whitespace-nowrap min-w-[140px]",
                                                             col.key === 'amount' && "text-right",
                                                             (col.key === 'deliverer_address' || col.key === 'items_summary') && "max-w-[200px] truncate"
                                                         )}>

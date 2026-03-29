@@ -12,6 +12,7 @@ import {
     Search,
     Trash2,
     Truck,
+    User,
     X
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -577,29 +578,40 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                                     <SearchableSelect options={customers.map(c => ({ label: c.name, value: c.id }))} value={formData.customer_id} onValueChange={v => setFormData({ ...formData, customer_id: v })} placeholder="-- Chọn khách hàng --" disabled={isReadOnly} />
                                 </div>
 
-                                <div className="space-y-1.5">
-                                    <label className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800"><ScanLine size={16} /> Quét mã QR</label>
-                                    <div className="flex gap-2 items-center">
-                                        <div className="relative flex-1">
-                                            <select value={formData.order_id} onChange={e => setFormData({ ...formData, order_id: e.target.value })} disabled={isReadOnly || !formData.customer_id} className="w-full h-11 px-4 border border-slate-200 rounded-xl font-bold bg-slate-50 outline-none appearance-none">
-                                                <option value=""></option>
-                                                {customerOrders.map(o => <option key={o.id} value={o.id}>ĐH {o.order_code} ({o.status})</option>)}
-                                            </select>
-                                            {!isReadOnly && formData.customer_id && <ChevronDown className="w-4 h-4 text-primary absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div className="space-y-1.5">
+                                        <label className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800"><ScanLine size={16} /> Quét mã đơn hàng</label>
+                                        <div className="flex gap-2 items-center">
+                                            <div className="relative flex-1">
+                                                <select value={formData.order_id} onChange={e => setFormData({ ...formData, order_id: e.target.value })} disabled={isReadOnly || !formData.customer_id} className="w-full h-11 px-4 border border-slate-200 rounded-xl font-bold bg-slate-50 outline-none appearance-none">
+                                                    <option value=""></option>
+                                                    {customerOrders.map(o => <option key={o.id} value={o.id}>ĐH {o.order_code} ({o.status})</option>)}
+                                                </select>
+                                                {!isReadOnly && formData.customer_id && <ChevronDown className="w-4 h-4 text-primary absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />}
+                                            </div>
+                                            {!isReadOnly && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setScannerType('order');
+                                                        setIsScannerOpen(true);
+                                                    }}
+                                                    className="w-11 h-11 flex items-center justify-center bg-primary text-white border border-primary/20 rounded-xl hover:bg-primary-700 transition-all shadow-lg shadow-primary/20"
+                                                    title="Quét mã đơn hàng"
+                                                >
+                                                    <ScanLine size={18} />
+                                                </button>
+                                            )}
                                         </div>
-                                        {!isReadOnly && (
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setScannerType('order');
-                                                    setIsScannerOpen(true);
-                                                }}
-                                                className="w-11 h-11 flex items-center justify-center bg-primary text-white border border-primary/20 rounded-xl hover:bg-primary-700 transition-all shadow-lg shadow-primary/20"
-                                                title="Quét mã đơn hàng"
-                                            >
-                                                <ScanLine size={18} />
-                                            </button>
-                                        )}
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800"><User size={16} /> Nhân viên tạo phiếu</label>
+                                        <input
+                                            type="text"
+                                            value={formData.created_by}
+                                            readOnly
+                                            className="w-full h-11 px-4 bg-slate-100 border border-slate-200 rounded-xl font-bold text-slate-500 cursor-not-allowed outline-none"
+                                        />
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
