@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
 import { supabase } from '../../supabase/config';
-import { validateMST, validatePhone } from '../../utils/taxUtils';
+import { validateMST, validatePhone, formatPhoneNumber } from '../../utils/taxUtils';
 
 export default function SupplierFormModal({ supplier, onClose, onSuccess }) {
     const isEdit = !!supplier;

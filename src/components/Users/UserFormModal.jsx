@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { USER_ROLES, USER_STATUSES } from '../../constants/userConstants';
 import { supabase } from '../../supabase/config';
+import { validatePhone, formatPhoneNumber } from '../../utils/taxUtils';
 
 export default function UserFormModal({ user, onClose, onSuccess }) {
     const isEdit = !!user;
