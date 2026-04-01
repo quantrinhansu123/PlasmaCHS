@@ -41,6 +41,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
         invoice_address: '',
         invoice_email: '',
         care_expiry_date: '',
+        care_assigned_at: '',
         status: 'Chưa thành công'
     });
 
@@ -64,6 +65,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                 invoice_address: customer.invoice_address || '',
                 invoice_email: customer.invoice_email || '',
                 care_expiry_date: customer.care_expiry_date || '',
+                care_assigned_at: customer.care_assigned_at || '',
                 status: customer.status || 'Chưa thành công'
             });
         } else {
@@ -90,10 +92,15 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
             };
             generateCode();
 
-            // Set default care_expiry_date (60 days from now)
+            // Set default care_expiry_date (60 days from now) và care_assigned_at
+            const now = new Date();
             const expiry = new Date();
             expiry.setDate(expiry.getDate() + 60);
-            setFormData(prev => ({ ...prev, care_expiry_date: expiry.toISOString().split('T')[0] }));
+            setFormData(prev => ({ 
+                ...prev, 
+                care_assigned_at: now.toISOString(),
+                care_expiry_date: expiry.toISOString().split('T')[0] 
+            }));
         }
     }, [isEdit, customer, warehouses]);
 
@@ -175,15 +182,55 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
             }
 
             const { data: existing, error: checkError } = await checkQuery
-                .select('id, name, care_expiry_date')
-                .gte('care_expiry_date', new Date().toISOString().split('T')[0]); // Only active care periods
+                .select('id, name, care_expiry_date, care_by');
 
             if (checkError) throw checkError;
 
             if (existing && existing.length > 0) {
-                setErrorMsg('❌ Khách hàng sở hữu: Đã tồn tại khách hàng này và vẫn trong thời hạn chăm sóc (60 ngày)!');
-                setIsLoading(false);
-                return;
+                const existingCustomer = existing[0];
+                const now = new Date();
+                const expiryDate = new Date(existingCustomer.care_expiry_date);
+
+                // Nếu khách hàng đã QUÁ HẠN (expired)
+                if (now > expiryDate) {
+                    const confirmSteal = window.confirm(`⚠️ Khách hàng "${existingCustomer.name}" đã quá hạn chăm sóc (phụ trách cũ: ${existingCustomer.care_by || 'Không rõ'}). \n\nBạn có muốn nhận khách hàng này về tài khoản của mình không? (Bộ đếm 60 ngày sẽ được reset)`);
+                    
+                    if (confirmSteal) {
+                        const newExpiry = new Date();
+                        newExpiry.setDate(newExpiry.getDate() + 60);
+                        
+                        const updateData = {
+                            ...formData,
+                            care_by: formData.care_by || 'Sale hiện tại', // Nên lấy từ auth context nếu có, hiện tại dùng formData
+                            care_assigned_at: now.toISOString(),
+                            care_expiry_date: newExpiry.toISOString().split('T')[0]
+                        };
+                        delete updateData.code; // Không đổi mã khách hàng
+
+                        const { error: stealError } = await supabase
+                            .from('customers')
+                            .update(updateData)
+                            .eq('id', existingCustomer.id);
+                        
+                        if (stealError) throw stealError;
+                        
+                        notificationService.add({
+                            title: `🎯 Đã nhận khách quá hạn: ${existingCustomer.name}`,
+                            description: `Bạn đã tiếp nhận chăm sóc khách hàng này từ hôm nay.`,
+                            type: 'success'
+                        });
+                        
+                        onSuccess();
+                        return;
+                    } else {
+                        setIsLoading(false);
+                        return;
+                    }
+                } else {
+                    setErrorMsg(`❌ Khách hàng sở hữu: "${existingCustomer.name}" hiện vẫn đang trong thời hạn chăm sóc của ${existingCustomer.care_by || 'sale khác'}!`);
+                    setIsLoading(false);
+                    return;
+                }
             }
 
             if (isEdit) {

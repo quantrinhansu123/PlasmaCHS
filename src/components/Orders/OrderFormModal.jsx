@@ -1140,37 +1140,36 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                     <button
                         type="button"
                         onClick={onClose}
-                        className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-500 hover:text-primary font-bold text-[15px] transition-colors outline-none"
-                        disabled={isLoading}
-                    >
-                        Hủy
-                    </button>
-                    <button
-                        type={isReadOnly ? "button" : "submit"}
-                        form={isReadOnly ? undefined : "orderForm"}
-                        disabled={isLoading}
-                        onClick={isReadOnly ? () => {
-                            setReasonSource('initial-edit');
-                            setShowReasonModal(true);
-                        } : undefined}
                         className={clsx(
-                            "w-full md:flex-1 sm:w-auto px-6 py-3 font-bold text-[15px] rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 border disabled:opacity-50",
+                            "px-6 py-3 font-bold text-[14px] rounded-xl transition-all flex items-center justify-center gap-2 border",
                             isReadOnly 
-                                ? "bg-amber-500 text-white border-amber-600 hover:bg-amber-600 shadow-amber-200" 
-                                : "bg-primary text-white border-primary-700/40 hover:bg-primary-700 shadow-primary-200"
+                                ? "w-full sm:w-auto bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200" 
+                                : "w-full sm:w-auto px-4 py-2.5 border border-slate-300 bg-white text-slate-500 hover:text-primary"
                         )}
+                        disabled={isLoading}
                     >
-                        {isLoading ? (
-                            <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                        ) : (
-                            isReadOnly ? <Edit3 className="w-4 h-4" /> : <Save className="w-4 h-4" />
-                        )}
-                        {isLoading 
-                            ? 'Đang lưu đơn...' 
-                            : isReadOnly 
-                                ? 'Sửa đơn' 
-                                : isEdit ? 'Xác nhận cập nhật' : 'Xác nhận tạo đơn hàng'}
+                        {isReadOnly ? <X className="w-4 h-4" /> : null}
+                        {isReadOnly ? 'Đóng cửa sổ' : 'Hủy'}
                     </button>
+                    {!isReadOnly && (
+                        <button
+                            type={isReadOnly ? "button" : "submit"}
+                            form={isReadOnly ? undefined : "orderForm"}
+                            disabled={isLoading}
+                            className={clsx(
+                                "w-full md:flex-1 sm:w-auto px-6 py-3 font-bold text-[15px] rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 border disabled:opacity-50 bg-primary text-white border-primary-700/40 hover:bg-primary-700 shadow-primary-200"
+                            )}
+                        >
+                            {isLoading ? (
+                                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                            ) : (
+                                <Save className="w-4 h-4" />
+                            )}
+                            {isLoading 
+                                ? 'Đang lưu đơn...' 
+                                : isEdit ? 'Xác nhận cập nhật' : 'Xác nhận tạo đơn hàng'}
+                        </button>
+                    )}
                 </div>
 
                 </div>

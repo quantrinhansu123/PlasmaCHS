@@ -117,12 +117,9 @@ const Customers = () => {
         { key: 'legal_rep', label: 'Người đại diện pháp luật' },
         { key: 'managed_by', label: 'Nhân viên phụ trách' },
         { key: 'category', label: 'Loại khách hàng' },
-        { key: 'current_cylinders', label: 'Số vỏ' },
-        { key: 'current_machines', label: 'Số máy hiện có' },
-        { key: 'borrowed_cylinders', label: 'Vỏ bình đang mượn' },
-        { key: 'machines_in_use', label: 'Mã máy đang sử dụng' },
-        { key: 'care_by', label: 'KD chăm sóc' },
-        { key: 'care_expiry_date', label: 'Thời hạn chăm sóc' },
+        { key: 'care_assigned_at', label: 'Ngày đăng ký' },
+        { key: 'days_left', label: 'Ngày còn lại' },
+        { key: 'care_status', label: 'Trạng thái CS' },
         { key: 'status', label: 'Trạng thái' },
         { key: 'invoice_email', label: 'Email hóa đơn' },
     ];
@@ -1037,21 +1034,6 @@ const Customers = () => {
                                         )}
                                     </div>
 
-                                    <div className="grid grid-cols-3 gap-2 rounded-xl bg-muted/10 border border-border/60 p-2.5 mb-3">
-                                        <div className="text-center">
-                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Số vỏ</p>
-                                            <p className="text-[13px] font-bold text-foreground">{formatNumber(c.current_cylinders || 0)}</p>
-                                        </div>
-                                        <div className="text-center border-x border-border/60">
-                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Số máy</p>
-                                            <p className="text-[13px] font-bold text-foreground">{formatNumber(c.current_machines || 0)}</p>
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Bình mượn</p>
-                                            <p className="text-[13px] font-bold text-foreground">{formatNumber(c.borrowed_cylinders || 0)}</p>
-                                        </div>
-                                    </div>
-
                                     <div className="flex items-center justify-between pt-2 border-t border-border/70">
                                         <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                                             <User size={12} />
@@ -1353,52 +1335,67 @@ const Customers = () => {
                                                 className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
                                             />
                                         </td>
-                                        {isColumnVisible('code') && <td className={getCodeCellClass(c.category)}>{c.code}</td>}
-                                        {isColumnVisible('name') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{c.name}</td>}
-                                        {isColumnVisible('phone') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.phone || '—'}</td>}
-                                        {isColumnVisible('address') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.address || '—'}</td>}
-                                        {isColumnVisible('legal_rep') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.legal_rep || '—'}</td>}
-                                        {isColumnVisible('managed_by') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.managed_by || '—'}</td>}
-                                        {isColumnVisible('category') && <td className="px-4 py-4 text-sm text-muted-foreground"><span className={getCategoryBadgeClass(c.category)}>{getLabel(CUSTOMER_CATEGORIES, c.category)}</span></td>}
-                                        {isColumnVisible('current_cylinders') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.current_cylinders || 0)}</td>}
-                                        {isColumnVisible('current_machines') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.current_machines || 0)}</td>}
-                                        {isColumnVisible('borrowed_cylinders') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.borrowed_cylinders || 0)}</td>}
-                                        {isColumnVisible('machines_in_use') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.machines_in_use || '—'}</td>}
-                                        {isColumnVisible('care_by') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.care_by || '—'}</td>}
-                                        {isColumnVisible('care_expiry_date') && (
-                                            <td className="px-4 py-4 text-sm">
-                                                {c.care_expiry_date ? (
-                                                    <div className="flex flex-col">
-                                                        <span className="font-bold text-slate-700">{new Date(c.care_expiry_date).toLocaleDateString('vi-VN')}</span>
-                                                        {(() => {
-                                                            const diff = Math.ceil((new Date(c.care_expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
-                                                            if (diff <= 0) return <span className="text-[10px] font-bold text-rose-500 uppercase">Đã hết hạn</span>;
-                                                            if (diff <= 10) return <span className="text-[10px] font-bold text-amber-500 uppercase">Còn {diff} ngày</span>;
-                                                            return <span className="text-[10px] font-bold text-emerald-500 uppercase">Còn {diff} ngày</span>;
-                                                        })()}
-                                                    </div>
-                                                ) : '—'}
-                                            </td>
-                                        )}
-                                        {isColumnVisible('invoice_email') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.invoice_email || '—'}</td>}
-                                        {isColumnVisible('status') && (
-                                            <td className="px-4 py-4 text-sm">
-                                                <select
-                                                    value={c.status || ''}
-                                                    onChange={(e) => handleStatusChange(c.id, e.target.value)}
-                                                    className={clsx(
-                                                        "px-2 py-1 rounded-lg text-[11px] font-black uppercase tracking-wider border-none focus:ring-2 focus:ring-primary/20 outline-none cursor-pointer transition-all",
-                                                        c.status === 'Thành công' 
-                                                            ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" 
-                                                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                                                    )}
-                                                >
-                                                    <option value="" disabled>-- Chọn --</option>
-                                                    <option value="Thành công">Thành công</option>
-                                                    <option value="Chưa thành công">Chưa thành công</option>
-                                                </select>
-                                            </td>
-                                        )}
+                                        {visibleTableColumns.map((col) => {
+                                            const key = col.key;
+                                            if (key === 'code') return <td key={key} className={getCodeCellClass(c.category)}>{c.code}</td>;
+                                            if (key === 'name') return <td key={key} className="px-4 py-4 text-sm font-semibold text-foreground">{c.name}</td>;
+                                            if (key === 'phone') return <td key={key} className="px-4 py-4 text-sm text-muted-foreground">{c.phone || '—'}</td>;
+                                            if (key === 'address') return <td key={key} className="px-4 py-4 text-sm text-muted-foreground">{c.address || '—'}</td>;
+                                            if (key === 'legal_rep') return <td key={key} className="px-4 py-4 text-sm text-muted-foreground">{c.legal_rep || '—'}</td>;
+                                            if (key === 'managed_by') return <td key={key} className="px-4 py-4 text-sm text-muted-foreground">{c.managed_by || '—'}</td>;
+                                            if (key === 'category') return (
+                                                <td key={key} className="px-4 py-4 text-sm text-muted-foreground">
+                                                    <span className={getCategoryBadgeClass(c.category)}>{getLabel(CUSTOMER_CATEGORIES, c.category)}</span>
+                                                </td>
+                                            );
+                                            if (key === 'care_assigned_at') return (
+                                                <td key={key} className="px-4 py-4 text-sm font-medium text-slate-600">
+                                                    {c.care_assigned_at ? new Date(c.care_assigned_at).toLocaleDateString('vi-VN') : (c.created_at ? new Date(c.created_at).toLocaleDateString('vi-VN') : '—')}
+                                                </td>
+                                            );
+                                            if (key === 'days_left') return (
+                                                <td key={key} className="px-4 py-4 text-sm">
+                                                    {(() => {
+                                                        if (!c.care_expiry_date) return <span className="text-slate-400">—</span>;
+                                                        const diff = Math.ceil((new Date(c.care_expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
+                                                        if (diff <= 0) return <span className="font-black text-rose-600 uppercase tracking-tighter">Hết hạn</span>;
+                                                        if (diff <= 10) return <span className="font-black text-rose-500 animate-pulse">Còn {diff} ngày</span>;
+                                                        return <span className="font-bold text-slate-700">Còn {diff} ngày</span>;
+                                                    })()}
+                                                </td>
+                                            );
+                                            if (key === 'care_status') return (
+                                                <td key={key} className="px-4 py-4 text-sm">
+                                                    {(() => {
+                                                        if (!c.care_expiry_date) return '—';
+                                                        const diff = Math.ceil((new Date(c.care_expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
+                                                        if (diff <= 0) return <span className="px-2 py-1 bg-rose-100 text-rose-700 rounded-lg text-[10px] font-black uppercase tracking-widest border border-rose-200">QUÁ HẠN</span>;
+                                                        if (diff <= 10) return <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded-lg text-[10px] font-black uppercase tracking-widest border border-amber-200">CẢNH BÁO</span>;
+                                                        return <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-black uppercase tracking-widest border border-emerald-200">ỔN ĐỊNH</span>;
+                                                    })()}
+                                                </td>
+                                            );
+                                            if (key === 'status') return (
+                                                <td key={key} className="px-4 py-4 text-sm">
+                                                    <select
+                                                        value={c.status || ''}
+                                                        onChange={(e) => handleStatusChange(c.id, e.target.value)}
+                                                        className={clsx(
+                                                            "px-2 py-1 rounded-lg text-[11px] font-black uppercase tracking-wider border-none focus:ring-2 focus:ring-primary/20 outline-none cursor-pointer transition-all",
+                                                            c.status === 'Thành công' 
+                                                                ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" 
+                                                                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                                        )}
+                                                    >
+                                                        <option value="" disabled>-- Chọn --</option>
+                                                        <option value="Thành công">Thành công</option>
+                                                        <option value="Chưa thành công">Chưa thành công</option>
+                                                    </select>
+                                                </td>
+                                            );
+                                            if (key === 'invoice_email') return <td key={key} className="px-4 py-4 text-sm text-muted-foreground">{c.invoice_email || '—'}</td>;
+                                            return <td key={key} className="px-4 py-4 text-sm text-muted-foreground">—</td>;
+                                        })}
                                         <td className="px-4 py-4 text-center border-l border-r border-primary/20">
                                             <div className="flex items-center justify-center gap-3">
                                                 {c.status === 'Thành công' && (
