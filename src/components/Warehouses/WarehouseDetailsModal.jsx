@@ -95,7 +95,7 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
     const content = (
         <div className="flex flex-col h-full bg-[#f8fafc]">
             {/* Header Profile */}
-            <div className="bg-white px-4 md:px-8 py-4 md:py-6 border-b border-slate-200 shrink-0 relative overflow-hidden sticky top-0 z-20">
+            <div className="bg-white px-4 md:px-8 py-4 md:py-6 border-b border-slate-200 shrink-0 overflow-hidden sticky top-0 z-20">
                 <div className="absolute top-0 right-0 w-40 h-40 md:w-64 md:h-64 bg-primary/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 opacity-60 pointer-events-none"></div>
 
                 <div className="flex items-start justify-between gap-3 relative z-10">
@@ -104,7 +104,7 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                             <Warehouse className="w-6 h-6 md:w-8 md:h-8" />
                         </div>
                         <div className="min-w-0">
-                            <h2 className="text-xl md:text-2xl font-black text-slate-900 mb-1 tracking-tight flex items-center gap-2 md:gap-3 truncate text-primary">
+                            <h2 className="text-xl md:text-2xl font-black mb-1 tracking-tight flex items-center gap-2 md:gap-3 truncate text-primary">
                                 {warehouse.warehouse_name || 'Kho hàng'}
                             </h2>
                             <div className="flex flex-wrap items-center gap-2 md:gap-4 text-xs md:text-sm font-bold text-slate-500">
@@ -176,29 +176,52 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                                     <p className="text-slate-400 font-bold">Kho hiện đang trống</p>
                                 </div>
                             ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {displayedInventory.map((item) => (
-                                        <div key={item.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-primary/20 transition-all group overflow-hidden relative">
-                                            <div className="absolute top-0 right-0 w-24 h-24 bg-primary/5 rounded-full -translate-y-1/2 translate-x-1/2 group-hover:bg-primary/10 transition-colors"></div>
-                                            <div className="flex items-center gap-3 mb-3 relative z-10">
-                                                <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-black group-hover:scale-110 transition-transform">
-                                                    {item.volume || '—'}
-                                                </div>
-                                                <div className="min-w-0 flex-1">
-                                                    <h4 className="font-black text-slate-800 truncate mb-0.5">{item.serial_number}</h4>
-                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{item.category || 'Vỏ bình'}</p>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center justify-between relative z-10">
-                                                <span className="text-[10px] font-black text-slate-400 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100">
-                                                    OK
-                                                </span>
-                                                <span className="text-[10px] font-black text-primary px-2 py-0.5">
-                                                    {item.status}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    ))}
+                                <div className="bg-white border border-slate-200 rounded-[1.5rem] overflow-hidden shadow-sm shadow-slate-100">
+                                    <div className="overflow-x-auto custom-scrollbar">
+                                        <table className="w-full border-collapse">
+                                            <thead>
+                                                <tr className="bg-slate-50/80 border-b border-slate-200">
+                                                    <th className="px-5 py-4 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest">Loại</th>
+                                                    <th className="px-5 py-4 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest">Số hiệu / Serial</th>
+                                                    <th className="px-5 py-4 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center">Kiểm định</th>
+                                                    <th className="px-5 py-4 text-right text-[11px] font-black text-slate-400 uppercase tracking-widest">Trạng thái</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {displayedInventory.map((item) => (
+                                                    <tr key={item.id} className="hover:bg-primary/[0.02] transition-colors group">
+                                                        <td className="px-5 py-4 whitespace-nowrap">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="h-9 min-w-[40px] px-3 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center font-bold text-[12px] group-hover:bg-primary/10 group-hover:text-primary transition-all">
+                                                                    {item.volume || '—'}
+                                                                </div>
+                                                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{item.category || 'Vỏ bình'}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-5 py-4 whitespace-nowrap">
+                                                            <span className="font-black text-slate-800 text-[14px]">{item.serial_number}</span>
+                                                        </td>
+                                                        <td className="px-5 py-4 whitespace-nowrap text-center">
+                                                            <span className="inline-flex px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-600 text-[10px] font-black border border-emerald-100/50">
+                                                                OK
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-5 py-4 whitespace-nowrap text-right">
+                                                            <span className={clsx(
+                                                                "inline-flex px-3 py-1 rounded-full text-[10px] font-black tracking-wide shadow-sm",
+                                                                item.status === 'sẵn sàng' ? "bg-emerald-500 text-white" :
+                                                                item.status === 'đang vận chuyển' ? "bg-blue-500 text-white" :
+                                                                item.status === 'thuộc khách hàng' ? "bg-indigo-500 text-white" :
+                                                                "bg-slate-100 text-slate-600"
+                                                            )}>
+                                                                {item.status?.toUpperCase()}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
                             )}
                         </section>

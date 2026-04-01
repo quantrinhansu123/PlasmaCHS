@@ -91,6 +91,8 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
     const [formData, setFormData] = useState(defaultState);
     const [warehousesList, setWarehousesList] = useState([]);
     const [cylinderDebt, setCylinderDebt] = useState([]);
+    const [availableProductTypes, setAvailableProductTypes] = useState(PRODUCT_TYPES);
+    const [isFetchingStock, setIsFetchingStock] = useState(false);
 
     useEffect(() => {
         fetchRealCustomers();
@@ -110,6 +112,70 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
     const loadCylinderDebt = async (customerId) => {
         const debt = await fetchCustomerCylinderDebt(customerId);
         setCylinderDebt(debt || []);
+    };
+
+    const updateStockOptions = async (warehouseId) => {
+        if (!warehouseId) {
+            setAvailableProductTypes(PRODUCT_TYPES);
+            return;
+        }
+
+        setIsFetchingStock(true);
+        try {
+            // 1. Fetch Machine counts
+            const { data: machines, error: mErr } = await supabase
+                .from('machines')
+                .select('machine_type')
+                .eq('warehouse', warehouseId)
+                .eq('status', 'sẵn sàng');
+            
+            if (mErr) throw mErr;
+
+            // 2. Fetch Cylinder counts
+            const { data: cylinders, error: cErr } = await supabase
+                .from('cylinders')
+                .select('volume')
+                .eq('warehouse_id', warehouseId)
+                .eq('status', 'sẵn sàng');
+            
+            if (cErr) throw cErr;
+
+            // Count occurrences
+            const mCounts = {};
+            machines?.forEach(m => {
+                const type = m.machine_type || 'Khac';
+                mCounts[type] = (mCounts[type] || 0) + 1;
+            });
+
+            const cCounts = {};
+            cylinders?.forEach(c => {
+                const vol = c.volume || '';
+                if (vol.includes('4L')) cCounts['BINH_4L'] = (cCounts['BINH_4L'] || 0) + 1;
+                else if (vol.includes('8L')) cCounts['BINH_8L'] = (cCounts['BINH_8L'] || 0) + 1;
+                else if (vol.includes('3LC')) cCounts['BINH_3LC'] = (cCounts['BINH_3LC'] || 0) + 1;
+            });
+
+            // Map static PRODUCT_TYPES to their stock counts
+            const updatedTypes = PRODUCT_TYPES.map(pt => {
+                let stock = 0;
+                if (pt.id === 'BINH_4L') stock = cCounts['BINH_4L'] || 0;
+                else if (pt.id === 'BINH_8L') stock = cCounts['BINH_8L'] || 0;
+                else if (pt.id === 'MAY_MED') stock = mCounts['BV'] || 0;
+                else if (pt.id === 'TM') stock = mCounts['TM'] || 0;
+                else if (pt.id === 'FM') stock = mCounts['FM'] || 0;
+                else if (pt.id === 'MAY_ROSY') stock = mCounts['ROSY'] || mCounts['MAY_ROSY'] || 0;
+                else if (pt.id === 'MAY') stock = machines?.length || 0;
+                
+                return { ...pt, stock };
+            });
+
+            setAvailableProductTypes(updatedTypes);
+        } catch (error) {
+            console.error('Error updating stock options:', error);
+            setAvailableProductTypes(PRODUCT_TYPES);
+        } finally {
+            setIsFetchingStock(false);
+        }
     };
 
     const fetchPromotions = async () => {
@@ -132,7 +198,14 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
             if (data) {
                 setWarehousesList(data);
                 if (!isEdit && data.length > 0) {
-                    setFormData(prev => prev.warehouse ? prev : { ...prev, warehouse: data[0].id });
+                    const defaultWh = data[0].id;
+                    setFormData(prev => {
+                        const newWh = prev.warehouse || defaultWh;
+                        updateStockOptions(newWh);
+                        return { ...prev, warehouse: newWh };
+                    });
+                } else if (isEdit && order.warehouse) {
+                    updateStockOptions(order.warehouse);
                 }
             }
         } catch (error) {
@@ -253,6 +326,9 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
     const handleChange = (e) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
+        if (name === 'warehouse') {
+            updateStockOptions(value);
+        }
     };
 
     const handleCustomerSelect = (customer) => {
@@ -846,13 +922,21 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                             name="productType"
                                             value={formData.productType}
                                             onChange={handleChange}
-                                            disabled={isReadOnly}
+                                            disabled={isReadOnly || isFetchingStock}
                                             className={clsx(
                                                 "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold appearance-none transition-all",
-                                                isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                                (isReadOnly || isFetchingStock) ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
                                             )}
                                         >
-                                            {PRODUCT_TYPES.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                                            {isFetchingStock ? (
+                                                <option>Đang tải tồn kho...</option>
+                                            ) : (
+                                                availableProductTypes.map(p => (
+                                                    <option key={p.id} value={p.id}>
+                                                        {p.label} {p.stock !== undefined ? (p.stock > 0 ? `(Tồn: ${p.stock})` : '(Hết hàng)') : ''}
+                                                    </option>
+                                                ))
+                                            )}
                                         </select>
                                         {!isReadOnly && <ChevronDown className="w-4 h-4 text-primary/70 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />}
                                     </div>
