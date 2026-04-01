@@ -30,10 +30,11 @@ import {
     Users,
     Download,
     Upload,
-    Ticket,
     X,
     MoreVertical,
-    FilePlus
+    FilePlus,
+    ToggleLeft,
+    ToggleRight
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
@@ -1066,10 +1067,27 @@ const Customers = () => {
                                                     <FilePlus size={16} />
                                                 </button>
                                             )}
-                                            <button onClick={() => { setSelectedCustomer(c); setIsRepairModalOpen(true); }} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg" title="Báo hỏng"><Ticket size={16} /></button>
-                                            <button onClick={() => handleViewCustomer(c)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg"><Eye size={16} /></button>
-                                            <button onClick={() => handleEditCustomer(c)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
-                                            <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg"><Trash2 size={16} /></button>
+                                            <button 
+                                                onClick={() => handleStatusChange(c.id, c.status === 'Thành công' ? 'Chưa thành công' : 'Thành công')} 
+                                                className={clsx(
+                                                    "p-2 rounded-lg transition-all border",
+                                                    c.status === 'Thành công' 
+                                                        ? "bg-emerald-50 border-emerald-100 text-emerald-600" 
+                                                        : "bg-slate-50 border-slate-200 text-slate-400"
+                                                )}
+                                                title={c.status === 'Thành công' ? "Đánh dấu là chưa thành công" : "Đánh dấu là thành công"}
+                                            >
+                                                {c.status === 'Thành công' ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
+                                            </button>
+                                            <button onClick={() => handleViewCustomer(c)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg" title="Xem chi tiết">
+                                                <Eye size={16} />
+                                            </button>
+                                            <button onClick={() => handleEditCustomer(c)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg" title="Chỉnh sửa">
+                                               <Edit size={16} />
+                                            </button>
+                                            <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg" title="Xóa">
+                                               <Trash2 size={16} />
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
@@ -1392,8 +1410,17 @@ const Customers = () => {
                                                         <FilePlus size={16} className="w-4 h-4" />
                                                     </button>
                                                 )}
-                                                <button onClick={() => { setSelectedCustomer(c); setIsRepairModalOpen(true); }} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Báo hỏng">
-                                                    <Ticket size={16} className="w-4 h-4" />
+                                                <button 
+                                                    onClick={() => handleStatusChange(c.id, c.status === 'Thành công' ? 'Chưa thành công' : 'Thành công')} 
+                                                    className={clsx(
+                                                        "transition-all p-1 rounded-md",
+                                                        c.status === 'Thành công' 
+                                                            ? "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50" 
+                                                            : "text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                                                    )}
+                                                    title={c.status === 'Thành công' ? "Đánh dấu là chưa thành công" : "Đánh dấu là thành công"}
+                                                >
+                                                    {c.status === 'Thành công' ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
                                                 </button>
                                                 <button onClick={() => handleViewCustomer(c)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="Xem chi tiết">
                                                     <Eye className="w-4 h-4" />
