@@ -551,11 +551,29 @@ const Suppliers = () => {
                                             <Phone size={12} />
                                             <span>NCC #{supplier.id.slice(0, 5)}</span>
                                         </div>
-                                        <div className="flex items-center gap-3">
-                                            <button onClick={() => handleViewSupplier(supplier)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg shadow-sm active:scale-95 transition-all"><Eye size={16} /></button>
-                                            <button onClick={() => handleEditSupplier(supplier)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg shadow-sm active:scale-95 transition-all"><Edit size={16} /></button>
+                                        <div className="flex items-center gap-2">
+                                            <button 
+                                                onClick={() => handleViewSupplier(supplier)} 
+                                                className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-950 bg-blue-50 border border-blue-100 shadow-sm transition-all"
+                                                title="Xem chi tiết"
+                                            >
+                                                <Eye size={18} />
+                                            </button>
+                                            <button 
+                                                onClick={() => handleEditSupplier(supplier)} 
+                                                className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-950 bg-amber-50 border border-amber-100 shadow-sm transition-all"
+                                                title="Chỉnh sửa"
+                                            >
+                                                <Edit size={18} />
+                                            </button>
                                             {(role === 'admin' || role === 'manager') && (
-                                                <button onClick={() => handleDeleteSupplier(supplier.id, supplier.name)} className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg shadow-sm active:scale-95 transition-all"><Trash2 size={16} /></button>
+                                                <button 
+                                                    onClick={() => handleDeleteSupplier(supplier.id, supplier.name)} 
+                                                    className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-950 bg-rose-50 border border-rose-100 shadow-sm transition-all"
+                                                    title="Xóa"
+                                                >
+                                                    <Trash2 size={18} />
+                                                </button>
                                             )}
                                         </div>
                                     </div>
@@ -729,21 +747,21 @@ const Suppliers = () => {
                                         {isColumnVisible('email') && <td className="px-4 py-4 text-[13px] font-bold text-slate-500">{supplier.email || '—'}</td>}
                                         {isColumnVisible('phone') && <td className="px-4 py-4 text-[13px] font-bold text-slate-500 tabular-nums">{supplier.phone || '—'}</td>}
                                         {isColumnVisible('address') && <td className="px-4 py-4 text-[13px] font-bold text-slate-500">{supplier.address || '—'}</td>}
-                                        <td className="px-4 py-4 text-center border-l border-primary/20">
-                                            <div className="flex items-center justify-center gap-3">
+                                        <td className="sticky right-0 z-20 bg-white group-hover:bg-blue-50/40 px-4 py-4 text-center shadow-[-6px_0_10px_-8px_rgba(15,23,42,0.25)] before:content-[''] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:bg-slate-300">
+                                            <div className="flex items-center justify-center gap-2">
                                                 <button 
                                                     onClick={() => handleViewSupplier(supplier)} 
                                                     className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" 
                                                     title="Xem chi tiết"
                                                 >
-                                                    <Eye className="w-4 h-4" />
+                                                    <Eye size={18} />
                                                 </button>
                                                 <button 
                                                     onClick={() => handleEditSupplier(supplier)} 
                                                     className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" 
                                                     title="Chỉnh sửa"
                                                 >
-                                                    <Edit className="w-4 h-4" />
+                                                    <Edit size={18} />
                                                 </button>
                                                 {(role === 'admin' || role === 'manager') && (
                                                     <button 
@@ -751,7 +769,7 @@ const Suppliers = () => {
                                                         className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" 
                                                         title="Xóa"
                                                     >
-                                                        <Trash2 className="w-4 h-4" />
+                                                        <Trash2 size={18} />
                                                     </button>
                                                 )}
                                             </div>

@@ -62,8 +62,6 @@ export default function CustomerDetailsModal({ customer, onClose }) {
         currentDebt: 0
     });
 
-
-
     useEffect(() => {
         if (!customer) return;
         fetchCustomerData();
@@ -72,7 +70,6 @@ export default function CustomerDetailsModal({ customer, onClose }) {
     const fetchCustomerData = async () => {
         setLoading(true);
         try {
-            // 1. Fetch Orders (Exclude HUY_DON)
             const { data: ordersData, error: err1 } = await supabase
                 .from('orders')
                 .select('*')
@@ -81,7 +78,6 @@ export default function CustomerDetailsModal({ customer, onClose }) {
 
             if (err1) throw err1;
 
-            // 2. Fetch Transactions (THU/CHI)
             const { data: txData, error: err2 } = await supabase
                 .from('customer_transactions')
                 .select('*')
@@ -93,24 +89,20 @@ export default function CustomerDetailsModal({ customer, onClose }) {
             setOrders(ordersData || []);
             setTransactions(txData || []);
 
-            // 3. Calculate Debt
-            // Consider order as debt if it's not canceled or in initial draft states
             const validOrders = (ordersData || []).filter(o =>
                 !['HUY_DON'].includes(o.status)
             );
             const totalOrder = validOrders.reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0);
 
             let totalPaid = 0;
-            let totalRefund = 0; // Công ty hoàn tiền cho khách
+            let totalRefund = 0;
 
             (txData || []).forEach(tx => {
                 const amt = Number(tx.amount) || 0;
-                if (tx.transaction_type === 'THU') totalPaid += amt; // Khách trả nợ -> THU
-                else if (tx.transaction_type === 'CHI') totalRefund += amt; // Cty hoàn lại -> CHI
+                if (tx.transaction_type === 'THU') totalPaid += amt;
+                else if (tx.transaction_type === 'CHI') totalRefund += amt;
             });
 
-            // Công nợ = (Tổng tiền hàng KH mua) - (Tổng tiền KH đã trả - Công ty hoàn lại)
-            // Nếu > 0: Khách hàng đang nợ Công ty.
             const debt = totalOrder - (totalPaid - totalRefund);
 
             setStats({
@@ -140,7 +132,6 @@ export default function CustomerDetailsModal({ customer, onClose }) {
             let nextCode = editingTxCode;
 
             if (!editingTxId) {
-                // Generate next PT code (Phiếu Thu) only if creating new
                 const { data: latestTx } = await supabase
                     .from('customer_transactions')
                     .select('transaction_code')
@@ -164,14 +155,12 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                 note: paymentNote,
             };
 
-            // Only set these for NEW transactions
             if (!editingTxId) {
                 payload.transaction_code = nextCode;
                 payload.transaction_type = 'THU';
                 payload.created_by = 'Kế toán';
             }
 
-            // Upload bill image if provided
             if (billImageFile) {
                 const fileName = `bill_${nextCode}_${Date.now()}.${billImageFile.name.split('.').pop()}`;
                 const { error: uploadError } = await supabase.storage
@@ -194,7 +183,7 @@ export default function CustomerDetailsModal({ customer, onClose }) {
             }
 
             resetPaymentForm();
-            fetchCustomerData(); // refresh data
+            fetchCustomerData();
         } catch (error) {
             console.error('Lỗi khi lập phiếu thu:', error);
             alert('❌ Có lỗi lập phiếu thu: ' + error.message);
@@ -228,9 +217,7 @@ export default function CustomerDetailsModal({ customer, onClose }) {
     };
 
     const handleDeleteTransaction = async (id, code) => {
-        if (!window.confirm(`Bạn có chắc chắn muốn xóa giao dịch ${code} không? Thao tác này có thể ảnh hưởng đến công nợ chung và không thể hoàn tác.`)) {
-            return;
-        }
+        if (!window.confirm(`Bạn có chắc chắn muốn xóa giao dịch ${code} không?`)) return;
         try {
             const { error } = await supabase.from('customer_transactions').delete().eq('id', id);
             if (error) throw error;
@@ -251,23 +238,16 @@ export default function CustomerDetailsModal({ customer, onClose }) {
         const exportData = transactions.map(tx => ({
             'Mã Giao Dịch': tx.transaction_code,
             'Ngày Giao Dịch': new Date(tx.transaction_date).toLocaleDateString('vi-VN'),
-            'Loại Giao Dịch': tx.transaction_type === 'THU' ? 'Khách Trả Tiền (Cộng)' : 'Hoàn Tiền (Trừ)',
-            'Số Tiền (VNĐ)': tx.amount,
+            'Loại Giao Dịch': tx.transaction_type === 'THU' ? 'Thu' : 'Chi',
+            'Số Tiền': tx.amount,
             'Hình Thức': tx.payment_method,
-            'Nội Dung': tx.note || '',
-            'Phụ Trách': tx.created_by || ''
+            'Nội Dung': tx.note || ''
         }));
 
         const ws = XLSX.utils.json_to_sheet(exportData);
-        const colWidths = [
-            { wch: 15 }, { wch: 15 }, { wch: 25 }, { wch: 18 }, { wch: 18 }, { wch: 30 }, { wch: 15 }
-        ];
-        ws['!cols'] = colWidths;
-
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Lịch Sử Giao Dịch");
-        const safeName = customer.name.replace(/[^a-zA-Z0-9\s-]/g, '').trim().replace(/\s+/g, '_');
-        XLSX.writeFile(wb, `LichSu_GiaoDich_${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+        XLSX.utils.book_append_sheet(wb, ws, "Giao dịch");
+        XLSX.writeFile(wb, `GiaoDich_${customer.name}.xlsx`);
     };
 
     const formatCurrency = (amount) => {
@@ -284,7 +264,6 @@ export default function CustomerDetailsModal({ customer, onClose }) {
             "fixed inset-0 z-[100005] flex justify-end transition-all duration-300",
             isClosing ? "opacity-0 pointer-events-none" : "opacity-100"
         )}>
-            {/* Backdrop */}
             <div
                 className={clsx(
                     "absolute inset-0 bg-black/45 backdrop-blur-sm animate-in fade-in duration-300",
@@ -293,497 +272,229 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                 onClick={handleClose}
             />
 
-            {/* Panel */}
             <div
                 className={clsx(
-                    "relative bg-slate-50 shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col h-full border-l border-slate-200 animate-in slide-in-from-right duration-500",
+                    "relative bg-slate-50 shadow-2xl w-full max-w-3xl overflow-hidden h-full flex flex-col border-l border-slate-200 animate-in slide-in-from-right duration-500",
                     isClosing && "animate-out slide-out-to-right duration-300"
                 )}
                 onClick={e => e.stopPropagation()}
             >
-                {/* Header Profile */}
-                <div className="bg-white px-4 md:px-6 py-3 md:py-4 border-b border-slate-200 shrink-0 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-32 h-32 md:w-48 md:h-48 bg-primary/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 opacity-60 pointer-events-none"></div>
-
-                    <div className="flex items-start justify-between gap-3 relative z-10">
-                        <div className="flex items-start md:items-center gap-2 md:gap-4 min-w-0">
-                            <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl flex items-center justify-center bg-primary text-white shadow-lg shadow-primary/20 shrink-0">
-                                <UserCircle className="w-5 h-5 md:w-7 md:h-7" />
+                {/* Header */}
+                <div className="bg-white px-6 py-4 border-b border-slate-200 shrink-0">
+                    <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-primary text-white shadow-lg">
+                                <UserCircle className="w-7 h-7" />
                             </div>
-                            <div className="min-w-0">
-                                <h2 className="text-xl md:text-2xl font-black text-slate-900 mb-1 tracking-tight truncate">{customer.name}</h2>
-                                <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs md:text-sm font-bold text-slate-500">
-                                    <span className="flex items-center gap-1.5"><Phone className="w-4 h-4 text-slate-400" /> {customer.phone || '—'}</span>
-                                    <span className="flex items-center gap-1.5 min-w-0"><MapPin className="w-4 h-4 text-slate-400 shrink-0" /> <span className="max-w-[220px] md:max-w-[300px] truncate" title={customer.address}>{customer.address || '—'}</span></span>
+                            <div>
+                                <h2 className="text-2xl font-black text-slate-900 tracking-tight">{customer.name}</h2>
+                                <div className="flex items-center gap-4 text-sm font-bold text-slate-500">
+                                    <span className="flex items-center gap-1.5"><Phone className="w-4 h-4" /> {customer.phone || '—'}</span>
+                                    <span className="flex items-center gap-1.5"><MapPin className="w-4 h-4" /> {customer.address || '—'}</span>
                                 </div>
                             </div>
                         </div>
-                        <button onClick={handleClose} className="p-2 md:p-2.5 bg-slate-100 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-xl transition-colors shrink-0">
-                            <X className="w-5 h-5 md:w-6 md:h-6" />
+                        <button onClick={handleClose} className="p-2 bg-slate-100 text-slate-400 hover:text-rose-500 rounded-xl transition-colors">
+                            <X className="w-6 h-6" />
                         </button>
                     </div>
 
-                    {/* Navigation Tabs */}
-                    <div className="grid grid-cols-3 md:flex md:items-center md:gap-6 mt-4 md:mt-5 border-b border-slate-200 relative z-10 overflow-hidden">
-                        <button
-                            onClick={() => setActiveTab('overview')}
-                            className={`pt-1.5 pb-2.5 md:pb-4 px-1 md:px-2 text-[11px] md:text-sm font-black tracking-normal md:tracking-wider transition-all duration-300 border-b-2 min-w-0 ${activeTab === 'overview' ? 'text-primary border-primary' : 'text-slate-400 border-transparent hover:text-slate-700'}`}
-                        >
-                            <div className="flex items-center justify-center gap-1 md:gap-2 min-w-0">
-                                <Activity className="w-3.5 h-3.5 md:w-4 md:h-4 shrink-0" />
-                                <span className="text-center leading-tight">Tổng quan</span>
-                            </div>
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('orders')}
-                            className={`pt-1.5 pb-2.5 md:pb-4 px-1 md:px-2 text-[11px] md:text-sm font-black tracking-normal md:tracking-wider transition-all duration-300 border-b-2 min-w-0 ${activeTab === 'orders' ? 'text-primary border-primary' : 'text-slate-400 border-transparent hover:text-slate-700'}`}
-                        >
-                            <div className="relative flex items-center justify-center gap-1 md:gap-2 min-w-0">
-                                <Package className="w-3.5 h-3.5 md:w-4 md:h-4 shrink-0" />
-                                <span className="text-center leading-tight">Đơn hàng</span>
-                                <span className="hidden md:inline-flex bg-slate-100 text-slate-500 py-0.5 px-2 rounded-full text-[10px] leading-none shrink-0">{orders.length}</span>
-                            </div>
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('transactions')}
-                            className={`pt-1.5 pb-2.5 md:pb-4 px-1 md:px-2 text-[11px] md:text-sm font-black tracking-normal md:tracking-wider transition-all duration-300 border-b-2 min-w-0 ${activeTab === 'transactions' ? 'text-primary border-primary' : 'text-slate-400 border-transparent hover:text-slate-700'}`}
-                        >
-                            <div className="relative flex items-center justify-center gap-1 md:gap-2 min-w-0">
-                                <History className="w-3.5 h-3.5 md:w-4 md:h-4 shrink-0" />
-                                <span className="text-center leading-tight">Thu / Chi</span>
-                                <span className="hidden md:inline-flex bg-slate-100 text-slate-500 py-0.5 px-2 rounded-full text-[10px] leading-none shrink-0">{transactions.length}</span>
-                            </div>
-                        </button>
+                    <div className="flex items-center gap-6 mt-5 border-b border-slate-200">
+                        <button onClick={() => setActiveTab('overview')} className={clsx("pb-4 text-sm font-black transition-all border-b-2", activeTab === 'overview' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Tổng quan</button>
+                        <button onClick={() => setActiveTab('orders')} className={clsx("pb-4 text-sm font-black transition-all border-b-2", activeTab === 'orders' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Đơn hàng ({orders.length})</button>
+                        <button onClick={() => setActiveTab('transactions')} className={clsx("pb-4 text-sm font-black transition-all border-b-2", activeTab === 'transactions' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Thu / Chi ({transactions.length})</button>
                     </div>
                 </div>
 
-                {/* Body Details */}
-                <div className="flex-1 overflow-y-auto p-4 md:p-6 relative">
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto p-6">
                     {loading ? (
-                        <div className="flex flex-col items-center justify-center h-40 space-y-4">
-                            <div className="w-10 h-10 border-4 border-primary/10 border-t-primary rounded-full animate-spin"></div>
-                            <p className="text-sm font-bold text-slate-400 animate-pulse">Đang tải dữ liệu Khách hàng...</p>
-                        </div>
+                        <div className="flex items-center justify-center h-40 font-bold text-slate-400">Đang tải...</div>
                     ) : (
-                        <div className="animate-in slide-in-from-bottom-4 duration-500 fade-in">
-
-                            {/* TAB: OVERVIEW */}
+                        <div className="space-y-6">
                             {activeTab === 'overview' && (
-                                <div className="space-y-6 md:space-y-8">
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
-                                        {/* Card CÔNG NỢ */}
-                                        <div className="bg-rose-50 border border-rose-100 rounded-2xl p-4 md:p-5 relative overflow-hidden group hover:-translate-y-1 transition-transform duration-300">
-                                            <div className="absolute -right-4 -bottom-4 bg-rose-200/50 w-24 h-24 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-500"></div>
-                                            <div className="flex justify-between items-start mb-4 relative z-10">
-                                                <div className="w-10 h-10 bg-rose-100 text-rose-600 rounded-xl flex items-center justify-center">
-                                                    <DollarSign className="w-5 h-5" />
-                                                </div>
-                                            </div>
-                                            <p className="text-[11px] font-black text-rose-400 uppercase tracking-widest relative z-10">Công Nợ Khách Gửi</p>
-                                            <h3 className="text-xl md:text-2xl font-black text-rose-700 mt-1 relative z-10 break-words">{formatCurrency(stats.currentDebt)}</h3>
+                                <div className="space-y-6">
+                                    <div className="grid grid-cols-3 gap-6 text-center">
+                                        <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100">
+                                            <p className="text-[10px] font-black text-rose-400 uppercase tracking-widest mb-1">Công Nợ</p>
+                                            <h3 className="text-xl font-black text-rose-700">{formatCurrency(stats.currentDebt)}</h3>
                                         </div>
-
-                                        <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4 md:p-5 relative overflow-hidden group hover:-translate-y-1 transition-transform duration-300">
-                                            <div className="absolute -right-4 -bottom-4 bg-slate-100 w-24 h-24 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-500"></div>
-                                            <div className="flex justify-between items-start mb-4 relative z-10">
-                                                <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
-                                                    <ArrowUpRight className="w-5 h-5" />
-                                                </div>
-                                            </div>
-                                            <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest relative z-10">Tổng Tiền Hàng</p>
-                                            <h3 className="text-xl md:text-2xl font-black text-slate-800 mt-1 relative z-10 break-words">{formatCurrency(stats.totalOrderValue)}</h3>
+                                        <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100">
+                                            <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-1">Tổng Tiền Hàng</p>
+                                            <h3 className="text-xl font-black text-emerald-700">{formatCurrency(stats.totalOrderValue)}</h3>
                                         </div>
+                                        <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100">
+                                            <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Đã Thanh Toán</p>
+                                            <h3 className="text-xl font-black text-indigo-700">{formatCurrency(stats.totalPaid)}</h3>
+                                        </div>
+                                    </div>
 
-                                        <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4 md:p-5 relative overflow-hidden group hover:-translate-y-1 transition-transform duration-300">
-                                            <div className="absolute -right-4 -bottom-4 bg-slate-100 w-24 h-24 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-500"></div>
-                                            <div className="flex justify-between items-start mb-4 relative z-10">
-                                                <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center">
-                                                    <ArrowDownRight className="w-5 h-5" />
-                                                </div>
+                                    {/* Care Info section */}
+                                    <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200">
+                                        <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                                            <Activity className="w-3 h-3" /> Trạng thái chăm sóc (60 ngày)
+                                        </h5>
+                                        <div className="flex flex-col gap-2">
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-sm font-bold text-slate-600">Thời hạn chăm sóc:</span>
+                                                {(() => {
+                                                    if (!customer.care_expiry_date) return <span className="text-sm font-bold text-slate-400">Chưa có dữ liệu</span>;
+                                                    const diff = Math.ceil((new Date(customer.care_expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
+                                                    if (diff <= 0) return <span className="text-sm font-black text-rose-600 uppercase">Quá hạn</span>;
+                                                    if (diff <= 10) return <span className="text-sm font-black text-amber-500 animate-pulse uppercase">Cảnh báo (Còn {diff} ngày)</span>;
+                                                    return <span className="text-sm font-black text-emerald-600 uppercase">Đang chăm sóc (Còn {diff} ngày)</span>;
+                                                })()}
+                                            </div>
+                                            <div className="flex justify-between items-center text-xs">
+                                                <span className="text-slate-400">Ngày đăng ký:</span>
+                                                <span className="font-bold text-slate-600">{formatDate(customer.care_assigned_at || customer.created_at)}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center text-xs">
+                                                <span className="text-slate-400">Ngày hết hạn:</span>
+                                                <span className="font-bold text-slate-600">{formatDate(customer.care_expiry_date)}</span>
                                             </div>
                                         </div>
                                     </div>
 
-                                    {/* Invoicing Information Section */}
-                                    <div className="bg-white border border-slate-200 shadow-sm rounded-3xl p-5 md:p-6 space-y-5">
-                                        <h4 className="flex items-center gap-2.5 text-[16px] font-black text-slate-800 pb-3 border-b border-slate-100 uppercase tracking-tighter">
-                                            <Receipt className="w-4 h-4 text-primary" /> Thông tin xuất hóa đơn
+                                    <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-4 shadow-sm">
+                                        <h4 className="flex items-center gap-2 text-sm font-black text-slate-800 uppercase tracking-widest border-b pb-3">
+                                            <Receipt className="w-4 h-4" /> Thông tin xuất hóa đơn
                                         </h4>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
+                                        <div className="grid grid-cols-2 gap-4 text-sm">
                                             <div className="space-y-1">
-                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Mã số thuế</p>
-                                                <p className="font-bold text-slate-700 flex items-center gap-2 text-sm">
-                                                    <Building className="w-3.5 h-3.5 text-slate-400" />
-                                                    {customer.tax_code || '—'}
-                                                </p>
+                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Mã số thuế</p>
+                                                <p className="font-bold text-slate-700">{customer.tax_code || '—'}</p>
                                             </div>
                                             <div className="space-y-1">
-                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Email nhận hóa đơn</p>
-                                                <p className="font-bold text-primary flex items-center gap-2 text-sm">
-                                                    <Mail className="w-3.5 h-3.5 text-primary/60" />
-                                                    {customer.invoice_email || '—'}
-                                                </p>
+                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Email hóa đơn</p>
+                                                <p className="font-bold text-primary">{customer.invoice_email || '—'}</p>
                                             </div>
-                                            <div className="md:col-span-2 space-y-1 pt-2 border-t border-slate-50">
-                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Tên đơn vị (Hoá đơn)</p>
-                                                <p className="font-bold text-slate-800 text-sm italic">{customer.invoice_company_name || '—'}</p>
+                                            <div className="col-span-2 space-y-1">
+                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tên đơn vị</p>
+                                                <p className="font-bold text-slate-800">{customer.invoice_company_name || '—'}</p>
                                             </div>
-                                            <div className="md:col-span-2 space-y-1 pt-2 border-t border-slate-50">
-                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Địa chỉ xuất hóa đơn</p>
-                                                <p className="font-bold text-slate-600 text-sm leading-relaxed">{customer.invoice_address || '—'}</p>
+                                            <div className="col-span-2 space-y-1">
+                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Địa chỉ xuất hóa đơn</p>
+                                                <p className="font-bold text-slate-600">{customer.invoice_address || '—'}</p>
                                             </div>
                                         </div>
                                     </div>
 
-                                    {/* Action Shortcuts */}
-                                    <div className="flex flex-col items-stretch gap-4 pt-4 border-t border-slate-100">
-                                        {!showPaymentForm ? (
-                                            <button
-                                                onClick={() => setShowPaymentForm(true)}
-                                                className="w-full md:w-auto px-6 py-3 bg-slate-900 text-white rounded-xl font-black text-sm shadow-xl shadow-slate-200 hover:bg-slate-800 transition-colors flex items-center justify-center gap-2"
-                                            >
-                                                <CreditCard className="w-4 h-4" /> Nhận Tiền Khách Trả Nợ (Phiếu Thu)
-                                            </button>
-                                        ) : (
-                                            <div className="w-full bg-slate-50 border border-slate-200 rounded-3xl p-4 md:p-6 animate-in slide-in-from-top-4 duration-300">
-                                                <div className="flex items-start md:items-center justify-between gap-3 mb-5 md:mb-6">
-                                                    <h3 className="text-base md:text-lg font-black text-slate-900 flex items-center gap-2">
-                                                        <CreditCard className="w-5 h-5 text-primary" /> 
-                                                        {editingTxId ? `CHỈNH SỬA PHIẾU ${editingTxCode}` : 'TẠO PHIẾU THU TIỀN'}
-                                                    </h3>
-                                                    <button onClick={resetPaymentForm} className="text-slate-400 hover:text-rose-500 font-bold text-sm text-[11px] uppercase tracking-widest bg-white border border-slate-200 px-3 py-1.5 rounded-lg transition-all hover:bg-rose-50 shadow-sm">Thoát</button>
-                                                </div>
-                                                <form onSubmit={handlePaymentSubmit} className="space-y-5">
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                                        <div className="space-y-2">
-                                                            <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Số tiền thu (VNĐ) *</label>
-                                                            <input
-                                                                type="text"
-                                                                required
-                                                                value={paymentAmount ? Number(paymentAmount.replace(/\./g, '')).toLocaleString('vi-VN') : ''}
-                                                                onChange={(e) => setPaymentAmount(e.target.value)}
-                                                                placeholder="Nhập số tiền..."
-                                                                className="w-full px-4 md:px-5 py-3 bg-white border border-slate-200 rounded-xl font-black text-primary text-base md:text-lg outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 transition-all placeholder:font-medium placeholder:text-slate-300"
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-1">
-                                                            <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Hình thức *</label>
-                                                            <select
-                                                                value={paymentMethod}
-                                                                onChange={(e) => setPaymentMethod(e.target.value)}
-                                                                className="w-full px-4 md:px-5 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 transition-all"
-                                                            >
-                                                                <option value="CHUYEN_KHOAN">💳 Chuyển khoản (Ngân hàng)</option>
-                                                                <option value="TIEN_MAT">💵 Tiền mặt</option>
-                                                                <option value="KHAC">🔄 Phương thức khác</option>
-                                                            </select>
-                                                        </div>
-                                                    </div>
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                                        <div className="space-y-2">
-                                                            <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Ngày lập phiếu *</label>
-                                                            <input
-                                                                type="date"
-                                                                required
-                                                                value={paymentDate}
-                                                                onChange={(e) => setPaymentDate(e.target.value)}
-                                                                className="w-full px-4 md:px-5 py-3.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 transition-all"
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-2">
-                                                            <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Nội dung nộp tiền</label>
-                                                            <input
-                                                                type="text"
-                                                                value={paymentNote}
-                                                                onChange={(e) => setPaymentNote(e.target.value)}
-                                                                placeholder="Khách hàng thanh toán tiền hàng..."
-                                                                className="w-full px-4 md:px-5 py-3.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 transition-all placeholder:font-medium placeholder:text-slate-300"
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Ảnh Bill / Hóa đơn</label>
-                                                        <label className="flex items-center gap-3 px-4 md:px-5 py-3.5 bg-white border border-dashed border-slate-300 rounded-xl cursor-pointer hover:border-primary/40 hover:bg-primary/5 transition-all">
-                                                            <Upload className="w-5 h-5 text-slate-400" />
-                                                            <span className="font-bold text-sm text-slate-500 truncate">
-                                                                {billImageFile ? billImageFile.name : 'Chọn ảnh bill...'}
-                                                            </span>
-                                                            <input
-                                                                type="file"
-                                                                accept="image/*"
-                                                                className="hidden"
-                                                                onChange={(e) => setBillImageFile(e.target.files[0] || null)}
-                                                            />
-                                                        </label>
-                                                    </div>
-                                                    <div className="flex justify-end pt-2">
-                                                        <button
-                                                            type="submit"
-                                                            disabled={isSubmittingPayment}
-                                                            className="w-full md:w-auto px-6 md:px-8 py-3 bg-primary hover:bg-primary/90 text-white rounded-xl font-black text-sm shadow-xl shadow-primary/20 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                                                        >
-                                                            {isSubmittingPayment ? 'Đang lưu...' : (editingTxId ? 'Cập nhật thay đổi' : 'Xác nhận Đã Nhận Tiền')}
-                                                        </button>
-                                                    </div>
-                                                </form>
+                                    {!showPaymentForm ? (
+                                        <button onClick={() => setShowPaymentForm(true)} className="w-full py-3 bg-slate-900 text-white rounded-xl font-black text-sm shadow-xl flex items-center justify-center gap-2 hover:bg-slate-800 transition-colors">
+                                            <CreditCard className="w-4 h-4" /> Nhận Tiền Khách Trả Nợ
+                                        </button>
+                                    ) : (
+                                        <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-4">
+                                            <div className="flex items-center justify-between">
+                                                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Lập phiếu thu tiền</h3>
+                                                <button onClick={resetPaymentForm} className="text-xs font-black text-slate-400 hover:text-rose-500 uppercase">Thoát</button>
                                             </div>
-                                        )}
-                                    </div>
+                                            <form onSubmit={handlePaymentSubmit} className="space-y-4">
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div className="space-y-1">
+                                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Số tiền thu *</label>
+                                                        <input type="text" required value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} placeholder="0" className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-black text-primary outline-none focus:border-primary/40" />
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Hình thức *</label>
+                                                        <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:border-primary/40">
+                                                            <option value="CHUYEN_KHOAN">Chuyển khoản</option>
+                                                            <option value="TIEN_MAT">Tiền mặt</option>
+                                                        </select>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Ngày lập phiếu *</label>
+                                                        <input type="date" required value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:border-primary/40" />
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nội dung</label>
+                                                        <input type="text" value={paymentNote} onChange={(e) => setPaymentNote(e.target.value)} placeholder="Nội dung nộp tiền..." className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:border-primary/40" />
+                                                    </div>
+                                                </div>
+                                                <button type="submit" disabled={isSubmittingPayment} className="w-full py-3 bg-primary text-white font-black rounded-xl shadow-lg shadow-primary/20 hover:brightness-110 transition-all">Xác nhận Đã Nhận Tiền</button>
+                                            </form>
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
-                            {/* TAB: ORDERS */}
                             {activeTab === 'orders' && (
-                                <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+                                <div className="space-y-4">
                                     {orders.length === 0 ? (
-                                        <div className="p-8 md:p-16 text-center flex flex-col items-center">
-                                            <Package className="w-12 h-12 md:w-16 md:h-16 text-slate-200 mb-4" />
-                                            <p className="text-slate-400 font-bold text-base md:text-lg">Khách hàng chưa có đơn mua hàng nào</p>
-                                        </div>
+                                        <div className="py-12 text-center font-bold text-slate-300 italic">Khách hàng chưa có đơn hàng</div>
                                     ) : (
-                                        <>
-                                            <div className="md:hidden divide-y divide-slate-100">
-                                                {orders.map(o => (
-                                                    <div key={o.id} className="p-4 space-y-3">
-                                                        <div className="flex items-center justify-between gap-2">
-                                                            <p className="font-black text-sm text-slate-800 truncate">{o.order_code}</p>
-                                                            <span className={`px-2.5 py-1 text-[10px] font-black tracking-wider uppercase rounded-lg border shrink-0 ${o.status === 'DA_DUYET' || o.status === 'HOAN_THANH' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200'
-                                                                }`}>
-                                                                {o.status}
-                                                            </span>
-                                                        </div>
-                                                        <div className="grid grid-cols-2 gap-3 text-sm">
-                                                            <div>
-                                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ngày tạo</p>
-                                                                <p className="font-bold text-slate-600 mt-1">{formatDate(o.created_at)}</p>
-                                                            </div>
-                                                            <div className="text-right">
-                                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Số lượng</p>
-                                                                <p className="font-black text-slate-800 mt-1">{o.quantity}</p>
-                                                            </div>
-                                                        </div>
-                                                        <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tổng giá trị</p>
-                                                            <p className="text-sm font-black text-emerald-600">{formatCurrency(o.total_amount)}</p>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-
-                                            <table className="hidden md:table w-full text-left">
+                                        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                                            <table className="w-full text-left text-sm">
                                                 <thead className="bg-slate-50 border-b border-slate-100">
                                                     <tr>
-                                                        <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Mã đơn</th>
-                                                        <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Ngày tạo</th>
-                                                        <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-center">Số lượng</th>
-                                                        <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-right">Tổng giá trị</th>
-                                                        <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-center">Trạng thái</th>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Mã đơn</th>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Ngày tạo</th>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px] text-right">Tổng tiền</th>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px] text-center">Trạng thái</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-50">
                                                     {orders.map(o => (
                                                         <tr key={o.id} className="hover:bg-slate-50/50 transition-colors">
-                                                            <td className="px-4 py-3 font-black text-sm text-slate-700">{o.order_code}</td>
-                                                            <td className="px-4 py-3 text-sm font-bold text-slate-500">{formatDate(o.created_at)}</td>
-                                                            <td className="px-4 py-3 text-sm font-black text-slate-700 text-center">{o.quantity}</td>
-                                                            <td className="px-4 py-3 text-sm font-black text-emerald-600 text-right">{formatCurrency(o.total_amount)}</td>
+                                                            <td className="px-4 py-3 font-black text-slate-700">{o.order_code}</td>
+                                                            <td className="px-4 py-3 font-bold text-slate-500">{formatDate(o.created_at)}</td>
+                                                            <td className="px-4 py-3 font-black text-emerald-600 text-right">{formatCurrency(o.total_amount)}</td>
                                                             <td className="px-4 py-3 text-center">
-                                                                <span className={`px-3 py-1 text-[10px] font-black tracking-widest uppercase rounded-lg border ${o.status === 'DA_DUYET' || o.status === 'HOAN_THANH' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200'
-                                                                    }`}>
-                                                                    {o.status}
-                                                                </span>
+                                                                <span className={clsx("px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest", o.status === 'DA_DUYET' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500')}>{o.status}</span>
                                                             </td>
                                                         </tr>
                                                     ))}
                                                 </tbody>
                                             </table>
-                                        </>
+                                        </div>
                                     )}
                                 </div>
                             )}
 
-                            {/* TAB: TRANSACTIONS */}
                             {activeTab === 'transactions' && (
-                                <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+                                <div className="space-y-4">
                                     {transactions.length === 0 ? (
-                                        <div className="p-8 md:p-16 text-center flex flex-col items-center">
-                                            <FileText className="w-12 h-12 md:w-16 md:h-16 text-slate-200 mb-4" />
-                                            <p className="text-slate-400 font-bold text-base md:text-lg mb-6">Chưa có giao dịch thu/chi nào</p>
-                                            <button
-                                                onClick={() => {
-                                                    setActiveTab('overview');
-                                                    setShowPaymentForm(true);
-                                                }}
-                                                className="w-full sm:w-auto px-6 py-3 bg-primary hover:bg-primary/90 text-white rounded-xl font-black text-sm shadow-xl shadow-primary/20 transition-all flex items-center justify-center gap-2"
-                                            >
-                                                <CreditCard className="w-4 h-4" /> Lập Phiếu Thu tiền Khách nợ ngay
-                                            </button>
-                                        </div>
+                                        <div className="py-12 text-center font-bold text-slate-300 italic">Chưa có giao dịch thu/chi</div>
                                     ) : (
-                                        <>
-                                            <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-                                                <h5 className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Lịch sử giao dịch</h5>
-                                                <button 
-                                                    onClick={handleExportTransactions}
-                                                    className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-emerald-600 font-black text-[10px] uppercase tracking-wider hover:bg-emerald-50 hover:border-emerald-200 transition-all shadow-sm"
-                                                >
-                                                    <Download className="w-3.5 h-3.5" /> Xuất Excel (Backup)
+                                        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                                            <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                                                <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Lịch sử thu chi</h5>
+                                                <button onClick={handleExportTransactions} className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded-lg text-emerald-600 font-bold text-[10px] hover:bg-emerald-50 transition-colors">
+                                                    <Download className="w-3 h-3" /> Xuất Excel
                                                 </button>
                                             </div>
-                                            <div className="md:hidden divide-y divide-slate-100">
-                                                {transactions.map(tx => (
-                                                    <div key={tx.id} className="p-4 space-y-3">
-                                                        <div className="flex items-center justify-between gap-2">
-                                                            <p className="font-black text-sm text-slate-800 truncate">{tx.transaction_code}</p>
-                                                            {tx.transaction_type === 'THU' ? (
-                                                                <span className="text-emerald-600 flex items-center gap-1 text-xs font-black"><ArrowDownRight className="w-3.5 h-3.5" /> THU TIỀN</span>
-                                                            ) : (
-                                                                <span className="text-amber-600 flex items-center gap-1 text-xs font-black"><ArrowUpRight className="w-3.5 h-3.5" /> HOÀN TIỀN</span>
-                                                            )}
-                                                        </div>
-                                                        <div className="grid grid-cols-2 gap-3 text-sm">
-                                                            <div>
-                                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ngày GD</p>
-                                                                <p className="font-bold text-slate-600 mt-1">{formatDate(tx.transaction_date)}</p>
-                                                            </div>
-                                                            <div className="text-right">
-                                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Hình thức</p>
-                                                                <p className="font-bold text-slate-700 mt-1 break-words">{tx.payment_method}</p>
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                                                            <div>
-                                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Người lập</p>
-                                                                <p className="font-bold text-slate-600 mt-1">{tx.created_by || '—'}</p>
-                                                            </div>
-                                                            <p className="text-sm font-black text-slate-900">{formatCurrency(tx.amount)}</p>
-                                                        </div>
-                                                        <div className="pt-2 border-t border-slate-50 flex items-center justify-between gap-2">
-                                                            <div className="flex items-center gap-2">
-                                                                {tx.bill_image_url ? (
-                                                                    <button
-                                                                        onClick={() => setPreviewImage(tx.bill_image_url)}
-                                                                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary/5 text-primary rounded-lg hover:bg-primary/10 transition-colors text-xs font-bold"
-                                                                    >
-                                                                        <ImageIcon className="w-3.5 h-3.5" /> Bill
-                                                                    </button>
-                                                                ) : (
-                                                                    <span className="text-slate-300 text-xs">Không bill</span>
-                                                                )}
-                                                            </div>
-                                                            <div className="flex items-center gap-1.5">
-                                                                <button 
-                                                                    onClick={() => handleEditTransaction(tx)}
-                                                                    className="p-2 bg-slate-100 text-slate-500 rounded-lg hover:bg-primary/10 hover:text-primary transition-all"
-                                                                >
-                                                                    <Edit className="w-4 h-4" />
-                                                                </button>
-                                                                <button 
-                                                                    onClick={() => handleDeleteTransaction(tx.id, tx.transaction_code)}
-                                                                    className="p-2 bg-slate-100 text-slate-500 rounded-lg hover:bg-rose-50 hover:text-rose-600 transition-all"
-                                                                >
-                                                                    <Trash2 className="w-4 h-4" />
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-
-                                            <table className="hidden md:table w-full text-left">
+                                            <table className="w-full text-left text-sm">
                                                 <thead className="bg-slate-50 border-b border-slate-100">
                                                     <tr>
-                                                        <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Mã GD</th>
-                                                        <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Ngày GD</th>
-                                                        <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Loại</th>
-                                                        <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Hình thức</th>
-                                                        <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-right">Số tiền</th>
-                                                        <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Người lập</th>
-                                                        <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-center">Bill</th>
-                                                        <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-right">Thao tác</th>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Mã GD</th>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Ngày</th>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px] text-right">Số tiền</th>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px] text-center">Thao tác</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-50">
                                                     {transactions.map(tx => (
                                                         <tr key={tx.id} className="hover:bg-slate-50/50 transition-colors">
-                                                            <td className="px-4 py-2.5 font-black text-sm text-slate-700">{tx.transaction_code}</td>
-                                                            <td className="px-4 py-2.5 text-sm font-bold text-slate-500">{formatDate(tx.transaction_date)}</td>
-                                                            <td className="px-4 py-2.5 text-sm font-black">
-                                                                {tx.transaction_type === 'THU' ? (
-                                                                    <span className="text-emerald-600 flex items-center gap-1"><ArrowDownRight className="w-3.5 h-3.5" /> THU TIỀN</span>
-                                                                ) : (
-                                                                    <span className="text-amber-600 flex items-center gap-1"><ArrowUpRight className="w-3.5 h-3.5" /> HOÀN TIỀN</span>
-                                                                )}
-                                                            </td>
-                                                            <td className="px-4 py-2.5 text-sm font-bold text-slate-600">{tx.payment_method}</td>
-                                                            <td className="px-4 py-2.5 text-sm font-black text-slate-900 text-right">{formatCurrency(tx.amount)}</td>
-                                                            <td className="px-4 py-2.5 text-sm font-bold text-slate-500">{tx.created_by || '—'}</td>
-                                                            <td className="px-4 py-2.5 text-center">
-                                                                {tx.bill_image_url ? (
-                                                                    <button
-                                                                        onClick={() => setPreviewImage(tx.bill_image_url)}
-                                                                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary/5 text-primary rounded-lg hover:bg-primary/10 transition-colors text-[11px] font-bold"
-                                                                    >
-                                                                        <ImageIcon className="w-3 h-3" /> Xem
-                                                                    </button>
-                                                                ) : (
-                                                                    <span className="text-slate-300 text-xs">—</span>
-                                                                )}
-                                                            </td>
-                                                            <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                                                                <div className="flex items-center justify-end gap-1">
-                                                                    <button 
-                                                                        onClick={() => handleEditTransaction(tx)}
-                                                                        className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-all"
-                                                                        title="Sửa giao dịch"
-                                                                    >
-                                                                        <Edit className="w-4 h-4" />
-                                                                    </button>
-                                                                    <button 
-                                                                        onClick={() => handleDeleteTransaction(tx.id, tx.transaction_code)}
-                                                                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
-                                                                        title="Xóa giao dịch"
-                                                                    >
-                                                                        <Trash2 className="w-4 h-4" />
-                                                                    </button>
+                                                            <td className="px-4 py-3 font-black text-slate-700">{tx.transaction_code}</td>
+                                                            <td className="px-4 py-3 font-bold text-slate-500">{formatDate(tx.transaction_date)}</td>
+                                                            <td className="px-4 py-3 font-black text-rose-600 text-right">{formatCurrency(tx.amount)}</td>
+                                                            <td className="px-4 py-3 text-center">
+                                                                <div className="flex items-center justify-center gap-2">
+                                                                    <button onClick={() => handleDeleteTransaction(tx.id, tx.transaction_code)} className="p-1.5 text-slate-400 hover:text-rose-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
                                                                 </div>
                                                             </td>
                                                         </tr>
                                                     ))}
                                                 </tbody>
                                             </table>
-                                        </>
+                                        </div>
                                     )}
                                 </div>
                             )}
-
                         </div>
                     )}
                 </div>
-
-                {/* Image Lightbox */}
-                {previewImage && (
-                    <div
-                        onClick={() => setPreviewImage(null)}
-                        className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-2 md:p-4 cursor-pointer"
-                    >
-                        <div className="relative max-w-2xl max-h-[90vh] w-full">
-                            <button
-                                onClick={() => setPreviewImage(null)}
-                                className="absolute top-2 right-2 md:-top-3 md:-right-3 p-2 bg-white rounded-full shadow-lg hover:bg-red-50 transition-colors z-10"
-                            >
-                                <X className="w-5 h-5 text-slate-600" />
-                            </button>
-                            <img
-                                src={previewImage}
-                                alt="Bill"
-                                className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl"
-                                onClick={(e) => e.stopPropagation()}
-                            />
-                        </div>
-                    </div>
-                )}
-
             </div>
         </div>,
         document.body

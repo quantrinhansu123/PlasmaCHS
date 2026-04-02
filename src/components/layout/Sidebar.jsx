@@ -39,8 +39,8 @@ function Sidebar({ isOpen, setIsOpen }) {
             <Sparkles size={20} />
           </div>
           <div className={clsx('flex flex-col ml-3 whitespace-nowrap transition-opacity duration-300', !isOpen && 'opacity-0 hidden')}>
-            <span className="font-bold text-[16px] leading-tight text-foreground tracking-tight">PlasmaVN</span>
-            <span className="text-[11px] text-muted-foreground/80 leading-tight">Hệ thống quản lý</span>
+            <span className="font-bold text-[16px] leading-tight text-slate-900 tracking-tight">PlasmaVN</span>
+            <span className="text-[11px] text-slate-600 leading-tight font-bold">Hệ thống quản lý</span>
           </div>
         </div>
 
@@ -131,7 +131,7 @@ function NavItem({ item, onClick, isOpen }) {
         className={clsx(
           'font-semibold text-[14px] transition-all duration-300',
           !isOpen && 'opacity-0 w-0 hidden',
-          isActive ? 'text-foreground' : 'text-slate-500 group-hover:text-foreground'
+          isActive ? 'text-slate-900 shadow-sm' : 'text-slate-700 group-hover:text-slate-900'
         )}
       >
         {item.label}

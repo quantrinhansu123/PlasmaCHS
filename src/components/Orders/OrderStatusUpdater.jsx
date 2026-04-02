@@ -18,6 +18,8 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     const [adjustedQuantity, setAdjustedQuantity] = useState(order?.quantity || 0);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
     const [isClosing, setIsClosing] = useState(false);
+    const [adjustmentNote, setAdjustmentNote] = useState('');
+    const [showAdjustmentInput, setShowAdjustmentInput] = useState(false);
 
     const STATUS_TRANSITIONS_METADATA = [
         { nextStatus: 'DIEU_CHINH', icon: AlertTriangle },
@@ -260,7 +262,8 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             // Perform DB update
             const updatePayload = {
                 status: transition.nextStatus,
-                updated_at: new Date().toISOString()
+                updated_at: new Date().toISOString(),
+                note: transition.label === 'Yêu cầu điều chỉnh' ? adjustmentNote : order.note
             };
 
             // Calculate total amount if quantity changed
@@ -527,7 +530,21 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                             {errorMsg && (
                                 <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl text-[13px] font-bold text-rose-600 flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
                                     <XCircle className="w-4 h-4 shrink-0" />
-                                    {errorMsg}
+                                            {errorMsg}
+                                </div>
+                            )}
+
+                            {/* Adjustment Note Input Area */}
+                            {availableActions.some(a => a.label === 'Yêu cầu điều chỉnh') && (
+                                <div className="space-y-3 p-4 bg-orange-50 border border-orange-100 rounded-2xl animate-in fade-in slide-in-from-top-2">
+                                    <label className="block text-[11px] font-black text-orange-600 uppercase tracking-widest">Lý do/Ghi chú điều chỉnh <span className="text-red-500">*</span></label>
+                                    <textarea
+                                        placeholder="Nhập lý do chuyển trả đơn hàng về bước trước..."
+                                        className="w-full px-4 py-3 bg-white border border-orange-200 rounded-xl font-bold text-slate-800 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-50 min-h-[80px] transition-all resize-none text-sm"
+                                        value={adjustmentNote}
+                                        onChange={e => setAdjustmentNote(e.target.value)}
+                                    />
+                                    <p className="text-[10px] text-orange-400 italic font-medium">* Ghi chú này sẽ được lưu lại để người ở bước trước theo dõi.</p>
                                 </div>
                             )}
 
@@ -554,7 +571,13 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                             return (
                                                 <button
                                                     key={action.nextStatus}
-                                                    onClick={() => handleUpdateStatus(action)}
+                                                    onClick={() => {
+                                                        if (action.label === 'Yêu cầu điều chỉnh' && !adjustmentNote.trim()) {
+                                                            setErrorMsg('Vui lòng nhập lý do điều chỉnh trước khi xác nhận.');
+                                                            return;
+                                                        }
+                                                        handleUpdateStatus(action);
+                                                    }}
                                                     disabled={isLoading}
                                                     className={`w-full p-4 flex items-center justify-center gap-3 font-black rounded-2xl transition-all border uppercase tracking-wider text-[13px] ${actionStyle} ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                                                 >

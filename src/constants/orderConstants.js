@@ -42,8 +42,8 @@ export const ORDER_STATUSES = [
     { id: 'ALL', label: 'Tất cả', color: 'gray' },
     { id: 'CHO_DUYET', label: 'Chờ Lead duyệt', color: 'yellow' },
     { id: 'CHO_CTY_DUYET', label: 'Chờ Công ty duyệt', color: 'orange' },
-    { id: 'KHO_XU_LY', label: 'Kho đang xử lý', color: 'blue' },
     { id: 'DIEU_CHINH', label: 'Điều chỉnh', color: 'orange' },
+    { id: 'KHO_XU_LY', label: 'Kho đang xử lý', color: 'blue' },
     { id: 'DA_DUYET', label: 'Đã báo xuất (Chờ giao)', color: 'indigo' },
     { id: 'CHO_GIAO_HANG', label: 'Chờ giao hàng', color: 'indigo' },
     { id: 'DANG_GIAO_HANG', label: 'Đang giao hàng', color: 'purple' },
@@ -53,6 +53,21 @@ export const ORDER_STATUSES = [
     { id: 'TRA_HANG', label: 'Đơn hàng trả về', color: 'red' },
     { id: 'HUY_DON', label: 'Hủy đơn', color: 'red' },
 ];
+
+export const STATUS_PRIORITY = {
+    'CHO_DUYET': 1,
+    'CHO_CTY_DUYET': 2,
+    'DIEU_CHINH': 3,
+    'KHO_XU_LY': 4,
+    'DA_DUYET': 5,
+    'CHO_GIAO_HANG': 6,
+    'DANG_GIAO_HANG': 7,
+    'CHO_DOI_SOAT': 8,
+    'HOAN_THANH': 9,
+    'DOI_SOAT_THAT_BAI': 10,
+    'TRA_HANG': 11,
+    'HUY_DON': 12
+};
 
 export const TABLE_COLUMNS = [
     { key: 'code', label: 'Mã ĐH' },
@@ -66,6 +81,7 @@ export const TABLE_COLUMNS = [
     { key: 'cylinders', label: 'Mã bình' },
     { key: 'cylinder_debt', label: 'Nợ vỏ' },
     { key: 'status', label: 'Trạng thái' },
+    { key: 'note', label: 'Ghi chú' },
     { key: 'date', label: 'Ngày đặt' },
 ];
 
@@ -85,12 +101,12 @@ export const ORDER_STATE_TRANSITIONS = {
         { nextStatus: 'HUY_DON', allowedRoles: [ORDER_ROLES.ADMIN, ORDER_ROLES.LEAD_SALE, ORDER_ROLES.SALE], label: 'Hủy đơn' }
     ],
     'CHO_CTY_DUYET': [
-        { nextStatus: 'DIEU_CHINH', allowedRoles: [ORDER_ROLES.ADMIN], label: 'Yêu cầu điều chỉnh' },
+        { nextStatus: 'CHO_DUYET', allowedRoles: [ORDER_ROLES.ADMIN], label: 'Yêu cầu điều chỉnh' },
         { nextStatus: 'KHO_XU_LY', allowedRoles: [ORDER_ROLES.ADMIN], label: 'Công ty Duyệt -> Kho' },
         { nextStatus: 'HUY_DON', allowedRoles: [ORDER_ROLES.ADMIN], label: 'Hủy đơn' }
     ],
     'KHO_XU_LY': [
-        { nextStatus: 'DIEU_CHINH', allowedRoles: [ORDER_ROLES.ADMIN, ORDER_ROLES.THU_KHO], label: 'Yêu cầu điều chỉnh' },
+        { nextStatus: 'CHO_CTY_DUYET', allowedRoles: [ORDER_ROLES.ADMIN, ORDER_ROLES.THU_KHO], label: 'Yêu cầu điều chỉnh' },
         { nextStatus: 'CHO_GIAO_HANG', allowedRoles: [ORDER_ROLES.ADMIN, ORDER_ROLES.THU_KHO], label: 'Kho Báo Đã Xuất' }
     ],
     'DIEU_CHINH': [

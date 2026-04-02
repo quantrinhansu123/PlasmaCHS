@@ -923,11 +923,9 @@ const Warehouses = () => {
                                                 <button onClick={() => handleEditWarehouse(w)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
                                                     <Edit size={18} />
                                                 </button>
-                                                {(role === 'admin' || role === 'manager') && (
-                                                    <button onClick={() => handleDeleteWarehouse(w.id, w.name)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                )}
+                                                <button onClick={() => handleDeleteWarehouse(w.id, w.name)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
+                                                    <Trash2 size={18} />
+                                                </button>
                                             </div>
                                         </td>
                                     </tr>

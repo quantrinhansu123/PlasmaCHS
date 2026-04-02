@@ -24,6 +24,8 @@ import Shippers from './pages/Shippers';
 import Suppliers from './pages/Suppliers';
 import Users from './pages/Users';
 import Warehouses from './pages/Warehouses';
+import Login from './pages/Login';
+import Profile from './pages/Profile';
 import RepairTickets from './pages/RepairTickets';
 import CreateRepairTicket from './pages/CreateRepairTicket';
 import CreateMachineIssueRequest from './pages/CreateMachineIssueRequest';
@@ -90,6 +92,7 @@ function App() {
       <div className="min-h-screen bg-background">
         <ErrorBoundary>
           <Routes>
+            <Route path="/login" element={<Login />} />
             <Route path="/" element={<Navigate to="/trang-chu" replace />} />
 
             <Route
@@ -100,6 +103,7 @@ function App() {
               }
             >
               <Route path="/trang-chu" element={<Dashboard />} />
+              <Route path="/ho-so" element={<Profile />} />
               <Route path="/thong-ke" element={<StatisticsDashboard />} />
               <Route path="/bao-cao/khach-hang" element={<CustomerReport />} />
               <Route path="/bao-cao/nhan-vien" element={<SalespersonReport />} />

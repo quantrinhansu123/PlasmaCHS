@@ -22,5 +22,6 @@ export const TABLE_COLUMNS = [
     { key: 'sales_group', label: 'Nhóm kinh doanh' },
     { key: 'role', label: 'Vai trò / Công việc' },
     { key: 'approval_level', label: 'Quyền Duyệt' },
+    { key: 'password', label: 'Mật khâu' },
     { key: 'status', label: 'Trạng thái' },
 ];

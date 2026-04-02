@@ -30,10 +30,12 @@ import {
     Users,
     Download,
     Upload,
-    Ticket,
     X,
     MoreVertical,
-    FilePlus
+    FilePlus,
+    ToggleLeft,
+    ToggleRight,
+    Ticket
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
@@ -124,12 +126,9 @@ const Customers = () => {
         { key: 'legal_rep', label: 'Người đại diện pháp luật' },
         { key: 'managed_by', label: 'Nhân viên phụ trách' },
         { key: 'category', label: 'Loại khách hàng' },
-        { key: 'current_cylinders', label: 'Số vỏ' },
-        { key: 'current_machines', label: 'Số máy hiện có' },
-        { key: 'borrowed_cylinders', label: 'Vỏ bình đang mượn' },
-        { key: 'machines_in_use', label: 'Mã máy đang sử dụng' },
-        { key: 'care_by', label: 'KD chăm sóc' },
-        { key: 'care_expiry_date', label: 'Thời hạn chăm sóc' },
+        { key: 'care_assigned_at', label: 'Ngày đăng ký' },
+        { key: 'days_left', label: 'Ngày còn lại' },
+        { key: 'care_status', label: 'Trạng thái CS' },
         { key: 'status', label: 'Trạng thái' },
         { key: 'invoice_email', label: 'Email hóa đơn' },
     ];
@@ -976,21 +975,6 @@ const Customers = () => {
                                         )}
                                     </div>
 
-                                    <div className="grid grid-cols-3 gap-2 rounded-xl bg-muted/10 border border-border/60 p-2.5 mb-3">
-                                        <div className="text-center">
-                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Số vỏ</p>
-                                            <p className="text-[13px] font-bold text-foreground">{formatNumber(c.current_cylinders || 0)}</p>
-                                        </div>
-                                        <div className="text-center border-x border-border/60">
-                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Số máy</p>
-                                            <p className="text-[13px] font-bold text-foreground">{formatNumber(c.current_machines || 0)}</p>
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Bình mượn</p>
-                                            <p className="text-[13px] font-bold text-foreground">{formatNumber(c.borrowed_cylinders || 0)}</p>
-                                        </div>
-                                    </div>
-
                                     <div className="flex items-center justify-between pt-2 border-t border-border/70">
                                         <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                                             <User size={12} />
@@ -1006,10 +990,30 @@ const Customers = () => {
                                                     <FilePlus size={16} />
                                                 </button>
                                             )}
-                                            <button onClick={() => { setSelectedCustomer(c); setIsRepairModalOpen(true); }} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg" title="Báo hỏng"><Ticket size={16} /></button>
-                                            <button onClick={() => handleViewCustomer(c)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg"><Eye size={16} /></button>
-                                            <button onClick={() => handleEditCustomer(c)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
-                                            <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg"><Trash2 size={16} /></button>
+                                            <button 
+                                                onClick={() => handleStatusChange(c.id, c.status === 'Thành công' ? 'Chưa thành công' : 'Thành công')} 
+                                                className={clsx(
+                                                    "p-2 rounded-lg transition-all border",
+                                                    c.status === 'Thành công' 
+                                                        ? "bg-emerald-50 border-emerald-100 text-emerald-600" 
+                                                        : "bg-slate-50 border-slate-200 text-slate-400"
+                                                )}
+                                                title={c.status === 'Thành công' ? "Đánh dấu là chưa thành công" : "Đánh dấu là thành công"}
+                                            >
+                                                {c.status === 'Thành công' ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
+                                            </button>
+                                            <button onClick={() => { setSelectedCustomer(c); setIsRepairModalOpen(true); }} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg" title="Báo hỏng">
+                                                <Ticket size={16} />
+                                            </button>
+                                            <button onClick={() => handleViewCustomer(c)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg" title="Xem chi tiết">
+                                                <Eye size={16} />
+                                            </button>
+                                            <button onClick={() => handleEditCustomer(c)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg" title="Chỉnh sửa">
+                                               <Edit size={16} />
+                                            </button>
+                                            <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg" title="Xóa">
+                                               <Trash2 size={16} />
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
@@ -1272,95 +1276,95 @@ const Customers = () => {
                                     </tr>
                                 ) : (
                                     filteredCustomers.map((c) => (
-                                        <tr
-                                            key={c.id}
-                                            className={clsx(
-                                                getRowStyle(c.category),
-                                                selectedIds.includes(c.id) && "bg-primary/[0.04] !hover:bg-primary/[0.08]"
-                                            )}
-                                        >
-                                            <td className="px-4 py-4 text-center border-r border-primary/10">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selectedIds.includes(c.id)}
-                                                    onChange={() => toggleSelectOne(c.id)}
-                                                    className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
-                                                />
+                                        <tr 
+                                            key={c.id} 
+                                        className={clsx(
+                                            getRowStyle(c.category),
+                                            selectedIds.includes(c.id) && "bg-primary/[0.04] !hover:bg-primary/[0.08]"
+                                        )}
+                                    >
+                                        <td className="px-4 py-4 text-center border-r border-primary/10">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedIds.includes(c.id)}
+                                                onChange={() => toggleSelectOne(c.id)}
+                                                className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                                            />
+                                        </td>
+                                        {isColumnVisible('code') && <td className={getCodeCellClass(c.category)}>{c.code}</td>}
+                                        {isColumnVisible('name') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{c.name}</td>}
+                                        {isColumnVisible('phone') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.phone || '—'}</td>}
+                                        {isColumnVisible('address') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.address || '—'}</td>}
+                                        {isColumnVisible('legal_rep') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.legal_rep || '—'}</td>}
+                                        {isColumnVisible('managed_by') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.managed_by || '—'}</td>}
+                                        {isColumnVisible('category') && <td className="px-4 py-4 text-sm text-muted-foreground"><span className={getCategoryBadgeClass(c.category)}>{getLabel(CUSTOMER_CATEGORIES, c.category)}</span></td>}
+                                        {isColumnVisible('current_cylinders') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.current_cylinders || 0)}</td>}
+                                        {isColumnVisible('current_machines') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.current_machines || 0)}</td>}
+                                        {isColumnVisible('borrowed_cylinders') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.borrowed_cylinders || 0)}</td>}
+                                        {isColumnVisible('machines_in_use') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.machines_in_use || '—'}</td>}
+                                        {isColumnVisible('care_by') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.care_by || '—'}</td>}
+                                        {isColumnVisible('care_expiry_date') && (
+                                            <td className="px-4 py-4 text-sm">
+                                                {c.care_expiry_date ? (
+                                                    <div className="flex flex-col">
+                                                        <span className="font-bold text-slate-700">{new Date(c.care_expiry_date).toLocaleDateString('vi-VN')}</span>
+                                                        {(() => {
+                                                            const diff = Math.ceil((new Date(c.care_expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
+                                                            if (diff <= 0) return <span className="text-[10px] font-bold text-rose-500 uppercase">Đã hết hạn</span>;
+                                                            if (diff <= 10) return <span className="text-[10px] font-bold text-amber-500 uppercase">Còn {diff} ngày</span>;
+                                                            return <span className="text-[10px] font-bold text-emerald-500 uppercase">Còn {diff} ngày</span>;
+                                                        })()}
+                                                    </div>
+                                                ) : '—'}
                                             </td>
-                                            {isColumnVisible('code') && <td className={getCodeCellClass(c.category)}>{c.code}</td>}
-                                            {isColumnVisible('name') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{c.name}</td>}
-                                            {isColumnVisible('phone') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.phone || '—'}</td>}
-                                            {isColumnVisible('address') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.address || '—'}</td>}
-                                            {isColumnVisible('legal_rep') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.legal_rep || '—'}</td>}
-                                            {isColumnVisible('managed_by') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.managed_by || '—'}</td>}
-                                            {isColumnVisible('category') && <td className="px-4 py-4 text-sm text-muted-foreground"><span className={getCategoryBadgeClass(c.category)}>{getLabel(CUSTOMER_CATEGORIES, c.category)}</span></td>}
-                                            {isColumnVisible('current_cylinders') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.current_cylinders || 0)}</td>}
-                                            {isColumnVisible('current_machines') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.current_machines || 0)}</td>}
-                                            {isColumnVisible('borrowed_cylinders') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.borrowed_cylinders || 0)}</td>}
-                                            {isColumnVisible('machines_in_use') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.machines_in_use || '—'}</td>}
-                                            {isColumnVisible('care_by') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.care_by || '—'}</td>}
-                                            {isColumnVisible('care_expiry_date') && (
-                                                <td className="px-4 py-4 text-sm">
-                                                    {c.care_expiry_date ? (
-                                                        <div className="flex flex-col">
-                                                            <span className="font-bold text-slate-700">{new Date(c.care_expiry_date).toLocaleDateString('vi-VN')}</span>
-                                                            {(() => {
-                                                                const diff = Math.ceil((new Date(c.care_expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
-                                                                if (diff <= 0) return <span className="text-[10px] font-bold text-rose-500 uppercase">Đã hết hạn</span>;
-                                                                if (diff <= 10) return <span className="text-[10px] font-bold text-amber-500 uppercase">Còn {diff} ngày</span>;
-                                                                return <span className="text-[10px] font-bold text-emerald-500 uppercase">Còn {diff} ngày</span>;
-                                                            })()}
-                                                        </div>
-                                                    ) : '—'}
-                                                </td>
-                                            )}
-                                            {isColumnVisible('invoice_email') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.invoice_email || '—'}</td>}
-                                            {isColumnVisible('status') && (
-                                                <td className="px-4 py-4 text-sm">
-                                                    <select
-                                                        value={c.status || ''}
-                                                        onChange={(e) => handleStatusChange(c.id, e.target.value)}
-                                                        className={clsx(
-                                                            "px-2 py-1 rounded-lg text-[11px] font-black uppercase tracking-wider border-none focus:ring-2 focus:ring-primary/20 outline-none cursor-pointer transition-all",
-                                                            c.status === 'Thành công'
-                                                                ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                                                                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                                                        )}
-                                                    >
-                                                        <option value="" disabled>-- Chọn --</option>
-                                                        <option value="Thành công">Thành công</option>
-                                                        <option value="Chưa thành công">Chưa thành công</option>
-                                                    </select>
-                                                </td>
-                                            )}
-                                            <td className="px-4 py-4 text-center border-l border-r border-primary/20">
-                                                <div className="flex items-center justify-center gap-3">
-                                                    {c.status === 'Thành công' && (
-                                                        <button
-                                                            onClick={() => navigate(`/de-nghi-xuat-may/tao?phone=${c.phone || ''}`)}
-                                                            className="text-indigo-600/80 hover:text-indigo-700 transition-colors p-1 rounded hover:bg-indigo-50"
-                                                            title="Mẫu đề nghị máy"
-                                                        >
-                                                            <FilePlus size={16} className="w-4 h-4" />
-                                                        </button>
+                                        )}
+                                        {isColumnVisible('invoice_email') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.invoice_email || '—'}</td>}
+                                        {isColumnVisible('status') && (
+                                            <td className="px-4 py-4 text-sm">
+                                                <select
+                                                    value={c.status || ''}
+                                                    onChange={(e) => handleStatusChange(c.id, e.target.value)}
+                                                    className={clsx(
+                                                        "px-2 py-1 rounded-lg text-[11px] font-black uppercase tracking-wider border-none focus:ring-2 focus:ring-primary/20 outline-none cursor-pointer transition-all",
+                                                        c.status === 'Thành công' 
+                                                            ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" 
+                                                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                                                     )}
-                                                    <button onClick={() => { setSelectedCustomer(c); setIsRepairModalOpen(true); }} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Báo hỏng">
-                                                        <Ticket size={16} className="w-4 h-4" />
-                                                    </button>
-                                                    <button onClick={() => handleViewCustomer(c)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="Xem chi tiết">
-                                                        <Eye className="w-4 h-4" />
-                                                    </button>
-                                                    <button onClick={() => handleEditCustomer(c)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
-                                                        <Edit className="w-4 h-4" />
-                                                    </button>
-                                                    <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                </div>
+                                                >
+                                                    <option value="" disabled>-- Chọn --</option>
+                                                    <option value="Thành công">Thành công</option>
+                                                    <option value="Chưa thành công">Chưa thành công</option>
+                                                </select>
                                             </td>
-                                        </tr>
-                                    ))
-                                )}
+                                        )}
+                                        <td className="px-4 py-4 text-center border-l border-r border-primary/20">
+                                            <div className="flex items-center justify-center gap-3">
+                                                {c.status === 'Thành công' && (
+                                                    <button 
+                                                        onClick={() => navigate(`/de-nghi-xuat-may/tao?phone=${c.phone || ''}`)} 
+                                                        className="text-indigo-600/80 hover:text-indigo-700 transition-colors p-1 rounded hover:bg-indigo-50" 
+                                                        title="Mẫu đề nghị máy"
+                                                    >
+                                                        <FilePlus size={16} className="w-4 h-4" />
+                                                    </button>
+                                                )}
+                                                <button onClick={() => { setSelectedCustomer(c); setIsRepairModalOpen(true); }} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Báo hỏng">
+                                                    <Ticket size={16} className="w-4 h-4" />
+                                                </button>
+                                                <button onClick={() => handleViewCustomer(c)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="Xem chi tiết">
+                                                    <Eye className="w-4 h-4" />
+                                                </button>
+                                                <button onClick={() => handleEditCustomer(c)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
+                                                    <Edit className="w-4 h-4" />
+                                                </button>
+                                                <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
                             </tbody>
                         </table>
                     </div>

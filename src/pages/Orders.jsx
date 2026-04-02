@@ -22,6 +22,7 @@ import {
     ChevronRight,
     ClipboardCheck,
     Edit,
+    Eye,
     Filter,
     List,
     MapPin,
@@ -53,6 +54,7 @@ import {
     ORDER_STATUSES,
     ORDER_TYPES,
     PRODUCT_TYPES,
+    STATUS_PRIORITY,
     TABLE_COLUMNS
 } from '../constants/orderConstants';
 import usePermissions from '../hooks/usePermissions';
@@ -84,6 +86,10 @@ const Orders = () => {
     const [isActionModalOpen, setIsActionModalOpen] = useState(false);
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [orderToEdit, setOrderToEdit] = useState(null);
+    const [viewOnly, setViewOnly] = useState(false);
+    const [activeRowMenu, setActiveRowMenu] = useState(null);
+    const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
+    const rowMenuRef = useRef(null);
     const [serialsModalOrder, setSerialsModalOrder] = useState(null);
     const [warehousesList, setWarehousesList] = useState([]);
     const [showMoreActions, setShowMoreActions] = useState(false);
@@ -148,11 +154,21 @@ const Orders = () => {
     const [pendingProductTypes, setPendingProductTypes] = useState([]);
     const [pendingCustomers, setPendingCustomers] = useState([]);
 
-    // Dropdown state
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [filterSearch, setFilterSearch] = useState('');
-    const dropdownRef = useRef(null); // Keep this for backward compatibility if used elsewhere, but we'll use specific refs
+    const dropdownRef = useRef(null);
     const listDropdownRef = useRef(null);
+
+    // Close logic for row action menu
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (rowMenuRef.current && !rowMenuRef.current.contains(event.target)) {
+                setActiveRowMenu(null);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
     const statsDropdownRef = useRef(null);
     const { fetchCustomerCylinderDebt } = useReports();
     const [allCustomerDebts, setAllCustomerDebts] = useState({}); // customer_id -> debt array
@@ -318,6 +334,18 @@ const Orders = () => {
 
         return matchesSearch && matchesStatus && matchesCategory &&
             matchesOrderType && matchesProductType && matchesCustomer;
+    });
+
+    const sortedOrders = [...filteredOrders].sort((a, b) => {
+        const priorityA = STATUS_PRIORITY[a.status] || 99;
+        const priorityB = STATUS_PRIORITY[b.status] || 99;
+
+        if (priorityA !== priorityB) {
+            return priorityA - priorityB;
+        }
+
+        // Secondary sort: Newest first within same status
+        return new Date(b.created_at) - new Date(a.created_at);
     });
 
     // Calculate totals
@@ -565,7 +593,16 @@ const Orders = () => {
 
     const handleEditOrder = (order) => {
         setOrderToEdit(order);
+        setViewOnly(false);
         setIsFormModalOpen(true);
+        setActiveRowMenu(null);
+    };
+
+    const handleViewOrder = (order) => {
+        setOrderToEdit(order);
+        setViewOnly(true);
+        setIsFormModalOpen(true);
+        setActiveRowMenu(null);
     };
 
     const handleFormSubmitSuccess = () => {
@@ -1311,13 +1348,13 @@ const Orders = () => {
                                             Đang tải dữ liệu...
                                         </td>
                                     </tr>
-                                ) : filteredOrders.length === 0 ? (
+                                ) : sortedOrders.length === 0 ? (
                                     <tr>
                                         <td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center text-muted-foreground">
                                             Không tìm thấy đơn hàng nào
                                         </td>
                                     </tr>
-                                ) : filteredOrders.map((order) => {
+                                ) : sortedOrders.map((order) => {
                                     const status = getStatusConfig(order.status);
                                     return (
                                         <tr key={order.id} className={getRowStyle(order.customer_category, selectedIds.includes(order.id))}>
@@ -1342,45 +1379,103 @@ const Orders = () => {
                                                     {renderCell(col.key, order)}
                                                 </td>
                                             ))}
-                                            <td className="sticky right-0 z-20 bg-white px-4 py-4 text-center shadow-[-6px_0_10px_-8px_rgba(15,23,42,0.25)] before:content-[''] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:bg-slate-300">
-                                                <div className="flex items-center justify-center gap-3">
-                                                    <button
-                                                        onClick={() => { setSelectedOrder(order); setIsActionModalOpen(true); }}
-                                                        className="text-emerald-600/80 hover:text-emerald-700 transition-colors p-1 rounded hover:bg-emerald-50"
-                                                        title="Thao tác đơn hàng"
-                                                    >
-                                                        <Package className="w-4 h-4" />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handlePrint(order)}
-                                                        className="text-muted-foreground hover:text-primary transition-colors p-1 rounded hover:bg-primary/10"
-                                                        title={order.product_type?.startsWith('MAY') ? 'In phiếu xuất kho + biên bản bàn giao máy' : 'In phiếu xuất kho'}
-                                                    >
-                                                        <Printer className="w-4 h-4" />
-                                                    </button>
-                                                    {order.product_type?.startsWith('MAY') && (
+                                            <td className="sticky right-0 z-20 bg-white px-2 py-4 text-center shadow-[-6px_0_10px_-8px_rgba(15,23,42,0.25)] before:content-[''] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:bg-slate-300">
+                                                <div className="flex items-center justify-center gap-1">
+                                                    {/* Dropdown for All Actions */}
+                                                    <div className="relative">
                                                         <button
-                                                            onClick={() => handleHandoverPrint(order)}
-                                                            className="text-muted-foreground hover:text-green-600 transition-colors p-1 rounded hover:bg-green-50"
-                                                            title="In biên bản bàn giao (BBBG)"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                if (activeRowMenu === order.id) {
+                                                                    setActiveRowMenu(null);
+                                                                } else {
+                                                                    const rect = e.currentTarget.getBoundingClientRect();
+                                                                    setMenuPosition({ 
+                                                                        top: rect.bottom + window.scrollY, 
+                                                                        left: rect.left + window.scrollX - 200 // Offset to the left
+                                                                    });
+                                                                    setActiveRowMenu(order.id);
+                                                                }
+                                                            }}
+                                                            className={clsx(
+                                                                "p-2 rounded-xl transition-all",
+                                                                activeRowMenu === order.id ? "bg-slate-100 text-slate-800" : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+                                                            )}
                                                         >
-                                                            <ClipboardCheck className="w-4 h-4" />
+                                                            <MoreVertical className="w-5 h-5" />
                                                         </button>
-                                                    )}
-                                                    <button
-                                                        onClick={() => handleEditOrder(order)}
-                                                        className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50"
-                                                        title="Chỉnh sửa"
-                                                    >
-                                                        <Edit className="w-4 h-4" />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleDeleteOrder(order.id, order.order_code)}
-                                                        className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50"
-                                                        title="Xóa"
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
+
+                                                        {activeRowMenu === order.id && createPortal(
+                                                            <div 
+                                                                ref={rowMenuRef}
+                                                                style={{ 
+                                                                    position: 'absolute', 
+                                                                    top: `${menuPosition.top + 8}px`, 
+                                                                    left: `${menuPosition.left}px`,
+                                                                    width: '220px'
+                                                                }}
+                                                                className="bg-white border border-slate-200 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.2)] z-[999999] py-2 overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            >
+                                                                <button
+                                                                    onClick={() => handleViewOrder(order)}
+                                                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-indigo-600 hover:bg-indigo-50 transition-colors text-[13px] font-bold"
+                                                                >
+                                                                    <Eye className="w-4 h-4" />
+                                                                    Xem đơn hàng
+                                                                </button>
+
+                                                                <button
+                                                                    onClick={() => handleEditOrder(order)}
+                                                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-amber-600 hover:bg-amber-50 transition-colors text-[13px] font-bold"
+                                                                >
+                                                                    <Edit className="w-4 h-4" />
+                                                                    Sửa đơn hàng
+                                                                </button>
+
+                                                                <div className="h-px bg-slate-100 my-1 mx-2" />
+
+                                                                <button
+                                                                    onClick={() => { setSelectedOrder(order); setIsActionModalOpen(true); setActiveRowMenu(null); }}
+                                                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-emerald-600 hover:bg-emerald-50 transition-colors text-[13px] font-bold"
+                                                                >
+                                                                    <Package className="w-4 h-4" />
+                                                                    Thao tác đơn hàng
+                                                                </button>
+
+                                                                <div className="h-px bg-slate-100 my-1 mx-2" />
+
+                                                                <button
+                                                                    onClick={() => { handlePrint(order); setActiveRowMenu(null); }}
+                                                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-slate-600 hover:bg-slate-50 transition-colors text-[13px] font-bold"
+                                                                >
+                                                                    <Printer className="w-4 h-4 text-slate-400" />
+                                                                    In phiếu xuất kho
+                                                                </button>
+
+                                                                {order.product_type?.startsWith('MAY') && (
+                                                                    <button
+                                                                        onClick={() => { handleHandoverPrint(order); setActiveRowMenu(null); }}
+                                                                        className="w-full flex items-center gap-3 px-4 py-2.5 text-slate-600 hover:bg-slate-50 transition-colors text-[13px] font-bold"
+                                                                    >
+                                                                        <ClipboardCheck className="w-4 h-4 text-slate-400" />
+                                                                        In biên bản bàn giao
+                                                                    </button>
+                                                                )}
+
+                                                                <div className="h-px bg-slate-100 my-1 mx-2" />
+
+                                                                <button
+                                                                    onClick={() => { handleDeleteOrder(order.id, order.order_code); setActiveRowMenu(null); }}
+                                                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-rose-600 hover:bg-rose-50 transition-colors text-[13px] font-bold"
+                                                                >
+                                                                    <Trash2 className="w-4 h-4" />
+                                                                    Xóa đơn hàng
+                                                                </button>
+                                                            </div>,
+                                                            document.body
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </td>
                                         </tr>
@@ -1985,6 +2080,7 @@ const Orders = () => {
                     order={orderToEdit}
                     onClose={() => setIsFormModalOpen(false)}
                     onSuccess={handleFormSubmitSuccess}
+                    initialMode={viewOnly ? 'view' : 'edit'}
                 />,
                 document.body
             )}

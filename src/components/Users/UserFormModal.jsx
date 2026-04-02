@@ -2,9 +2,11 @@ import { clsx } from 'clsx';
 import { Briefcase, CheckCircle2, ChevronDown, Phone, ShieldCheck, UserCircle, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import bcrypt from 'bcryptjs';
 import { USER_ROLES, USER_STATUSES } from '../../constants/userConstants';
 import { supabase } from '../../supabase/config';
 import { validatePhone, formatPhoneNumber } from '../../utils/taxUtils';
+import { Eye, EyeOff, Lock } from 'lucide-react';
 
 export default function UserFormModal({ user, onClose, onSuccess }) {
     const isEdit = !!user;
@@ -21,9 +23,11 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
         sales_group: '',
         approval_level: 'Staff',
         status: 'Hoạt động',
+        password: '',
     };
 
     const [formData, setFormData] = useState(defaultState);
+    const [showPassword, setShowPassword] = useState(false);
 
     const handleClose = useCallback(() => {
         setIsClosing(true);
@@ -43,6 +47,7 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                 sales_group: user.sales_group || '',
                 approval_level: user.approval_level || 'Staff',
                 status: user.status || 'Hoạt động',
+                password: '', // Password is never shown in edit mode
             });
         }
     }, [user, isEdit]);
@@ -68,6 +73,16 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
 
         if (!validatePhone(formData.phone)) {
             setErrorMsg('Số điện thoại không đúng định dạng Việt Nam (10 chữ số).');
+            return;
+        }
+
+        if (!isEdit && !formData.password.trim()) {
+            setErrorMsg('Vui lòng nhập mật khẩu cho tài khoản mới.');
+            return;
+        }
+
+        if (formData.password && formData.password.length < 6) {
+            setErrorMsg('Mật khẩu phải có ít nhất 6 ký tự.');
             return;
         }
 
@@ -99,6 +114,12 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                 status: formData.status,
                 updated_at: new Date().toISOString()
             };
+
+            // Only hash and include password if provided
+            if (formData.password.trim()) {
+                const salt = bcrypt.genSaltSync(10);
+                payload.password = bcrypt.hashSync(formData.password.trim(), salt);
+            }
 
             if (isEdit) {
                 const { error } = await supabase
@@ -155,7 +176,7 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                                 {isEdit ? 'Cập nhật tài khoản' : 'Thêm nhân sự mới'}
                             </h3>
                             <p className="text-slate-500 text-[12px] font-semibold mt-0.5 uppercase tracking-wider">
-                                {isEdit ? `Tài khoản: @${user.username}` : 'Quản lý truy cập hệ thống'}
+                                {isEdit ? `Tài khoản: ${user.username}` : 'Quản lý truy cập hệ thống'}
                             </p>
                         </div>
                     </div>
@@ -212,7 +233,7 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                                         disabled={isEdit}
                                         placeholder="VD: nguyenva"
                                         className={clsx(
-                                            "w-full h-12 px-4 border rounded-2xl font-bold text-[15px] transition-all uppercase tracking-wider",
+                                            "w-full h-12 px-4 border rounded-2xl font-bold text-[15px] transition-all",
                                             isEdit 
                                                 ? "bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed" 
                                                 : "bg-slate-50 border-slate-200 text-primary focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
@@ -220,6 +241,32 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                                         required
                                     />
                                     {!isEdit && <p className="text-[10px] text-slate-400 ml-1 font-bold italic">* Viết liền không dấu, không chứa ký tự đặc biệt.</p>}
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                        <Lock className="w-4 h-4 text-primary" />
+                                        Mật khẩu { !isEdit && <span className="text-rose-500">*</span> }
+                                    </label>
+                                    <div className="relative">
+                                        <input
+                                            type={showPassword ? "text" : "password"}
+                                            name="password"
+                                            value={formData.password}
+                                            onChange={handleChange}
+                                            placeholder={isEdit ? "Để trống nếu không muốn đổi mật khẩu" : "Nhập mật khẩu..."}
+                                            className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-800 transition-all focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white pr-12"
+                                            required={!isEdit}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowPassword(!showPassword)}
+                                            className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-primary transition-colors p-1"
+                                        >
+                                            {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                                        </button>
+                                    </div>
+                                    {isEdit && <p className="text-[10px] text-slate-400 ml-1 font-bold italic">* Chỉ nhập nếu bạn muốn thay đổi mật khẩu hiện tại.</p>}
                                 </div>
                             </div>
                         </div>

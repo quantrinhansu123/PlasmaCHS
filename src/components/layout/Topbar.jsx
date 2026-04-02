@@ -106,8 +106,9 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const username = localStorage.getItem('user_name') || "Lê Minh Công";
-  const userRole = localStorage.getItem('user_role') || "Quản trị viên (Admin)";
+  const username = localStorage.getItem('user_name') || sessionStorage.getItem('user_name') || "Nhân viên";
+  const userRole = localStorage.getItem('user_role') || sessionStorage.getItem('user_role') || "Chưa xác định";
+  const userAvatar = localStorage.getItem('user_avatar') || sessionStorage.getItem('user_avatar') || null;
   const displayName = username.split(' ').map(n => n.charAt(0)).join('+');
   const defaultAvatar = `https://ui-avatars.com/api/?name=${displayName}&background=random&color=random`;
 
@@ -234,6 +235,15 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
     return () => clearInterval(timer);
   }, []);
 
+  const handleLogout = () => {
+    localStorage.removeItem('is_authenticated');
+    localStorage.removeItem('user_id');
+    localStorage.removeItem('user_name');
+    localStorage.removeItem('user_role');
+    sessionStorage.clear();
+    navigate('/login', { replace: true });
+  };
+
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (notificationDropdownRef.current && !notificationDropdownRef.current.contains(event.target)) {
@@ -346,7 +356,7 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
             </svg>
           </span>
 
-          <Link to="/trang-chu" className="text-muted-foreground text-[13px] font-medium hover:text-primary transition-colors">
+          <Link to="/trang-chu" className="text-slate-700 text-[13px] font-bold hover:text-primary transition-colors">
             Trang chủ
           </Link>
 
@@ -358,11 +368,11 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
                 </svg>
               </span>
               {index === breadcrumbs.length - 1 ? (
-                <div className="flex items-center bg-primary text-white px-1.5 py-0.5 rounded-lg text-[12px] font-bold shadow-sm ring-1 ring-primary/20">
+                <div className="flex items-center bg-primary text-white px-2 py-0.5 rounded-lg text-[12px] font-extrabold shadow-sm ring-1 ring-primary/20">
                   {crumb.label}
                 </div>
               ) : (
-                <Link to={crumb.path} className="text-muted-foreground text-[13px] font-medium hover:text-primary transition-colors">
+                <Link to={crumb.path} className="text-slate-700 text-[13px] font-bold hover:text-primary transition-colors">
                   {crumb.label}
                 </Link>
               )}
@@ -377,12 +387,12 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
         <div className="hidden md:flex items-center bg-card border border-border shadow-sm px-4 py-1.5 rounded-full gap-3 text-[13px]">
           <div className="flex items-center gap-2">
             <Clock size={16} className="text-primary" />
-            <span className="font-bold text-foreground tabular-nums">{formatTime(time)}</span>
+            <span className="font-extrabold text-slate-900 tabular-nums">{formatTime(time)}</span>
           </div>
-          <div className="w-[1px] h-4 bg-border" />
-          <div className="flex items-center gap-2 text-muted-foreground">
+          <div className="w-[1px] h-4 bg-slate-200" />
+          <div className="flex items-center gap-2 text-slate-700">
             <Calendar size={16} className="text-primary" />
-            <span className="font-medium whitespace-nowrap">{formatDate(time)}</span>
+            <span className="font-bold whitespace-nowrap">{formatDate(time)}</span>
           </div>
         </div>
 
@@ -520,7 +530,12 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
           >
             <div className="relative">
               <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center overflow-hidden shadow-sm shadow-primary/5">
-                <img src={defaultAvatar} alt="Avatar" className="w-full h-full object-cover" />
+                <img 
+                  src={userAvatar || defaultAvatar} 
+                  alt="Avatar" 
+                  className="w-full h-full object-cover" 
+                  onError={(e) => { e.target.src = defaultAvatar; }}
+                />
               </div>
               <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-card shadow-sm shadow-emerald-500/50" />
             </div>
@@ -570,7 +585,7 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
                 <div className="my-1 border-t border-border/50" />
 
                 <button
-                  onClick={() => setShowUserDropdown(false)}
+                  onClick={handleLogout}
                   className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-red-500 hover:bg-red-500/10 transition-all duration-200"
                 >
                   <div className="w-8 h-8 rounded-lg bg-red-500/5 flex items-center justify-center">
