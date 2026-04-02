@@ -23,73 +23,6 @@ import { clsx } from 'clsx';
 import { sidebarMenu, extraMenuItems } from '../../constants/sidebarMenu';
 import { actionModuleGroups } from '../../constants/actionModuleData';
 
-const mockNotifications = [
-  {
-    id: '1',
-    title: 'Chào mừng trở lại',
-    description: 'Đây là thông báo mẫu. Bạn có thể thêm, đánh dấu đã đọc hoặc xóa từng thông báo.',
-    time: '2 phút trước',
-    type: 'info',
-    isRead: false,
-  },
-  {
-    id: '2',
-    title: 'Cập nhật hệ thống',
-    description: 'Phiên bản mới đã sẵn sàng. Vui lòng làm mới trang khi thuận tiện.',
-    time: '1 giờ trước',
-    type: 'success',
-    isRead: false,
-  },
-  {
-    id: '3',
-    title: 'Đơn nghỉ phép đã duyệt',
-    description: 'Đơn xin nghỉ phép từ 12/02 đến 14/02 đã được phê duyệt.',
-    time: '3 giờ trước',
-    type: 'success',
-    isRead: false,
-  },
-  {
-    id: '4',
-    title: 'Bảo trì định kỳ',
-    description: 'Hệ thống sẽ bảo trì từ 23:00 ngày 15/02 đến 02:00 ngày 16/02. Vui lòng lưu dữ liệu trước...',
-    time: '5 giờ trước',
-    type: 'warning',
-    isRead: false,
-  },
-  {
-    id: '5',
-    title: 'Nhắc nhở nộp báo cáo',
-    description: 'Báo cáo tháng 1 chưa được nộp. Hạn chót: 15/02.',
-    time: '1 ngày trước',
-    type: 'warning',
-    isRead: true,
-  },
-  {
-    id: '6',
-    title: 'Lương tháng 1 đã sẵn sàng',
-    description: 'Phiếu lương tháng 1/2026 đã được cập nhật trên hệ thống.',
-    time: '2 ngày trước',
-    type: 'success',
-    isRead: true,
-  },
-  {
-    id: '7',
-    title: 'Nội quy công ty mới',
-    description: 'Vui lòng đọc và xác nhận nội quy làm việc mới áp dụng từ tháng sau.',
-    time: '3 ngày trước',
-    type: 'info',
-    isRead: true,
-  },
-  {
-    id: '8',
-    title: 'Thông báo cũ',
-    description: 'Đây là một thông báo cũ để kiểm tra tính năng xem tất cả.',
-    time: '1 tuần trước',
-    type: 'info',
-    isRead: true,
-  },
-];
-
 import { supabase } from '../../supabase/config';
 
 function Topbar({ sidebarOpen, setSidebarOpen }) {
@@ -119,7 +52,7 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
       .from('notifications')
       .select('*')
       .order('created_at', { ascending: false });
-    
+
     if (!error && data) {
       setNotifications(data);
     }
@@ -132,10 +65,10 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
     // Setup Real-time Subscription
     const channel = supabase
       .channel('public:notifications')
-      .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
-        table: 'notifications' 
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications'
       }, (payload) => {
         setNotifications(prev => [payload.new, ...prev]);
       })
@@ -273,7 +206,7 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
       .from('notifications')
       .update({ is_read: true })
       .eq('is_read', false);
-    
+
     if (!error) {
       setNotifications(notifications.map((n) => ({ ...n, is_read: true })));
     }
@@ -284,7 +217,7 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
       .from('notifications')
       .delete()
       .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
-    
+
     if (!error) {
       setNotifications([]);
     }
@@ -295,7 +228,7 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
       .from('notifications')
       .update({ is_read: true })
       .eq('id', id);
-    
+
     if (!error) {
       setNotifications(
         notifications.map((n) =>
@@ -416,39 +349,39 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
           </button>
 
           {showNotifications && (
-            <div className="absolute right-0 mt-2 w-[350px] bg-white rounded-xl shadow-xl border border-border overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-right">
-              <div className="p-3 border-b border-border flex items-center justify-between bg-white sticky top-0 z-10">
+            <div className="fixed top-[55px] inset-x-0 bottom-0 z-[99999] flex flex-col bg-slate-50/95 backdrop-blur-md sm:bg-white sm:absolute sm:top-auto sm:inset-x-auto sm:bottom-auto sm:right-0 sm:mt-2 sm:w-[350px] sm:h-auto sm:rounded-xl shadow-xl sm:border border-t border-border/80 overflow-hidden animate-in fade-in slide-in-from-top-2 sm:slide-in-from-top-0 sm:zoom-in-95 duration-200 sm:origin-top-right">
+              <div className="p-4 sm:p-3 border-b border-border/60 flex items-center justify-between bg-white/80 sm:bg-white backdrop-blur-md sticky top-0 z-10 sm:shadow-none shadow-sm">
                 <div className="flex items-center gap-2">
-                  <Bell size={16} className="text-primary" />
-                  <h3 className="font-bold text-foreground text-[13px]">Thông báo</h3>
+                  <Bell size={16} className="text-primary hidden sm:block" />
+                  <h3 className="font-bold text-foreground text-[15px] sm:text-[13px]">Thông báo hệ thống</h3>
                   {unreadCount > 0 && (
-                    <span className="bg-primary/10 text-primary text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                      {unreadCount}
+                    <span className="bg-primary/10 text-primary text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                      {unreadCount} mới
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-0.5">
+                <div className="flex items-center gap-1 sm:gap-0.5">
                   <button
                     onClick={markAllAsRead}
-                    className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/5 rounded-md transition-colors"
+                    className="p-2 sm:p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/5 rounded-md transition-colors"
                     title="Đánh dấu tất cả là đã đọc"
                   >
-                    <CheckCheck size={16} />
+                    <CheckCheck className="w-5 h-5 sm:w-4 sm:h-4" />
                   </button>
                   <button
                     onClick={clearAll}
-                    className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
+                    className="p-2 sm:p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
                     title="Xóa tất cả"
                   >
-                    <Trash2 size={16} />
+                    <Trash2 className="w-5 h-5 sm:w-4 sm:h-4" />
                   </button>
                 </div>
               </div>
 
               <div
                 className={clsx(
-                  'overflow-y-auto custom-scrollbar transition-all duration-300',
-                  isExpanded ? 'max-h-[400px]' : 'max-h-[350px]'
+                  'overflow-y-auto custom-scrollbar transition-all duration-300 flex-1 sm:flex-none bg-white/50 sm:bg-transparent',
+                  isExpanded ? 'sm:max-h-[400px]' : 'sm:max-h-[350px]'
                 )}
               >
                 {notifications.length > 0 ? (
@@ -458,7 +391,7 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
                         key={notification.id}
                         onClick={() => markAsRead(notification.id)}
                         className={clsx(
-                          'p-3 transition-colors cursor-pointer hover:bg-muted/30 relative',
+                          'p-4 sm:p-3 transition-colors cursor-pointer hover:bg-white/80 bg-white/60 sm:bg-transparent sm:hover:bg-muted/30 relative border-b border-border/40 sm:border-b-0',
                           getTypeStyles(notification.type, notification.is_read)
                         )}
                       >
@@ -474,23 +407,23 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
                             {getIcon(notification.type)}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between gap-2 mb-0.5">
+                            <div className="flex items-start justify-between gap-2 mb-1 sm:mb-0.5">
                               <h4
                                 className={clsx(
-                                  'font-bold text-[13px] leading-tight transition-colors truncate',
+                                  'font-bold text-[14px] sm:text-[13px] leading-tight transition-colors truncate',
                                   notification.is_read ? 'text-foreground/70' : 'text-primary'
                                 )}
                               >
                                 {notification.title}
                               </h4>
                               {!notification.is_read && (
-                                <span className="w-1.5 h-1.5 bg-primary rounded-full shrink-0 mt-1" />
+                                <span className="w-2 h-2 sm:w-1.5 sm:h-1.5 bg-primary rounded-full shrink-0 mt-1" />
                               )}
                             </div>
-                            <p className="text-[12px] text-muted-foreground leading-snug mb-0.5 line-clamp-1">
+                            <p className="text-[13px] sm:text-[12px] text-muted-foreground leading-relaxed sm:leading-snug mb-1 sm:mb-0.5 line-clamp-2 sm:line-clamp-1">
                               {notification.description}
                             </p>
-                            <span className="text-[10px] text-muted-foreground/50">{new Date(notification.created_at).toLocaleString('vi-VN')}</span>
+                            <span className="text-[11px] sm:text-[10px] text-muted-foreground/60">{new Date(notification.created_at).toLocaleString('vi-VN')}</span>
                           </div>
                         </div>
                       </div>
@@ -505,13 +438,15 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
               </div>
 
               {hasMore && (
-                <button
-                  onClick={() => setIsExpanded(!isExpanded)}
-                  className="w-full p-2.5 text-center text-[12px] font-bold text-primary hover:bg-primary/5 border-t border-border transition-colors flex items-center justify-center gap-1"
-                >
-                  {isExpanded ? 'Thu gọn' : 'Xem tất cả thông báo'}
-                  <ChevronRight size={14} className={clsx('transition-transform', isExpanded && 'rotate-90')} />
-                </button>
+                <div className="mt-auto sm:mt-0 border-t border-border/80 bg-white/90 sm:bg-white backdrop-blur-md z-10 shrink-0">
+                  <button
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    className="w-full p-4 sm:p-2.5 text-center text-[14px] sm:text-[12px] font-bold text-primary hover:bg-primary/5 transition-colors flex items-center justify-center gap-1"
+                  >
+                    {isExpanded ? 'Thu gọn' : 'Xem tất cả lịch sử'}
+                    <ChevronRight size={16} className={clsx('transition-transform sm:w-[14px] sm:h-[14px]', isExpanded && 'rotate-90')} />
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -530,10 +465,10 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
           >
             <div className="relative">
               <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center overflow-hidden shadow-sm shadow-primary/5">
-                <img 
-                  src={userAvatar || defaultAvatar} 
-                  alt="Avatar" 
-                  className="w-full h-full object-cover" 
+                <img
+                  src={userAvatar || defaultAvatar}
+                  alt="Avatar"
+                  className="w-full h-full object-cover"
                   onError={(e) => { e.target.src = defaultAvatar; }}
                 />
               </div>
