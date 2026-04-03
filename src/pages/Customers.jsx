@@ -10,47 +10,47 @@ import {
     PointElement,
     Title
 } from 'chart.js';
+import { clsx } from 'clsx';
 import {
     BarChart2,
     ChevronDown,
     ChevronLeft,
     ChevronRight,
+    Download,
     Edit,
     Eye,
+    FilePlus,
     Filter,
     List,
     Mail,
     MapPin,
+    MoreVertical,
     Phone,
     Plus,
     Search,
     SlidersHorizontal,
-    Trash2,
-    User,
-    Users,
-    Download,
-    Upload,
-    X,
-    MoreVertical,
-    FilePlus,
+    Ticket,
     ToggleLeft,
     ToggleRight,
-    Ticket
+    Trash2,
+    Upload,
+    User,
+    Users,
+    X
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import * as XLSX from 'xlsx';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { clsx } from 'clsx';
+import * as XLSX from 'xlsx';
 import CustomerDetailsModal from '../components/Customers/CustomerDetailsModal';
 import CustomerFormModal from '../components/Customers/CustomerFormModal';
+import MobilePageHeader from '../components/layout/MobilePageHeader';
+import MobilePagination from '../components/layout/MobilePagination';
+import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import RepairTicketForm from '../components/Repairs/RepairTicketForm';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
-import MobilePageHeader from '../components/layout/MobilePageHeader';
-import MobilePagination from '../components/layout/MobilePagination';
-import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 
@@ -127,10 +127,15 @@ const Customers = () => {
         { key: 'managed_by', label: 'Nhân viên phụ trách' },
         { key: 'category', label: 'Loại khách hàng' },
         { key: 'care_assigned_at', label: 'Ngày đăng ký' },
+        { key: 'care_expiry_date', label: 'Ngày hết hạn' },
         { key: 'days_left', label: 'Ngày còn lại' },
         { key: 'care_status', label: 'Trạng thái CS' },
         { key: 'status', label: 'Trạng thái' },
         { key: 'invoice_email', label: 'Email hóa đơn' },
+        { key: 'current_cylinders', label: 'Vỏ bình' },
+        { key: 'current_machines', label: 'Máy móc' },
+        { key: 'borrowed_cylinders', label: 'Vỏ mượn' },
+        { key: 'care_by', label: 'KD chăm sóc' },
     ];
 
     const CUSTOMER_CATEGORIES = [
@@ -990,12 +995,12 @@ const Customers = () => {
                                                     <FilePlus size={16} />
                                                 </button>
                                             )}
-                                            <button 
-                                                onClick={() => handleStatusChange(c.id, c.status === 'Thành công' ? 'Chưa thành công' : 'Thành công')} 
+                                            <button
+                                                onClick={() => handleStatusChange(c.id, c.status === 'Thành công' ? 'Chưa thành công' : 'Thành công')}
                                                 className={clsx(
                                                     "p-2 rounded-lg transition-all border",
-                                                    c.status === 'Thành công' 
-                                                        ? "bg-emerald-50 border-emerald-100 text-emerald-600" 
+                                                    c.status === 'Thành công'
+                                                        ? "bg-emerald-50 border-emerald-100 text-emerald-600"
                                                         : "bg-slate-50 border-slate-200 text-slate-400"
                                                 )}
                                                 title={c.status === 'Thành công' ? "Đánh dấu là chưa thành công" : "Đánh dấu là thành công"}
@@ -1009,10 +1014,10 @@ const Customers = () => {
                                                 <Eye size={16} />
                                             </button>
                                             <button onClick={() => handleEditCustomer(c)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg" title="Chỉnh sửa">
-                                               <Edit size={16} />
+                                                <Edit size={16} />
                                             </button>
                                             <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg" title="Xóa">
-                                               <Trash2 size={16} />
+                                                <Trash2 size={16} />
                                             </button>
                                         </div>
                                     </div>
@@ -1258,7 +1263,7 @@ const Customers = () => {
                                             {col.label}
                                         </th>
                                     ))}
-                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide border-l border-r border-primary/30">Thao tác</th>
+                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide border-l border-r border-primary/30 min-w-[120px]">Thao tác</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-primary/10">
@@ -1276,95 +1281,134 @@ const Customers = () => {
                                     </tr>
                                 ) : (
                                     filteredCustomers.map((c) => (
-                                        <tr 
-                                            key={c.id} 
-                                        className={clsx(
-                                            getRowStyle(c.category),
-                                            selectedIds.includes(c.id) && "bg-primary/[0.04] !hover:bg-primary/[0.08]"
-                                        )}
-                                    >
-                                        <td className="px-4 py-4 text-center border-r border-primary/10">
-                                            <input
-                                                type="checkbox"
-                                                checked={selectedIds.includes(c.id)}
-                                                onChange={() => toggleSelectOne(c.id)}
-                                                className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
-                                            />
-                                        </td>
-                                        {isColumnVisible('code') && <td className={getCodeCellClass(c.category)}>{c.code}</td>}
-                                        {isColumnVisible('name') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{c.name}</td>}
-                                        {isColumnVisible('phone') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.phone || '—'}</td>}
-                                        {isColumnVisible('address') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.address || '—'}</td>}
-                                        {isColumnVisible('legal_rep') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.legal_rep || '—'}</td>}
-                                        {isColumnVisible('managed_by') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.managed_by || '—'}</td>}
-                                        {isColumnVisible('category') && <td className="px-4 py-4 text-sm text-muted-foreground"><span className={getCategoryBadgeClass(c.category)}>{getLabel(CUSTOMER_CATEGORIES, c.category)}</span></td>}
-                                        {isColumnVisible('current_cylinders') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.current_cylinders || 0)}</td>}
-                                        {isColumnVisible('current_machines') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.current_machines || 0)}</td>}
-                                        {isColumnVisible('borrowed_cylinders') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.borrowed_cylinders || 0)}</td>}
-                                        {isColumnVisible('machines_in_use') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.machines_in_use || '—'}</td>}
-                                        {isColumnVisible('care_by') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.care_by || '—'}</td>}
-                                        {isColumnVisible('care_expiry_date') && (
-                                            <td className="px-4 py-4 text-sm">
-                                                {c.care_expiry_date ? (
-                                                    <div className="flex flex-col">
-                                                        <span className="font-bold text-slate-700">{new Date(c.care_expiry_date).toLocaleDateString('vi-VN')}</span>
-                                                        {(() => {
-                                                            const diff = Math.ceil((new Date(c.care_expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
-                                                            if (diff <= 0) return <span className="text-[10px] font-bold text-rose-500 uppercase">Đã hết hạn</span>;
-                                                            if (diff <= 10) return <span className="text-[10px] font-bold text-amber-500 uppercase">Còn {diff} ngày</span>;
-                                                            return <span className="text-[10px] font-bold text-emerald-500 uppercase">Còn {diff} ngày</span>;
-                                                        })()}
-                                                    </div>
-                                                ) : '—'}
+                                        <tr
+                                            key={c.id}
+                                            className={clsx(
+                                                getRowStyle(c.category),
+                                                selectedIds.includes(c.id) && "bg-primary/[0.04] !hover:bg-primary/[0.08]"
+                                            )}
+                                        >
+                                            <td className="px-4 py-4 text-center border-r border-primary/10">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedIds.includes(c.id)}
+                                                    onChange={() => toggleSelectOne(c.id)}
+                                                    className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                                                />
                                             </td>
-                                        )}
-                                        {isColumnVisible('invoice_email') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.invoice_email || '—'}</td>}
-                                        {isColumnVisible('status') && (
-                                            <td className="px-4 py-4 text-sm">
-                                                <select
-                                                    value={c.status || ''}
-                                                    onChange={(e) => handleStatusChange(c.id, e.target.value)}
-                                                    className={clsx(
-                                                        "px-2 py-1 rounded-lg text-[11px] font-black uppercase tracking-wider border-none focus:ring-2 focus:ring-primary/20 outline-none cursor-pointer transition-all",
-                                                        c.status === 'Thành công' 
-                                                            ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" 
-                                                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                            {visibleTableColumns.map(col => {
+                                                const value = c[col.key];
+
+                                                if (col.key === 'code') {
+                                                    return <td key={col.key} className={getCodeCellClass(c.category)}>{value}</td>;
+                                                }
+
+                                                if (col.key === 'name') {
+                                                    return <td key={col.key} className="px-4 py-4 text-sm font-semibold text-foreground">{value}</td>;
+                                                }
+
+                                                if (col.key === 'category') {
+                                                    return (
+                                                        <td key={col.key} className="px-4 py-4 text-sm text-muted-foreground">
+                                                            <span className={getCategoryBadgeClass(c.category)}>
+                                                                {getLabel(CUSTOMER_CATEGORIES, c.category)}
+                                                            </span>
+                                                        </td>
+                                                    );
+                                                }
+
+                                                if (['phone', 'address', 'legal_rep', 'managed_by', 'invoice_email', 'care_by'].includes(col.key)) {
+                                                    return <td key={col.key} className="px-4 py-4 text-sm text-muted-foreground">{value || '—'}</td>;
+                                                }
+
+                                                if (['current_cylinders', 'current_machines', 'borrowed_cylinders'].includes(col.key)) {
+                                                    return <td key={col.key} className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(value || 0)}</td>;
+                                                }
+
+                                                if (col.key === 'care_assigned_at') {
+                                                    return (
+                                                        <td key={col.key} className="px-4 py-4 text-sm text-muted-foreground">
+                                                            {value ? new Date(value).toLocaleDateString('vi-VN') : '—'}
+                                                        </td>
+                                                    );
+                                                }
+
+                                                if (col.key === 'care_expiry_date') {
+                                                    return (
+                                                        <td key={col.key} className="px-4 py-4 text-sm text-muted-foreground">
+                                                            {value ? new Date(value).toLocaleDateString('vi-VN') : '—'}
+                                                        </td>
+                                                    );
+                                                }
+
+                                                if (col.key === 'days_left') {
+                                                    const expiryDate = c.care_expiry_date;
+                                                    if (!expiryDate) return <td key={col.key} className="px-4 py-4 text-sm text-muted-foreground">—</td>;
+
+                                                    const diff = Math.ceil((new Date(expiryDate) - new Date()) / (1000 * 60 * 60 * 24));
+                                                    return (
+                                                        <td key={col.key} className="px-4 py-4 text-sm font-bold uppercase">
+                                                            {diff <= 0 ? (
+                                                                <span className="text-rose-500">Đã hết hạn</span>
+                                                            ) : (
+                                                                <span className={diff <= 10 ? "text-amber-500" : "text-emerald-500"}>
+                                                                    Còn {diff} ngày
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                    );
+                                                }
+
+                                                if (col.key === 'status') {
+                                                    return (
+                                                        <td key={col.key} className="px-4 py-4 text-sm">
+                                                            <select
+                                                                value={c.status || 'Chưa thành công'}
+                                                                onChange={(e) => handleStatusChange(c.id, e.target.value)}
+                                                                className={clsx(
+                                                                    "px-2 py-1 rounded-lg text-[11px] font-black uppercase tracking-wider border-none focus:ring-2 focus:ring-primary/20 outline-none cursor-pointer transition-all",
+                                                                    c.status === 'Thành công'
+                                                                        ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                                                                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                                                )}
+                                                            >
+                                                                <option value="Thành công">Thành công</option>
+                                                                <option value="Chưa thành công">Chưa thành công</option>
+                                                            </select>
+                                                        </td>
+                                                    );
+                                                }
+
+                                                return <td key={col.key} className="px-4 py-4 text-sm text-muted-foreground">{value || '—'}</td>;
+                                            })}
+                                            <td className="px-4 py-4 text-center border-l border-r border-primary/20">
+                                                <div className="flex items-center justify-center gap-3">
+                                                    {c.status === 'Thành công' && (
+                                                        <button
+                                                            onClick={() => navigate(`/de-nghi-xuat-may/tao?phone=${c.phone || ''}`)}
+                                                            className="text-indigo-600/80 hover:text-indigo-700 transition-colors p-1 rounded hover:bg-indigo-50"
+                                                            title="Mẫu đề nghị máy"
+                                                        >
+                                                            <FilePlus size={16} className="w-4 h-4" />
+                                                        </button>
                                                     )}
-                                                >
-                                                    <option value="" disabled>-- Chọn --</option>
-                                                    <option value="Thành công">Thành công</option>
-                                                    <option value="Chưa thành công">Chưa thành công</option>
-                                                </select>
-                                            </td>
-                                        )}
-                                        <td className="px-4 py-4 text-center border-l border-r border-primary/20">
-                                            <div className="flex items-center justify-center gap-3">
-                                                {c.status === 'Thành công' && (
-                                                    <button 
-                                                        onClick={() => navigate(`/de-nghi-xuat-may/tao?phone=${c.phone || ''}`)} 
-                                                        className="text-indigo-600/80 hover:text-indigo-700 transition-colors p-1 rounded hover:bg-indigo-50" 
-                                                        title="Mẫu đề nghị máy"
-                                                    >
-                                                        <FilePlus size={16} className="w-4 h-4" />
+                                                    <button onClick={() => { setSelectedCustomer(c); setIsRepairModalOpen(true); }} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Báo hỏng">
+                                                        <Ticket size={16} className="w-4 h-4" />
                                                     </button>
-                                                )}
-                                                <button onClick={() => { setSelectedCustomer(c); setIsRepairModalOpen(true); }} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Báo hỏng">
-                                                    <Ticket size={16} className="w-4 h-4" />
-                                                </button>
-                                                <button onClick={() => handleViewCustomer(c)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="Xem chi tiết">
-                                                    <Eye className="w-4 h-4" />
-                                                </button>
-                                                <button onClick={() => handleEditCustomer(c)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
-                                                    <Edit className="w-4 h-4" />
-                                                </button>
-                                                <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))
-                            )}
+                                                    <button onClick={() => handleViewCustomer(c)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="Xem chi tiết">
+                                                        <Eye className="w-4 h-4" />
+                                                    </button>
+                                                    <button onClick={() => handleEditCustomer(c)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
+                                                        <Edit className="w-4 h-4" />
+                                                    </button>
+                                                    <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
                             </tbody>
                         </table>
                     </div>

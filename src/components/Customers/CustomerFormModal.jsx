@@ -1,10 +1,10 @@
 import { clsx } from 'clsx';
-import { Building, Hash, MapPin, Phone, Receipt, Save, User, X, Mail } from 'lucide-react';
+import { Building, Hash, Mail, MapPin, Phone, Receipt, Save, User, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../../supabase/config';
-import { validateMST, validatePhone, formatPhoneNumber } from '../../utils/taxUtils';
 import { notificationService } from '../../utils/notificationService';
+import { formatPhoneNumber, validateMST, validatePhone } from '../../utils/taxUtils';
 
 export default function CustomerFormModal({ customer, onClose, onSuccess, categories, warehouses }) {
     const isEdit = !!customer;
@@ -96,10 +96,10 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
             const now = new Date();
             const expiry = new Date();
             expiry.setDate(expiry.getDate() + 60);
-            setFormData(prev => ({ 
-                ...prev, 
+            setFormData(prev => ({
+                ...prev,
                 care_assigned_at: now.toISOString(),
-                care_expiry_date: expiry.toISOString().split('T')[0] 
+                care_expiry_date: expiry.toISOString().split('T')[0]
             }));
         }
     }, [isEdit, customer, warehouses]);
@@ -130,7 +130,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        
+
         if (name === 'phone') {
             const formatted = formatPhoneNumber(value);
             setFormData(prev => ({ ...prev, [name]: formatted }));
@@ -145,7 +145,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        
+
         if (formData.phone && !validatePhone(formData.phone)) {
             setErrorMsg('❌ Số điện thoại không đúng định dạng!');
             setPhoneError(true);
@@ -194,11 +194,11 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                 // Nếu khách hàng đã QUÁ HẠN (expired)
                 if (now > expiryDate) {
                     const confirmSteal = window.confirm(`⚠️ Khách hàng "${existingCustomer.name}" đã quá hạn chăm sóc (phụ trách cũ: ${existingCustomer.care_by || 'Không rõ'}). \n\nBạn có muốn nhận khách hàng này về tài khoản của mình không? (Bộ đếm 60 ngày sẽ được reset)`);
-                    
+
                     if (confirmSteal) {
                         const newExpiry = new Date();
                         newExpiry.setDate(newExpiry.getDate() + 60);
-                        
+
                         const updateData = {
                             ...formData,
                             care_by: formData.care_by || 'Sale hiện tại', // Nên lấy từ auth context nếu có, hiện tại dùng formData
@@ -211,15 +211,15 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                             .from('customers')
                             .update(updateData)
                             .eq('id', existingCustomer.id);
-                        
+
                         if (stealError) throw stealError;
-                        
+
                         notificationService.add({
                             title: `🎯 Đã nhận khách quá hạn: ${existingCustomer.name}`,
                             description: `Bạn đã tiếp nhận chăm sóc khách hàng này từ hôm nay.`,
                             type: 'success'
                         });
-                        
+
                         onSuccess();
                         return;
                     } else {
@@ -305,7 +305,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                 {/* Form Body */}
                 <div className="flex-1 overflow-y-auto p-4 md:p-10 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
                     <form id="customer-form" onSubmit={handleSubmit} className="space-y-8 md:space-y-10">
-                        
+
                         {/* Section 1: Thông tin cơ bản */}
                         <div className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6 space-y-6 shadow-sm">
                             <h4 className="flex items-center gap-2.5 text-[18px] font-extrabold text-slate-800 pb-3 border-b border-slate-100">
@@ -358,8 +358,8 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                         placeholder="VD: 0912 345 678"
                                         className={clsx(
                                             "w-full h-12 px-4 border rounded-2xl focus:ring-4 outline-none transition-all font-semibold",
-                                            phoneError 
-                                                ? "bg-rose-50 border-rose-300 text-rose-900 focus:ring-rose-100 focus:border-rose-400" 
+                                            phoneError
+                                                ? "bg-rose-50 border-rose-300 text-rose-900 focus:ring-rose-100 focus:border-rose-400"
                                                 : "bg-slate-50 border-slate-200 text-slate-900 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
                                         )}
                                     />
@@ -504,8 +504,8 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                             placeholder="VD: 0101234567"
                                             className={clsx(
                                                 "w-full h-12 pl-9 pr-4 border rounded-2xl focus:ring-4 outline-none transition-all font-semibold",
-                                                taxError 
-                                                    ? "bg-rose-50 border-rose-300 text-rose-900 focus:ring-rose-100 focus:border-rose-400" 
+                                                taxError
+                                                    ? "bg-rose-50 border-rose-300 text-rose-900 focus:ring-rose-100 focus:border-rose-400"
                                                     : "bg-slate-50 border-slate-200 text-slate-900 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
                                             )}
                                         />
