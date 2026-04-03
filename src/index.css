@@ -84,6 +84,33 @@ textarea {
   font-size: 14px !important;
 }
 
+/* Bảng khách hàng: tránh global button/select làm vỡ vùng bấm (trạng thái + thao tác) */
+.customers-data-table select.customer-status-select,
+.customers-data-table .customer-row-actions button[type="button"] {
+  pointer-events: auto !important;
+  position: relative;
+  z-index: 2;
+}
+
+.customers-data-table select.customer-status-select {
+  -webkit-appearance: menulist !important;
+  appearance: menulist !important;
+  cursor: pointer !important;
+  height: auto !important;
+  min-height: 2.25rem !important;
+  padding: 0.375rem 0.5rem !important;
+}
+
+.customers-data-table .customer-row-actions button[type="button"] {
+  height: auto !important;
+  min-height: 2.25rem !important;
+  min-width: 2.25rem !important;
+  padding: 0.375rem !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
 /* Buttons - consistent 14px, compact and single line */
 button {
   font-size: 14px !important;

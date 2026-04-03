@@ -7,6 +7,7 @@ import { USER_ROLES, USER_STATUSES } from '../../constants/userConstants';
 import { supabase } from '../../supabase/config';
 import { validatePhone, formatPhoneNumber } from '../../utils/taxUtils';
 import { Eye, EyeOff, Lock } from 'lucide-react';
+import Combobox from '../ui/Combobox';
 
 export default function UserFormModal({ user, onClose, onSuccess }) {
     const isEdit = !!user;
@@ -28,6 +29,39 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
 
     const [formData, setFormData] = useState(defaultState);
     const [showPassword, setShowPassword] = useState(false);
+    const [departmentSuggestions, setDepartmentSuggestions] = useState([]);
+    const [salesGroupSuggestions, setSalesGroupSuggestions] = useState([]);
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const [usersRes, custRes] = await Promise.all([
+                    supabase.from('app_users').select('department, sales_group'),
+                    supabase.from('customers').select('agency_name, business_group'),
+                ]);
+                if (cancelled) return;
+                const dep = new Set();
+                const sg = new Set();
+                (usersRes.data || []).forEach((u) => {
+                    if (u.department?.trim()) dep.add(u.department.trim());
+                    if (u.sales_group?.trim()) sg.add(u.sales_group.trim());
+                });
+                (custRes.data || []).forEach((c) => {
+                    if (c.agency_name?.trim()) dep.add(c.agency_name.trim());
+                    if (c.business_group?.trim()) sg.add(c.business_group.trim());
+                });
+                const sortVi = (a, b) => a.localeCompare(b, 'vi', { sensitivity: 'base' });
+                setDepartmentSuggestions([...dep].sort(sortVi));
+                setSalesGroupSuggestions([...sg].sort(sortVi));
+            } catch (e) {
+                console.error('Load department/sales_group suggestions:', e);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const handleClose = useCallback(() => {
         setIsClosing(true);
@@ -305,27 +339,37 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                                         <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
                                             Phòng ban / Đại lý
                                         </label>
-                                        <input
-                                            type="text"
-                                            name="department"
+                                        <Combobox
+                                            options={departmentSuggestions}
                                             value={formData.department}
-                                            onChange={handleChange}
-                                            placeholder="VD: Kế toán, Đại lý A..."
-                                            className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-800 transition-all focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                            onChange={(v) =>
+                                                setFormData((prev) => ({ ...prev, department: v }))
+                                            }
+                                            placeholder="Chọn trong danh sách hoặc nhập mới..."
+                                            emptyMessage="Không khớp gợi ý — Enter để dùng text đã gõ."
+                                            className="!h-12 rounded-2xl text-[15px] font-semibold bg-slate-50 border-slate-200"
                                         />
+                                        <p className="text-[10px] text-slate-400 font-medium ml-1">
+                                            Gợi ý từ nhân sự và trường Đại lý (khách hàng); có thể thêm giá trị mới.
+                                        </p>
                                     </div>
                                     <div className="space-y-1.5">
                                         <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
                                             Nhóm kinh doanh
                                         </label>
-                                        <input
-                                            type="text"
-                                            name="sales_group"
+                                        <Combobox
+                                            options={salesGroupSuggestions}
                                             value={formData.sales_group}
-                                            onChange={handleChange}
-                                            placeholder="VD: Nhóm 1, Miền Bắc..."
-                                            className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-800 transition-all focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                            onChange={(v) =>
+                                                setFormData((prev) => ({ ...prev, sales_group: v }))
+                                            }
+                                            placeholder="Chọn trong danh sách hoặc nhập mới..."
+                                            emptyMessage="Không khớp gợi ý — Enter để dùng text đã gõ."
+                                            className="!h-12 rounded-2xl text-[15px] font-semibold bg-slate-50 border-slate-200"
                                         />
+                                        <p className="text-[10px] text-slate-400 font-medium ml-1">
+                                            Gợi ý từ nhân sự và Nhóm KD (khách hàng); có thể thêm giá trị mới.
+                                        </p>
                                     </div>
                                 </div>
 

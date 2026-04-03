@@ -64,6 +64,12 @@ ChartJS.register(
     ChartLegend
 );
 
+function getLoaiLoiBadgeClass(loai) {
+    if (loai === 'Máy') return 'bg-blue-50 text-blue-600 border-blue-100';
+    if (loai === 'Nâng cấp') return 'bg-amber-50 text-amber-700 border-amber-100';
+    if (loai === 'Bình') return 'bg-purple-50 text-purple-600 border-purple-100';
+    return 'bg-slate-50 text-slate-600 border-slate-100';
+}
 
 const TICKET_COLUMNS = [
     { key: 'stt', label: 'STT' },
@@ -831,7 +837,7 @@ export default function RepairTickets() {
                                                     case 'loai_loi':
                                                         content = <span className={clsx(
                                                             "px-2 py-0.5 rounded-lg text-[11px] font-bold border",
-                                                            ticket.loai_loi === 'Máy' ? "bg-blue-50 text-blue-600 border-blue-100" : "bg-purple-50 text-purple-600 border-purple-100"
+                                                            getLoaiLoiBadgeClass(ticket.loai_loi)
                                                         )}>{ticket.loai_loi || '---'}</span>; break;
                                                     case 'error_type':
                                                         content = <span className="font-bold text-rose-600">{getErrorTypeName(ticket.error_type_id)}</span>; break;
@@ -946,7 +952,7 @@ export default function RepairTickets() {
                                                 <div className="flex items-start gap-1.5 mb-1.5 min-w-0">
                                                     <span className={clsx(
                                                         "px-2 py-0.5 rounded text-[10px] font-bold border shrink-0",
-                                                        ticket.loai_loi === 'Máy' ? "bg-blue-50 text-blue-600 border-blue-100" : "bg-purple-50 text-purple-600 border-purple-100"
+                                                        getLoaiLoiBadgeClass(ticket.loai_loi)
                                                     )}>{ticket.loai_loi || '---'}</span>
                                                     <span className="text-[13px] font-bold text-rose-600 break-words">{getErrorTypeName(ticket.error_type_id)}</span>
                                                 </div>

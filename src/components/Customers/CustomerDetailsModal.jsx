@@ -353,6 +353,16 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                                 <span className="text-slate-400">Ngày hết hạn:</span>
                                                 <span className="font-bold text-slate-600">{formatDate(customer.care_expiry_date)}</span>
                                             </div>
+                                            {customer.status === 'Thành công' && (
+                                                <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-200/80">
+                                                    <span className="text-slate-400">Ngày thành công:</span>
+                                                    <span className="font-bold text-emerald-700">
+                                                        {customer.success_at
+                                                            ? formatDate(customer.success_at)
+                                                            : '—'}
+                                                    </span>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
 

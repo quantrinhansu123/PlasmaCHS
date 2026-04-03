@@ -12,6 +12,7 @@ import {
 } from 'chart.js';
 import {
     BarChart2,
+    ClipboardCheck,
     ChevronDown,
     ChevronLeft,
     ChevronRight,
@@ -37,7 +38,7 @@ import {
     ToggleRight,
     Ticket
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -111,12 +112,8 @@ const Customers = () => {
     const searchParams = new URLSearchParams(location.search);
     const filterType = searchParams.get('filter') || (location.pathname === '/khach-hang-lead' ? 'lead' : null);
 
-    const baseCustomers = useMemo(() => {
-        if (filterType === 'lead') {
-            return customers.filter(c => c.status !== 'Thành công');
-        }
-        return customers.filter(c => c.status === 'Thành công');
-    }, [customers, filterType]);
+    /** Lead / khách hàng: đã lọc trên server — không lọc lại client (tránh tải trang rồi vứt bớt dòng) */
+    const leadFilterRef = useRef(null);
 
     const TABLE_COLUMNS_DEF = [
         { key: 'code', label: 'Mã khách hàng' },
@@ -130,6 +127,7 @@ const Customers = () => {
         { key: 'days_left', label: 'Ngày còn lại' },
         { key: 'care_status', label: 'Trạng thái CS' },
         { key: 'status', label: 'Trạng thái' },
+        { key: 'success_at', label: 'Ngày thành công' },
         { key: 'invoice_email', label: 'Email hóa đơn' },
     ];
 
@@ -143,10 +141,16 @@ const Customers = () => {
     ];
 
     const defaultColOrder = TABLE_COLUMNS_DEF.map(col => col.key);
-    const columnDefs = TABLE_COLUMNS_DEF.reduce((acc, col) => {
-        acc[col.key] = { label: col.label };
-        return acc;
-    }, {});
+    const columnDefs = useMemo(
+        () =>
+            TABLE_COLUMNS_DEF.reduce((acc, col) => {
+                acc[col.key] = {
+                    label: col.key === 'code' && filterType === 'lead' ? 'STT' : col.label,
+                };
+                return acc;
+            }, {}),
+        [filterType]
+    );
     const [columnOrder, setColumnOrder] = useState(() => {
         try {
             const saved = JSON.parse(localStorage.getItem('columns_customers_order') || 'null');
@@ -172,14 +176,54 @@ const Customers = () => {
         .filter(key => visibleColumns.includes(key))
         .map(key => TABLE_COLUMNS_DEF.find(col => col.key === key))
         .filter(Boolean);
-    const isColumnVisible = (key) => visibleColumns.includes(key);
     const visibleCount = visibleColumns.length;
     const totalCount = defaultColOrder.length;
 
     useEffect(() => {
-        fetchCustomers();
         fetchWarehouses();
-    }, [currentPage, pageSize]);
+    }, []);
+
+    const fetchCustomers = useCallback(async () => {
+        setIsLoading(true);
+        try {
+            const switched = leadFilterRef.current !== null && leadFilterRef.current !== filterType;
+            leadFilterRef.current = filterType;
+            const page = switched ? 1 : currentPage;
+            if (switched) {
+                setCurrentPage(1);
+            }
+
+            const from = (page - 1) * pageSize;
+            const to = from + pageSize - 1;
+
+            let query = supabase
+                .from('customers')
+                .select('*', { count: 'exact' })
+                .order('created_at', { ascending: false });
+
+            if (filterType === 'lead') {
+                query = query.or('status.is.null,status.neq."Thành công"');
+            } else {
+                query = query.eq('status', 'Thành công');
+            }
+
+            const { data, count, error } = await query.range(from, to);
+
+            if (error) throw error;
+            setCustomers(data || []);
+            setTotalRecords(count ?? 0);
+            setSelectedIds([]);
+        } catch (error) {
+            console.error('Error fetching customers:', error);
+            alert('❌ Không thể tải danh sách khách hàng: ' + error.message);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [currentPage, pageSize, filterType]);
+
+    useEffect(() => {
+        fetchCustomers();
+    }, [fetchCustomers]);
 
     useEffect(() => {
         if (location.pathname === '/khach-hang/tao') {
@@ -196,11 +240,11 @@ const Customers = () => {
     }, [isSearchExpanded]);
 
     useEffect(() => {
-        const managedBy = [...new Set(baseCustomers.map(c => c.managed_by).filter(Boolean))];
-        const careBy = [...new Set(baseCustomers.map(c => c.care_by).filter(Boolean))];
+        const managedBy = [...new Set(customers.map((c) => c.managed_by).filter(Boolean))];
+        const careBy = [...new Set(customers.map((c) => c.care_by).filter(Boolean))];
         setUniqueManagedBy(managedBy);
         setUniqueCareBy(careBy);
-    }, [baseCustomers]);
+    }, [customers]);
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -248,30 +292,6 @@ const Customers = () => {
         setSelectedCareBy(pendingCareBy);
         setSelectedStatuses(pendingStatuses);
         closeMobileFilter();
-    };
-
-    const fetchCustomers = async () => {
-        setIsLoading(true);
-        try {
-            const from = (currentPage - 1) * pageSize;
-            const to = from + pageSize - 1;
-
-            const { data, count, error } = await supabase
-                .from('customers')
-                .select('*', { count: 'exact' })
-                .order('created_at', { ascending: false })
-                .range(from, to);
-
-            if (error) throw error;
-            setCustomers(data || []);
-            setTotalRecords(count || 0);
-            setSelectedIds([]); // Clear selection on refresh
-        } catch (error) {
-            console.error('Error fetching customers:', error);
-            alert('❌ Không thể tải danh sách khách hàng: ' + error.message);
-        } finally {
-            setIsLoading(false);
-        }
     };
 
     const fetchWarehouses = async () => {
@@ -376,7 +396,7 @@ const Customers = () => {
     );
 
 
-    const filteredCustomers = baseCustomers.filter(c => {
+    const filteredCustomers = customers.filter((c) => {
         const search = searchTerm.toLowerCase();
         const matchesSearch = (
             (c.code?.toLowerCase().includes(search)) ||
@@ -391,7 +411,16 @@ const Customers = () => {
         });
         const matchesManagedBy = selectedManagedBy.length === 0 || selectedManagedBy.includes(c.managed_by);
         const matchesCareBy = selectedCareBy.length === 0 || selectedCareBy.includes(c.care_by);
-        const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(c.status);
+        const matchesStatus =
+            selectedStatuses.length === 0 ||
+            selectedStatuses.some((s) => {
+                if (s === 'Chưa thành công') {
+                    if (c.status === 'Chưa thành công') return true;
+                    if (filterType === 'lead' && (c.status == null || c.status === '')) return true;
+                    return false;
+                }
+                return c.status === s;
+            });
 
         return matchesSearch && matchesCategory && matchesManagedBy && matchesCareBy && matchesStatus;
     });
@@ -407,25 +436,43 @@ const Customers = () => {
     const categoryOptions = CUSTOMER_CATEGORIES.map(c => ({
         id: c.id,
         label: c.label,
-        count: baseCustomers.filter(x => x.category === c.id || x.category === c.label).length
+        count: customers.filter((x) => x.category === c.id || x.category === c.label).length
     }));
 
     const managedByOptions = uniqueManagedBy.map(name => ({
         id: name,
         label: name,
-        count: baseCustomers.filter(x => x.managed_by === name).length
+        count: customers.filter((x) => x.managed_by === name).length
     }));
 
     const careByOptions = uniqueCareBy.map(name => ({
         id: name,
         label: name,
-        count: baseCustomers.filter(x => x.care_by === name).length
+        count: customers.filter((x) => x.care_by === name).length
     }));
 
-    const statusOptions = [
-        { id: 'Thành công', label: 'Thành công', count: baseCustomers.filter(x => x.status === 'Thành công').length },
-        { id: 'Chưa thành công', label: 'Chưa thành công', count: baseCustomers.filter(x => x.status === 'Chưa thành công').length },
-    ];
+    const statusOptions = useMemo(() => {
+        if (filterType === 'lead') {
+            return [
+                {
+                    id: 'Chưa thành công',
+                    label: 'Chưa thành công',
+                    count: customers.filter(
+                        (x) => x.status === 'Chưa thành công' || x.status == null || x.status === ''
+                    ).length,
+                },
+                {
+                    id: 'Thành công',
+                    label: 'Thành công',
+                    count: customers.filter((x) => x.status === 'Thành công').length,
+                },
+            ];
+        }
+        return [
+            { id: 'Thành công', label: 'Thành công', count: customers.filter((x) => x.status === 'Thành công').length },
+            { id: 'Chưa thành công', label: 'Chưa thành công', count: customers.filter((x) => x.status === 'Chưa thành công').length },
+        ];
+    }, [filterType, customers]);
 
     const handleEditCustomer = (customer) => {
         setSelectedCustomer(customer);
@@ -461,20 +508,62 @@ const Customers = () => {
         setIsFormModalOpen(false);
     };
 
+    const isLikelyNetworkFailure = (err) => {
+        if (!err) return false;
+        const msg = String(err.message ?? err);
+        const name = err.name ?? '';
+        return (
+            msg.includes('Failed to fetch') ||
+            msg.includes('NetworkError') ||
+            msg.includes('Load failed') ||
+            msg.includes('network') ||
+            name === 'TypeError'
+        );
+    };
+
     const handleStatusChange = async (id, newStatus) => {
+        if (id == null || newStatus == null || newStatus === '') {
+            alert('❌ Không cập nhật được: thiếu mã khách hoặc trạng thái.');
+            return;
+        }
+
+        const patch = {
+            status: newStatus,
+            success_at: newStatus === 'Thành công' ? new Date().toISOString() : null,
+        };
+
+        const runUpdate = () => supabase.from('customers').update(patch).eq('id', id);
+
+        const attemptOnce = async () => {
+            try {
+                const { error } = await runUpdate();
+                return { error };
+            } catch (e) {
+                return { error: e };
+            }
+        };
+
         try {
-            const { error } = await supabase
-                .from('customers')
-                .update({ status: newStatus })
-                .eq('id', id);
+            let { error } = await attemptOnce();
 
-            if (error) throw error;
+            if (error && isLikelyNetworkFailure(error)) {
+                await new Promise((r) => setTimeout(r, 500));
+                ({ error } = await attemptOnce());
+            }
 
-            // Cập nhật state local để UI phản hồi nhanh
-            setCustomers(prev => prev.map(c => c.id === id ? { ...c, status: newStatus } : c));
+            if (error) throw error instanceof Error ? error : new Error(String(error?.message ?? error));
+
+            setCustomers((prev) =>
+                prev.map((c) => (c.id === id ? { ...c, ...patch } : c))
+            );
         } catch (error) {
             console.error('Error updating status:', error);
-            alert('❌ Không thể cập nhật trạng thái: ' + error.message);
+            const raw = error?.message ?? String(error);
+            const networkHint =
+                raw.includes('Failed to fetch') || error?.name === 'TypeError'
+                    ? '\n\n— Kiểm tra: mạng/VPN; tường lửa (một số môi trường chặn PATCH); extension chặn request; dự án Supabase còn hoạt động; biến VITE_SUPABASE_URL trong .env đúng.'
+                    : '';
+            alert('❌ Không thể cập nhật trạng thái: ' + raw + networkHint);
         }
     };
 
@@ -498,7 +587,144 @@ const Customers = () => {
         }
     };
 
+    /** Số ngày còn lại đến hạn chăm sóc (null nếu không có ngày hết hạn) */
+    const getCareExpiryDiffDays = (c) => {
+        if (!c.care_expiry_date) return null;
+        return Math.ceil((new Date(c.care_expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
+    };
 
+    /**
+     * Lead: STT theo thứ tự tạo toàn danh sách (1 = tạo sớm nhất, N = mới nhất).
+     * API sort created_at DESC; offset trong trang = from + chỉ số dòng trong `customers`.
+     */
+    const getLeadCreationStt = useCallback(
+        (customerId) => {
+            if (filterType !== 'lead' || !totalRecords) return null;
+            const idxInPage = customers.findIndex((x) => x.id === customerId);
+            if (idxInPage < 0) return null;
+            const from = (currentPage - 1) * pageSize;
+            return totalRecords - (from + idxInPage);
+        },
+        [filterType, totalRecords, customers, currentPage, pageSize]
+    );
+
+    /** Một ô <td> — thứ tự khớp thead (visibleTableColumns) */
+    const renderCustomerTableCell = (c, colKey) => {
+        const diff = getCareExpiryDiffDays(c);
+        switch (colKey) {
+            case 'code':
+                if (filterType === 'lead') {
+                    const stt = getLeadCreationStt(c.id);
+                    return (
+                        <td
+                            key={colKey}
+                            className="px-4 py-4 text-center text-sm font-bold text-slate-600 tabular-nums border-l border-r border-primary/20"
+                        >
+                            {stt != null ? stt : '—'}
+                        </td>
+                    );
+                }
+                return <td key={colKey} className={getCodeCellClass(c.category)}>{c.code}</td>;
+            case 'name':
+                return <td key={colKey} className="px-4 py-4 text-sm font-semibold text-foreground">{c.name}</td>;
+            case 'phone':
+                return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{c.phone || '—'}</td>;
+            case 'address':
+                return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{c.address || '—'}</td>;
+            case 'legal_rep':
+                return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{c.legal_rep || '—'}</td>;
+            case 'managed_by':
+                return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{c.managed_by || '—'}</td>;
+            case 'category':
+                return (
+                    <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">
+                        <span className={getCategoryBadgeClass(c.category)}>{getLabel(CUSTOMER_CATEGORIES, c.category)}</span>
+                    </td>
+                );
+            case 'care_assigned_at':
+                return (
+                    <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground whitespace-nowrap">
+                        {c.care_assigned_at
+                            ? new Date(c.care_assigned_at).toLocaleString('vi-VN', {
+                                  day: '2-digit',
+                                  month: '2-digit',
+                                  year: 'numeric',
+                              })
+                            : '—'}
+                    </td>
+                );
+            case 'days_left':
+                return (
+                    <td key={colKey} className="px-4 py-4 text-sm whitespace-nowrap">
+                        {diff == null ? (
+                            '—'
+                        ) : diff <= 0 ? (
+                            <span className="font-bold text-rose-600">0</span>
+                        ) : (
+                            <span className="font-bold text-slate-700">{diff}</span>
+                        )}
+                    </td>
+                );
+            case 'care_status':
+                return (
+                    <td key={colKey} className="px-4 py-4 text-sm whitespace-nowrap">
+                        {diff == null ? (
+                            '—'
+                        ) : diff <= 0 ? (
+                            <span className="text-[11px] font-bold text-rose-600 uppercase">Hết hạn</span>
+                        ) : diff <= 10 ? (
+                            <span className="text-[11px] font-bold text-amber-600 uppercase">Sắp hết hạn</span>
+                        ) : (
+                            <span className="text-[11px] font-bold text-emerald-600 uppercase">Trong hạn</span>
+                        )}
+                    </td>
+                );
+            case 'status': {
+                const statusValue =
+                    c.status === 'Thành công' ? 'Thành công' : 'Chưa thành công';
+                return (
+                    <td key={colKey} className="px-4 py-4 text-sm relative z-10">
+                        <select
+                            value={statusValue}
+                            onChange={(e) => handleStatusChange(c.id, e.target.value)}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className={clsx(
+                                'customer-status-select max-w-full min-w-[10.5rem] min-h-9 px-2 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider border border-slate-200/80 focus:ring-2 focus:ring-primary/20 outline-none cursor-pointer transition-all appearance-auto',
+                                c.status === 'Thành công'
+                                    ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                            )}
+                        >
+                            <option value="Chưa thành công">Chưa thành công</option>
+                            <option value="Thành công">Thành công</option>
+                        </select>
+                    </td>
+                );
+            }
+            case 'success_at':
+                return (
+                    <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground whitespace-nowrap">
+                        {c.success_at
+                            ? new Date(c.success_at).toLocaleString('vi-VN', {
+                                  day: '2-digit',
+                                  month: '2-digit',
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                              })
+                            : '—'}
+                    </td>
+                );
+            case 'invoice_email':
+                return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{c.invoice_email || '—'}</td>;
+            default:
+                return (
+                    <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">
+                        —
+                    </td>
+                );
+        }
+    };
 
     const handleBulkDelete = async () => {
         const count = selectedIds.length;
@@ -928,7 +1154,9 @@ const Customers = () => {
                         ) : filteredCustomers.length === 0 ? (
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy kết quả phù hợp</div>
                         ) : (
-                            filteredCustomers.map((c) => (
+                            filteredCustomers.map((c) => {
+                                const leadStt = filterType === 'lead' ? getLeadCreationStt(c.id) : null;
+                                return (
                                 <div key={c.id} className={clsx(
                                     "rounded-2xl border shadow-sm p-4 transition-all duration-200",
                                     selectedIds.includes(c.id)
@@ -949,7 +1177,11 @@ const Customers = () => {
                                                 />
                                             </div>
                                             <div>
-                                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">{c.code}</p>
+                                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider tabular-nums">
+                                                    {filterType === 'lead'
+                                                        ? (leadStt != null ? `#${leadStt}` : '—')
+                                                        : c.code}
+                                                </p>
                                                 <h3 className="text-[15px] font-bold text-foreground leading-tight mt-0.5">{c.name}</h3>
                                             </div>
                                         </div>
@@ -983,41 +1215,97 @@ const Customers = () => {
                                         <div className="flex items-center gap-3">
                                             {c.status === 'Thành công' && (
                                                 <button
+                                                    type="button"
                                                     onClick={() => navigate(`/de-nghi-xuat-may/tao?phone=${c.phone || ''}`)}
-                                                    className="p-2 text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg"
+                                                    className="p-2 text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg shrink-0"
                                                     title="Mẫu đề nghị máy"
                                                 >
                                                     <FilePlus size={16} />
                                                 </button>
                                             )}
-                                            <button 
-                                                onClick={() => handleStatusChange(c.id, c.status === 'Thành công' ? 'Chưa thành công' : 'Thành công')} 
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    handleStatusChange(
+                                                        c.id,
+                                                        c.status === 'Thành công' ? 'Chưa thành công' : 'Thành công'
+                                                    )
+                                                }
                                                 className={clsx(
-                                                    "p-2 rounded-lg transition-all border",
-                                                    c.status === 'Thành công' 
-                                                        ? "bg-emerald-50 border-emerald-100 text-emerald-600" 
-                                                        : "bg-slate-50 border-slate-200 text-slate-400"
+                                                    'p-2 rounded-lg transition-all border',
+                                                    c.status === 'Thành công'
+                                                        ? 'bg-emerald-50 border-emerald-100 text-emerald-600'
+                                                        : 'bg-slate-50 border-slate-200 text-slate-400'
                                                 )}
-                                                title={c.status === 'Thành công' ? "Đánh dấu là chưa thành công" : "Đánh dấu là thành công"}
+                                                title={
+                                                    c.status === 'Thành công'
+                                                        ? 'Đánh dấu là chưa thành công'
+                                                        : 'Đánh dấu là thành công'
+                                                }
                                             >
                                                 {c.status === 'Thành công' ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
                                             </button>
-                                            <button onClick={() => { setSelectedCustomer(c); setIsRepairModalOpen(true); }} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg" title="Báo hỏng">
-                                                <Ticket size={16} />
-                                            </button>
-                                            <button onClick={() => handleViewCustomer(c)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg" title="Xem chi tiết">
+                                            {filterType === 'lead' ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        handleStatusChange(
+                                                            c.id,
+                                                            c.status === 'Thành công' ? 'Chưa thành công' : 'Thành công'
+                                                        )
+                                                    }
+                                                    className={clsx(
+                                                        'p-2 rounded-lg transition-all border',
+                                                        c.status === 'Thành công'
+                                                            ? 'bg-emerald-50 border-emerald-100 text-emerald-700'
+                                                            : 'bg-teal-50 border-teal-100 text-teal-700'
+                                                    )}
+                                                    title="Check trạng thái — chuyển Thành công / Chưa thành công"
+                                                >
+                                                    <ClipboardCheck size={16} />
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setSelectedCustomer(c);
+                                                        setIsRepairModalOpen(true);
+                                                    }}
+                                                    className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg shrink-0"
+                                                    title="Báo hỏng"
+                                                >
+                                                    <Ticket size={16} />
+                                                </button>
+                                            )}
+                                            <button
+                                                type="button"
+                                                onClick={() => handleViewCustomer(c)}
+                                                className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg shrink-0"
+                                                title="Xem chi tiết"
+                                            >
                                                 <Eye size={16} />
                                             </button>
-                                            <button onClick={() => handleEditCustomer(c)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg" title="Chỉnh sửa">
-                                               <Edit size={16} />
+                                            <button
+                                                type="button"
+                                                onClick={() => handleEditCustomer(c)}
+                                                className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg shrink-0"
+                                                title="Chỉnh sửa"
+                                            >
+                                                <Edit size={16} />
                                             </button>
-                                            <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg" title="Xóa">
-                                               <Trash2 size={16} />
+                                            <button
+                                                type="button"
+                                                onClick={() => handleDeleteCustomer(c.id, c.name)}
+                                                className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg shrink-0"
+                                                title="Xóa"
+                                            >
+                                                <Trash2 size={16} />
                                             </button>
                                         </div>
                                     </div>
                                 </div>
-                            ))
+                                );
+                            })
                         )}
                     </div>
 
@@ -1192,36 +1480,34 @@ const Customers = () => {
                                 )}
                             </div>
 
-                            {filterType !== 'lead' && (
-                                <div className="relative">
-                                    <button
-                                        onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
-                                        className={clsx(
-                                            'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            getFilterButtonClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)
-                                        )}
-                                    >
-                                        <List size={14} className={getFilterIconClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)} />
-                                        Trạng thái
-                                        {selectedStatuses.length > 0 && (
-                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('status'))}>
-                                                {selectedStatuses.length}
-                                            </span>
-                                        )}
-                                        <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'status' ? 'rotate-180' : '')} />
-                                    </button>
-                                    {activeDropdown === 'status' && (
-                                        <FilterDropdown
-                                            options={statusOptions}
-                                            selected={selectedStatuses}
-                                            setSelected={setSelectedStatuses}
-                                            filterSearch={filterSearch}
-                                            setFilterSearch={setFilterSearch}
-                                            showSearch={false}
-                                        />
+                            <div className="relative">
+                                <button
+                                    onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
+                                    className={clsx(
+                                        'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
+                                        getFilterButtonClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)
                                     )}
-                                </div>
-                            )}
+                                >
+                                    <List size={14} className={getFilterIconClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)} />
+                                    Trạng thái
+                                    {selectedStatuses.length > 0 && (
+                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('status'))}>
+                                            {selectedStatuses.length}
+                                        </span>
+                                    )}
+                                    <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'status' ? 'rotate-180' : '')} />
+                                </button>
+                                {activeDropdown === 'status' && (
+                                    <FilterDropdown
+                                        options={statusOptions}
+                                        selected={selectedStatuses}
+                                        setSelected={setSelectedStatuses}
+                                        filterSearch={filterSearch}
+                                        setFilterSearch={setFilterSearch}
+                                        showSearch={false}
+                                    />
+                                )}
+                            </div>
 
                             {hasActiveFilters && (
                                 <button
@@ -1236,7 +1522,7 @@ const Customers = () => {
                     </div>
 
                     <div className="hidden md:block flex-1 overflow-x-auto bg-white">
-                        <table className="w-full border-collapse">
+                        <table className="customers-data-table w-full border-collapse">
                             <thead className="bg-primary/5">
                                 <tr>
                                     <th className="px-4 py-3.5 text-center border-r border-primary/30">
@@ -1251,14 +1537,19 @@ const Customers = () => {
                                         <th
                                             key={col.key}
                                             className={clsx(
-                                                'px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide',
+                                                'px-4 py-3.5 text-[12px] font-bold text-muted-foreground uppercase tracking-wide',
+                                                col.key === 'code' && filterType === 'lead'
+                                                    ? 'text-center'
+                                                    : 'text-left',
                                                 col.key === 'code' && 'border-l border-r border-primary/30'
                                             )}
                                         >
-                                            {col.label}
+                                            {col.key === 'code' && filterType === 'lead' ? 'STT' : col.label}
                                         </th>
                                     ))}
-                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide border-l border-r border-primary/30">Thao tác</th>
+                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide border-l border-r border-primary/30">
+                                        Thao tác
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-primary/10">
@@ -1291,74 +1582,74 @@ const Customers = () => {
                                                 className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
                                             />
                                         </td>
-                                        {isColumnVisible('code') && <td className={getCodeCellClass(c.category)}>{c.code}</td>}
-                                        {isColumnVisible('name') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{c.name}</td>}
-                                        {isColumnVisible('phone') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.phone || '—'}</td>}
-                                        {isColumnVisible('address') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.address || '—'}</td>}
-                                        {isColumnVisible('legal_rep') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.legal_rep || '—'}</td>}
-                                        {isColumnVisible('managed_by') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.managed_by || '—'}</td>}
-                                        {isColumnVisible('category') && <td className="px-4 py-4 text-sm text-muted-foreground"><span className={getCategoryBadgeClass(c.category)}>{getLabel(CUSTOMER_CATEGORIES, c.category)}</span></td>}
-                                        {isColumnVisible('current_cylinders') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.current_cylinders || 0)}</td>}
-                                        {isColumnVisible('current_machines') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.current_machines || 0)}</td>}
-                                        {isColumnVisible('borrowed_cylinders') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{formatNumber(c.borrowed_cylinders || 0)}</td>}
-                                        {isColumnVisible('machines_in_use') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.machines_in_use || '—'}</td>}
-                                        {isColumnVisible('care_by') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.care_by || '—'}</td>}
-                                        {isColumnVisible('care_expiry_date') && (
-                                            <td className="px-4 py-4 text-sm">
-                                                {c.care_expiry_date ? (
-                                                    <div className="flex flex-col">
-                                                        <span className="font-bold text-slate-700">{new Date(c.care_expiry_date).toLocaleDateString('vi-VN')}</span>
-                                                        {(() => {
-                                                            const diff = Math.ceil((new Date(c.care_expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
-                                                            if (diff <= 0) return <span className="text-[10px] font-bold text-rose-500 uppercase">Đã hết hạn</span>;
-                                                            if (diff <= 10) return <span className="text-[10px] font-bold text-amber-500 uppercase">Còn {diff} ngày</span>;
-                                                            return <span className="text-[10px] font-bold text-emerald-500 uppercase">Còn {diff} ngày</span>;
-                                                        })()}
-                                                    </div>
-                                                ) : '—'}
-                                            </td>
-                                        )}
-                                        {isColumnVisible('invoice_email') && <td className="px-4 py-4 text-sm text-muted-foreground">{c.invoice_email || '—'}</td>}
-                                        {isColumnVisible('status') && (
-                                            <td className="px-4 py-4 text-sm">
-                                                <select
-                                                    value={c.status || ''}
-                                                    onChange={(e) => handleStatusChange(c.id, e.target.value)}
-                                                    className={clsx(
-                                                        "px-2 py-1 rounded-lg text-[11px] font-black uppercase tracking-wider border-none focus:ring-2 focus:ring-primary/20 outline-none cursor-pointer transition-all",
-                                                        c.status === 'Thành công' 
-                                                            ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" 
-                                                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                                                    )}
-                                                >
-                                                    <option value="" disabled>-- Chọn --</option>
-                                                    <option value="Thành công">Thành công</option>
-                                                    <option value="Chưa thành công">Chưa thành công</option>
-                                                </select>
-                                            </td>
-                                        )}
-                                        <td className="px-4 py-4 text-center border-l border-r border-primary/20">
-                                            <div className="flex items-center justify-center gap-3">
+                                        {visibleTableColumns.map((col) => renderCustomerTableCell(c, col.key))}
+                                        <td className="px-4 py-4 text-center border-l border-r border-primary/20 relative z-10">
+                                            <div className="flex items-center justify-center gap-3 flex-nowrap customer-row-actions">
                                                 {c.status === 'Thành công' && (
-                                                    <button 
-                                                        onClick={() => navigate(`/de-nghi-xuat-may/tao?phone=${c.phone || ''}`)} 
-                                                        className="text-indigo-600/80 hover:text-indigo-700 transition-colors p-1 rounded hover:bg-indigo-50" 
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => navigate(`/de-nghi-xuat-may/tao?phone=${c.phone || ''}`)}
+                                                        className="text-indigo-600/80 hover:text-indigo-700 transition-colors p-1 rounded hover:bg-indigo-50 shrink-0"
                                                         title="Mẫu đề nghị máy"
                                                     >
                                                         <FilePlus size={16} className="w-4 h-4" />
                                                     </button>
                                                 )}
-                                                <button onClick={() => { setSelectedCustomer(c); setIsRepairModalOpen(true); }} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Báo hỏng">
-                                                    <Ticket size={16} className="w-4 h-4" />
+                                                {filterType === 'lead' ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            handleStatusChange(
+                                                                c.id,
+                                                                c.status === 'Thành công' ? 'Chưa thành công' : 'Thành công'
+                                                            )
+                                                        }
+                                                        className={clsx(
+                                                            'transition-colors p-1 rounded shrink-0 min-w-9 min-h-9 inline-flex items-center justify-center',
+                                                            c.status === 'Thành công'
+                                                                ? 'text-emerald-600/90 hover:text-emerald-700 hover:bg-emerald-50'
+                                                                : 'text-teal-600/90 hover:text-teal-700 hover:bg-teal-50'
+                                                        )}
+                                                        title="Check trạng thái — nhấn để chuyển Thành công / Chưa thành công"
+                                                    >
+                                                        <ClipboardCheck size={16} className="w-4 h-4 pointer-events-none" />
+                                                    </button>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setSelectedCustomer(c);
+                                                            setIsRepairModalOpen(true);
+                                                        }}
+                                                        className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50 shrink-0 min-w-9 min-h-9 inline-flex items-center justify-center"
+                                                        title="Báo hỏng"
+                                                    >
+                                                        <Ticket size={16} className="w-4 h-4 pointer-events-none" />
+                                                    </button>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleViewCustomer(c)}
+                                                    className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50 shrink-0 min-w-9 min-h-9 inline-flex items-center justify-center"
+                                                    title="Xem chi tiết"
+                                                >
+                                                    <Eye className="w-4 h-4 pointer-events-none" />
                                                 </button>
-                                                <button onClick={() => handleViewCustomer(c)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="Xem chi tiết">
-                                                    <Eye className="w-4 h-4" />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleEditCustomer(c)}
+                                                    className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50 shrink-0 min-w-9 min-h-9 inline-flex items-center justify-center"
+                                                    title="Chỉnh sửa"
+                                                >
+                                                    <Edit className="w-4 h-4 pointer-events-none" />
                                                 </button>
-                                                <button onClick={() => handleEditCustomer(c)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
-                                                    <Edit className="w-4 h-4" />
-                                                </button>
-                                                <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
-                                                    <Trash2 className="w-4 h-4" />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleDeleteCustomer(c.id, c.name)}
+                                                    className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50 shrink-0 min-w-9 min-h-9 inline-flex items-center justify-center"
+                                                    title="Xóa"
+                                                >
+                                                    <Trash2 className="w-4 h-4 pointer-events-none" />
                                                 </button>
                                             </div>
                                         </td>
@@ -1749,7 +2040,7 @@ const Customers = () => {
                             selectedValues: pendingStatuses,
                             onSelectionChange: setPendingStatuses,
                         },
-                    ].filter(section => filterType !== 'lead' || section.id !== 'status')}
+                    ]}
                 />
             )}
 

@@ -73,7 +73,7 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
         technicalFeedback: '',
         technicalImages: [],
         status: 'Mới',
-        errorCategory: '', // Tên lỗi: Máy/Bình
+        errorCategory: '', // Tên lỗi: Máy / Bình / Nâng cấp
         expectedCompletionDate: '',
         errorLevel: 'Trung bình'
     };
@@ -99,7 +99,7 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                 detailImages: ticket.error_images || [],
                 salesId: ticket.sales_id || '',
                 technicianId: ticket.technician_id || '',
-                cskhId: ticket.cskh_id || '',
+                cskhId: ticket.cskh_id || ticket.created_by || '',
                 technicalFeedback: ticket.technical_feedback || '',
                 technicalImages: ticket.technical_images || [],
                 status: ticket.status || 'Mới',
@@ -117,13 +117,14 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                 fetchCustomerDevices(initialCustomer.name);
             }
 
-            // Auto assign creator to the salesperson field (Nhân viên kinh doanh)
+            // Auto assign creator: KD + CSKH (có thể đổi trong form); kỹ thuật nếu đúng role
             if (user?.id) {
-                setFormData(prev => ({ ...prev, salesId: user.id }));
-                
-                if (role === 'Nhân viên kỹ thuật') {
-                    setFormData(prev => ({ ...prev, technicianId: user.id }));
-                }
+                setFormData(prev => ({
+                    ...prev,
+                    salesId: user.id,
+                    cskhId: user.id,
+                    ...(role === 'Nhân viên kỹ thuật' ? { technicianId: user.id } : {}),
+                }));
             }
         }
     }, [ticket, isEdit, user, role, initialCustomer]);
@@ -177,6 +178,24 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
             setSalesUsers(salesList);
         }
     }, [user, allUsers]);
+
+    // CSKH: danh sách role CSKH + người đang đăng nhập + (khi sửa) người đã gán / người tạo phiếu — để select hiển thị đúng khi auto điền
+    useEffect(() => {
+        if (allUsers.length === 0) return;
+        let cskhList = allUsers.filter((u) => u.role === 'Nhân viên CSKH');
+        const pushIfMissing = (u) => {
+            if (u?.id && !cskhList.find((x) => x.id === u.id)) {
+                cskhList = [...cskhList, u];
+            }
+        };
+        pushIfMissing(user);
+        if (isEdit && ticket) {
+            const extraId = ticket.cskh_id || ticket.created_by;
+            if (extraId) pushIfMissing(allUsers.find((u) => u.id === extraId));
+        }
+        cskhList.sort((a, b) => a.name.localeCompare(b.name, 'vi', { sensitivity: 'base' }));
+        setCskhUsers(cskhList);
+    }, [user, allUsers, isEdit, ticket]);
 
     const fetchCustomerDevices = async (customerName) => {
         if (!customerName) return;
@@ -652,10 +671,10 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                         {/* Section 1.5: Phân loại lỗi (Tên lỗi) */}
                         <div id="section-category" className="scroll-mt-6 rounded-2xl border border-primary/10 bg-white p-4 sm:p-5 space-y-4 shadow-sm hover:shadow-md transition-shadow">
                             <h4 className="flex items-center gap-2 text-[16px] !font-black !text-primary pb-1">
-                                <Activity className="w-4 h-4 text-primary/80" /> Tên lỗi (Máy/Bình)
+                                <Activity className="w-4 h-4 text-primary/80" /> Tên lỗi (Máy/Bình/Nâng cấp)
                             </h4>
                             <div className="flex flex-wrap gap-4">
-                                {['Máy', 'Bình'].map(cat => (
+                                {['Máy', 'Bình', 'Nâng cấp'].map(cat => (
                                     <button
                                         key={cat}
                                         type="button"
@@ -670,7 +689,7 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                         {cat}
                                     </button>
                                 ))}
-                                {!['Máy', 'Bình'].includes(formData.errorCategory) && formData.errorCategory && (
+                                {!['Máy', 'Bình', 'Nâng cấp'].includes(formData.errorCategory) && formData.errorCategory && (
                                     <div className="px-6 py-2.5 rounded-2xl text-[14px] font-bold bg-primary border-primary text-white shadow-lg shadow-primary/20">
                                         {formData.errorCategory}
                                     </div>
@@ -696,7 +715,7 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                             <ChevronDown className="w-5 h-5 text-primary/60" />
                                         </div>
                                         {isErrorTypeDropdownOpen && (
-                                            <div className="absolute z-50 w-full mt-2 bg-white border border-slate-200 shadow-2xl max-h-72 flex flex-col rounded-2xl animate-in fade-in zoom-in-95 duration-200">
+                                            <div className="absolute z-50 w-full min-w-0 mt-2 bg-white border border-slate-200 shadow-2xl max-h-72 flex flex-col rounded-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                                                 <div className="p-3 border-b border-slate-100 bg-slate-50 flex items-center gap-3">
                                                     <Search className="w-4 h-4 text-primary/40" />
                                                     <input
@@ -711,9 +730,16 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                                         </div>
                                                     ))}
                                                 </div>
-                                                <div className="p-3 border-t border-slate-100 bg-primary/5 flex items-center gap-2">
-                                                    <input type="text" value={newErrorTypeName} onChange={(e) => setNewErrorTypeName(e.target.value)} placeholder="Nhập tên lỗi mới..." onClick={(e) => e.stopPropagation()} className="w-full px-4 py-2 rounded-xl border border-slate-200 text-sm font-bold outline-none focus:border-primary/40 transition-all" />
-                                                    <button type="button" onClick={(e) => { e.stopPropagation(); handleAddErrorType(); }} className="h-10 w-10 bg-primary text-white rounded-xl hover:bg-primary/90 shadow-lg shadow-primary/20 flex items-center justify-center shrink-0 transition-all"><Plus size={20} /></button>
+                                                <div className="p-3 border-t border-slate-100 bg-primary/5 flex items-center gap-2 min-w-0">
+                                                    <input type="text" value={newErrorTypeName} onChange={(e) => setNewErrorTypeName(e.target.value)} placeholder="Nhập tên lỗi mới..." onClick={(e) => e.stopPropagation()} className="min-w-0 flex-1 px-3 py-2 rounded-xl border border-slate-200 text-sm font-bold outline-none focus:border-primary/40 transition-all" />
+                                                    <button
+                                                        type="button"
+                                                        aria-label="Thêm loại lỗi mới"
+                                                        onClick={(e) => { e.stopPropagation(); handleAddErrorType(); }}
+                                                        className="!h-10 !w-10 !min-w-10 !max-w-10 !p-0 !m-0 bg-primary text-white rounded-xl hover:bg-primary/90 shadow-lg shadow-primary/20 inline-flex items-center justify-center shrink-0 transition-all"
+                                                    >
+                                                        <Plus className="text-white" size={20} strokeWidth={2.25} aria-hidden />
+                                                    </button>
                                                 </div>
                                             </div>
                                         )}

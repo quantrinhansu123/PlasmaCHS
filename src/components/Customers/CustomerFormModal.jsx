@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { Building, Hash, MapPin, Phone, Receipt, Save, User, X, Mail } from 'lucide-react';
+import { Building, Calendar, Hash, MapPin, Phone, Receipt, Save, User, X, Mail } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../../supabase/config';
@@ -138,6 +138,11 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
         } else if (name === 'tax_code') {
             setFormData(prev => ({ ...prev, [name]: value }));
             setTaxError(value ? !validateMST(value) : false);
+        } else if (name === 'care_assigned_at') {
+            setFormData(prev => ({
+                ...prev,
+                care_assigned_at: value ? new Date(`${value}T12:00:00`).toISOString() : '',
+            }));
         } else {
             setFormData(prev => ({ ...prev, [name]: value }));
         }
@@ -160,6 +165,22 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
 
         setIsLoading(true);
         setErrorMsg('');
+
+        const payload = {
+            ...formData,
+            care_assigned_at: formData.care_assigned_at || null,
+        };
+
+        const prevStatus = isEdit ? customer.status : null;
+        const prevSuccessAt = isEdit ? customer.success_at : null;
+        if (formData.status === 'Thành công') {
+            payload.success_at =
+                prevSuccessAt && prevStatus === 'Thành công'
+                    ? prevSuccessAt
+                    : new Date().toISOString();
+        } else {
+            payload.success_at = null;
+        }
 
         try {
             // Duplicate Check: Name + Phone + Category
@@ -200,7 +221,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                         newExpiry.setDate(newExpiry.getDate() + 60);
                         
                         const updateData = {
-                            ...formData,
+                            ...payload,
                             care_by: formData.care_by || 'Sale hiện tại', // Nên lấy từ auth context nếu có, hiện tại dùng formData
                             care_assigned_at: now.toISOString(),
                             care_expiry_date: newExpiry.toISOString().split('T')[0]
@@ -236,13 +257,13 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
             if (isEdit) {
                 const { error } = await supabase
                     .from('customers')
-                    .update(formData)
+                    .update(payload)
                     .eq('id', customer.id);
                 if (error) throw error;
             } else {
                 const { error } = await supabase
                     .from('customers')
-                    .insert([formData]);
+                    .insert([payload]);
                 if (error) throw error;
 
                 // Notification for new customer
@@ -417,18 +438,33 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                         <option value="Chưa thành công">Chưa thành công</option>
                                     </select>
                                 </div>
-                                <div className="space-y-2">
-                                    <label className="flex items-center gap-1.5 text-[14px] font-bold mb-1.5 ml-1 text-primary">
-                                        <Receipt className="w-4 h-4" /> Thời hạn chăm sóc
-                                    </label>
-                                    <input
-                                        type="date"
-                                        name="care_expiry_date"
-                                        value={formData.care_expiry_date}
-                                        onChange={handleChange}
-                                        className="w-full h-12 px-4 bg-primary/5 border border-primary/20 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white outline-none transition-all font-black text-primary"
-                                    />
-                                    <p className="text-[10px] font-bold text-primary/60 ml-1 italic">* Mặc định 60 ngày kể từ lúc tạo</p>
+                                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                                    <div className="space-y-2">
+                                        <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5 ml-1 text-slate-600">
+                                            <Calendar className="w-4 h-4" /> Ngày đăng ký (bắt đầu chăm sóc)
+                                        </label>
+                                        <input
+                                            type="date"
+                                            name="care_assigned_at"
+                                            value={formData.care_assigned_at ? formData.care_assigned_at.slice(0, 10) : ''}
+                                            onChange={handleChange}
+                                            className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white outline-none transition-all font-semibold text-slate-900"
+                                        />
+                                        <p className="text-[10px] font-bold text-slate-400 ml-1">Thời điểm gán khách / bắt đầu đếm chu kỳ CS</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="flex items-center gap-1.5 text-[14px] font-bold mb-1.5 ml-1 text-primary">
+                                            <Receipt className="w-4 h-4" /> Thời hạn chăm sóc (hết hạn)
+                                        </label>
+                                        <input
+                                            type="date"
+                                            name="care_expiry_date"
+                                            value={formData.care_expiry_date}
+                                            onChange={handleChange}
+                                            className="w-full h-12 px-4 bg-primary/5 border border-primary/20 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white outline-none transition-all font-black text-primary"
+                                        />
+                                        <p className="text-[10px] font-bold text-primary/60 ml-1 italic">* Mặc định 60 ngày kể từ lúc tạo</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -438,19 +474,26 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                             <h4 className="flex items-center gap-2.5 text-[18px] font-extrabold text-slate-800 pb-3 border-b border-slate-100">
                                 <Receipt className="w-4 h-4 text-emerald-500" /> Cấu trúc & Quản lý
                             </h4>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-x-8 gap-y-6">
-                                <div>
-                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5 ml-1 text-slate-600"><User className="w-4 h-4" /> Kinh doanh (Chăm sóc)</label>
-                                    <select
-                                        name="care_by"
-                                        value={formData.care_by}
-                                        onChange={handleChange}
-                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white outline-none transition-all font-semibold text-slate-900 cursor-pointer"
-                                    >
-                                        <option value="">-- Chọn NVKD/Giao hàng --</option>
-                                        {staffList.map(u => <option key={u.id} value={u.name}>{u.name}{u.role ? ` (${u.role})` : ''}</option>)}
-                                    </select>
-                                </div>
+                            <div
+                                className={clsx(
+                                    'grid grid-cols-1 gap-x-8 gap-y-6',
+                                    isEdit ? 'md:grid-cols-2' : 'md:grid-cols-3'
+                                )}
+                            >
+                                {!isEdit && (
+                                    <div>
+                                        <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5 ml-1 text-slate-600"><User className="w-4 h-4" /> Kinh doanh (Chăm sóc)</label>
+                                        <select
+                                            name="care_by"
+                                            value={formData.care_by}
+                                            onChange={handleChange}
+                                            className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white outline-none transition-all font-semibold text-slate-900 cursor-pointer"
+                                        >
+                                            <option value="">-- Chọn NVKD/Giao hàng --</option>
+                                            {staffList.map(u => <option key={u.id} value={u.name}>{u.name}{u.role ? ` (${u.role})` : ''}</option>)}
+                                        </select>
+                                    </div>
+                                )}
                                 <div>
                                     <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5 ml-1 text-slate-600">
                                         <Building className="w-4 h-4" />
