@@ -285,38 +285,53 @@ const OrderItem = ({ order, warehousesList }) => {
     const month = String(today.getMonth() + 1).padStart(2, '0');
     const year = today.getFullYear();
 
-    // Build table rows
+    // Build table rows from order_items if available, else use legacy fields
     const rows = [];
-    if (isBinh && serials.length > 0) {
-        serials.forEach((serial, idx) => {
-            rows.push({
-                stt: idx + 1,
-                name: productLabel,
-                code: serial,
-                unit: 'Bình',
-                qtyReq: 1,
-                qtyAct: 1,
-                price: order.unit_price || 0,
-                total: (order.unit_price || 0) * 1,
+    const itemsToProcess = order.order_items && order.order_items.length > 0 
+        ? order.order_items 
+        : [
+            { product_type: order.product_type, quantity: order.quantity, unit_price: order.unit_price, isLegacy: true },
+            { product_type: order.product_type_2, quantity: order.quantity_2, unit_price: order.unit_price_2, isLegacy: true }
+          ].filter(p => p.product_type && p.quantity > 0);
+
+    let serialCursor = 0;
+    itemsToProcess.forEach((p, pIdx) => {
+        const pLabel = getProductLabel(p.product_type);
+        const pIsBinh = p.product_type?.startsWith('BINH');
+        const pUnit = pIsBinh ? 'Bình' : 'Máy';
+
+        if (pIsBinh && serials.length > serialCursor) {
+            // Expand serials for this product type
+            const subSerials = serials.slice(serialCursor, serialCursor + p.quantity);
+            subSerials.forEach((serial) => {
+                rows.push({
+                    stt: rows.length + 1,
+                    name: pLabel,
+                    code: serial,
+                    unit: pUnit,
+                    qtyReq: 1,
+                    qtyAct: 1,
+                    price: p.unit_price || 0,
+                    total: p.unit_price || 0,
+                });
             });
-        });
-    } else {
-        rows.push({
-            stt: 1,
-            name: productLabel,
-            code: order.department || '',
-            unit: isBinh ? 'Bình' : 'Máy',
-            qtyReq: order.quantity || 0,
-            qtyAct: order.quantity || 0,
-            price: order.unit_price || 0,
-            total: (order.quantity || 0) * (order.unit_price || 0),
-        });
-    }
+            serialCursor += subSerials.length;
+        } else {
+            rows.push({
+                stt: rows.length + 1,
+                name: pLabel,
+                code: (p.isLegacy && pIdx === 0 && order.department) ? order.department : (p.serial_number || ''),
+                unit: pUnit,
+                qtyReq: p.quantity,
+                qtyAct: p.quantity,
+                price: p.unit_price || 0,
+                total: (p.quantity || 0) * (p.unit_price || 0),
+            });
+        }
+    });
 
-
-
-    const totalQty = isBinh && serials.length > 0 ? serials.length : (order.quantity || 0);
-    const totalAmount = order.total_amount || totalQty * (order.unit_price || 0);
+    const totalQty = itemsToProcess.reduce((sum, p) => sum + (p.quantity || 0), 0);
+    const totalAmount = order.total_amount || rows.reduce((sum, r) => sum + (r.total || 0), 0);
     const warehouseLabel = getWarehouseLabel(order.warehouse);
 
     return (
@@ -496,17 +511,44 @@ const OrderItem = ({ order, warehousesList }) => {
     );
 };
 
-const OrderPrintTemplate = ({ orders, warehousesList = [] }) => {
+const OrderPrintTemplate = ({ orders, warehousesList = [], options = { copies: 1, paperSize: 'A4' } }) => {
     if (!orders) return null;
     const orderList = Array.isArray(orders) ? orders : [orders];
+    const { copies = 1, paperSize = 'A4' } = options;
+
+    // Flatten logic: Duplicate each order in the list N times based on 'copies'
+    const finalPrintList = [];
+    orderList.forEach((order) => {
+        for (let i = 0; i < copies; i++) {
+            finalPrintList.push({ ...order, copyIndex: i });
+        }
+    });
 
     return (
-        <div className="bulk-print-container">
-            {orderList.map((order, index) => (
-                <React.Fragment key={order.id || index}>
+        <div className={`bulk-print-container ${paperSize}`}>
+            {/* Dynamic CSS for Page Size */}
+            <style>
+                {`
+                @media print {
+                    @page {
+                        size: ${paperSize === 'A5' ? 'A5 landscape' : 'A4 portrait'};
+                        margin: 0;
+                    }
+                    .print-page {
+                        page-break-after: always;
+                        width: 100%;
+                    }
+                    .print-page:last-child {
+                        page-break-after: auto;
+                    }
+                }
+                `}
+            </style>
+
+            {finalPrintList.map((order, index) => (
+                <div key={`${order.id || index}-${order.copyIndex}`} className="print-page">
                     <OrderItem order={order} warehousesList={warehousesList} />
-                    {index < orderList.length - 1 && <div className="page-break" />}
-                </React.Fragment>
+                </div>
             ))}
         </div>
     );

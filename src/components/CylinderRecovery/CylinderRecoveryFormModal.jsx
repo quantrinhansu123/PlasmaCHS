@@ -12,6 +12,7 @@ import {
     Plus,
     Save,
     ScanLine,
+    ScanBarcode,
     Search,
     Trash2,
     Truck,
@@ -157,6 +158,38 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
         if (data) setItems(data.map(i => ({ ...i, _id: i.id || Date.now() + Math.random() })));
     };
 
+    // Synchronize items list with requested_quantity in real-time
+    useEffect(() => {
+        if (isReadOnly) return;
+        
+        const targetCount = formData.requested_quantity || 0;
+        if (targetCount === items.length) return;
+
+        if (targetCount > items.length) {
+            // Add rows
+            const rowsToAdd = targetCount - items.length;
+            const newRows = Array.from({ length: rowsToAdd }).map(() => ({
+                _id: crypto.randomUUID(),
+                serial_number: '',
+                condition: 'tot',
+                note: '',
+                isValidating: false,
+                isValid: null,
+                error: null
+            }));
+            setItems(prev => [...prev, ...newRows]);
+        } else if (targetCount < items.length) {
+            // Remove rows from the end, but be careful if they have data
+            const itemsWithData = items.slice(targetCount).filter(i => i.serial_number);
+            if (itemsWithData.length > 0) {
+                // If there's data in the rows being removed, we might want to warn
+                // But for high-speed UI, we'll just respect the number
+                console.log('Truncating rows that contained data');
+            }
+            setItems(prev => prev.slice(0, targetCount));
+        }
+    }, [formData.requested_quantity, isReadOnly]);
+
     const generateCode = async () => {
         const date = new Date();
         const yy = date.getFullYear().toString().slice(2);
@@ -180,9 +213,18 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
         }
     };
 
-    const handleScanSuccess = useCallback(async (decodedText, time) => {
+    const handleScanSuccess = useCallback(async (decodedText, time, specificItemId) => {
         if (scannerType === 'order') {
             await handleOrderScanSuccess(decodedText);
+            return;
+        }
+
+        const safeTime = time || new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+
+        // If specificItemId is provided, update that row
+        if (specificItemId) {
+            updateItem(specificItemId, 'serial_number', decodedText);
+            setIsScannerOpen(false);
             return;
         }
 
@@ -191,8 +233,6 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
             toast.info(`Mã ${decodedText} đã được quét!`);
             return;
         }
-
-        const safeTime = time || new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 
         // Add item first with loading state
         const newItemId = crypto.randomUUID();
@@ -352,8 +392,25 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
         setItems(prev => prev.map(i => i._id === id ? { ...i, [field]: value } : i));
 
         // If serial number changed, trigger re-validation
-        if (field === 'serial_number' && value.length >= 3) {
-            triggerItemValidation(id, value);
+        if (field === 'serial_number' && value.trim().length >= 3) {
+            triggerItemValidation(id, value.trim());
+        }
+    };
+
+    const handleSerialKeyDown = (e, idx) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const nextIdx = idx + 1;
+            const nextInput = document.getElementById(`recovery-serial-${nextIdx}`);
+            if (nextInput) {
+                nextInput.focus();
+            } else {
+                addItemManual();
+                setTimeout(() => {
+                    const brandNewInput = document.getElementById(`recovery-serial-${nextIdx}`);
+                    if (brandNewInput) brandNewInput.focus();
+                }, 50);
+            }
         }
     };
 
@@ -671,10 +728,14 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                         </label>
                                         <input
                                             type="number"
-                                            value={formData.requested_quantity}
-                                            onChange={(e) => setFormData({ ...formData, requested_quantity: parseInt(e.target.value) || 0 })}
+                                            value={formData.requested_quantity === 0 ? '' : formData.requested_quantity}
+                                            onChange={(e) => {
+                                                const val = e.target.value === '' ? 0 : parseInt(e.target.value);
+                                                setFormData({ ...formData, requested_quantity: isNaN(val) ? 0 : val });
+                                            }}
+                                            onFocus={(e) => e.target.select()}
                                             disabled={isReadOnly}
-                                            placeholder="SL yêu cầu..."
+                                            placeholder="0"
                                             className={clsx(
                                                 "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold transition-all",
                                                 isReadOnly ? "text-slate-500 cursor-default" : "text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
@@ -857,19 +918,35 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                                             <div className="flex gap-2">
                                                                 <div className="flex-1 relative">
                                                                     <input
+                                                                        id={`recovery-serial-${idx}`}
                                                                         value={item.serial_number}
                                                                         onChange={(e) => updateItem(item._id, 'serial_number', e.target.value)}
-                                                                        placeholder="Mã serial"
+                                                                        onKeyDown={(e) => handleSerialKeyDown(e, idx)}
+                                                                        placeholder="Nhập mã serial..."
                                                                         disabled={isReadOnly}
                                                                         className={clsx(
-                                                                            "w-full px-3 py-2 bg-white border rounded-xl font-black text-[14px] outline-none transition-all",
+                                                                            "w-full pl-3 pr-10 py-2.5 bg-white border rounded-xl font-black text-[14px] outline-none transition-all",
                                                                             item.isValid === true ? "border-green-200 focus:ring-green-500 text-green-700 bg-green-50/30" :
                                                                                 item.isValid === false ? "border-red-200 focus:ring-red-500 text-red-700 bg-red-50/30" :
                                                                                     "border-slate-200 focus:ring-primary text-slate-800"
                                                                         )}
                                                                     />
+                                                                    {!isReadOnly && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                setScannerType('item');
+                                                                                setIsScannerOpen(true);
+                                                                                // Store which row we are scanning for
+                                                                                window._currentScanItemId = item._id;
+                                                                            }}
+                                                                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-primary/60 hover:text-primary transition-colors hover:bg-primary/5 rounded-lg z-10"
+                                                                        >
+                                                                            <ScanBarcode className="w-5 h-5" />
+                                                                        </button>
+                                                                    )}
                                                                     {item.isValidating && (
-                                                                        <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                                                                        <div className="absolute right-10 top-1/2 -translate-y-1/2">
                                                                             <div className="w-3.5 h-3.5 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
                                                                         </div>
                                                                     )}
@@ -878,7 +955,7 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                                                     value={item.condition}
                                                                     onChange={(e) => updateItem(item._id, 'condition', e.target.value)}
                                                                     disabled={isReadOnly}
-                                                                    className="w-32 px-2 py-2 bg-white border border-slate-200 rounded-xl font-bold text-[12px] text-slate-800 focus:ring-2 focus:ring-primary outline-none cursor-pointer"
+                                                                    className="w-32 px-2 py-2.5 bg-white border border-slate-200 rounded-xl font-bold text-[12px] text-slate-800 focus:ring-2 focus:ring-primary outline-none cursor-pointer"
                                                                 >
                                                                     {ITEM_CONDITIONS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                                                                 </select>
@@ -1029,8 +1106,11 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
 
             <BarcodeScanner
                 isOpen={isScannerOpen}
-                onClose={() => setIsScannerOpen(false)}
-                onScanSuccess={handleScanSuccess}
+                onClose={() => {
+                    setIsScannerOpen(false);
+                    window._currentScanItemId = null;
+                }}
+                onScanSuccess={(text, time) => handleScanSuccess(text, time, window._currentScanItemId)}
                 title={scannerType === 'order' ? 'Quét mã QR đơn hàng' : `Quét mã vạch (${items.length} đã thêm)`}
                 currentCount={items.length}
                 allowDuplicateScans={true}

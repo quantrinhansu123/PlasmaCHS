@@ -31,6 +31,7 @@ const ShippingTasks = () => {
     const [uploading, setUploading] = useState(false);
     const [uploadedImages, setUploadedImages] = useState([]);
     const [notes, setNotes] = useState('');
+    const [deliveryStatus, setDeliveryStatus] = useState('HOAN_THANH');
 
     useEffect(() => {
         fetchShippingOrders();
@@ -98,26 +99,36 @@ const ShippingTasks = () => {
 
     const confirmDelivery = async () => {
         if (!selectedOrder) return;
+        
+        if (deliveryStatus === 'TRA_HANG' && !notes.trim()) {
+            toast.error('Vui lòng nhập lý do giao hàng chưa thành công!');
+            return;
+        }
 
         setIsLoading(true);
         try {
+            const finalStatus = deliveryStatus; // HOAN_THANH or TRA_HANG
+            const notePrefix = finalStatus === 'TRA_HANG' ? '[Lý do Giao Không Thành Công]: ' : '[Ghi chú Shipper]: ';
+            const newNoteText = notes ? `\n${notePrefix}${notes}` : '';
+
             const { error } = await supabase
                 .from('orders')
                 .update({
-                    status: 'HOAN_THANH',
-                    delivery_images: uploadedImages,
-                    note: notes ? `${selectedOrder.note || ''}\n[Shipper Note]: ${notes}` : selectedOrder.note,
+                    status: finalStatus,
+                    delivery_images: finalStatus === 'HOAN_THANH' ? uploadedImages : selectedOrder.delivery_images,
+                    note: (selectedOrder.note || '') + newNoteText,
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', selectedOrder.id);
 
             if (error) throw error;
 
-            toast.success('✅ Xác nhận giao hàng thành công!');
+            toast.success(finalStatus === 'HOAN_THANH' ? '✅ Xác nhận giao hàng thành công!' : '⚠️ Đã báo cáo giao thất bại!');
             setIsConfirmModalOpen(false);
             setSelectedOrder(null);
             setUploadedImages([]);
             setNotes('');
+            setDeliveryStatus('HOAN_THANH');
             fetchShippingOrders();
         } catch (error) {
             console.error('Error confirming delivery:', error);
@@ -245,6 +256,9 @@ const ShippingTasks = () => {
                                 <button 
                                     onClick={() => {
                                         setSelectedOrder(order);
+                                        setDeliveryStatus('HOAN_THANH');
+                                        setNotes('');
+                                        setUploadedImages([]);
                                         setIsConfirmModalOpen(true);
                                     }}
                                     className="flex-[1.5] bg-primary text-white py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md shadow-primary/20 active:bg-primary/90"
@@ -287,44 +301,77 @@ const ShippingTasks = () => {
                             </div>
 
                             <div>
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Hình ảnh bằng chứng (Tùy chọn)</p>
-                                <div className="grid grid-cols-3 gap-3">
-                                    {uploadedImages.map((url, idx) => (
-                                        <div key={idx} className="relative aspect-square rounded-xl border border-slate-200 overflow-hidden bg-slate-100 group">
-                                            <img src={url} alt="Proof" className="w-full h-full object-cover" />
-                                            <button 
-                                                onClick={() => removeImage(idx)}
-                                                className="absolute top-1 right-1 p-1 bg-black/40 text-white rounded-full hover:bg-black/60 transition-colors"
-                                            >
-                                                <X size={12} />
-                                            </button>
-                                        </div>
-                                    ))}
-                                    <div className="relative aspect-square">
-                                        <input 
-                                            type="file" 
-                                            accept="image/*" 
-                                            capture="environment" 
-                                            multiple
-                                            onChange={handleUploadImages}
-                                            className="absolute inset-0 opacity-0 cursor-pointer z-10"
-                                        />
-                                        <div className="w-full h-full border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center gap-1.5 text-slate-400 group-hover:border-primary group-hover:text-primary transition-all bg-slate-50">
-                                            {uploading ? <Loader2 size={20} className="animate-spin text-primary" /> : <Camera size={24} />}
-                                            <span className="text-[10px] font-bold">Chụp ảnh</span>
-                                        </div>
-                                    </div>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Kết quả giao hàng</p>
+                                <div className="flex gap-3">
+                                    <button 
+                                        onClick={() => setDeliveryStatus('HOAN_THANH')}
+                                        className={clsx(
+                                            "flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center gap-2 border transition-all text-sm",
+                                            deliveryStatus === 'HOAN_THANH' ? "bg-emerald-50 border-emerald-500 text-emerald-700 shadow-sm" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
+                                        )}
+                                    >
+                                        <CheckCircle2 size={18} className={deliveryStatus === 'HOAN_THANH' ? "text-emerald-500" : ""} />
+                                        Thành công
+                                    </button>
+                                    <button 
+                                        onClick={() => setDeliveryStatus('TRA_HANG')}
+                                        className={clsx(
+                                            "flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center gap-2 border transition-all text-sm",
+                                            deliveryStatus === 'TRA_HANG' ? "bg-rose-50 border-rose-500 text-rose-700 shadow-sm" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
+                                        )}
+                                    >
+                                        <X size={18} className={deliveryStatus === 'TRA_HANG' ? "text-rose-500" : ""} />
+                                        Chưa thành công
+                                    </button>
                                 </div>
                             </div>
 
+                            {deliveryStatus === 'HOAN_THANH' && (
+                                <div className="animate-in fade-in slide-in-from-top-2 duration-300">
+                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Hình ảnh bằng chứng (Tùy chọn nhưng khuyến nghị)</p>
+                                    <div className="grid grid-cols-3 gap-3">
+                                        {uploadedImages.map((url, idx) => (
+                                            <div key={idx} className="relative aspect-square rounded-xl border border-slate-200 overflow-hidden bg-slate-100 group">
+                                                <img src={url} alt="Proof" className="w-full h-full object-cover" />
+                                                <button 
+                                                    onClick={() => removeImage(idx)}
+                                                    className="absolute top-1 right-1 p-1 bg-black/40 text-white rounded-full hover:bg-black/60 transition-colors"
+                                                >
+                                                    <X size={12} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                        <div className="relative aspect-square">
+                                            <input 
+                                                type="file" 
+                                                accept="image/*" 
+                                                capture="environment" 
+                                                multiple
+                                                onChange={handleUploadImages}
+                                                className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                                            />
+                                            <div className="w-full h-full border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center gap-1.5 text-slate-400 group-hover:border-primary group-hover:text-primary transition-all bg-slate-50">
+                                                {uploading ? <Loader2 size={20} className="animate-spin text-primary" /> : <Camera size={24} />}
+                                                <span className="text-[10px] font-bold text-center leading-tight">Chụp ảnh<br/>giao hàng</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
                             <div>
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Ghi chú (Tùy chọn)</p>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
+                                    {deliveryStatus === 'HOAN_THANH' ? 'Ghi chú (Tùy chọn)' : 'Lý do chưa thành công (Bắt buộc)'}
+                                </p>
                                 <textarea 
                                     rows={3} 
-                                    placeholder="Ghi thêm thông tin nếu cần..."
+                                    placeholder={deliveryStatus === 'HOAN_THANH' ? 'Ghi thêm thông tin nếu cần...' : 'Vui lòng ghi rõ lý do không giao được hàng...'}
                                     value={notes}
                                     onChange={(e) => setNotes(e.target.value)}
-                                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-medium"
+                                    className={clsx(
+                                        "w-full px-4 py-3 bg-slate-50 border rounded-xl text-sm focus:outline-none focus:ring-2 transition-all font-medium",
+                                        deliveryStatus === 'TRA_HANG' && !notes.trim() ? "border-rose-300 focus:ring-rose-200" : "border-slate-200 focus:ring-primary/20"
+                                    )}
                                 />
                             </div>
                         </div>
@@ -333,12 +380,17 @@ const ShippingTasks = () => {
                             <button 
                                 onClick={confirmDelivery}
                                 disabled={isLoading || uploading}
-                                className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 active:bg-emerald-700 disabled:opacity-50 transition-all text-lg"
+                                className={clsx(
+                                    "w-full text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] disabled:opacity-50 transition-all text-lg",
+                                    deliveryStatus === 'HOAN_THANH' ? "bg-emerald-600 shadow-emerald-600/20 active:bg-emerald-700" : "bg-rose-600 shadow-rose-600/20 active:bg-rose-700"
+                                )}
                             >
-                                {isLoading ? <Loader2 className="animate-spin" size={24} /> : <CheckCircle2 size={24} />}
-                                Giao hàng thành công
+                                {isLoading ? <Loader2 className="animate-spin" size={24} /> : (deliveryStatus === 'HOAN_THANH' ? <CheckCircle2 size={24} /> : <X size={24} />)}
+                                {deliveryStatus === 'HOAN_THANH' ? 'Xác nhận Đã Giao Hàng' : 'Báo cáo Chưa Thành Công'}
                             </button>
-                            <p className="text-center text-[11px] text-slate-400 mt-3 italic">Bằng cách ấn nút này, trạng thái đơn hàng sẽ chuyển thành Hoàn thành.</p>
+                            <p className="text-center text-[11px] text-slate-400 mt-3 italic">
+                                {deliveryStatus === 'HOAN_THANH' ? 'Trạng thái đơn hàng sẽ chuyển thành Hoàn thành.' : 'Đơn hàng sẽ được trả về kho (Trạng thái: Đơn hàng trả về).'}
+                            </p>
                         </div>
                     </div>
                 </div>

@@ -46,6 +46,7 @@ import MachineHandoverPrintTemplate from '../components/MachineHandoverPrintTemp
 import OrderPrintTemplate from '../components/OrderPrintTemplate';
 import OrderFormModal from '../components/Orders/OrderFormModal';
 import OrderStatusUpdater from '../components/Orders/OrderStatusUpdater';
+import PrintOptionsModal from '../components/Orders/PrintOptionsModal';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
@@ -82,6 +83,9 @@ const Orders = () => {
     const [selectedOrder, setSelectedOrder] = useState(null);
     const [ordersToPrint, setOrdersToPrint] = useState(null);
     const [handoverToPrint, setHandoverToPrint] = useState(null);
+    const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+    const [printContext, setPrintContext] = useState(null); // { type: 'single' | 'bulk' | 'handover', data: any }
+    const [printOptions, setPrintOptions] = useState({ copies: 1, paperSize: 'A4' });
     const [selectedIds, setSelectedIds] = useState([]);
     const [isActionModalOpen, setIsActionModalOpen] = useState(false);
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
@@ -279,7 +283,7 @@ const Orders = () => {
         try {
             const { data, error } = await supabase
                 .from('orders')
-                .select('*')
+                .select('*, order_items(*)')
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
@@ -326,7 +330,8 @@ const Orders = () => {
 
         // Filter by product type
         const matchesProductType = selectedProductTypes.length === 0 ||
-            selectedProductTypes.includes(order.product_type);
+            selectedProductTypes.includes(order.product_type) ||
+            (order.product_type_2 && selectedProductTypes.includes(order.product_type_2));
 
         // Filter by customer name
         const matchesCustomer = selectedCustomers.length === 0 ||
@@ -493,19 +498,13 @@ const Orders = () => {
             ...order,
             customer_debt: allCustomerDebts[order.customer_id] || []
         };
-        setOrdersToPrint(orderWithDebt);
-        setHandoverToPrint(null);
-        setTimeout(() => {
-            window.print();
-        }, 150);
+        setPrintContext({ type: 'single', data: orderWithDebt });
+        setIsPrintModalOpen(true);
     };
 
     const handleHandoverPrint = (order) => {
-        setOrdersToPrint(null);
-        setHandoverToPrint(order);
-        setTimeout(() => {
-            window.print();
-        }, 150);
+        setPrintContext({ type: 'handover', data: order });
+        setIsPrintModalOpen(true);
     };
 
     const handleBulkPrint = () => {
@@ -521,7 +520,24 @@ const Orders = () => {
                 customer_debt: allCustomerDebts[o.customer_id] || []
             }));
 
-        setOrdersToPrint(selectedOrders);
+        setPrintContext({ type: 'bulk', data: selectedOrders });
+        setIsPrintModalOpen(true);
+    };
+
+    const executePrint = (options) => {
+        setPrintOptions(options);
+        const { type, data } = printContext;
+
+        if (type === 'single') {
+            setOrdersToPrint(data);
+            setHandoverToPrint(null);
+        } else if (type === 'handover') {
+            setOrdersToPrint(null);
+            setHandoverToPrint(data);
+        } else if (type === 'bulk') {
+            setOrdersToPrint(data);
+            setHandoverToPrint(null);
+        }
 
         setTimeout(() => {
             window.print();
@@ -717,12 +733,29 @@ const Orders = () => {
                     </span>
                 );
             case 'product':
+                const items = order.order_items || [];
+                if (items.length > 1) {
+                    return (
+                        <div className="flex flex-wrap gap-1 max-w-[150px]">
+                            {items.map((it, idx) => (
+                                <span key={idx} className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100 text-[10px] font-semibold">
+                                    {getLabel(PRODUCT_TYPES, it.product_type)} x {it.quantity}
+                                </span>
+                            ))}
+                        </div>
+                    );
+                }
                 return (
                     <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-xs font-semibold">
-                        {getLabel(PRODUCT_TYPES, order.product_type)}
+                        {getLabel(PRODUCT_TYPES, items[0]?.product_type || order.product_type)}
                     </span>
                 );
             case 'quantity':
+                const qItems = order.order_items || [];
+                if (qItems.length > 0) {
+                    const totalQty = qItems.reduce((sum, it) => sum + (it.quantity || 0), 0);
+                    return <span className="text-[13px] font-semibold text-foreground">{formatNumber(totalQty)}</span>;
+                }
                 return <span className="text-[13px] font-semibold text-foreground">{formatNumber(order.quantity)}</span>;
             case 'department':
                 return <span className="text-[13px] text-muted-foreground font-normal">{order.department || '—'}</span>;
@@ -924,13 +957,36 @@ const Orders = () => {
                                                 <p className="text-[9px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                                                     <Package className="w-3 h-3 text-blue-600" /> Hàng hóa
                                                 </p>
-                                                <p className="text-[12px] text-foreground font-bold mt-0.5">
-                                                    <span className={getProductTypeBadgeClass(order.product_type)}>{getLabel(PRODUCT_TYPES, order.product_type)}</span>
-                                                </p>
+                                                <div className="text-[12px] text-foreground font-bold mt-0.5">
+                                                    <div className="flex flex-col gap-1 items-start">
+                                                        {order.order_items && order.order_items.length > 0 ? (
+                                                            order.order_items.map((it, idx) => (
+                                                                <span key={idx} className={getProductTypeBadgeClass(it.product_type)}>
+                                                                    {getLabel(PRODUCT_TYPES, it.product_type)} ({it.quantity || 0})
+                                                                </span>
+                                                            ))
+                                                        ) : (
+                                                            <>
+                                                                <span className={getProductTypeBadgeClass(order.product_type)}>
+                                                                    {getLabel(PRODUCT_TYPES, order.product_type)} ({order.quantity || 0})
+                                                                </span>
+                                                                {order.product_type_2 && order.quantity_2 > 0 && (
+                                                                    <span className={getProductTypeBadgeClass(order.product_type_2)}>
+                                                                        {getLabel(PRODUCT_TYPES, order.product_type_2)} ({order.quantity_2})
+                                                                    </span>
+                                                                )}
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </div>
                                             </div>
                                             <div>
                                                 <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Số lượng</p>
-                                                <p className="text-[14px] text-foreground font-black mt-0.5">{formatNumber(order.quantity)}</p>
+                                                <div className="text-[14px] text-foreground font-black mt-0.5">
+                                                    {order.order_items && order.order_items.length > 0 
+                                                        ? formatNumber(order.order_items.reduce((sum, it) => sum + (it.quantity || 0), 0))
+                                                        : formatNumber(order.quantity)}
+                                                </div>
                                             </div>
                                             <div className="col-span-2">
                                                 <div className="space-y-3">
@@ -961,10 +1017,10 @@ const Orders = () => {
                                         </div>
 
                                         <div className="bg-amber-50/40 rounded-xl p-2.5 border border-amber-100/50 mb-3 shadow-inner">
-                                            <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                                            <div className="text-[10px] font-bold text-amber-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
                                                 <div className="w-1.5 h-3 bg-amber-400 rounded-full"></div>
                                                 Nợ vỏ tại khách
-                                            </p>
+                                            </div>
                                             <div className="grid grid-cols-2 gap-2">
                                                 {(allCustomerDebts[order.customer_id] || []).length > 0 ? (
                                                     allCustomerDebts[order.customer_id].map((debt, idx) => (
@@ -1418,7 +1474,14 @@ const Orders = () => {
                                                                 onClick={(e) => e.stopPropagation()}
                                                             >
                                                                 <button
-                                                                    onClick={() => handleViewOrder(order)}
+                                                                    onClick={() => {
+                                                                        if (order.order_type === 'DNXM') {
+                                                                            navigate(`/de-nghi-xuat-may/tao?orderId=${order.id}&viewOnly=true`);
+                                                                        } else {
+                                                                            handleViewOrder(order);
+                                                                        }
+                                                                        setActiveRowMenu(null);
+                                                                    }}
                                                                     className="w-full flex items-center gap-3 px-4 py-2.5 text-indigo-600 hover:bg-indigo-50 transition-colors text-[13px] font-bold"
                                                                 >
                                                                     <Eye className="w-4 h-4" />
@@ -1426,7 +1489,14 @@ const Orders = () => {
                                                                 </button>
 
                                                                 <button
-                                                                    onClick={() => handleEditOrder(order)}
+                                                                    onClick={() => {
+                                                                        if (order.order_type === 'DNXM') {
+                                                                            navigate(`/de-nghi-xuat-may/tao?orderId=${order.id}`);
+                                                                        } else {
+                                                                            handleEditOrder(order);
+                                                                        }
+                                                                        setActiveRowMenu(null);
+                                                                    }}
                                                                     className="w-full flex items-center gap-3 px-4 py-2.5 text-amber-600 hover:bg-amber-50 transition-colors text-[13px] font-bold"
                                                                 >
                                                                     <Edit className="w-4 h-4" />
@@ -2085,10 +2155,25 @@ const Orders = () => {
                 document.body
             )}
 
+            {isPrintModalOpen && createPortal(
+                <PrintOptionsModal 
+                    onClose={() => setIsPrintModalOpen(false)}
+                    onConfirm={executePrint}
+                    title={printContext?.type === 'bulk' ? `In hàng loạt (${printContext.data.length} đơn)` : "Tùy chọn in phiếu"}
+                />,
+                document.body
+            )}
+
             {/* Hidden Print Template — rendered via Portal directly under <body> to bypass #root hiding */}
             {createPortal(
                 <div className="print-only-content">
-                    {ordersToPrint && <OrderPrintTemplate orders={ordersToPrint} warehousesList={warehousesList} />}
+                    {ordersToPrint && (
+                        <OrderPrintTemplate 
+                            orders={ordersToPrint} 
+                            warehousesList={warehousesList} 
+                            options={printOptions}
+                        />
+                    )}
                     {ordersToPrint && handoverToPrint && <div className="page-break" />}
                     {handoverToPrint && <MachineHandoverPrintTemplate orders={handoverToPrint} />}
                 </div>,

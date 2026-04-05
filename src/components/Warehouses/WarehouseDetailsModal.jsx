@@ -12,7 +12,9 @@ import {
     Shield,
     Truck,
     Warehouse,
-    X
+    X,
+    Image as ImageIcon,
+    ExternalLink
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -250,6 +252,21 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                                                     <span className="text-[10px] font-bold text-slate-400 shrink-0">{formatDate(log.created_at)}</span>
                                                 </div>
                                                 <p className="text-xs font-bold text-slate-500 truncate">{log.description || `Bình ${log.serial_number} được xử lý tại kho`}</p>
+                                                
+                                                {log.image_url && (
+                                                    <div className="mt-2 pt-2 border-t border-slate-50">
+                                                        <a 
+                                                            href={log.image_url} 
+                                                            target="_blank" 
+                                                            rel="noopener noreferrer"
+                                                            className="inline-flex items-center gap-1.5 px-2 py-1 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition-all border border-emerald-100/50"
+                                                        >
+                                                            <ImageIcon size={12} />
+                                                            <span className="text-[10px] font-black uppercase">Ảnh bàn giao</span>
+                                                            <ExternalLink size={10} />
+                                                        </a>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     ))

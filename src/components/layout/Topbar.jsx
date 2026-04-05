@@ -238,6 +238,17 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
     }
   };
 
+  const handleNotificationClick = (notification) => {
+    if (!notification.is_read) {
+      markAsRead(notification.id);
+    }
+    if (notification.link) {
+      setShowNotifications(false);
+      setIsExpanded(false);
+      navigate(notification.link);
+    }
+  };
+
   const getIcon = (type) => {
     switch (type) {
       case 'info':
@@ -389,7 +400,7 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
                     {displayNotifications.map((notification) => (
                       <div
                         key={notification.id}
-                        onClick={() => markAsRead(notification.id)}
+                        onClick={() => handleNotificationClick(notification)}
                         className={clsx(
                           'p-4 sm:p-3 transition-colors cursor-pointer hover:bg-white/80 bg-white/60 sm:bg-transparent sm:hover:bg-muted/30 relative border-b border-border/40 sm:border-b-0',
                           getTypeStyles(notification.type, notification.is_read)

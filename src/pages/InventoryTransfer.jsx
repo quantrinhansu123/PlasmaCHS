@@ -10,14 +10,21 @@ import {
     ArrowRight,
     ArrowDown,
     Hash,
-    Info
+    Info,
+    Camera,
+    Printer,
+    Image as ImageIcon,
+    X,
+    Loader2
 } from 'lucide-react';
 import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 import { toast } from 'react-toastify';
 import { supabase } from '../supabase/config';
 import { notificationService } from '../utils/notificationService';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
+import MachineHandoverPrintTemplate from '../components/MachineHandoverPrintTemplate';
 
 const InventoryTransfer = () => {
     const navigate = useNavigate();
@@ -36,6 +43,61 @@ const InventoryTransfer = () => {
 
     const [availableItems, setAvailableItems] = useState([]);
     const [maxQuantity, setMaxQuantity] = useState(0);
+
+    const [uploading, setUploading] = useState(false);
+    const [uploadedImage, setUploadedImage] = useState(null);
+    const [printBBBG, setPrintBBBG] = useState(false);
+
+    const mockOrderForBBBG = useMemo(() => {
+        return {
+            id: 'bbbg_transfer',
+            created_at: new Date().toISOString(),
+            product_type: formData.item_type,
+            quantity: formData.quantity,
+            department: formData.item_name, // Mã máy / Tên hàng hóa
+            customer_name: warehouses.find(w => w.id === formData.to_warehouse_id)?.name || 'Kho Nhận',
+            recipient_name: 'Đại diện ' + (warehouses.find(w => w.id === formData.to_warehouse_id)?.name || 'Kho Nhận'),
+            recipient_address: 'Luân chuyển nội bộ',
+        };
+    }, [formData, warehouses]);
+
+    const handlePrintBBBG = () => {
+        setPrintBBBG(true);
+        setTimeout(() => {
+            window.print();
+            setPrintBBBG(false);
+        }, 100);
+    };
+
+    const handleUploadImage = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setUploading(true);
+        try {
+            const fileExt = file.name.split('.').pop();
+            const fileName = `${Math.random()}.${fileExt}`;
+            const filePath = `inventory_transfers/${fileName}`;
+
+            const { error: uploadError } = await supabase.storage
+                .from('delivery_proofs')
+                .upload(filePath, file);
+
+            if (uploadError) throw uploadError;
+
+            const { data: { publicUrl } } = supabase.storage
+                .from('delivery_proofs')
+                .getPublicUrl(filePath);
+
+            setUploadedImage(publicUrl);
+            toast.success('Đã tải lên ảnh bàn giao!');
+        } catch (error) {
+            console.error('Error uploading image:', error);
+            toast.error('Lỗi tải ảnh: ' + error.message);
+        } finally {
+            setUploading(false);
+        }
+    };
 
     useEffect(() => {
         fetchWarehouses();
@@ -160,6 +222,18 @@ const InventoryTransfer = () => {
             }
 
             const transferCode = `TRF${Date.now().toString().slice(-6)}`;
+            
+            const toName = warehouses.find(w => w.id === formData.to_warehouse_id)?.name;
+            const fromName = warehouses.find(w => w.id === formData.from_warehouse_id)?.name;
+            
+            const finalNoteOut = uploadedImage 
+                ? `Điều chuyển tới ${toName}. ${formData.note}\n[Ảnh Bàn Giao]: ${uploadedImage}` 
+                : `Điều chuyển tới ${toName}. ${formData.note}`;
+                
+            const finalNoteIn = uploadedImage 
+                ? `Nhận điều chuyển từ ${fromName}. ${formData.note}\n[Ảnh Bàn Giao]: ${uploadedImage}` 
+                : `Nhận điều chuyển từ ${fromName}. ${formData.note}`;
+
             const { error: txError } = await supabase
                 .from('inventory_transactions')
                 .insert([
@@ -168,14 +242,14 @@ const InventoryTransfer = () => {
                         transaction_type: 'OUT',
                         reference_code: transferCode,
                         quantity_changed: formData.quantity,
-                        note: `Điều chuyển tới ${warehouses.find(w => w.id === formData.to_warehouse_id)?.name}. ${formData.note}`
+                        note: finalNoteOut
                     },
                     {
                         inventory_id: destInventoryId,
                         transaction_type: 'IN',
                         reference_code: transferCode,
                         quantity_changed: formData.quantity,
-                        note: `Nhận điều chuyển từ ${warehouses.find(w => w.id === formData.from_warehouse_id)?.name}. ${formData.note}`
+                        note: finalNoteIn
                     }
                 ]);
             if (txError) throw txError;
@@ -349,6 +423,76 @@ const InventoryTransfer = () => {
                             </div>
                         </div>
                     </div>
+
+                    {/* BBBG & Handover Photo Section */}
+                    <div className="rounded-3xl border border-primary/20 bg-white p-5 sm:p-6 space-y-5 shadow-sm">
+                         <div className="flex items-center justify-between pb-3 border-b border-primary/10">
+                            <div className="flex items-center gap-2.5">
+                                <ClipboardList className="w-4 h-4 text-primary" />
+                                <h4 className="text-[18px] !font-extrabold !text-primary">Chứng từ và Hình Ảnh Bàn Giao</h4>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
+                            {/* BBBG Button */}
+                            <div className="space-y-2">
+                                <label className="flex items-center gap-1.5 text-[14px] font-semibold text-primary">Biên Bản Bàn Giao</label>
+                                <button
+                                    type="button"
+                                    onClick={handlePrintBBBG}
+                                    disabled={!formData.to_warehouse_id || !formData.item_name}
+                                    className="w-full h-11 md:h-12 flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold border border-slate-300 rounded-2xl transition-all disabled:opacity-50"
+                                >
+                                    <Printer size={18} /> In Biên Bản Bàn Giao (Mẫu CHS)
+                                </button>
+                                <p className="text-[11px] text-slate-500 italic mt-1 px-1">Cho phép in BBBG lưu nháp để các bên ký nhận.</p>
+                            </div>
+
+                            {/* Photo Upload */}
+                            <div className="space-y-2">
+                                <label className="flex items-center gap-1.5 text-[14px] font-semibold text-primary">Ảnh chụp bàn giao (BBBG đã ký, Hàng hóa...)</label>
+                                {uploadedImage ? (
+                                     <div className="relative h-11 md:h-12 rounded-2xl border border-emerald-500 bg-emerald-50 flex items-center justify-between px-3 group overflow-hidden">
+                                        <div className="flex items-center gap-2">
+                                            <ImageIcon size={18} className="text-emerald-600" />
+                                            <span className="text-[13px] font-bold text-emerald-700 truncate max-w-[150px]">Đã tải lên ảnh chụp</span>
+                                            <a href={uploadedImage} target="_blank" rel="noopener noreferrer" className="text-[11px] text-emerald-600 underline">Xem</a>
+                                        </div>
+                                        <button 
+                                            type="button"
+                                            onClick={() => setUploadedImage(null)}
+                                            className="p-1.5 bg-rose-100 text-rose-600 rounded-lg hover:bg-rose-200 transition-colors"
+                                        >
+                                            <X size={14} />
+                                        </button>
+                                     </div>
+                                ) : (
+                                    <div className="relative h-11 md:h-12">
+                                        <input 
+                                            type="file" 
+                                            accept="image/*" 
+                                            capture="environment" 
+                                            onChange={handleUploadImage}
+                                            disabled={uploading}
+                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                        />
+                                        <div className="w-full h-full border border-dashed border-primary/40 rounded-2xl flex items-center justify-center gap-2 text-primary/70 bg-primary/5 hover:bg-primary/10 transition-colors">
+                                            {uploading ? <Loader2 size={18} className="animate-spin" /> : <Camera size={18} />}
+                                            <span className="text-[13px] font-bold">{uploading ? 'Đang tải lên...' : 'Bấm tải ảnh bàn giao'}</span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Hidden Print Template */}
+                    {printBBBG && createPortal(
+                        <div className="print-only-content">
+                            <MachineHandoverPrintTemplate orders={[mockOrderForBBBG]} />
+                        </div>,
+                        document.body
+                    )}
 
                     {/* Bottom Actions */}
                     <div className="fixed md:static z-40 bottom-0 left-0 right-0 border-t md:border-none border-slate-200 p-4 md:p-0 bg-white md:bg-transparent flex flex-col-reverse sm:flex-row gap-3 md:gap-4 pt-4 items-center justify-end shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)] md:shadow-none pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-16 mt-6 md:mt-0">

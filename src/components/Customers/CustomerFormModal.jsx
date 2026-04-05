@@ -260,6 +260,16 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                     .update(payload)
                     .eq('id', customer.id);
                 if (error) throw error;
+                
+                // Nv KD thay đổi trạng thái sang Thành công
+                if (payload.status === 'Thành công' && prevStatus !== 'Thành công') {
+                    notificationService.add({
+                        title: `🎉 Khách hàng chốt Thành công: ${formData.name}`,
+                        description: `NV Kinh doanh (${formData.care_by || 'Không rõ'}) vừa chuyển trạng thái khách hàng này sang Thành công.`,
+                        type: 'success',
+                        link: '/khach-hang'
+                    });
+                }
             } else {
                 const { error } = await supabase
                     .from('customers')

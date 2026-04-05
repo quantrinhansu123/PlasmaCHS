@@ -54,6 +54,7 @@ import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
+import { notificationService } from '../utils/notificationService';
 
 ChartJS.register(
     CategoryScale,
@@ -203,13 +204,17 @@ const Customers = () => {
 
             let query = supabase
                 .from('customers')
-                .select('*', { count: 'exact' })
-                .order('created_at', { ascending: false });
+                .select('*', { count: 'exact' });
 
             if (filterType === 'lead') {
-                query = query.or('status.is.null,status.neq."Thành công"');
+                // Group unresolved first: nulls first, then "Chưa thành công", then "Thành công" at the bottom
+                query = query
+                    .order('status', { ascending: true, nullsFirst: true })
+                    .order('created_at', { ascending: false });
             } else {
-                query = query.eq('status', 'Thành công');
+                query = query
+                    .eq('status', 'Thành công')
+                    .order('created_at', { ascending: false });
             }
 
             const { data, count, error } = await query.range(from, to);
@@ -557,6 +562,18 @@ const Customers = () => {
             }
 
             if (error) throw error instanceof Error ? error : new Error(String(error?.message ?? error));
+
+            if (newStatus === 'Thành công') {
+                const updatedCustomer = customers.find(c => c.id === id);
+                if (updatedCustomer && updatedCustomer.status !== 'Thành công') {
+                    notificationService.add({
+                        title: `🎉 Khách hàng chốt Thành công: ${updatedCustomer.name}`,
+                        description: `NV Kinh doanh (${updatedCustomer.care_by || 'Không rõ'}) vừa chuyển trạng thái khách hàng này sang Thành công.`,
+                        type: 'success',
+                        link: '/khach-hang'
+                    });
+                }
+            }
 
             setCustomers((prev) =>
                 prev.map((c) => (c.id === id ? { ...c, ...patch } : c))
@@ -1181,11 +1198,17 @@ const Customers = () => {
                                 const leadStt = filterType === 'lead' ? getLeadCreationStt(c.id) : null;
                                 return (
                                 <div key={c.id} className={clsx(
-                                    "rounded-2xl border shadow-sm p-4 transition-all duration-200",
+                                    "rounded-2xl border shadow-sm p-4 transition-all duration-200 relative overflow-hidden",
                                     selectedIds.includes(c.id)
                                         ? "border-primary bg-primary/[0.05] ring-1 ring-primary/20"
-                                        : "border-primary/15 bg-white"
+                                        : "border-primary/15 bg-white",
+                                    filterType === 'lead' && c.status === 'Thành công' && "!bg-slate-50/80 !border-emerald-200 opacity-70"
                                 )}>
+                                    {filterType === 'lead' && c.status === 'Thành công' && (
+                                        <div className="absolute top-0 right-0 px-2.5 py-0.5 bg-emerald-500 text-white text-[9px] font-bold rounded-bl-xl shadow-sm z-10 flex items-center gap-1">
+                                            <ClipboardCheck size={10} /> ĐÃ THÀNH CÔNG
+                                        </div>
+                                    )}
                                     <div className="flex items-start justify-between gap-2 mb-2">
                                         <div className="flex gap-3">
                                             <div className="pt-1">
@@ -1594,7 +1617,8 @@ const Customers = () => {
                                             key={c.id} 
                                             className={clsx(
                                                 getRowStyle(c.category),
-                                                selectedIds.includes(c.id) && "bg-primary/[0.04] !hover:bg-primary/[0.08]"
+                                                selectedIds.includes(c.id) && "bg-primary/[0.04] !hover:bg-primary/[0.08]",
+                                                filterType === 'lead' && c.status === 'Thành công' && "!bg-slate-50/80 !border-l-[4px] !border-l-emerald-500 opacity-70 grayscale-[20%]"
                                             )}
                                         >
                                             <td className="px-4 py-4 text-center border-r border-primary/10">

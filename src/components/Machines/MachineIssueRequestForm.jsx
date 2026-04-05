@@ -5,6 +5,7 @@ import { useLocation } from 'react-router-dom';
 import { supabase } from '../../supabase/config';
 import { toast } from 'react-toastify';
 import usePermissions from '../../hooks/usePermissions';
+import { notificationService } from '../../utils/notificationService';
 
 const MachineIssueRequestForm = () => {
     const location = useLocation();
@@ -55,13 +56,100 @@ const MachineIssueRequestForm = () => {
         notes: ''
     });
 
+    const [editOrderId, setEditOrderId] = useState(null);
+    const [isReadOnly, setIsReadOnly] = useState(false);
+
     useEffect(() => {
         const queryParams = new URLSearchParams(location.search);
+        const orderId = queryParams.get('orderId');
+        const viewOnly = queryParams.get('viewOnly');
         const phone = queryParams.get('phone');
-        if (phone) {
+        
+        if (viewOnly === 'true') {
+            setIsReadOnly(true);
+            setShowPreview(true);
+        }
+        
+        if (orderId) {
+            setEditOrderId(orderId);
+            fetchExistingOrder(orderId);
+        } else if (phone) {
             setFormData(prev => ({ ...prev, phone }));
         }
     }, [location.search]);
+
+    const fetchExistingOrder = async (id) => {
+        try {
+            const { data, error } = await supabase.from('orders').select('*').eq('id', id).single();
+            if (error) throw error;
+            if (data) {
+                const noteStr = data.note || '';
+                const lines = noteStr.split('\n').map(l => l.trim());
+                
+                const parseField = (prefix) => {
+                    const match = lines.find(l => l.startsWith(prefix));
+                    return match ? match.replace(prefix, '').replace(/\.\s*$/, '').trim() : '';
+                };
+                
+                const types = parseField('Loại máy:').split(',').map(s => s.trim()).filter(Boolean);
+                const issues = parseField('Hình thức:').split(',').map(s => s.trim()).filter(Boolean);
+                const colors = parseField('Màu máy:').split(',').map(s => s.trim()).filter(Boolean);
+                const pShipping = parseField('PT Vận chuyển:').split(',').map(s => s.trim()).filter(Boolean);
+                
+                let notesRemaining = '';
+                const ghichuIndex = lines.findIndex(l => l.startsWith('Ghi chú:'));
+                if (ghichuIndex !== -1) {
+                    const firstLine = lines[ghichuIndex].replace('Ghi chú:', '').trim();
+                    const rest = lines.slice(ghichuIndex + 1).map(l => l.replace(/\.\s*$/, '')).join('\n');
+                    notesRemaining = `${firstLine}${rest ? '\n' + rest : ''}`;
+                }
+                
+                setFormData({
+                    orangeNumber: data.order_code?.replace('DNXM-', '') || '',
+                    requesterName: data.ordered_by || '',
+                    machineManager: parseField('Phụ trách máy:'),
+                    customerName: data.customer_name || '',
+                    phone: data.recipient_phone || '',
+                    facilityName: data.recipient_name || '',
+                    placementAddress: data.recipient_address || '',
+                    
+                    machineType: {
+                        TM: types.includes('TM'),
+                        SD: types.includes('SD'),
+                        FM: types.includes('FM'),
+                        Khac: types.includes('Khac') || types.includes('Khác (NK, IoT)')
+                    },
+                    machineColor: {
+                        'Ghi xám': colors.includes('Ghi xám'),
+                        'Trắng(600-WH1, fullshade)': colors.includes('Trắng(600-WH1, fullshade)'),
+                        'Xanh dương(600-RBL70,WH1)': colors.includes('Xanh dương(600-RBL70,WH1)'),
+                        'Xanh Lá(600-TGR32, WH1)': colors.includes('Xanh Lá(600-TGR32, WH1)'),
+                        'Hồng Nhạt(600-RRD84, WH1)': colors.includes('Hồng Nhạt(600-RRD84, WH1)'),
+                        'Tím (600-VT20, RGB17)': colors.includes('Tím (600-VT20, RGB17)')
+                    },
+                    quantity: data.quantity?.toString() || '',
+                    machineCode: parseField('Mã máy:'),
+                    dateNeeded: parseField('Ngày cần:'),
+                    dateDelivery: parseField('Giao:'),
+                    dateRecall: parseField('Thu hồi dự kiến:'),
+                    shippingMethod: {
+                        'KD tự vận chuyển': pShipping.includes('KD tự vận chuyển'),
+                        'Xe Công ty': pShipping.includes('Xe Công ty')
+                    },
+                    issueType: {
+                        'Demo': issues.includes('Demo'),
+                        'Thuê': issues.includes('Thuê'),
+                        'Bán': issues.includes('Bán'),
+                        'Ngoại Giao': issues.includes('Ngoại Giao')
+                    },
+                    notes: notesRemaining
+                });
+            }
+        } catch (err) {
+            console.error('Error fetching DNXM:', err);
+            toast.error('Lỗi khi tải phiếu đề xuất: ' + err.message);
+        }
+    };
 
     const [isSearching, setIsSearching] = useState(false);
     const [staffList, setStaffList] = useState([]);
@@ -177,11 +265,16 @@ const MachineIssueRequestForm = () => {
                 .map(([type]) => type)
                 .join(', ');
 
+            const shippingList = Object.entries(formData.shippingMethod)
+                .filter(([_, checked]) => checked)
+                .map(([m]) => m)
+                .join(', ');
+
             // Map ĐNXM fields to orders table
             const orderData = {
                 order_code: formData.orangeNumber || `DNXM-${Date.now().toString().slice(-6)}`,
                 customer_name: formData.customerName,
-                recipient_name: formData.customerName, // Required NOT NULL
+                recipient_name: formData.facilityName || formData.customerName, // Required NOT NULL
                 recipient_address: formData.placementAddress || 'N/A', // Required NOT NULL
                 recipient_phone: formData.phone || 'N/A', // Required NOT NULL
                 product_type: dbProductType,
@@ -190,25 +283,49 @@ const MachineIssueRequestForm = () => {
                 total_amount: 0, // Required NOT NULL
                 order_type: 'DNXM',
                 note: `Loại máy: ${selectedMachineTypes.join(', ')}. 
-                       Hình thức: ${issueTypesList || 'Chưa chọn'}.
-                       Màu máy: ${selectedColors}. 
-                       Ngày cần: ${formData.dateNeeded}. 
-                       Giao: ${formData.dateDelivery}. 
-                       Thu hồi dự kiến: ${formData.dateRecall}. 
-                       Ghi chú: ${formData.notes}`,
-                status: 'CHO_DUYET',
+Hình thức: ${issueTypesList || 'Chưa chọn'}.
+Màu máy: ${selectedColors}. 
+Ngày cần: ${formData.dateNeeded}. 
+Giao: ${formData.dateDelivery}. 
+Thu hồi dự kiến: ${formData.dateRecall}. 
+Phụ trách máy: ${formData.machineManager}. 
+PT Vận chuyển: ${shippingList}. 
+Mã máy: ${formData.machineCode}. 
+Ghi chú: ${formData.notes}`,
                 ordered_by: formData.requesterName,
-                created_at: new Date().toISOString(),
                 customer_category: 'TM' 
             };
 
-            const { data, error } = await supabase
-                .from('orders')
-                .insert([orderData]);
-
-            if (error) throw error;
-            toast.success('Đã lưu Phiếu Đề Nghị Xuất Máy vào hệ thống!');
-            setShowPreview(false);
+            if (editOrderId) {
+                const { error } = await supabase
+                    .from('orders')
+                    .update({ ...orderData, updated_at: new Date().toISOString() })
+                    .eq('id', editOrderId);
+                if (error) throw error;
+                
+                notificationService.add({
+                    title: `📝 Đã cập nhật Đề nghị xuất máy: ${orderData.customer_name}`,
+                    description: `NV Kinh doanh (${orderData.ordered_by || 'Không rõ'}) vừa cập nhật phiếu yêu cầu xuất máy.`,
+                    type: 'info',
+                    link: '/don-hang'
+                });
+                toast.success('Đã cập nhật Phiếu Đề Nghị Xuất Máy thành công!');
+            } else {
+                orderData.status = 'CHO_DUYET';
+                orderData.created_at = new Date().toISOString();
+                const { error } = await supabase
+                    .from('orders')
+                    .insert([orderData]);
+                if (error) throw error;
+                
+                notificationService.add({
+                    title: `💡 Yêu cầu xuất máy mới: ${orderData.customer_name}`,
+                    description: `NV Kinh doanh (${orderData.ordered_by || 'Không rõ'}) vừa lập phiếu đề nghị xuất máy mới.`,
+                    type: 'info',
+                    link: '/don-hang'
+                });
+                toast.success('Đã được lưu vào hệ thống!');
+            }
         } catch (error) {
             console.error('Error saving DNXM:', error);
             toast.error('Lỗi khi lưu phiếu: ' + error.message);
@@ -220,7 +337,7 @@ const MachineIssueRequestForm = () => {
     return (
         <>
             {/* DATA ENTRY FORM (MÀN HÌNH CHUẨN) */}
-            <div className="max-w-4xl mx-auto mb-10 print:hidden space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className={clsx("max-w-4xl mx-auto mb-10 print:hidden space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500", isReadOnly ? "hidden" : "block")}>
                 <div className="bg-card rounded-xl border border-border overflow-hidden shadow-sm p-4 md:p-6 pb-24">
                     <h2 className="text-xl font-bold text-foreground mb-6 pb-4 border-b border-border">Nhập thông tin Đề Nghị Xuất Máy</h2>
 
@@ -232,8 +349,9 @@ const MachineIssueRequestForm = () => {
                                 <input
                                     type="text"
                                     value={formData.orangeNumber}
+                                    readOnly={isReadOnly}
                                     onChange={(e) => handleInputChange('orangeNumber', e.target.value)}
-                                    className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                    className={clsx("w-full px-4 py-2 border rounded-lg focus:outline-none transition-all", isReadOnly ? "bg-muted/50 border-border/50 text-muted-foreground cursor-not-allowed italic font-normal" : "bg-background border-border focus:ring-2 focus:ring-primary/20")}
                                     placeholder="Điền số thứ tự"
                                 />
                             </div>
@@ -478,35 +596,39 @@ const MachineIssueRequestForm = () => {
 
                 {/* Print Action / Inline button */}
                 {/* ACTION BUTTONS */}
-                <div className="no-print mt-8 px-4 flex flex-wrap justify-center gap-4 w-full z-10 md:justify-end md:px-0">
-                    <button
-                        onClick={() => setShowPreview(!showPreview)}
-                        className="flex items-center justify-center gap-2 bg-slate-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-slate-700 transition-all font-bold text-sm"
-                    >
-                        {showPreview ? <EyeOff size={18} /> : <Eye size={18} />}
-                        {showPreview ? 'QUAY LẠI NHẬP LIỆU' : 'XEM TRƯỚC VĂN BẢN'}
-                    </button>
+                {!isReadOnly && (
+                    <div className="no-print mt-8 px-4 flex flex-wrap justify-center gap-4 w-full z-10 md:justify-end md:px-0">
+                        <button
+                            onClick={() => setShowPreview(!showPreview)}
+                            className="flex items-center justify-center gap-2 bg-slate-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-slate-700 transition-all font-bold text-sm"
+                        >
+                            {showPreview ? <EyeOff size={18} /> : <Eye size={18} />}
+                            {showPreview ? 'QUAY LẠI NHẬP LIỆU' : 'XEM TRƯỚC VĂN BẢN'}
+                        </button>
 
-                    <button
-                        onClick={handleSave}
-                        disabled={isSaving}
-                        className="flex items-center justify-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-blue-700 transition-all font-bold text-sm disabled:opacity-50"
-                    >
-                        {isSaving ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" /> : <Save size={18} />}
-                        LƯU HỆ THỐNG
-                    </button>
+                        <button
+                            onClick={handleSave}
+                            disabled={isSaving}
+                            className="flex items-center justify-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-blue-700 transition-all font-bold text-sm disabled:opacity-50"
+                        >
+                            {isSaving ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" /> : <Save size={18} />}
+                            {editOrderId ? 'CẬP NHẬT PHIẾU' : 'LƯU HỆ THỐNG'}
+                        </button>
+                    </div>
+                )}
+            </div>
 
-                    <button
+            {isReadOnly && (
+                <div className="no-print max-w-[210mm] mx-auto flex justify-end gap-4 print:hidden">
+                     <button
                         onClick={handlePrint}
-                        className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-8 py-3 rounded-xl shadow-lg shadow-emerald-600/30 hover:bg-emerald-700 transition-all font-bold text-sm transform active:scale-[0.98]"
+                        className="mb-6 flex items-center justify-center gap-2 bg-emerald-600 text-white px-8 py-3 rounded-xl shadow-lg shadow-emerald-600/30 hover:bg-emerald-700 transition-all font-bold text-sm transform active:scale-[0.98]"
                     >
                         <Printer size={20} />
-                        IN PHIẾU
+                        IN PHIẾU (HOẶC XUẤT PDF)
                     </button>
                 </div>
-                {/* Spacer to allow scrolling past the button on mobile with bottom nav */}
-                <div className="h-32 md:h-10 w-full no-print"></div>
-            </div>
+            )}
 
             {/* PRINT VIEW (HIỆN KHI ẤN IN HOẶC KHI BẬT PREVIEW) */}
             <div id="print-area" className={clsx(
