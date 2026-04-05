@@ -178,6 +178,11 @@ const SalespersonReport = () => {
     const dataToExport = selectedIds.length > 0
       ? filteredData.filter((_, index) => selectedIds.includes(index))
       : filteredData;
+
+    if (dataToExport.length === 0) {
+      alert('Không có dữ liệu để xuất!');
+      return;
+    }
     exportSalespersonReport(dataToExport);
   };
 

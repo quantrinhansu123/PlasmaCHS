@@ -90,6 +90,8 @@ const CylinderExpiryReport = () => {
   // Filters
   const [selectedWarehouses, setSelectedWarehouses] = useState([]);
   const [selectedMinDays, setSelectedMinDays] = useState([]);
+  const [isDateRange, setIsDateRange] = useState(false);
+  const [dateRange, setDateRange] = useState({ start: '', end: '' });
 
   const [filterOptions, setFilterOptions] = useState({
     warehouses: [],
@@ -158,7 +160,9 @@ const CylinderExpiryReport = () => {
   const loadData = async () => {
     const filters = {
       warehouse_id: selectedWarehouses.length > 0 ? selectedWarehouses[0] : '',
-      min_days: selectedMinDays.length > 0 ? selectedMinDays[0] : ''
+      min_days: !isDateRange && selectedMinDays.length > 0 ? selectedMinDays[0] : '',
+      startDate: isDateRange ? dateRange.start : '',
+      endDate: isDateRange ? dateRange.end : ''
     };
     const result = await fetchCylinderExpiry(filters);
     setData(result || []);
@@ -182,7 +186,13 @@ const CylinderExpiryReport = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [activeDropdown]);
 
-  const handleExport = () => exportCylinderExpiryReport(data);
+  const handleExport = () => exportCylinderExpiryReport(data, { 
+    warehouse_id: selectedWarehouses[0], 
+    min_days: selectedMinDays[0],
+    startDate: isDateRange ? dateRange.start : '',
+    endDate: isDateRange ? dateRange.end : '',
+    isDateRange 
+  });
 
   const filteredData = data.filter(item =>
     item.ma_binh?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -277,8 +287,39 @@ const CylinderExpiryReport = () => {
 
   const filterSections = useMemo(() => [
     { id: 'warehouses', label: 'Kho quản lý', icon: <MapPin size={16} />, options: warehouseOptions, selectedValues: pendingWarehouses, onSelectionChange: setPendingWarehouses },
-    { id: 'minDays', label: 'Số ngày tồn', icon: <Clock size={16} />, options: minDaysOptions, selectedValues: pendingMinDays, onSelectionChange: setPendingMinDays }
-  ], [warehouseOptions, minDaysOptions, pendingWarehouses, pendingMinDays]);
+    { 
+      id: 'dateMode', 
+      label: 'Chế độ lọc', 
+      icon: <SlidersHorizontal size={16} />, 
+      options: [
+        { id: 'aging', label: 'Theo số ngày tồn' },
+        { id: 'range', label: 'Theo khoảng ngày hết hạn' }
+      ],
+      selectedValues: [isDateRange ? 'range' : 'aging'],
+      onSelectionChange: (val) => setIsDateRange(val[0] === 'range'),
+      singleSelect: true
+    },
+    ...(!isDateRange ? [
+      { id: 'minDays', label: 'Số ngày tồn', icon: <Clock size={16} />, options: minDaysOptions, selectedValues: pendingMinDays, onSelectionChange: setPendingMinDays }
+    ] : [
+      {
+        id: 'startDate',
+        label: 'Hết hạn từ',
+        icon: <Calendar size={16} className="text-emerald-500" />,
+        type: 'date',
+        value: dateRange.start,
+        onDateChange: (val) => setDateRange(prev => ({ ...prev, start: val }))
+      },
+      {
+        id: 'endDate',
+        label: 'Hết hạn đến',
+        icon: <Calendar size={16} className="text-emerald-500" />,
+        type: 'date',
+        value: dateRange.end,
+        onDateChange: (val) => setDateRange(prev => ({ ...prev, end: val }))
+      }
+    ])
+  ], [warehouseOptions, minDaysOptions, pendingWarehouses, pendingMinDays, isDateRange, dateRange]);
 
 
   return (
@@ -355,19 +396,65 @@ const CylinderExpiryReport = () => {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2" ref={listDropdownRef}>
+              <div className="flex items-center bg-muted/30 p-1 rounded-xl border border-border mr-2 shadow-inner">
+                <button 
+                  onClick={() => setIsDateRange(false)}
+                  className={clsx(
+                    "px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all",
+                    !isDateRange ? "bg-white text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Theo số ngày
+                </button>
+                <button 
+                  onClick={() => setIsDateRange(true)}
+                  className={clsx(
+                    "px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all",
+                    isDateRange ? "bg-white text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Khoảng ngày hết hạn
+                </button>
+              </div>
+
               <div className="relative">
                 <button onClick={() => { setActiveDropdown(activeDropdown === 'warehouses' ? null : 'warehouses'); setFilterSearch(''); }} className={clsx("flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all", getFilterButtonClass('warehouses', selectedWarehouses.length > 0))}>
                   <MapPin size={14} className={getFilterIconClass('warehouses', selectedWarehouses.length > 0)} /> Kho {selectedWarehouses.length > 0 && <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('warehouses'))}>{selectedWarehouses.length}</span>} <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'warehouses' ? "rotate-180" : "")} />
                 </button>
                 {activeDropdown === 'warehouses' && <FilterDropdown options={warehouseOptions} selected={selectedWarehouses} setSelected={setSelectedWarehouses} filterSearch={filterSearch} setFilterSearch={setFilterSearch} />}
               </div>
-              <div className="relative">
-                <button onClick={() => { setActiveDropdown(activeDropdown === 'minDays' ? null : 'minDays'); setFilterSearch(''); }} className={clsx("flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all", getFilterButtonClass('minDays', selectedMinDays.length > 0))}>
-                  <Clock size={14} className={getFilterIconClass('minDays', selectedMinDays.length > 0)} /> Tồn trên {selectedMinDays.length > 0 && <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('minDays'))}>{selectedMinDays.length}</span>} <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'minDays' ? "rotate-180" : "")} />
-                </button>
-                {activeDropdown === 'minDays' && <FilterDropdown options={minDaysOptions} selected={selectedMinDays} setSelected={setSelectedMinDays} filterSearch={filterSearch} setFilterSearch={setFilterSearch} />}
-              </div>
-              {hasActiveFilters && <button onClick={() => { setSelectedWarehouses([]); setSelectedMinDays([]); }} className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-red-300 text-red-500 text-[12px] font-bold hover:bg-red-50 transition-all"><X size={14} /> Xóa bộ lọc</button>}
+
+              {!isDateRange ? (
+                <div className="relative">
+                  <button onClick={() => { setActiveDropdown(activeDropdown === 'minDays' ? null : 'minDays'); setFilterSearch(''); }} className={clsx("flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all", getFilterButtonClass('minDays', selectedMinDays.length > 0))}>
+                    <Clock size={14} className={getFilterIconClass('minDays', selectedMinDays.length > 0)} /> Tồn trên {selectedMinDays.length > 0 && <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('minDays'))}>{selectedMinDays.length}</span>} <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'minDays' ? "rotate-180" : "")} />
+                  </button>
+                  {activeDropdown === 'minDays' && <FilterDropdown options={minDaysOptions} selected={selectedMinDays} setSelected={setSelectedMinDays} filterSearch={filterSearch} setFilterSearch={setFilterSearch} />}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-300">
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-white border border-border rounded-xl shadow-sm group focus-within:ring-2 focus-within:ring-primary/10 transition-all">
+                    <span className="text-[10px] font-black text-muted-foreground uppercase opacity-60">Từ:</span>
+                    <input 
+                      type="date" 
+                      value={dateRange.start}
+                      onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                      className="bg-transparent border-none outline-none text-[13px] font-bold text-foreground cursor-pointer"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-white border border-border rounded-xl shadow-sm group focus-within:ring-2 focus-within:ring-primary/10 transition-all">
+                    <span className="text-[10px] font-black text-muted-foreground uppercase opacity-60">Đến:</span>
+                    <input 
+                      type="date" 
+                      value={dateRange.end}
+                      onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                      className="bg-transparent border-none outline-none text-[13px] font-bold text-foreground cursor-pointer"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {(hasActiveFilters || isDateRange) && <button onClick={() => { setSelectedWarehouses([]); setSelectedMinDays([]); setIsDateRange(false); setDateRange({ start: '', end: '' }); }} className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-red-300 text-red-500 text-[12px] font-bold hover:bg-red-50 transition-all"><X size={14} /> Xóa bộ lọc</button>}
             </div>
           </div>
 

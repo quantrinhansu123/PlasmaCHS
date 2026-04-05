@@ -24,22 +24,63 @@ export const exportToExcel = (data, filename, sheetName = 'Báo cáo') => {
 };
 
 export const exportCustomerReport = (data) => {
-  const formattedData = data.map(item => ({
-    'Mã KH': item.ma_khach_hang,
-    'Tên khách hàng / Tên cơ sở': item.ten_khach_hang,
-    'Loại KH': item.loai_khach_hang === 'công' ? 'Bệnh viện công' : 'Bệnh viện tư',
-    'Kho': item.kho,
-    'Máy đang dùng': item.may_dang_su_dung,
-    'Bình hiện có': item.binh_hien_co,
-    'Bình xuất': item.binh_xuat,
-    'Bình bán': item.binh_ban,
-    'Bình demo': item.binh_demo,
-    'Vỏ thu hồi': item.vo_thu_hoi,
-    'NVKD': item.nhan_vien_kinh_doanh,
-    'Ngày đặt gần nhất': item.ngay_dat_hang_gan_nhat
-  }));
+  const CATEGORY_MAP = {
+    'BV': 'Bệnh viện',
+    'TM': 'Thẩm mỹ viện',
+    'PK': 'Phòng khám',
+    'NG': 'Khách ngoại giao',
+    'GD': 'Gia đình',
+    'SP': 'Spa / Khác'
+  };
+
+  const formattedData = data.map(item => {
+    const cat = item.loai_khach_hang || item.loai_khach;
+    return {
+      'Mã KH': item.ma_khach_hang,
+      'Tên khách hàng / Tên cơ sở': item.ten_khach_hang,
+      'Loại KH': CATEGORY_MAP[cat] || cat || 'Khác',
+      'Kho': item.kho,
+      'Máy đang dùng': item.may_dang_su_dung,
+      'Bình hiện có': item.binh_hien_co,
+      'Bình xuất': item.binh_xuat,
+      'Bình bán': item.binh_ban,
+      'Bình demo': item.binh_demo,
+      'Vỏ thu hồi': item.vo_thu_hoi,
+      'NVKD': item.nhan_vien_kinh_doanh,
+      'Ngày đặt gần nhất': item.ngay_dat_hang_gan_nhat
+    };
+  });
   exportToExcel(formattedData, 'BaoCao_KhachHang', 'Khách hàng');
 };
+
+export const exportCustomerList = (data) => {
+  const CATEGORY_MAP = {
+    'BV': 'Bệnh viện',
+    'TM': 'Thẩm mỹ viện',
+    'PK': 'Phòng khám',
+    'NG': 'Khách ngoại giao',
+    'GD': 'Gia đình',
+    'SP': 'Spa / Khác'
+  };
+
+  const formattedData = data.map(item => ({
+    'Mã KH': item.code,
+    'Tên khách hàng': item.name,
+    'Loại KH': CATEGORY_MAP[item.category] || item.category || 'Khác',
+    'Số điện thoại': item.phone || '',
+    'Địa chỉ': item.address || '',
+    'Người đại diện': item.legal_rep || '',
+    'NV phụ trách': item.managed_by || '',
+    'KD chăm sóc': item.care_by || '',
+    'Đại lý': item.agency_name || '',
+    'Nhóm KD': item.business_group || '',
+    'Mã số thuế': item.tax_code || '',
+    'Trạng thái': item.status || 'Chưa xác định',
+    'Ngày tạo': item.created_at ? new Date(item.created_at).toLocaleDateString('vi-VN') : ''
+  }));
+  exportToExcel(formattedData, 'DanhSach_KhachHang', 'Danh sách khách hàng');
+};
+
 
 export const exportSalespersonReport = (data) => {
   const formattedData = data.map(item => ({
@@ -60,7 +101,7 @@ export const exportSalespersonReport = (data) => {
   exportToExcel(formattedData, 'BaoCao_NhanVienKD', 'NVKD');
 };
 
-export const exportCylinderExpiryReport = (data) => {
+export const exportCylinderExpiryReport = (data, filters = {}) => {
   const formattedData = data.map(item => ({
     'Mã bình': item.ma_binh,
     'Mã khắc trên vỏ': item.ma_khac_tren_vo,
@@ -70,11 +111,18 @@ export const exportCylinderExpiryReport = (data) => {
     'Trạng thái': item.trang_thai,
     'Khách hàng': item.khach_hang,
     'Ngày hết hạn': item.ngay_het_han,
+    ...(filters.isDateRange ? {
+      'Khoảng lọc từ': filters.startDate,
+      'Khoảng lọc đến': filters.endDate
+    } : {}),
     'Số ngày tồn': item.so_ngay_ton,
     'NVKD': item.nhan_vien_kinh_doanh,
     'Kho': item.kho
   }));
-  exportToExcel(formattedData, 'BaoCao_BinhQuaHan', 'Bình quá hạn');
+  const filename = filters.isDateRange 
+    ? `BaoCao_BinhQuaHan_${filters.startDate}_To_${filters.endDate}`
+    : 'BaoCao_BinhQuaHan';
+  exportToExcel(formattedData, filename, 'Bình quá hạn');
 };
 
 export const exportCustomerExpiryReport = (data) => {
@@ -198,31 +246,45 @@ export const exportCustomerCylinderReport = (data, filters) => {
     'Tên khách hàng / Tên cơ sở': item.customer_name,
     'Loại': item.loai_khach,
     'Kho': item.kho,
-    'Năm': item.nam,
-    'Tháng': item.thang,
+    ...(filters.isDateRange ? {
+      'Từ ngày': filters.startDate,
+      'Đến ngày': filters.endDate
+    } : {
+      'Năm': item.nam,
+      'Tháng': item.thang
+    }),
     'Tồn đầu': item.opening_balance,
     'Xuất bình': item.xuat,
     'Thu hồi': item.thu_hoi,
     'Tồn cuối': item.closing_balance
   }));
-  const filename = `BaoCao_BinhTheoKhach_${filters.year}_${filters.month}`;
+  const filename = filters.isDateRange 
+    ? `BaoCao_BinhTheoKhach_${filters.startDate}_To_${filters.endDate}`
+    : `BaoCao_BinhTheoKhach_${filters.year}_${filters.month}`;
   exportToExcel(formattedData, filename, 'Bình theo khách');
 };
 
 export const exportMachineInventoryReport = (data, filters) => {
-    const filename = `bao_cao_may_khach_${filters.month || 'all'}_${filters.year || 'all'}.xlsx`;
-    const headers = ['Năm', 'Tháng', 'Khách hàng', 'Kho', 'Tồn đầu', 'Bàn giao', 'Thu hồi', 'Tồn cuối'];
-    const rows = data.map(item => [
-        item.nam,
-        item.thang,
-        item.customer_name,
-        item.kho,
-        item.ton_dau,
-        item.ban_giao,
-        item.thu_hoi,
-        item.ton_cuoi
-    ]);
-    exportToExcel(rows, headers, filename);
+    const filename = filters.isDateRange 
+      ? `BaoCao_MayTheoKhach_${filters.startDate}_To_${filters.endDate}`
+      : `BaoCao_MayTheoKhach_${filters.month || 'all'}_${filters.year || 'all'}`;
+    
+    const formattedData = data.map(item => ({
+        ...(filters.isDateRange ? {
+          'Từ ngày': filters.startDate,
+          'Đến ngày': filters.endDate
+        } : {
+          'Năm': item.nam,
+          'Tháng': item.thang
+        }),
+        'Khách hàng': item.customer_name,
+        'Kho': item.kho,
+        'Tồn đầu': item.opening_balance,
+        'Bàn giao': item.xuat,
+        'Thu hồi': item.thu_hoi,
+        'Tồn cuối': item.closing_balance
+    }));
+    exportToExcel(formattedData, filename, 'Máy theo khách');
 };
 
 export const exportSalesReport = (data, filters) => {

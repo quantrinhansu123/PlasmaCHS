@@ -51,6 +51,7 @@ import MobilePagination from '../components/layout/MobilePagination';
 import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import { supabase } from '../supabase/config';
 import { ISSUE_STATUSES, ISSUE_TABLE_COLUMNS, ISSUE_TYPES } from '../constants/goodsIssueConstants';
+import usePermissions from '../hooks/usePermissions';
 
 // Register ChartJS components
 ChartJS.register(
@@ -66,6 +67,7 @@ ChartJS.register(
 );
 
 const GoodsIssues = () => {
+    const { role, department } = usePermissions();
     const navigate = useNavigate();
     const [issues, setIssues] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -173,10 +175,17 @@ const GoodsIssues = () => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
+            let query = supabase
                 .from('goods_issues')
-                .select('*')
-                .order('created_at', { ascending: false });
+                .select('*');
+
+            // Apply warehouse filter for warehouse managers/staff (Non-Admin)
+            if (role !== 'Admin' && department) {
+                const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
+                query = query.eq('warehouse_id', userWhCode);
+            }
+
+            const { data, error } = await query.order('created_at', { ascending: false });
 
             if (error) throw error;
             setIssues(data || []);
@@ -864,7 +873,7 @@ const GoodsIssues = () => {
                             {hasActiveFilters && (
                                 <button
                                     onClick={handleResetFilters}
-                                    className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-rose-300 text-rose-500 text-[12px] font-bold hover:bg-rose-50 transition-all font-semibold"
+                                    className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-rose-300 text-rose-500 text-[12px] font-bold hover:bg-rose-50 transition-all"
                                 >
                                     <X size={14} />
                                     Xóa bộ lọc
@@ -1213,7 +1222,7 @@ const GoodsIssues = () => {
                             {totalActiveFilters > 0 && (
                                 <button
                                     onClick={handleResetFilters}
-                                    className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-rose-300 text-rose-500 text-[12px] font-bold hover:bg-rose-50 transition-all font-semibold"
+                                    className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-rose-300 text-rose-500 text-[12px] font-bold hover:bg-rose-50 transition-all"
                                 >
                                     <X size={14} />
                                     Xóa bộ lọc

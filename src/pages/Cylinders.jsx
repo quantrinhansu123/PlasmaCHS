@@ -78,7 +78,7 @@ const CATEGORY_OPTIONS = [
 ];
 
 const Cylinders = () => {
-    const { role } = usePermissions();
+    const { role, department } = usePermissions();
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
     const [selectedIds, setSelectedIds] = useState([]);
@@ -183,6 +183,12 @@ const Cylinders = () => {
             if (selectedCustomers.length > 0) query = query.in('customer_name', selectedCustomers);
             if (selectedCategories.length > 0) query = query.in('category', selectedCategories);
 
+            // Apply warehouse filter for warehouse managers/staff (Non-Admin)
+            if (role !== 'Admin' && department) {
+                const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
+                query = query.eq('warehouse_id', userWhCode);
+            }
+
             const { data } = await query;
             if (data) setAllMetadata(data);
         } catch (err) {
@@ -234,6 +240,12 @@ const Cylinders = () => {
                 if (selectedVolumes.length > 0) queries[key] = queries[key].in('volume', selectedVolumes);
                 if (selectedCustomers.length > 0) queries[key] = queries[key].in('customer_name', selectedCustomers);
                 if (selectedCategories.length > 0) queries[key] = queries[key].in('category', selectedCategories);
+                
+                // Apply warehouse filter for warehouse managers/staff (Non-Admin)
+                if (role !== 'Admin' && department) {
+                    const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
+                    queries[key] = queries[key].eq('warehouse_id', userWhCode);
+                }
             });
 
             const [totalRes, readyRes, inUseRes, emptyRes] = await Promise.all([
@@ -332,6 +344,12 @@ const Cylinders = () => {
             }
             if (selectedCategories.length > 0) {
                 query = query.in('category', selectedCategories);
+            }
+
+            // Apply warehouse filter for warehouse managers/staff (Non-Admin)
+            if (role !== 'Admin' && department) {
+                const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
+                query = query.eq('warehouse_id', userWhCode);
             }
 
             const from = (currentPage - 1) * pageSize;

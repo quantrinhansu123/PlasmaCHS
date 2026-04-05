@@ -190,7 +190,13 @@ const CustomerReport = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [activeDropdown]);
 
-  const handleExport = () => exportCustomerReport(data);
+  const handleExport = () => {
+    if (filteredData.length === 0) {
+      alert('Không có dữ liệu để xuất!');
+      return;
+    }
+    exportCustomerReport(filteredData);
+  };
 
   const filteredData = data.filter(item =>
     item.ten_khach_hang?.toLowerCase().includes(searchTerm.toLowerCase()) ||

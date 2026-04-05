@@ -54,6 +54,7 @@ import MobilePagination from '../components/layout/MobilePagination';
 import { RECEIPT_STATUSES, TABLE_COLUMNS } from '../constants/goodsReceiptConstants';
 import { supabase } from '../supabase/config';
 import { notificationService } from '../utils/notificationService';
+import usePermissions from '../hooks/usePermissions';
 
 // Register Chart.js components
 ChartJS.register(
@@ -69,6 +70,7 @@ ChartJS.register(
 );
 
 const GoodsReceipts = () => {
+    const { role, department } = usePermissions();
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
     const [receipts, setReceipts] = useState([]);
@@ -191,10 +193,20 @@ const GoodsReceipts = () => {
     const fetchReceipts = async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
+            let query = supabase
                 .from('goods_receipts')
-                .select('*, items:goods_receipt_items(item_name, item_type)')
-                .order('created_at', { ascending: false });
+                .select('*, items:goods_receipt_items(item_name, item_type)');
+
+            // Apply warehouse filter for warehouse managers/staff (Non-Admin)
+            if (role !== 'Admin' && department) {
+                const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
+                query = query.eq('warehouse_id', userWhCode);
+                // Note: If warehouse_id in DB is UUID and department is Name, 
+                // we might need a join or secondary lookup. 
+                // But usually the system uses names as identifiers in many places.
+            }
+
+            const { data, error } = await query.order('created_at', { ascending: false });
 
             if (error) throw error;
             setReceipts(data || []);

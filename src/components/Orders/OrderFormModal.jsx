@@ -14,7 +14,7 @@ import BarcodeScanner from '../Common/BarcodeScanner';
 import clsx from 'clsx';
 
 export default function OrderFormModal({ order, onClose, onSuccess, initialMode = 'edit' }) {
-    const { role, user } = usePermissions();
+    const { role, user, department } = usePermissions();
     const { fetchCustomerCylinderDebt } = useReports();
     const isEdit = !!order;
     const [mode, setMode] = useState(initialMode);
@@ -45,6 +45,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
     const [showReasonModal, setShowReasonModal] = useState(false);
     const [editReason, setEditReason] = useState('');
     const [reasonSource, setReasonSource] = useState('initial-edit'); // 'initial-edit' | 'submit'
+    const hasLoadedItemsRef = useRef(false);
 
     // Custom dropdown states
     const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
@@ -199,9 +200,25 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         try {
             const { data } = await supabase.from('warehouses').select('id, name').eq('status', 'Đang hoạt động').order('name');
             if (data) {
-                setWarehousesList(data);
-                if (!isEdit && data.length > 0) {
-                    const defaultWh = data[0].id;
+                let finalWarehouses = data;
+                
+                // If not admin and user has a department, filter the list
+                if (role !== 'Admin' && department) {
+                    const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
+                    finalWarehouses = data.filter(wh => wh.name === userWhCode || wh.id === userWhCode);
+                }
+
+                setWarehousesList(finalWarehouses);
+                
+                if (!isEdit && finalWarehouses.length > 0) {
+                    // Try to find the matched warehouse first, otherwise take the first available
+                    let defaultWh = finalWarehouses[0].id;
+                    if (role !== 'Admin' && department) {
+                        const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
+                        const matched = finalWarehouses.find(wh => wh.name === userWhCode || wh.id === userWhCode);
+                        if (matched) defaultWh = matched.id;
+                    }
+                    
                     setFormData(prev => {
                         const newWh = prev.warehouse || defaultWh;
                         updateStockOptions(newWh);
@@ -261,7 +278,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
 
     useEffect(() => {
         const loadOrderData = async () => {
-            if (isEdit && order) {
+            if (isEdit && order && !hasLoadedItemsRef.current) {
                 // Fetch items from order_items table
                 const { data: itemsData, error: itemsErr } = await supabase
                     .from('order_items')
@@ -319,11 +336,14 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                     }
                 }
 
+                // Map customer ID once customers are theoretically available or use order's raw data
+                const matchedCustomer = customers.find(c => c.name === order.customer_name || c.id === order.customerId);
+
                 setFormData({
                     orderCode: order.order_code,
                     customerCategory: order.customer_category || 'TM',
                     warehouse: order.warehouse || '',
-                    customerId: customers.find(c => c.name === order.customer_name || c.id === order.customerId)?.id || '',
+                    customerId: matchedCustomer?.id || order.customerId || '',
                     recipientName: order.recipient_name || '',
                     recipientAddress: order.recipient_address || '',
                     recipientPhone: order.recipient_phone || '',
@@ -334,11 +354,19 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                     shipperId: order.shipper_id || '',
                     shippingFee: order.shipping_fee || 0
                 });
+
+                hasLoadedItemsRef.current = true;
+            } else if (isEdit && order && hasLoadedItemsRef.current && customers.length > 0 && !formData.customerId) {
+                // If we already loaded items but were waiting for customers to map the ID
+                const matchedCustomer = customers.find(c => c.name === order.customer_name || c.id === order.customerId);
+                if (matchedCustomer) {
+                    setFormData(prev => ({ ...prev, customerId: matchedCustomer.id }));
+                }
             }
         };
 
         loadOrderData();
-    }, [order, isEdit, customers]);
+    }, [order, isEdit, customers, formData.customerId]);
 
     const handleChange = (e) => {
         let { name, value } = e.target;

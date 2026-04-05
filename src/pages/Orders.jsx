@@ -76,7 +76,7 @@ ChartJS.register(
 );
 
 const Orders = () => {
-    const { role } = usePermissions();
+    const { role, department } = usePermissions();
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
     const [searchTerm, setSearchTerm] = useState('');
@@ -281,10 +281,22 @@ const Orders = () => {
     const fetchOrders = async () => {
         setIsLoading(true);
         try {
-            const { data, error } = await supabase
+            let query = supabase
                 .from('orders')
-                .select('*, order_items(*)')
-                .order('created_at', { ascending: false });
+                .select('*, order_items(*)');
+
+            // Apply warehouse filter for warehouse managers/staff (Non-Admin)
+            if (role !== 'Admin' && department) {
+                // Logic: Extract warehouse code from department (e.g., "OCP1-CHS" -> "OCP1")
+                // We'll take the first part before the hyphen if it exists, otherwise use full string
+                const warehouseCode = department.includes('-') 
+                    ? department.split('-')[0].trim() 
+                    : department.trim();
+                
+                query = query.eq('warehouse', warehouseCode);
+            }
+
+            const { data, error } = await query.order('created_at', { ascending: false });
 
             if (error) throw error;
             setOrders(data || []);

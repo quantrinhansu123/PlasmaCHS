@@ -178,7 +178,13 @@ const CustomerExpiryReport = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [activeDropdown]);
 
-  const handleExport = () => exportCustomerExpiryReport(data);
+  const handleExport = () => {
+    if (filteredData.length === 0) {
+      alert('Không có dữ liệu để xuất!');
+      return;
+    }
+    exportCustomerExpiryReport(filteredData);
+  };
 
   const filteredData = data.filter(item =>
     item.ten_khach_hang?.toLowerCase().includes(searchTerm.toLowerCase())

@@ -43,6 +43,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { useLocation, useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
+import { exportCustomerList } from '../utils/exportExcel';
 import CustomerDetailsModal from '../components/Customers/CustomerDetailsModal';
 import CustomerFormModal from '../components/Customers/CustomerFormModal';
 import MobilePageHeader from '../components/layout/MobilePageHeader';
@@ -850,6 +851,14 @@ const Customers = () => {
         }
     };
 
+    const handleExportCustomers = () => {
+        if (filteredCustomers.length === 0) {
+            alert('Không có khách hàng nào để xuất!');
+            return;
+        }
+        exportCustomerList(filteredCustomers);
+    };
+
     const downloadTemplate = () => {
         const headers = [
             'Mã khách hàng',
@@ -1146,6 +1155,17 @@ const Customers = () => {
                                                 </div>
                                                 Sao lưu Giao dịch
                                             </div>
+
+                                            <div
+                                                role="button"
+                                                onClick={() => { handleExportCustomers(); setShowMoreActions(false); }}
+                                                className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-emerald-600 hover:bg-emerald-50 transition-colors border-t border-slate-50 mt-1 pt-2 cursor-pointer"
+                                            >
+                                                <div className="w-5 flex justify-center flex-shrink-0">
+                                                    <Download size={18} className="text-emerald-500" />
+                                                </div>
+                                                Xuất Excel Khách
+                                            </div>
                                         </div>
                                     )}
                                 </div>
@@ -1437,6 +1457,14 @@ const Customers = () => {
                                         className="hidden"
                                     />
                                 </label>
+
+                                <button
+                                    onClick={handleExportCustomers}
+                                    className="flex items-center gap-2 px-4 py-2 h-10 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-all text-[13px] font-bold shadow-sm"
+                                >
+                                    <Download size={16} className="shrink-0" />
+                                    <span>Xuất Excel</span>
+                                </button>
 
                                 <button
                                     onClick={handleExportTransactionsBulk}

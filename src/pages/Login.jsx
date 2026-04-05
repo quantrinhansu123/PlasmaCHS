@@ -110,12 +110,14 @@ const Login = () => {
             localStorage.removeItem('user_id');
             localStorage.removeItem('user_name');
             localStorage.removeItem('user_role');
+            localStorage.removeItem('user_department');
             sessionStorage.clear();
 
             storage.setItem('is_authenticated', 'true');
             storage.setItem('user_id', user.id);
             storage.setItem('user_name', user.name);
             storage.setItem('user_role', user.role);
+            storage.setItem('user_department', user.department || '');
             storage.setItem('user_avatar', user.avatar_url || '');
 
             toast.success(`Chào mừng trở lại, ${user.name}!`);

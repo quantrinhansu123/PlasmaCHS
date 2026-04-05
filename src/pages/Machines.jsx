@@ -72,7 +72,7 @@ const TABLE_COLUMNS = [
 ];
 
 const Machines = () => {
-    const { role } = usePermissions();
+    const { role, department } = usePermissions();
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
     const [selectedIds, setSelectedIds] = useState([]);
@@ -169,7 +169,7 @@ const Machines = () => {
         try {
             let query = supabase
                 .from('machines')
-                .select('status, machine_type, customer_name, department_in_charge');
+                .select('status, machine_type, customer_name, department_in_charge, warehouse');
 
             if (searchTerm) {
                 query = query.or(`serial_number.ilike.%${searchTerm}%,machine_type.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%,department_in_charge.ilike.%${searchTerm}%`);
@@ -178,6 +178,12 @@ const Machines = () => {
             if (selectedMachineTypes.length > 0) query = query.in('machine_type', selectedMachineTypes);
             if (selectedCustomers.length > 0) query = query.in('customer_name', selectedCustomers);
             if (selectedDepartments.length > 0) query = query.in('department_in_charge', selectedDepartments);
+
+            // Apply warehouse filter for warehouse managers/staff (Non-Admin)
+            if (role !== 'Admin' && department) {
+                const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
+                query = query.eq('warehouse', userWhCode);
+            }
 
             const { data } = await query;
             if (data) setAllMetadata(data);
@@ -207,6 +213,12 @@ const Machines = () => {
                 if (selectedCustomers.length > 0) queries[key] = queries[key].in('customer_name', selectedCustomers);
                 if (selectedDepartments.length > 0) queries[key] = queries[key].in('department_in_charge', selectedDepartments);
                 if (selectedWarehouses.length > 0) queries[key] = queries[key].in('warehouse', selectedWarehouses);
+
+                // Apply warehouse filter for warehouse managers/staff (Non-Admin)
+                if (role !== 'Admin' && department) {
+                    const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
+                    queries[key] = queries[key].eq('warehouse', userWhCode);
+                }
             });
 
             const [totalRes, readyRes, inUseRes, maintenanceRes] = await Promise.all([
@@ -311,6 +323,12 @@ const Machines = () => {
                 query = query.in('warehouse', selectedWarehouses);
             }
 
+            // Apply warehouse filter for warehouse managers/staff (Non-Admin)
+            if (role !== 'Admin' && department) {
+                const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
+                query = query.eq('warehouse', userWhCode);
+            }
+
             const from = (currentPage - 1) * pageSize;
             const to = from + pageSize - 1;
 
@@ -371,7 +389,7 @@ const Machines = () => {
 
     const fetchWarehouses = async () => {
         try {
-            const { data } = await supabase.from('warehouses').select('id, name').eq('status', 'Đang hoạt động').order('name');
+            const { data } = await supabase.from('warehouses').select('id, name').order('name');
             if (data) {
                 setWarehousesList(data);
             }

@@ -85,8 +85,11 @@ const CustomerCylinderReport = () => {
   const [filters, setFilters] = useState({
     year: new Date().getFullYear().toString(),
     month: (new Date().getMonth() + 1).toString(),
+    startDate: '',
+    endDate: '',
     warehouse: '',
-    customer_category: ''
+    customer_category: '',
+    isDateRange: false
   });
 
   const [filterOptions, setFilterOptions] = useState({
@@ -144,7 +147,13 @@ const CustomerCylinderReport = () => {
     return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   };
 
-  const handleExport = () => exportCustomerCylinderReport(filteredData, filters);
+  const handleExport = () => {
+    if (!filteredData || filteredData.length === 0) {
+      alert('Không có dữ liệu để xuất!');
+      return;
+    }
+    exportCustomerCylinderReport(filteredData, filters);
+  };
 
   const stats_summary = {
     totalOpening: filteredData.reduce((sum, item) => sum + (item.opening_balance || 0), 0),
@@ -214,55 +223,131 @@ const CustomerCylinderReport = () => {
       selectedValues: filters.warehouse ? [filters.warehouse] : [],
       onSelectionChange: (val) => setFilters(prev => ({ ...prev, warehouse: val[0] || '' })),
       singleSelect: true
-    }
+    },
+    {
+      id: 'dateRangeToggle',
+      label: 'Chế độ xem',
+      icon: <SlidersHorizontal size={18} className="text-slate-500" />,
+      options: [
+        { id: 'monthly', label: 'Theo Tháng' },
+        { id: 'custom', label: 'Tùy chọn ngày' }
+      ],
+      selectedValues: [filters.isDateRange ? 'custom' : 'monthly'],
+      onSelectionChange: (val) => setFilters(prev => ({ ...prev, isDateRange: val[0] === 'custom' })),
+      singleSelect: true
+    },
+    ...(filters.isDateRange ? [
+      {
+        id: 'startDate',
+        label: 'Từ ngày',
+        icon: <Calendar size={18} className="text-emerald-500" />,
+        type: 'date',
+        value: filters.startDate,
+        onDateChange: (val) => setFilters(prev => ({ ...prev, startDate: val }))
+      },
+      {
+        id: 'endDate',
+        label: 'Đến ngày',
+        icon: <Calendar size={18} className="text-emerald-500" />,
+        type: 'date',
+        value: filters.endDate,
+        onDateChange: (val) => setFilters(prev => ({ ...prev, endDate: val }))
+      }
+    ] : [])
   ];
 
   // Internal FilterButtons component to avoid repetition
   const renderFilterButtons = () => (
     <>
-      <div className="relative">
-        <button
-          onClick={() => {
-            if (activeDropdown !== 'year') setFilterSearch('');
-            setActiveDropdown(activeDropdown === 'year' ? null : 'year');
-          }}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-white text-[12px] font-bold hover:border-primary/50 transition-all shadow-sm"
+      <div className="flex items-center bg-muted/30 p-1 rounded-xl border border-border mr-2 shadow-inner">
+        <button 
+          onClick={() => setFilters(prev => ({ ...prev, isDateRange: false }))}
+          className={clsx(
+            "px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all",
+            !filters.isDateRange ? "bg-white text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
+          )}
         >
-          <Calendar size={14} className="text-blue-500" /> Năm {filters.year} <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'year' ? "rotate-180" : "")} />
+          Theo Tháng
         </button>
-        {activeDropdown === 'year' && (
-          <FilterDropdown
-            options={filterOptions.years.map(y => ({ id: y.toString(), label: `Năm ${y}`, count: filteredData.filter(d => d.nam === parseInt(y)).length }))}
-            selected={[filters.year]}
-            setSelected={(val) => { setFilters(prev => ({ ...prev, year: val[0] })); setActiveDropdown(null); }}
-            filterSearch={filterSearch}
-            setFilterSearch={setFilterSearch}
-            singleSelect={true}
-          />
-        )}
+        <button 
+          onClick={() => setFilters(prev => ({ ...prev, isDateRange: true }))}
+          className={clsx(
+            "px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all",
+            filters.isDateRange ? "bg-white text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          Tùy chọn ngày
+        </button>
       </div>
 
-      <div className="relative">
-        <button
-          onClick={() => {
-            if (activeDropdown !== 'month') setFilterSearch('');
-            setActiveDropdown(activeDropdown === 'month' ? null : 'month');
-          }}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-white text-[12px] font-bold hover:border-primary/50 transition-all shadow-sm"
-        >
-          <Calendar size={14} className="text-cyan-500" /> Tháng {filters.month} <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'month' ? "rotate-180" : "")} />
-        </button>
-        {activeDropdown === 'month' && (
-          <FilterDropdown
-            options={Array.from({ length: 12 }, (_, i) => ({ id: (i + 1).toString(), label: `Tháng ${i + 1}`, count: filteredData.filter(d => d.thang === (i + 1)).length }))}
-            selected={[filters.month]}
-            setSelected={(val) => { setFilters(prev => ({ ...prev, month: val[0] })); setActiveDropdown(null); }}
-            filterSearch={filterSearch}
-            setFilterSearch={setFilterSearch}
-            singleSelect={true}
-          />
-        )}
-      </div>
+      {!filters.isDateRange ? (
+        <>
+          <div className="relative">
+            <button
+              onClick={() => {
+                if (activeDropdown !== 'year') setFilterSearch('');
+                setActiveDropdown(activeDropdown === 'year' ? null : 'year');
+              }}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-white text-[12px] font-bold hover:border-primary/50 transition-all shadow-sm"
+            >
+              <Calendar size={14} className="text-blue-500" /> Năm {filters.year} <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'year' ? "rotate-180" : "")} />
+            </button>
+            {activeDropdown === 'year' && (
+              <FilterDropdown
+                options={filterOptions.years.map(y => ({ id: y.toString(), label: `Năm ${y}` }))}
+                selected={[filters.year]}
+                setSelected={(val) => { setFilters(prev => ({ ...prev, year: val[0] })); setActiveDropdown(null); }}
+                filterSearch={filterSearch}
+                setFilterSearch={setFilterSearch}
+                singleSelect={true}
+              />
+            )}
+          </div>
+
+          <div className="relative">
+            <button
+              onClick={() => {
+                if (activeDropdown !== 'month') setFilterSearch('');
+                setActiveDropdown(activeDropdown === 'month' ? null : 'month');
+              }}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-white text-[12px] font-bold hover:border-primary/50 transition-all shadow-sm"
+            >
+              <Calendar size={14} className="text-cyan-500" /> Tháng {filters.month} <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'month' ? "rotate-180" : "")} />
+            </button>
+            {activeDropdown === 'month' && (
+              <FilterDropdown
+                options={Array.from({ length: 12 }, (_, i) => ({ id: (i + 1).toString(), label: `Tháng ${i + 1}` }))}
+                selected={[filters.month]}
+                setSelected={(val) => { setFilters(prev => ({ ...prev, month: val[0] })); setActiveDropdown(null); }}
+                filterSearch={filterSearch}
+                setFilterSearch={setFilterSearch}
+                singleSelect={true}
+              />
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-300">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-white border border-border rounded-xl shadow-sm group focus-within:ring-2 focus-within:ring-primary/10 transition-all">
+            <span className="text-[10px] font-black text-muted-foreground uppercase opacity-60">Từ:</span>
+            <input 
+              type="date" 
+              value={filters.startDate}
+              onChange={(e) => setFilters(prev => ({ ...prev, startDate: e.target.value }))}
+              className="bg-transparent border-none outline-none text-[13px] font-bold text-foreground cursor-pointer"
+            />
+          </div>
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-white border border-border rounded-xl shadow-sm group focus-within:ring-2 focus-within:ring-primary/10 transition-all">
+            <span className="text-[10px] font-black text-muted-foreground uppercase opacity-60">Đến:</span>
+            <input 
+              type="date" 
+              value={filters.endDate}
+              onChange={(e) => setFilters(prev => ({ ...prev, endDate: e.target.value }))}
+              className="bg-transparent border-none outline-none text-[13px] font-bold text-foreground cursor-pointer"
+            />
+          </div>
+        </div>
+      )}
 
       <div className="relative">
         <button
@@ -443,7 +528,7 @@ const CustomerCylinderReport = () => {
                   ) : paginatedData.length === 0 ? (
                     <tr><td colSpan={visibleColumns.length} className="px-4 py-16 text-center text-muted-foreground italic">Không có dữ liệu trong kỳ báo cáo này</td></tr>
                   ) : (
-                    paginatedData.map((item, index) => {
+                    paginatedData.map((item, index) => (
                       <tr key={index} className="group hover:bg-blue-50/40 transition-all">
                         {columnOrder.filter(key => visibleColumns.includes(key)).map(colKey => (
                           <td key={colKey} className={clsx("px-4 py-4", colKey.includes('balance') || colKey === 'xuat' || colKey === 'thu_hoi' ? "text-right" : "text-left")}>
@@ -467,7 +552,7 @@ const CustomerCylinderReport = () => {
                           </td>
                         ))}
                       </tr>
-                    })
+                    ))
                   )}
                 </tbody>
               </table>

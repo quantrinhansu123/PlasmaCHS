@@ -4,6 +4,7 @@ import { supabase } from '../supabase/config';
 export const usePermissions = () => {
     const [permissions, setPermissions] = useState({});
     const [role, setRole] = useState(null);
+    const [department, setDepartment] = useState(null);
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
 
@@ -12,17 +13,19 @@ export const usePermissions = () => {
             try {
                 const userName = localStorage.getItem('user_name') || 'Lê Minh Công';
                 const userRoleFromStorage = localStorage.getItem('user_role') || 'Admin';
+                const userDeptFromStorage = localStorage.getItem('user_department') || '';
 
                 // 1. Fetch user info to get the actual ID and current role from app_users table
                 const { data: userData, error: userError } = await supabase
                     .from('app_users')
-                    .select('id, name, role, username')
+                    .select('id, name, role, username, department')
                     .eq('name', userName)
                     .maybeSingle();
 
                 if (!userError && userData) {
                     setUser(userData);
                     setRole(userData.role);
+                    setDepartment(userData.department || '');
                     
                     // 2. Fetch role permissions for this specific user's current role
                     const { data: roleData } = await supabase
@@ -38,9 +41,10 @@ export const usePermissions = () => {
                     }
                 } else {
                     // Fallback for development if user is not in the database yet
-                    const fallbackUser = { id: '00000000-0000-0000-0000-000000000000', name: userName, role: userRoleFromStorage };
+                    const fallbackUser = { id: '00000000-0000-0000-0000-000000000000', name: userName, role: userRoleFromStorage, department: userDeptFromStorage };
                     setUser(fallbackUser);
                     setRole(userRoleFromStorage);
+                    setDepartment(userDeptFromStorage);
                     setPermissions({});
                 }
             } catch (err) {
@@ -69,6 +73,7 @@ export const usePermissions = () => {
     return {
         permissions,
         role,
+        department,
         user,
         loading,
         canView,
