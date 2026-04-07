@@ -103,33 +103,7 @@ export default function MachineRequests() {
         }
     };
 
-    const handleApprove = async (id, code, customer) => {
-        if (!window.confirm(`Xác nhận duyệt phiếu đề xuất ${code} để xuất máy đi?`)) return;
-        
-        try {
-            const { error } = await supabase
-                .from('orders')
-                .update({ 
-                    status: 'DA_DUYET',
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', id);
-
-            if (error) throw error;
-            
-            notificationService.add({
-                title: `✅ Đã duyệt xuất máy: ${customer}`,
-                description: `Phiếu ${code} đã được duyệt và chuyển trạng thái sang "Chờ giao hàng".`,
-                type: 'success',
-                link: '/de-nghi-xuat-may'
-            });
-
-            toast.success(`Đã duyệt phiếu ${code}`);
-            fetchData();
-        } catch (error) {
-            toast.error('Lỗi duyệt phiếu: ' + error.message);
-        }
-    };
+    // Đã chuyển logic duyệt sang MachineIssueRequestForm.jsx
 
     const getChartData = () => {
         const customerData = {};
@@ -152,6 +126,28 @@ export default function MachineRequests() {
                 barThickness: 24
             }]
         };
+    };
+
+    const getStatusInfo = (status) => {
+        switch (status) {
+            case 'CHO_DUYET': return { label: 'Chờ duyệt', colorCls: 'bg-yellow-50 text-yellow-700 border-yellow-200' };
+            case 'CHO_CTY_DUYET': return { label: 'Chờ Công ty duyệt', colorCls: 'bg-orange-50 text-orange-700 border-orange-200' };
+            case 'TRUONG_KD_XU_LY': return { label: 'Trưởng kinh doanh xử lý', colorCls: 'bg-blue-50 text-blue-700 border-blue-200' };
+            case 'KD_XU_LY': return { label: 'Kinh doanh xử lý', colorCls: 'bg-purple-50 text-purple-700 border-purple-200' };
+            case 'KHO_XU_LY': return { label: 'Kho xử lý', colorCls: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+            case 'TU_CHOI': return { label: 'Từ chối', colorCls: 'bg-rose-50 text-rose-700 border-rose-200' };
+            case 'DA_DUYET': return { label: 'Đã duyệt', colorCls: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+            case 'CHO_GIAO_HANG': return { label: 'Chờ giao hàng', colorCls: 'bg-amber-50 text-amber-700 border-amber-200' };
+            case 'DANG_GIAO_HANG': return { label: 'Đang giao hàng', colorCls: 'bg-sky-50 text-sky-700 border-sky-200' };
+            case 'CHO_DOI_SOAT': return { label: 'Chờ đối soát', colorCls: 'bg-indigo-50 text-indigo-700 border-indigo-200' };
+            case 'HOAN_THANH': return { label: 'Hoàn thành', colorCls: 'bg-green-50 text-green-700 border-green-200' };
+            case 'HUY_DON': return { label: 'Hủy đơn', colorCls: 'bg-red-50 text-red-700 border-red-200' };
+            case 'TRA_HANG': return { label: 'Đơn hàng trả về', colorCls: 'bg-red-50 text-red-700 border-red-200' };
+            case 'DOI_SOAT_THAT_BAI': return { label: 'Đối soát thất bại', colorCls: 'bg-red-50 text-red-700 border-red-200' };
+            case 'DIEU_CHINH': return { label: 'Điều chỉnh', colorCls: 'bg-orange-50 text-orange-700 border-orange-200' };
+            default:
+                return { label: status || 'Không rõ', colorCls: 'bg-slate-50 text-slate-700 border-slate-200' };
+        }
     };
 
     return (
@@ -222,13 +218,10 @@ export default function MachineRequests() {
                                             <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Trạng thái</p>
                                             <div className="flex mt-0.5">
                                                 {(() => {
-                                                    const isApproved = ['DA_DUYET', 'KHO_XU_LY', 'CHO_GIAO_HANG', 'DANG_GIAO_HANG', 'CHO_DOI_SOAT', 'HOAN_THANH'].includes(r.status);
+                                                    const sInfo = getStatusInfo(r.status);
                                                     return (
-                                                        <span className={clsx(
-                                                            "px-2 py-0.5 rounded-full border text-[10px] font-bold",
-                                                            isApproved ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-yellow-50 text-yellow-700 border-yellow-200"
-                                                        )}>
-                                                            {isApproved ? 'Đã duyệt' : 'Chưa duyệt'}
+                                                        <span className={clsx("px-2 py-0.5 rounded-full border text-[10px] font-bold", sInfo.colorCls)}>
+                                                            {sInfo.label}
                                                         </span>
                                                     );
                                                 })()}
@@ -242,9 +235,6 @@ export default function MachineRequests() {
                                             <span>{new Date(r.created_at).toLocaleDateString('vi-VN')}</span>
                                         </div>
                                         <div className="flex items-center gap-3">
-                                            {['CHO_DUYET', 'CHO_CTY_DUYET'].includes(r.status) && (
-                                                <button onClick={() => handleApprove(r.id, r.order_code, r.customer_name)} className="p-2 text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg shadow-sm active:scale-95" title="Duyệt xuất đi"><CheckCircle size={16} /></button>
-                                            )}
                                             <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)} className="p-2 text-slate-400 hover:text-primary bg-slate-50 hover:bg-primary/10 border border-slate-100 rounded-lg"><Eye size={16} /></button>
                                             <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
                                             <button onClick={() => handleDelete(r.id, r.order_code)} className="p-2 text-rose-700 bg-rose-50 border border-rose-100 rounded-lg"><Trash2 size={16} /></button>
@@ -321,22 +311,16 @@ export default function MachineRequests() {
                                                 <td className="px-5 py-3.5"><span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-md font-bold text-[12px]">{r.quantity} máy</span></td>
                                                 <td className="px-5 py-3.5">
                                                     {(() => {
-                                                        const isApproved = ['DA_DUYET', 'KHO_XU_LY', 'CHO_GIAO_HANG', 'DANG_GIAO_HANG', 'CHO_DOI_SOAT', 'HOAN_THANH'].includes(r.status);
+                                                        const sInfo = getStatusInfo(r.status);
                                                         return (
-                                                            <span className={clsx(
-                                                                "px-2.5 py-1 rounded-full border text-[11px] font-bold inline-flex items-center",
-                                                                isApproved ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-yellow-50 text-yellow-700 border-yellow-200"
-                                                            )}>
-                                                                {isApproved ? 'Đã duyệt đơn' : 'Chưa duyệt đơn'}
+                                                            <span className={clsx("px-2.5 py-1 rounded-full border text-[11px] font-bold inline-flex items-center", sInfo.colorCls)}>
+                                                                {sInfo.label}
                                                             </span>
                                                         );
                                                     })()}
                                                 </td>
                                                 <td className="px-5 py-3.5">
                                                     <div className="flex items-center justify-center gap-1.5">
-                                                        {['CHO_DUYET', 'CHO_CTY_DUYET', 'DIEU_CHINH'].includes(r.status) && (
-                                                            <button onClick={() => handleApprove(r.id, r.order_code, r.customer_name)} className="p-1.5 text-emerald-600 hover:text-white hover:bg-emerald-600 border border-emerald-200 rounded-lg transition-all" title="Duyệt xuất đi"><CheckCircle size={16} /></button>
-                                                        )}
                                                         <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-all" title="Xem chi tiết"><Eye size={16} /></button>
                                                         <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)} className="p-1.5 text-slate-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-all" title="Chỉnh sửa"><Edit size={16} /></button>
                                                         <button onClick={() => handleDelete(r.id, r.order_code)} className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all" title="Xóa"><Trash2 size={16} /></button>

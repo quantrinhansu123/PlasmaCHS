@@ -41,6 +41,7 @@ export default function CustomerDetailsModal({ customer, onClose }) {
 
     const [orders, setOrders] = useState([]);
     const [transactions, setTransactions] = useState([]);
+    const [cylinders, setCylinders] = useState([]);
 
     // States for Payment Form
     const [showPaymentForm, setShowPaymentForm] = useState(false);
@@ -86,8 +87,16 @@ export default function CustomerDetailsModal({ customer, onClose }) {
 
             if (err2) throw err2;
 
+            const { data: cylData, error: err3 } = await supabase
+                .from('cylinders')
+                .select('*')
+                .eq('customer_id', customer.id);
+
+            if (err3) throw err3;
+
             setOrders(ordersData || []);
             setTransactions(txData || []);
+            setCylinders(cylData || []);
 
             const validOrders = (ordersData || []).filter(o =>
                 !['HUY_DON'].includes(o.status)
@@ -303,6 +312,7 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                         <button onClick={() => setActiveTab('overview')} className={clsx("pb-4 text-sm font-black transition-all border-b-2", activeTab === 'overview' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Tổng quan</button>
                         <button onClick={() => setActiveTab('orders')} className={clsx("pb-4 text-sm font-black transition-all border-b-2", activeTab === 'orders' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Đơn hàng ({orders.length})</button>
                         <button onClick={() => setActiveTab('transactions')} className={clsx("pb-4 text-sm font-black transition-all border-b-2", activeTab === 'transactions' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Thu / Chi ({transactions.length})</button>
+                        <button onClick={() => setActiveTab('cylinders')} className={clsx("pb-4 text-sm font-black transition-all border-b-2", activeTab === 'cylinders' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Danh sách bình ({cylinders.length})</button>
                     </div>
                 </div>
 
@@ -493,6 +503,51 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                                                 <div className="flex items-center justify-center gap-2">
                                                                     <button onClick={() => handleDeleteTransaction(tx.id, tx.transaction_code)} className="p-1.5 text-slate-400 hover:text-rose-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
                                                                 </div>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {activeTab === 'cylinders' && (
+                                <div className="space-y-4">
+                                    {cylinders.length === 0 ? (
+                                        <div className="py-12 text-center font-bold text-slate-300 italic">Khách hàng hiện không giữ bình nào</div>
+                                    ) : (
+                                        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                                            <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                                                <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Danh sách bình đang dùng</h5>
+                                            </div>
+                                            <table className="w-full text-left text-sm">
+                                                <thead className="bg-slate-50 border-b border-slate-100">
+                                                    <tr>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Serial</th>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Mã Khắc</th>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Thể tích</th>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Trạng thái</th>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Hạn kiểm định</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-50">
+                                                    {cylinders.map(cyl => (
+                                                        <tr key={cyl.id} className="hover:bg-slate-50/50 transition-colors">
+                                                            <td className="px-4 py-3 font-black text-slate-700">{cyl.serial_number}</td>
+                                                            <td className="px-4 py-3 font-bold text-slate-500">{cyl.cylinder_code || '—'}</td>
+                                                            <td className="px-4 py-3 font-bold text-slate-600">{cyl.volume || '—'}</td>
+                                                            <td className="px-4 py-3">
+                                                                <span className={clsx(
+                                                                    "px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest",
+                                                                    cyl.status === 'thuộc khách hàng' ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-500'
+                                                                )}>
+                                                                    {cyl.status}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-3 font-bold text-slate-500 text-xs">
+                                                                {cyl.expiry_date ? formatDate(cyl.expiry_date) : '—'}
                                                             </td>
                                                         </tr>
                                                     ))}

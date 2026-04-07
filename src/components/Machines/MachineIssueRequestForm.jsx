@@ -9,7 +9,7 @@ import { notificationService } from '../../utils/notificationService';
 
 const MachineIssueRequestForm = () => {
     const location = useLocation();
-    const { role } = usePermissions();
+    const { role, user } = usePermissions();
     
     // Authorization check for Machine Code
     const canEditMachineCode = role === 'Admin' || role === 'Thủ kho';
@@ -23,6 +23,7 @@ const MachineIssueRequestForm = () => {
         phone: '',
         facilityName: '',
         placementAddress: '',
+        status: '',
         // Checkboxes
         machineType: {
             TM: false,
@@ -78,6 +79,12 @@ const MachineIssueRequestForm = () => {
         }
     }, [location.search]);
 
+    useEffect(() => {
+        if (!editOrderId && user?.name && !formData.requesterName) {
+            setFormData(prev => ({ ...prev, requesterName: user.name }));
+        }
+    }, [user, editOrderId]);
+
     const fetchExistingOrder = async (id) => {
         try {
             const { data, error } = await supabase.from('orders').select('*').eq('id', id).single();
@@ -112,6 +119,7 @@ const MachineIssueRequestForm = () => {
                     phone: data.recipient_phone || '',
                     facilityName: data.recipient_name || '',
                     placementAddress: data.recipient_address || '',
+                    status: data.status || '',
                     
                     machineType: {
                         TM: types.includes('TM'),
@@ -336,6 +344,87 @@ Ghi chú: ${formData.notes}`,
         }
     };
 
+    const handleApproveStatus = async () => {
+        if (!formData.status) return;
+        let nextStatus = '';
+        let confirmMsg = '';
+        let successMsg = '';
+
+        switch (formData.status) {
+            case 'CHO_DUYET':
+            case 'CHO_CTY_DUYET':
+                nextStatus = 'TRUONG_KD_XU_LY';
+                confirmMsg = 'Duyệt (Cấp 1): Chuyển cho Trưởng kinh doanh xử lý?';
+                successMsg = 'Đã chuyển cho Trưởng kinh doanh xử lý';
+                break;
+            case 'TRUONG_KD_XU_LY':
+                nextStatus = 'KD_XU_LY';
+                confirmMsg = 'Duyệt (Cấp 2): Chuyển cho Kinh doanh xử lý?';
+                successMsg = 'Đã chuyển cho Kinh doanh xử lý';
+                break;
+            case 'KD_XU_LY':
+                nextStatus = 'KHO_XU_LY';
+                confirmMsg = 'Duyệt (Cấp 3): Chuyển cho Kho xử lý xuất máy?';
+                successMsg = 'Đã chuyển cho Kho xử lý';
+                break;
+            case 'KHO_XU_LY':
+                nextStatus = 'DA_DUYET';
+                confirmMsg = 'Duyệt (Cấp 4): Kho xác nhận hoàn tất (Đã duyệt)?';
+                successMsg = 'Kho đã xử lý thành công';
+                break;
+            default:
+                toast.info('Phiếu đã xử lý không thể duyệt tiếp.');
+                return;
+        }
+
+        if (!window.confirm(confirmMsg)) return;
+
+        setIsSaving(true);
+        try {
+            const { error } = await supabase.from('orders').update({
+                status: nextStatus,
+                updated_at: new Date().toISOString()
+            }).eq('id', editOrderId);
+
+            if (error) throw error;
+            
+            setFormData(prev => ({ ...prev, status: nextStatus }));
+            toast.success(successMsg);
+            
+            notificationService.add({
+                title: `✅ Đã duyệt xuất máy`,
+                description: `Phiếu ĐNXM${formData.orangeNumber || ''} chuyển trạng thái: ${successMsg}`,
+                type: 'success',
+                link: '/de-nghi-xuat-may'
+            });
+        } catch (error) {
+            toast.error('Lỗi khi duyệt: ' + error.message);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleRejectStatus = async () => {
+        if (!window.confirm('Bạn có thực sự muốn TỪ CHỐI phiếu đề nghị xuất máy này?')) return;
+        
+        setIsSaving(true);
+        try {
+            const { error } = await supabase.from('orders').update({
+                status: 'TU_CHOI',
+                updated_at: new Date().toISOString()
+            }).eq('id', editOrderId);
+
+            if (error) throw error;
+            
+            setFormData(prev => ({ ...prev, status: 'TU_CHOI' }));
+            toast.error('Đã từ chối phiếu đề xuất.');
+        } catch (error) {
+            toast.error('Lỗi khi từ chối: ' + error.message);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     return (
         <>
             {/* DATA ENTRY FORM (MÀN HÌNH CHUẨN) */}
@@ -378,12 +467,18 @@ Ghi chú: ${formData.notes}`,
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-foreground mb-1.5">Nhân viên phụ trách máy</label>
-                                <input
-                                    type="text"
+                                <select
                                     value={formData.machineManager}
                                     onChange={(e) => handleInputChange('machineManager', e.target.value)}
-                                    className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                                />
+                                    className="w-full h-10 px-4 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                                >
+                                    <option value="">-- Chọn Nhân viên --</option>
+                                    {staffList.map(u => (
+                                        <option key={`m-${u.id}`} value={u.name}>
+                                            {u.name}{u.role ? ` (${u.role})` : ''}
+                                        </option>
+                                    ))}
+                                </select>
                             </div>
                         </div>
 
@@ -621,13 +716,54 @@ Ghi chú: ${formData.notes}`,
             </div>
 
             {isReadOnly && (
-                <div className="no-print max-w-[210mm] mx-auto flex justify-end gap-4 print:hidden">
-                     <button
+                <div className="no-print max-w-[210mm] mx-auto flex flex-wrap justify-end gap-4 print:hidden mb-6">
+                    {(() => {
+                        const isLevel1 = formData.status === 'CHO_DUYET' || formData.status === 'CHO_CTY_DUYET';
+                        const isLevel2 = formData.status === 'TRUONG_KD_XU_LY';
+                        const isLevel3 = formData.status === 'KD_XU_LY';
+                        const isLevel4 = formData.status === 'KHO_XU_LY';
+
+                        const r = role?.toLowerCase() || '';
+                        let canApprove = false;
+                        if (r === 'admin' || r === 'giám đốc') canApprove = true;
+                        else if (isLevel1 && (r.includes('lead') || r.includes('trưởng'))) canApprove = true;
+                        else if (isLevel2 && (r.includes('sale') || r.includes('kinh doanh') || r.includes('trưởng'))) canApprove = true;
+                        else if (isLevel3 && (r.includes('kho'))) canApprove = true;
+                        else if (isLevel4 && (r.includes('kho'))) canApprove = true;
+
+                        if (!canApprove || !['CHO_DUYET', 'CHO_CTY_DUYET', 'TRUONG_KD_XU_LY', 'KD_XU_LY', 'KHO_XU_LY'].includes(formData.status)) return null;
+
+                        return (
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={handleApproveStatus}
+                                    disabled={isSaving}
+                                    className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-emerald-700 transition-all font-bold text-sm disabled:opacity-50"
+                                >
+                                    {isSaving ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" /> : <Save size={18} />}
+                                    DUYỆT PHIẾU ({
+                                        formData.status === 'CHO_DUYET' || formData.status === 'CHO_CTY_DUYET' ? '1/4' :
+                                        formData.status === 'TRUONG_KD_XU_LY' ? '2/4' :
+                                        formData.status === 'KD_XU_LY' ? '3/4' : '4/4'
+                                    })
+                                </button>
+                                <button
+                                    onClick={handleRejectStatus}
+                                    disabled={isSaving}
+                                    className="flex items-center justify-center gap-2 bg-rose-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-rose-700 transition-all font-bold text-sm disabled:opacity-50"
+                                >
+                                    {isSaving ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" /> : <EyeOff size={18} />}
+                                    TỪ CHỐI
+                                </button>
+                            </div>
+                        );
+                    })()}
+                    <button
                         onClick={handlePrint}
-                        className="mb-6 flex items-center justify-center gap-2 bg-emerald-600 text-white px-8 py-3 rounded-xl shadow-lg shadow-emerald-600/30 hover:bg-emerald-700 transition-all font-bold text-sm transform active:scale-[0.98]"
+                        className="flex items-center justify-center gap-2 bg-slate-700 text-white px-8 py-3 rounded-xl shadow-lg shadow-slate-600/30 hover:bg-slate-800 transition-all font-bold text-sm transform active:scale-[0.98]"
                     >
                         <Printer size={20} />
-                        IN PHIẾU (HOẶC XUẤT PDF)
+                        IN PHIẾU PDF
                     </button>
                 </div>
             )}

@@ -42,8 +42,11 @@ export const ORDER_STATUSES = [
     { id: 'ALL', label: 'Tất cả', color: 'gray' },
     { id: 'CHO_DUYET', label: 'Chờ Lead duyệt', color: 'yellow' },
     { id: 'CHO_CTY_DUYET', label: 'Chờ Công ty duyệt', color: 'orange' },
+    { id: 'TRUONG_KD_XU_LY', label: 'Trưởng kinh doanh xử lý', color: 'blue' },
+    { id: 'KD_XU_LY', label: 'Kinh doanh xử lý', color: 'purple' },
     { id: 'DIEU_CHINH', label: 'Điều chỉnh', color: 'orange' },
-    { id: 'KHO_XU_LY', label: 'Kho đang xử lý', color: 'blue' },
+    { id: 'KHO_XU_LY', label: 'Kho xử lý', color: 'emerald' },
+    { id: 'TU_CHOI', label: 'Từ chối', color: 'red' },
     { id: 'DA_DUYET', label: 'Đã báo xuất (Chờ giao)', color: 'indigo' },
     { id: 'CHO_GIAO_HANG', label: 'Chờ giao hàng', color: 'indigo' },
     { id: 'DANG_GIAO_HANG', label: 'Đang giao hàng', color: 'purple' },
@@ -57,16 +60,19 @@ export const ORDER_STATUSES = [
 export const STATUS_PRIORITY = {
     'CHO_DUYET': 1,
     'CHO_CTY_DUYET': 2,
-    'DIEU_CHINH': 3,
-    'KHO_XU_LY': 4,
-    'DA_DUYET': 5,
-    'CHO_GIAO_HANG': 6,
-    'DANG_GIAO_HANG': 7,
-    'CHO_DOI_SOAT': 8,
-    'HOAN_THANH': 9,
-    'DOI_SOAT_THAT_BAI': 10,
-    'TRA_HANG': 11,
-    'HUY_DON': 12
+    'TRUONG_KD_XU_LY': 3,
+    'KD_XU_LY': 4,
+    'DIEU_CHINH': 5,
+    'KHO_XU_LY': 6,
+    'TU_CHOI': 7,
+    'DA_DUYET': 8,
+    'CHO_GIAO_HANG': 9,
+    'DANG_GIAO_HANG': 10,
+    'CHO_DOI_SOAT': 11,
+    'HOAN_THANH': 12,
+    'DOI_SOAT_THAT_BAI': 13,
+    'TRA_HANG': 14,
+    'HUY_DON': 15
 };
 
 export const TABLE_COLUMNS = [

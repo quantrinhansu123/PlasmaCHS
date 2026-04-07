@@ -54,26 +54,49 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                 .eq('warehouse_id', warehouse.id)
                 .order('serial_number', { ascending: true });
 
-            setInventory(invData || []);
-
             // 3. Get Machines
             const { data: machinesData } = await supabase
                 .from('machines')
-                .select('id')
+                .select('id, serial_number, machine_type, status')
                 .eq('warehouse', warehouse.id);
 
-            setRecentLogs(logData || []);
+            const unifiedCylinders = (invData || []).map(cyl => ({
+                ...cyl,
+                uid: `cyl_${cyl.id}`,
+                category: cyl.category || 'Vỏ bình',
+                volume: cyl.volume || '—'
+            }));
 
-            // 4. Calc Stats
-            const cylinderCount = invData?.length || 0;
-            const machineCount = machinesData?.length || 0;
+            const unifiedMachines = (machinesData || []).map(mac => ({
+                ...mac,
+                uid: `mac_${mac.id}`,
+                category: 'Máy móc',
+                volume: mac.machine_type || '—'
+            }));
+
+            const combinedInventory = [...unifiedCylinders, ...unifiedMachines].sort((a, b) => 
+                (a.serial_number || '').localeCompare(b.serial_number || '')
+            );
+
+            setInventory(combinedInventory);
+
+            setRecentLogs([]);
+
+            // Calc Stats
+            const cylinderCount = unifiedCylinders.length;
+            const machineCount = unifiedMachines.length;
             const totalItems = cylinderCount + machineCount;
             const capacity = warehouse.capacity || 0;
 
+            const inTransitCount = combinedInventory.filter(i => 
+                i.status && i.status.toLowerCase() === 'đang vận chuyển'
+            ).length;
+
             setStats({
-                total_items: totalItems,
-                active_orders: 0, // Placeholder
-                recent_receipts: 0, // Placeholder
+                total_cylinders: cylinderCount,
+                total_machines: machineCount,
+                active_orders: 0, // Tính năng Yêu cầu chờ chưa có bảng map
+                in_transit: inTransitCount,
                 available_capacity: Math.max(0, capacity - totalItems)
             });
 
@@ -110,11 +133,10 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                         </div>
                         <div className="min-w-0">
                             <h2 className="text-xl md:text-2xl font-black mb-1 tracking-tight flex items-center gap-2 md:gap-3 truncate text-primary">
-                                {warehouse.warehouse_name || 'Kho hàng'}
+                                {warehouse.name || warehouse.warehouse_name || 'Kho hàng'}
                             </h2>
                             <div className="flex flex-wrap items-center gap-2 md:gap-4 text-xs md:text-sm font-bold text-slate-500">
                                 <span className="flex items-center gap-1.5"><MapPin className="w-4 h-4 text-slate-400" /> {warehouse.location || '—'}</span>
-                                <span className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 rounded-md text-slate-600">{warehouse.id}</span>
                                 <span className="flex items-center gap-1.5 text-primary"><Shield className="w-4 h-4 text-primary/60" /> {warehouse.status || 'Hoạt động'}</span>
                             </div>
                         </div>
@@ -126,17 +148,18 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
 
                 {/* Quick Stats */}
                 {!loading && (
-                    <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4 relative z-10">
+                    <div className="mt-6 grid grid-cols-2 md:grid-cols-5 gap-4 relative z-10 w-full overflow-x-auto custom-scrollbar pb-2">
                         {[
-                            { label: 'Tổng số bình', value: stats.total_items, icon: Package, color: 'text-primary' },
+                            { label: 'Tổng số bình', value: stats.total_cylinders, icon: Package, color: 'text-primary' },
+                            { label: 'Tổng số máy', value: stats.total_machines, icon: Activity, color: 'text-violet-500' },
                             { label: 'Sức chứa còn', value: stats.available_capacity, icon: Box, color: 'text-emerald-500' },
                             { label: 'Yêu cầu chờ', value: stats.active_orders, icon: Clock, color: 'text-amber-500' },
-                            { label: 'Đang vận chuyển', value: stats.recent_receipts, icon: Truck, color: 'text-blue-500' }
+                            { label: 'Đang vận chuyển', value: stats.in_transit, icon: Truck, color: 'text-blue-500' }
                         ].map((stat, idx) => (
-                            <div key={idx} className="bg-white px-3 md:px-4 py-3 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-primary/20 transition-all group">
+                            <div key={idx} className="bg-white px-3 md:px-4 py-3 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-primary/20 transition-all group shrink-0">
                                 <div className="flex items-center gap-2 mb-1">
                                     <stat.icon className={clsx("w-3.5 h-3.5", stat.color)} />
-                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{stat.label}</p>
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">{stat.label}</p>
                                 </div>
                                 <p className="font-black text-slate-800 text-lg md:text-xl">{stat.value}</p>
                             </div>
@@ -194,7 +217,7 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                                             </thead>
                                             <tbody className="divide-y divide-slate-100">
                                                 {displayedInventory.map((item) => (
-                                                    <tr key={item.id} className="hover:bg-primary/[0.02] transition-colors group">
+                                                    <tr key={item.uid} className="hover:bg-primary/[0.02] transition-colors group">
                                                         <td className="px-5 py-4 whitespace-nowrap">
                                                             <div className="flex items-center gap-3">
                                                                 <div className="h-9 min-w-[40px] px-3 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center font-bold text-[12px] group-hover:bg-primary/10 group-hover:text-primary transition-all">

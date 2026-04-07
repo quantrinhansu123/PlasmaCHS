@@ -1,36 +1,36 @@
 import { clsx } from 'clsx';
 import {
-    ArrowRightLeft,
+    AlertTriangle,
+    ArrowDown,
+    ArrowRight,
+    Camera,
+    CheckCircle2,
     ChevronLeft,
+    ClipboardList,
+    Hash,
+    Image as ImageIcon,
+    Info,
+    Loader2,
+    Package,
+    Printer,
     RefreshCw,
     Save,
-    Warehouse,
-    Package,
-    ClipboardList,
-    ArrowRight,
-    ArrowDown,
-    Hash,
-    Info,
-    Camera,
-    Printer,
-    Image as ImageIcon,
-    X,
-    Loader2,
     ScanLine,
-    AlertTriangle,
-    CheckCircle2,
+    Warehouse,
+    X,
+    Plus,
     Trash2
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
+import BarcodeScanner from '../components/Common/BarcodeScanner';
+import MachineHandoverPrintTemplate from '../components/MachineHandoverPrintTemplate';
+import { SearchableSelect } from '../components/ui/SearchableSelect';
+import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 import { notificationService } from '../utils/notificationService';
-import { SearchableSelect } from '../components/ui/SearchableSelect';
-import MachineHandoverPrintTemplate from '../components/MachineHandoverPrintTemplate';
-import BarcodeScanner from '../components/Common/BarcodeScanner';
-import usePermissions from '../hooks/usePermissions';
 
 // Helper functions for smart categorization
 const isMachine = (item) => {
@@ -58,15 +58,12 @@ const InventoryTransfer = () => {
     const [formData, setFormData] = useState({
         from_warehouse_id: '',
         to_warehouse_id: '',
-        item_type: 'MAY',
-        item_name: '',
-        quantity: '',
-        note: '',
-        specific_codes: [] // Array of { code: string, status: 'pending'|'valid'|'invalid', message?: string }
+        note: ''
     });
 
-    const [availableItems, setAvailableItems] = useState([]);
-    const [maxQuantity, setMaxQuantity] = useState(0);
+    const [transferItems, setTransferItems] = useState([
+        { id: Date.now().toString(), item_type: 'MAY', item_name: '', quantity: '', maxQuantity: 0, specific_codes: [] }
+    ]);
 
     const [uploading, setUploading] = useState(false);
     const [uploadedImage, setUploadedImage] = useState(null);
@@ -74,28 +71,39 @@ const InventoryTransfer = () => {
 
     // Scanner states
     const [isScannerOpen, setIsScannerOpen] = useState(false);
-    const [scanTargetIdx, setScanTargetIdx] = useState(-1);
-    const scanTargetIdxRef = useRef(-1);
-    useEffect(() => { scanTargetIdxRef.current = scanTargetIdx; }, [scanTargetIdx]);
+    const [scanTargetItemIdx, setScanTargetItemIdx] = useState(-1);
+    const [scanTargetCodeIdx, setScanTargetCodeIdx] = useState(-1);
+    
+    const scanRef = useRef({ itemIdx: -1, codeIdx: -1 });
+    useEffect(() => { 
+        scanRef.current = { itemIdx: scanTargetItemIdx, codeIdx: scanTargetCodeIdx }; 
+    }, [scanTargetItemIdx, scanTargetCodeIdx]);
 
     // Validating state
     const [isValidating, setIsValidating] = useState(false);
 
-    const needsSpecificCodes = formData.item_type === 'MAY' || formData.item_type === 'BINH';
-
     const mockOrderForBBBG = useMemo(() => {
-        const codesList = formData.specific_codes.filter(c => c.code).map(c => c.code).join(', ');
+        const orderItems = transferItems.filter(t => t.item_name && t.quantity > 0).map(t => {
+            const codesList = t.specific_codes.filter(c => c.code).map(c => c.code).join(', ');
+            return {
+                product_type: t.item_type,
+                product_name: t.item_name,
+                quantity: t.quantity,
+                codesList: codesList
+            };
+        });
+
         return {
             id: 'bbbg_transfer',
             created_at: new Date().toISOString(),
-            product_type: formData.item_type,
-            quantity: formData.quantity,
-            department: codesList || formData.item_name,
             customer_name: warehouses.find(w => w.id === formData.to_warehouse_id)?.name || 'Kho Nhận',
             recipient_name: 'Đại diện ' + (warehouses.find(w => w.id === formData.to_warehouse_id)?.name || 'Kho Nhận'),
             recipient_address: 'Luân chuyển nội bộ',
+            items: orderItems,
+            product_type: orderItems[0]?.product_type,
+            quantity: orderItems[0]?.quantity,
         };
-    }, [formData, warehouses]);
+    }, [formData, warehouses, transferItems]);
 
     const handlePrintBBBG = () => {
         setPrintBBBG(true);
@@ -142,73 +150,19 @@ const InventoryTransfer = () => {
     useEffect(() => {
         if (formData.from_warehouse_id) {
             fetchInventory(formData.from_warehouse_id);
+            // Clear items when changing source warehouse
+            setTransferItems([{ id: Date.now().toString(), item_type: 'MAY', item_name: '', quantity: '', maxQuantity: 0, specific_codes: [] }]);
         } else {
-            setAvailableItems([]);
+            setInventory([]);
+            setTransferItems([{ id: Date.now().toString(), item_type: 'MAY', item_name: '', quantity: '', maxQuantity: 0, specific_codes: [] }]);
         }
     }, [formData.from_warehouse_id]);
-
-    useEffect(() => {
-        if (formData.item_type && inventory.length > 0) {
-            // Smart filtering based on derived type
-            const items = inventory.filter(i => {
-                if (formData.item_type === 'MAY') return i.item_type === 'MAY';
-                if (formData.item_type === 'BINH') return i.item_type === 'BINH';
-                if (formData.item_type === 'VAT_TU') return i.item_type === 'VAT_TU';
-                return true;
-            });
-
-            setAvailableItems(items);
-
-            const selected = items.find(i => i.item_name === formData.item_name);
-            if (selected) {
-                setMaxQuantity(selected.quantity);
-            } else {
-                setFormData(prev => ({ ...prev, item_name: items[0]?.item_name || '', quantity: '', specific_codes: [] }));
-                setMaxQuantity(items[0]?.quantity || 0);
-            }
-        } else if (inventory.length === 0) {
-            setAvailableItems([]);
-        }
-    }, [formData.item_type, inventory]);
-
-    useEffect(() => {
-        const selected = availableItems.find(i => i.item_name === formData.item_name);
-        if (selected) {
-            setMaxQuantity(selected.quantity);
-        } else {
-            setMaxQuantity(0);
-        }
-    }, [formData.item_name]);
-
-    // Auto-resize specific_codes array when quantity changes (only for MAY, BINH)
-    useEffect(() => {
-        if (!needsSpecificCodes) {
-            if (formData.specific_codes.length > 0) {
-                setFormData(prev => ({ ...prev, specific_codes: [] }));
-            }
-            return;
-        }
-        const qty = parseInt(formData.quantity, 10) || 0;
-        setFormData(prev => {
-            const current = [...prev.specific_codes];
-            if (current.length === qty) return prev;
-            if (current.length < qty) {
-                for (let i = current.length; i < qty; i++) {
-                    current.push({ code: '', status: 'pending' });
-                }
-            } else {
-                current.length = qty;
-            }
-            return { ...prev, specific_codes: current };
-        });
-    }, [formData.quantity, needsSpecificCodes]);
 
     const fetchWarehouses = async () => {
         const { data } = await supabase.from('warehouses').select('id, name').eq('status', 'Đang hoạt động').order('name');
         if (data) {
             setWarehouses(data);
 
-            // Auto-select source warehouse for non-admin users
             if (role !== 'Admin' && department) {
                 const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
                 const userWh = data.find(w => w.id === userWhCode);
@@ -221,7 +175,7 @@ const InventoryTransfer = () => {
 
     const fetchInventory = async (warehouseId) => {
         try {
-            // 1. Fetch Materials (VAT_TU) from inventory table
+            // 1. Fetch Materials (VAT_TU)
             const { data: invData } = await supabase
                 .from('inventory')
                 .select('*')
@@ -229,14 +183,14 @@ const InventoryTransfer = () => {
                 .eq('item_type', 'VAT_TU')
                 .gt('quantity', 0);
 
-            // 2. Fetch Machines (MAY) from machines table
+            // 2. Fetch Machines (MAY)
             const { data: machinesData } = await supabase
                 .from('machines')
                 .select('machine_type, status')
                 .eq('warehouse', warehouseId)
                 .eq('status', 'sẵn sàng');
 
-            // 3. Fetch Cylinders (BINH) from cylinders table
+            // 3. Fetch Cylinders (BINH)
             const { data: cylindersData } = await supabase
                 .from('cylinders')
                 .select('volume, status')
@@ -256,7 +210,6 @@ const InventoryTransfer = () => {
                 return acc;
             }, {});
 
-            // Create unified inventory list
             const realInventory = [
                 ...(invData || []).map(i => ({ ...i, item_type: 'VAT_TU' })),
                 ...Object.entries(machCounts).map(([name, qty]) => ({
@@ -287,152 +240,269 @@ const InventoryTransfer = () => {
         [warehouses]
     );
 
-    const itemOptions = useMemo(() =>
-        availableItems.map(item => ({
-            value: item.item_name,
-            label: `${item.item_name} (Tồn: ${item.quantity})`
-        })),
-        [availableItems]
-    );
+    // ── ROW MANAGEMENT ──
+
+    const addRow = () => {
+        setTransferItems(prev => [...prev, {
+            id: Date.now().toString() + Math.random(),
+            item_type: 'MAY',
+            item_name: '',
+            quantity: '',
+            maxQuantity: 0,
+            specific_codes: []
+        }]);
+    };
+
+    const removeRow = (index) => {
+        setTransferItems(prev => prev.filter((_, i) => i !== index));
+    };
+
+    const updateRowType = (index, type) => {
+        setTransferItems(prev => {
+            const next = [...prev];
+            next[index] = {
+                ...next[index],
+                item_type: type,
+                item_name: '',
+                quantity: '',
+                maxQuantity: 0,
+                specific_codes: []
+            };
+            return next;
+        });
+    };
+
+    const updateRowName = (index, name) => {
+        setTransferItems(prev => {
+            const next = [...prev];
+            const type = next[index].item_type;
+            const availableItems = inventory.filter(i => {
+                if (type === 'MAY') return i.item_type === 'MAY';
+                if (type === 'BINH') return i.item_type === 'BINH';
+                if (type === 'VAT_TU') return i.item_type === 'VAT_TU';
+                return true;
+            });
+            const selected = availableItems.find(i => i.item_name === name);
+            const maxQty = selected ? selected.quantity : 0;
+            
+            // Check if already exist in other rows to calculate remaining maxQty? 
+            // Optional: for simplicity, rely on maxQty limits. But better to subtract already allocated.
+            
+            next[index] = {
+                ...next[index],
+                item_name: name,
+                quantity: '',
+                maxQuantity: maxQty,
+                specific_codes: []
+            };
+            return next;
+        });
+    };
+
+    const updateRowQuantity = (index, value) => {
+        setTransferItems(prev => {
+            const next = [...prev];
+            const item = next[index];
+            const maxQty = item.maxQuantity || 9999;
+            const raw = value.replace(/\D/g, '');
+            const num = raw === '' ? '' : Math.min(parseInt(raw, 10), maxQty);
+            
+            item.quantity = num;
+            
+            const needsSpecificCodes = item.item_type === 'MAY' || item.item_type === 'BINH';
+            if (needsSpecificCodes) {
+                const qty = num || 0;
+                const currentCodes = [...item.specific_codes];
+                if (currentCodes.length < qty) {
+                    for (let i = currentCodes.length; i < qty; i++) {
+                        currentCodes.push({ code: '', status: 'pending' });
+                    }
+                } else if (currentCodes.length > qty) {
+                    currentCodes.length = qty;
+                }
+                item.specific_codes = currentCodes;
+            } else {
+                item.specific_codes = [];
+            }
+            return next;
+        });
+    };
 
     // ── SPECIFIC CODE HANDLING ──
 
-    const handleCodeChange = (index, value) => {
+    const handleCodeChange = (itemIdx, codeIdx, value) => {
         const normalizedVal = value.trim().toUpperCase();
-        setFormData(prev => {
-            const codes = [...prev.specific_codes];
-            codes[index] = { code: normalizedVal, status: 'pending' };
-            return { ...prev, specific_codes: codes };
+        setTransferItems(prev => {
+            const next = [...prev];
+            const codes = [...next[itemIdx].specific_codes];
+            codes[codeIdx] = { code: normalizedVal, status: 'pending' };
+            next[itemIdx].specific_codes = codes;
+            return next;
         });
     };
 
-    const handleRemoveCode = (index) => {
-        setFormData(prev => {
-            const codes = [...prev.specific_codes];
-            codes[index] = { code: '', status: 'pending' };
-            return { ...prev, specific_codes: codes };
+    const handleRemoveCode = (itemIdx, codeIdx) => {
+        setTransferItems(prev => {
+            const next = [...prev];
+            const codes = [...next[itemIdx].specific_codes];
+            codes[codeIdx] = { code: '', status: 'pending' };
+            next[itemIdx].specific_codes = codes;
+            return next;
         });
     };
 
-    // Check for duplicate codes within the form
-    const getDuplicateIndices = () => {
+    // Check for duplicate codes globally across all items
+    const getDuplicateIndicesGlobally = () => {
         const seen = {};
-        const duplicates = new Set();
-        formData.specific_codes.forEach((item, idx) => {
-            if (!item.code) return;
-            if (seen[item.code] !== undefined) {
-                duplicates.add(seen[item.code]);
-                duplicates.add(idx);
-            } else {
-                seen[item.code] = idx;
-            }
+        const duplicates = new Set(); // store string like "itemIdx-codeIdx"
+        
+        transferItems.forEach((item, itemIdx) => {
+            if (!item.specific_codes) return;
+            item.specific_codes.forEach((entry, codeIdx) => {
+                if (!entry.code) return;
+                const globalKey = entry.code;
+                const currentLoc = `${itemIdx}-${codeIdx}`;
+                if (seen[globalKey] !== undefined) {
+                    duplicates.add(seen[globalKey]);
+                    duplicates.add(currentLoc);
+                } else {
+                    seen[globalKey] = currentLoc;
+                }
+            });
         });
         return duplicates;
     };
 
-    const duplicateIndices = useMemo(() => getDuplicateIndices(), [formData.specific_codes]);
+    const duplicateIndicesSet = useMemo(() => getDuplicateIndicesGlobally(), [transferItems]);
 
     // Validate specific codes against database
     const validateCodes = async () => {
-        const codes = formData.specific_codes.filter(c => c.code).map(c => c.code);
-        if (codes.length === 0) return true;
-
+        let allValid = true;
         setIsValidating(true);
         try {
-            const tableName = formData.item_type === 'BINH' ? 'cylinders' : 'machines';
-            const whColumn = formData.item_type === 'BINH' ? 'warehouse_id' : 'warehouse';
-            const serialColumn = 'serial_number';
+            // Group codes by table
+            const cylindersToVerify = [];
+            const machinesToVerify = [];
 
-            const { data: items, error } = await supabase
-                .from(tableName)
-                .select(`id, ${serialColumn}, status, ${whColumn}`)
-                .in(serialColumn, codes);
-
-            if (error) throw error;
-
-            const itemMap = {};
-            (items || []).forEach(item => {
-                itemMap[item.serial_number] = item;
+            transferItems.forEach((item) => {
+                if (!item.item_name || !item.quantity || !item.item_type) return;
+                const codes = item.specific_codes.filter(c => c.code).map(c => c.code);
+                if (item.item_type === 'BINH') cylindersToVerify.push(...codes);
+                if (item.item_type === 'MAY') machinesToVerify.push(...codes);
             });
 
-            let allValid = true;
-            const updatedCodes = formData.specific_codes.map(entry => {
-                if (!entry.code) return entry;
+            const dbMap = {}; // { tableName: { code: dbItem } }
+            dbMap['cylinders'] = {};
+            dbMap['machines'] = {};
 
-                const dbItem = itemMap[entry.code];
-                if (!dbItem) {
-                    allValid = false;
-                    return { ...entry, status: 'invalid', message: 'Mã không tồn tại trong hệ thống' };
-                }
+            if (cylindersToVerify.length > 0) {
+                const { data: cyls } = await supabase.from('cylinders').select('id, serial_number, status, warehouse_id').in('serial_number', cylindersToVerify);
+                (cyls || []).forEach(c => dbMap['cylinders'][c.serial_number] = c);
+            }
 
-                const itemWarehouse = dbItem[whColumn];
-                if (itemWarehouse !== formData.from_warehouse_id) {
-                    allValid = false;
-                    return { ...entry, status: 'invalid', message: `Không thuộc kho xuất (đang ở: ${itemWarehouse || 'N/A'})` };
-                }
+            if (machinesToVerify.length > 0) {
+                const { data: macs } = await supabase.from('machines').select('id, serial_number, status, warehouse').in('serial_number', machinesToVerify);
+                (macs || []).forEach(m => dbMap['machines'][m.serial_number] = m);
+            }
 
-                if (dbItem.status !== 'sẵn sàng') {
-                    allValid = false;
-                    return { ...entry, status: 'invalid', message: `Trạng thái: "${dbItem.status}" (cần "sẵn sàng")` };
-                }
+            const updatedItems = transferItems.map((item) => {
+                if (!item.item_name || item.item_type === 'VAT_TU') return item;
+                
+                const tableName = item.item_type === 'BINH' ? 'cylinders' : 'machines';
+                const whColumn = item.item_type === 'BINH' ? 'warehouse_id' : 'warehouse';
 
-                return { ...entry, status: 'valid', message: 'Hợp lệ', dbId: dbItem.id };
+                const updatedCodes = item.specific_codes.map(entry => {
+                    if (!entry.code) return entry;
+                    
+                    const dbItem = dbMap[tableName][entry.code];
+                    if (!dbItem) {
+                        allValid = false;
+                        return { ...entry, status: 'invalid', message: 'Mã không tồn tại' };
+                    }
+                    if (dbItem[whColumn] !== formData.from_warehouse_id) {
+                        allValid = false;
+                        return { ...entry, status: 'invalid', message: 'Không thuộc kho xuất' };
+                    }
+                    if (dbItem.status !== 'sẵn sàng') {
+                        allValid = false;
+                        return { ...entry, status: 'invalid', message: `Trạng thái: ${dbItem.status}` };
+                    }
+                    return { ...entry, status: 'valid', message: 'Hợp lệ', dbId: dbItem.id };
+                });
+
+                return { ...item, specific_codes: updatedCodes };
             });
 
-            setFormData(prev => ({ ...prev, specific_codes: updatedCodes }));
-            return allValid;
+            setTransferItems(updatedItems);
+            return { allValid, updatedItems };
         } catch (error) {
             console.error('Validation error:', error);
             toast.error('Lỗi kiểm tra mã: ' + error.message);
-            return false;
+            return { allValid: false, updatedItems: transferItems };
         } finally {
             setIsValidating(false);
         }
     };
 
-    // Scanner handlers
-    const startScanner = (index) => {
-        setScanTargetIdx(index);
+    // Scanner helpers
+    const startScannerCode = (itemIdx, codeIdx) => {
+        setScanTargetItemIdx(itemIdx);
+        setScanTargetCodeIdx(codeIdx);
         setIsScannerOpen(true);
     };
 
-    const startScanAll = () => {
-        const firstEmpty = formData.specific_codes.findIndex(c => !c.code);
+    const startScanAllForItem = (itemIdx) => {
+        const firstEmpty = transferItems[itemIdx].specific_codes.findIndex(c => !c.code);
         if (firstEmpty === -1) {
-            toast.info('Đã điền đủ mã cho tất cả vị trí!');
+            toast.info('Đã điền đủ mã cho mặt hàng này!');
             return;
         }
-        startScanner(firstEmpty);
+        startScannerCode(itemIdx, firstEmpty);
     };
 
     const handleScanSuccess = useCallback((decodedText) => {
         const normalizedText = decodedText.trim().toUpperCase();
-        const targetIdx = scanTargetIdxRef.current;
-        if (targetIdx === -1) return;
+        const { itemIdx, codeIdx } = scanRef.current;
+        if (itemIdx === -1 || codeIdx === -1) return;
 
-        // Check for duplicates
-        setFormData(prev => {
-            const codes = [...prev.specific_codes];
-            const isDuplicate = codes.some((c, i) => i !== targetIdx && c.code === normalizedText);
+        setTransferItems(prev => {
+            const next = [...prev];
+            const item = next[itemIdx];
+            const codes = [...item.specific_codes];
+            
+            // Local & Global duplicate check inside scanner
+            // (We could just rely on global check but it's nice to prevent insert)
+            const isDuplicateLocal = codes.some((c, i) => i !== codeIdx && c.code === normalizedText);
+            let isDuplicateGlobal = false;
+            next.forEach((it, i) => {
+                if (i !== itemIdx) {
+                    if (it.specific_codes && it.specific_codes.some(c => c.code === normalizedText)) {
+                        isDuplicateGlobal = true;
+                    }
+                }
+            });
 
-            if (isDuplicate) {
-                toast.warn(`Mã ${normalizedText} đã được nhập trước đó!`, { toastId: `dup-${normalizedText}` });
+            if (isDuplicateLocal || isDuplicateGlobal) {
+                toast.warn(`Mã ${normalizedText} đã được nhập!`, { toastId: `dup-${normalizedText}` });
                 return prev;
             }
 
-            codes[targetIdx] = { code: normalizedText, status: 'pending' };
+            codes[codeIdx] = { code: normalizedText, status: 'pending' };
+            next[itemIdx].specific_codes = codes;
 
-            // Auto-advance to next empty slot
-            const nextEmpty = codes.findIndex((c, i) => i > targetIdx && !c.code);
+            // Auto advance within the SAME item
+            const nextEmpty = codes.findIndex((c, i) => i > codeIdx && !c.code);
             if (nextEmpty !== -1) {
-                setScanTargetIdx(nextEmpty);
+                setScanTargetItemIdx(itemIdx); // Keep same
+                setScanTargetCodeIdx(nextEmpty);
             } else {
                 setIsScannerOpen(false);
-                setScanTargetIdx(-1);
-                toast.success(`Đã quét xong ${codes.filter(c => c.code).length} mã!`);
+                setScanTargetItemIdx(-1);
+                setScanTargetCodeIdx(-1);
+                toast.success(`Đã quét xong mục này!`);
             }
 
-            return { ...prev, specific_codes: codes };
+            return next;
         });
     }, []);
 
@@ -440,197 +510,162 @@ const InventoryTransfer = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!formData.from_warehouse_id || !formData.to_warehouse_id || !formData.item_name || formData.quantity <= 0) {
-            toast.error('Vui lòng điền đầy đủ thông tin');
+        
+        if (!formData.from_warehouse_id || !formData.to_warehouse_id) {
+            toast.error('Vui lòng chọn đầy đủ kho xuất và kho nhận');
             return;
         }
-
         if (formData.from_warehouse_id === formData.to_warehouse_id) {
             toast.error('Kho đi và kho đến không được trùng nhau');
             return;
         }
 
-        if (formData.quantity > maxQuantity) {
-            toast.error(`Số lượng chuyển (${formData.quantity}) vượt quá tồn kho (${maxQuantity})`);
+        // Validate items
+        const validItems = transferItems.filter(item => item.item_name && item.quantity > 0);
+        if (validItems.length === 0) {
+            toast.error('Vui lòng thêm ít nhất một mặt hàng và số lượng chuyển');
             return;
         }
 
-        // Validate specific codes for MAY/BINH
-        if (needsSpecificCodes) {
-            const filledCodes = formData.specific_codes.filter(c => c.code);
+        // Check stock
+        // Group by item_name to handle multiple lines of the SAME item_name (if any)
+        const totalQtyByName = {};
+        let stockError = '';
+        for (const it of validItems) {
+             if (!totalQtyByName[it.item_name]) totalQtyByName[it.item_name] = 0;
+             totalQtyByName[it.item_name] += it.quantity;
+             if (totalQtyByName[it.item_name] > it.maxQuantity) {
+                 stockError = `Tổng số lượng điều chuyển của ${it.item_name} vượt quá tồn kho (${it.maxQuantity})`;
+                 break;
+             }
+        }
+        if (stockError) {
+            toast.error(stockError);
+            return;
+        }
 
-            if (filledCodes.length === 0) {
-                toast.error(`Vui lòng nhập ít nhất mã ${formData.item_type === 'BINH' ? 'bình' : 'máy'} cần điều chuyển`);
-                return;
-            }
-
-            if (filledCodes.length !== formData.quantity) {
-                toast.error(`Cần nhập đúng ${formData.quantity} mã. Hiện tại đã nhập: ${filledCodes.length}`);
-                return;
-            }
-
-            if (duplicateIndices.size > 0) {
-                toast.error('Phát hiện mã bị trùng lặp, vui lòng kiểm tra lại!');
-                return;
-            }
-
-            // Validate against database
-            const valid = await validateCodes();
-            if (!valid) {
-                toast.error('Một số mã không hợp lệ. Vui lòng kiểm tra lại các mã đánh dấu đỏ.');
-                return;
+        // Validate specific codes
+        let codesError = '';
+        for (const it of validItems) {
+            const needsSpecificCodes = it.item_type === 'MAY' || it.item_type === 'BINH';
+            if (needsSpecificCodes) {
+                const filledCodes = it.specific_codes.filter(c => c.code);
+                if (filledCodes.length !== it.quantity) {
+                    codesError = `Mặt hàng [${it.item_name}] cần nhập đúng ${it.quantity} mã. Đã nhập: ${filledCodes.length}`;
+                    break;
+                }
             }
         }
+        if (codesError) {
+            toast.error(codesError);
+            return;
+        }
+
+        // Check for duplicates
+        if (duplicateIndicesSet.size > 0) {
+            toast.error('Phát hiện mã máy/bình bị trùng lặp, vui lòng kiểm tra lại!');
+            return;
+        }
+
+        // DB validation
+        const { allValid, updatedItems } = await validateCodes();
+        if (!allValid) {
+            toast.error('Một số mã không hợp lệ. Vui lòng kiểm tra lại các mã đánh dấu đỏ.');
+            return;
+        }
+
+        const validItemsToSubmit = updatedItems.filter(item => item.item_name && item.quantity > 0);
 
         setLoading(true);
         try {
-            // Find the exact source item record (using all fields to ensure correct match)
-            const sourceItem = inventory.find(i => i.item_name === formData.item_name && (
-                (formData.item_type === 'MAY' && isMachine(i)) ||
-                (formData.item_type === 'BINH' && isCylinder(i)) ||
-                (formData.item_type === 'VAT_TU' && !isMachine(i) && !isCylinder(i))
-            ));
-
-            if (!sourceItem) {
-                toast.error('Không tìm thấy thông tin hàng hóa trong kho nguồn');
-                setLoading(false);
-                return;
-            }
-
-            // 1. Resolve source inventory record and update count
-            let sourceInventoryId;
-            if (formData.item_type === 'VAT_TU') {
-                sourceInventoryId = sourceItem.id;
-                const { error: decError } = await supabase
-                    .from('inventory')
-                    .update({ quantity: sourceItem.quantity - formData.quantity })
-                    .eq('id', sourceInventoryId);
-                if (decError) throw decError;
-            } else {
-                // For MAY/BINH, find or create the summary record in inventory table
-                const { data: existingInv } = await supabase
-                    .from('inventory')
-                    .select('id, quantity')
-                    .eq('warehouse_id', formData.from_warehouse_id)
-                    .eq('item_type', formData.item_type)
-                    .eq('item_name', formData.item_name)
-                    .maybeSingle();
-
-                if (existingInv) {
-                    sourceInventoryId = existingInv.id;
-                    const { error: decError } = await supabase
-                        .from('inventory')
-                        .update({ quantity: sourceItem.quantity - formData.quantity })
-                        .eq('id', sourceInventoryId);
-                    if (decError) throw decError;
-                } else {
-                    // This shouldn't happen if UI shows it, but as fallback
-                    const { data: newInv, error: insError } = await supabase
-                        .from('inventory')
-                        .insert([{
-                            warehouse_id: formData.from_warehouse_id,
-                            item_type: formData.item_type,
-                            item_name: formData.item_name,
-                            quantity: sourceItem.quantity - formData.quantity
-                        }])
-                        .select().single();
-                    if (insError) throw insError;
-                    sourceInventoryId = newInv.id;
-                }
-            }
-
-            // 2. Increase/Create destination inventory count
-            const { data: destItemData, error: destQueryError } = await supabase
-                .from('inventory')
-                .select('id, quantity')
-                .eq('warehouse_id', formData.to_warehouse_id)
-                .eq('item_type', formData.item_type)
-                .eq('item_name', formData.item_name)
-                .maybeSingle();
-            if (destQueryError) throw destQueryError;
-
-            let destInventoryId;
-            if (destItemData) {
-                const { data: updatedDest, error: incError } = await supabase
-                    .from('inventory')
-                    .update({ quantity: destItemData.quantity + formData.quantity })
-                    .eq('id', destItemData.id)
-                    .select().single();
-                if (incError) throw incError;
-                destInventoryId = updatedDest.id;
-            } else {
-                const { data: newDest, error: insError } = await supabase
-                    .from('inventory')
-                    .insert([{
-                        warehouse_id: formData.to_warehouse_id,
-                        item_type: formData.item_type,
-                        item_name: formData.item_name,
-                        quantity: formData.quantity
-                    }])
-                    .select().single();
-                if (insError) throw insError;
-                destInventoryId = newDest.id;
-            }
-
-            // 3. Update individual item locations (cylinders/machines)
-            if (needsSpecificCodes) {
-                const validCodes = formData.specific_codes.filter(c => c.code && c.dbId);
-                const tableName = formData.item_type === 'BINH' ? 'cylinders' : 'machines';
-                const whColumn = formData.item_type === 'BINH' ? 'warehouse_id' : 'warehouse';
-
-                for (const entry of validCodes) {
-                    const { error: updateErr } = await supabase
-                        .from(tableName)
-                        .update({ [whColumn]: formData.to_warehouse_id })
-                        .eq('id', entry.dbId);
-
-                    if (updateErr) {
-                        console.error(`Failed to update ${tableName} ${entry.code}:`, updateErr);
-                    }
-                }
-            }
-
-            // 4. Create transaction records
             const transferCode = `TRF${Date.now().toString().slice(-6)}`;
-
             const toName = warehouses.find(w => w.id === formData.to_warehouse_id)?.name;
             const fromName = warehouses.find(w => w.id === formData.from_warehouse_id)?.name;
 
-            // Build codes list for note
-            const codesList = formData.specific_codes.filter(c => c.code).map(c => c.code).join(', ');
-            const codesNote = codesList ? `\nMã cụ thể: [${codesList}]` : '';
+            const transactions = [];
 
-            const finalNoteOut = uploadedImage
-                ? `Điều chuyển tới ${toName}. ${formData.note}${codesNote}\n[Ảnh Bàn Giao]: ${uploadedImage}`
-                : `Điều chuyển tới ${toName}. ${formData.note}${codesNote}`;
+            for (const item of validItemsToSubmit) {
+                // Find source item mapping
+                const sourceItem = inventory.find(i => i.item_name === item.item_name && (
+                    (item.item_type === 'MAY' && isMachine(i)) ||
+                    (item.item_type === 'BINH' && isCylinder(i)) ||
+                    (item.item_type === 'VAT_TU' && !isMachine(i) && !isCylinder(i))
+                ));
 
-            const finalNoteIn = uploadedImage
-                ? `Nhận điều chuyển từ ${fromName}. ${formData.note}${codesNote}\n[Ảnh Bàn Giao]: ${uploadedImage}`
-                : `Nhận điều chuyển từ ${fromName}. ${formData.note}${codesNote}`;
+                if (!sourceItem) throw new Error(`Không tìm thấy tồn kho cho: ${item.item_name}`);
 
-            const { error: txError } = await supabase
-                .from('inventory_transactions')
-                .insert([
-                    {
-                        inventory_id: sourceInventoryId,
-                        transaction_type: 'OUT',
-                        reference_code: transferCode,
-                        quantity_changed: formData.quantity,
-                        note: finalNoteOut
-                    },
-                    {
-                        inventory_id: destInventoryId,
-                        transaction_type: 'IN',
-                        reference_code: transferCode,
-                        quantity_changed: formData.quantity,
-                        note: finalNoteIn
+                // 1. Source DB update
+                let sourceInventoryId;
+                if (item.item_type === 'VAT_TU') {
+                    sourceInventoryId = sourceItem.id;
+                    const { error: decError } = await supabase.from('inventory')
+                        .update({ quantity: sourceItem.quantity - item.quantity }).eq('id', sourceInventoryId);
+                    if (decError) throw decError;
+                } else {
+                    const { data: existingInv } = await supabase.from('inventory')
+                        .select('id, quantity').eq('warehouse_id', formData.from_warehouse_id)
+                        .eq('item_type', item.item_type).eq('item_name', item.item_name).maybeSingle();
+                    if (existingInv) {
+                        sourceInventoryId = existingInv.id;
+                        const { error: decError } = await supabase.from('inventory')
+                            .update({ quantity: sourceItem.quantity - item.quantity }).eq('id', sourceInventoryId);
+                        if (decError) throw decError;
+                    } else {
+                        const { data: newInv, error: insError } = await supabase.from('inventory')
+                            .insert([{ warehouse_id: formData.from_warehouse_id, item_type: item.item_type, item_name: item.item_name, quantity: sourceItem.quantity - item.quantity }]).select().single();
+                        if (insError) throw insError;
+                        sourceInventoryId = newInv.id;
                     }
-                ]);
+                }
+
+                // 2. Dest DB update
+                const { data: destItemData } = await supabase.from('inventory')
+                    .select('id, quantity').eq('warehouse_id', formData.to_warehouse_id)
+                    .eq('item_type', item.item_type).eq('item_name', item.item_name).maybeSingle();
+
+                let destInventoryId;
+                if (destItemData) {
+                    const { data: updatedDest, error: incError } = await supabase.from('inventory')
+                        .update({ quantity: destItemData.quantity + item.quantity }).eq('id', destItemData.id).select().single();
+                    if (incError) throw incError;
+                    destInventoryId = updatedDest.id;
+                } else {
+                    const { data: newDest, error: insError } = await supabase.from('inventory')
+                        .insert([{ warehouse_id: formData.to_warehouse_id, item_type: item.item_type, item_name: item.item_name, quantity: item.quantity }]).select().single();
+                    if (insError) throw insError;
+                    destInventoryId = newDest.id;
+                }
+
+                // 3. Serialized locations Update
+                const needsSpecificCodes = item.item_type === 'MAY' || item.item_type === 'BINH';
+                if (needsSpecificCodes) {
+                    const validCodes = item.specific_codes.filter(c => c.code && c.dbId);
+                    const tableName = item.item_type === 'BINH' ? 'cylinders' : 'machines';
+                    const whColumn = item.item_type === 'BINH' ? 'warehouse_id' : 'warehouse';
+
+                    for (const entry of validCodes) {
+                        const { error: updateErr } = await supabase.from(tableName).update({ [whColumn]: formData.to_warehouse_id }).eq('id', entry.dbId);
+                        if (updateErr) console.error(`Failed to update ${tableName} ${entry.code}:`, updateErr);
+                    }
+                }
+
+                // 4. Record transactions
+                const codesList = item.specific_codes ? item.specific_codes.filter(c => c.code).map(c => c.code).join(', ') : '';
+                const codesNote = codesList ? `\nMã cụ thể: [${codesList}]` : '';
+
+                const commonNoteOut = uploadedImage ? `Điều chuyển tới ${toName}. ${formData.note}${codesNote}\n[Ảnh Bàn Giao]: ${uploadedImage}` : `Điều chuyển tới ${toName}. ${formData.note}${codesNote}`;
+                const commonNoteIn = uploadedImage ? `Nhận điều chuyển từ ${fromName}. ${formData.note}${codesNote}\n[Ảnh Bàn Giao]: ${uploadedImage}` : `Nhận điều chuyển từ ${fromName}. ${formData.note}${codesNote}`;
+
+                transactions.push({ inventory_id: sourceInventoryId, transaction_type: 'OUT', reference_code: transferCode, quantity_changed: item.quantity, note: commonNoteOut });
+                transactions.push({ inventory_id: destInventoryId, transaction_type: 'IN', reference_code: transferCode, quantity_changed: item.quantity, note: commonNoteIn });
+            }
+
+            const { error: txError } = await supabase.from('inventory_transactions').insert(transactions);
             if (txError) throw txError;
 
             await notificationService.add({
-                title: 'Điều chuyển kho',
-                description: `Đã chuyển ${formData.quantity} ${formData.item_name} từ ${fromName} tới ${toName}${codesList ? ` (${codesList})` : ''}`,
+                title: 'Điều chuyển kho nhiều thiết bị',
+                description: `Đã chuyển ${validItems.length} loại hàng từ ${fromName} tới ${toName} (Mã phiếu: ${transferCode})`,
                 type: 'success',
                 link: '/bao-cao/kho'
             });
@@ -645,8 +680,7 @@ const InventoryTransfer = () => {
         }
     };
 
-    // ── STATUS HELPERS ──
-
+    // ── HELPERS ──
     const getStatusIcon = (status) => {
         switch (status) {
             case 'valid': return <CheckCircle2 size={16} className="text-emerald-500" />;
@@ -664,13 +698,10 @@ const InventoryTransfer = () => {
         }
     };
 
-    const filledCount = formData.specific_codes.filter(c => c.code).length;
-    const totalSlots = formData.specific_codes.length;
-
     return (
         <div className="fixed md:static inset-0 z-[100] md:z-auto w-full md:flex-1 flex flex-col px-4 pt-16 pb-4 sm:p-6 bg-slate-50 overflow-y-auto md:overflow-visible custom-scrollbar md:min-h-screen">
-            {/* Optimized Page Header */}
-            <div className="hidden md:flex max-w-4xl mx-auto w-full mb-8 flex-col md:flex-row md:items-center justify-center relative gap-4 md:gap-6">
+            {/* Page Header */}
+            <div className="hidden md:flex max-w-5xl mx-auto w-full mb-8 flex-col md:flex-row md:items-center justify-center relative gap-4 md:gap-6">
                 <button
                     onClick={() => navigate(-1)}
                     className="md:absolute md:left-0 self-start md:self-auto !h-9 !px-3 md:!h-10 md:!px-4 flex items-center justify-center gap-1.5 md:gap-2 bg-white border border-slate-200 rounded-xl hover:bg-primary/5 hover:border-primary/30 transition-all text-slate-800 shadow-sm"
@@ -679,13 +710,14 @@ const InventoryTransfer = () => {
                     <span className="font-bold text-[13px] md:text-[14px]">Quay lại</span>
                 </button>
                 <div className="hidden md:flex flex-col text-center">
-                    <h1 className="text-[22px] md:text-2xl font-bold text-slate-900 tracking-tight leading-tight">Điều chuyển kho nội bộ</h1>
-                    <p className="text-[12px] md:text-[13px] text-slate-500 font-medium">Quản lý luân chuyển hàng hóa giữa các kho</p>
+                    <h1 className="text-[22px] md:text-2xl font-bold text-slate-900 tracking-tight leading-tight">Thêm Mới Phiếu Điều Chuyển Hàng Loạt</h1>
+                    <p className="text-[12px] md:text-[13px] text-slate-500 font-medium">Chọn xuất nhiều mặt hàng trong cùng 1 lần chuyển</p>
                 </div>
             </div>
 
-            <div className="max-w-4xl mx-auto w-full">
+            <div className="max-w-5xl mx-auto w-full">
                 <form onSubmit={handleSubmit} className="space-y-4 md:space-y-6 pb-32 md:pb-0">
+                    
                     {/* Warehouse Info Section */}
                     <div className="rounded-3xl border border-primary/20 bg-white p-5 sm:p-6 space-y-5 shadow-sm">
                         <div className="flex items-center gap-2.5 pb-3 border-b border-primary/10">
@@ -702,18 +734,15 @@ const InventoryTransfer = () => {
                                     <SearchableSelect
                                         options={warehouseOptions}
                                         value={formData.from_warehouse_id}
-                                        onValueChange={(val) => setFormData(prev => ({ ...prev, from_warehouse_id: val, specific_codes: [] }))}
+                                        onValueChange={(val) => setFormData(prev => ({ ...prev, from_warehouse_id: val }))}
                                         placeholder="Chọn kho xuất..."
                                         searchPlaceholder="Tìm kho..."
                                         disabled={role !== 'Admin' && department}
                                     />
                                 </div>
-
-                                {/* Arrow Down Indicator for Mobile */}
                                 <div className="flex md:hidden items-center justify-center -my-2.5 text-primary/30 pointer-events-none">
                                     <ArrowDown size={22} />
                                 </div>
-
                                 <div className="space-y-1.5">
                                     <label className="flex items-center gap-1.5 text-[14px] font-semibold text-primary">
                                         <Warehouse className="w-4 h-4 text-emerald-600" /> Kho nhận (Đích) <span className="text-red-500">*</span>
@@ -727,215 +756,218 @@ const InventoryTransfer = () => {
                                     />
                                 </div>
                             </div>
-
-                            {/* Arrow Right indicator on Desktop */}
                             <div className="hidden md:flex absolute left-1/2 top-[52px] -translate-x-1/2 -translate-y-1/2 w-8 h-8 items-center justify-center text-primary/40 z-10 pointer-events-none">
                                 <ArrowRight size={20} />
                             </div>
                         </div>
-                    </div>
 
-                    {/* Item Info Section */}
-                    <div className="rounded-3xl border border-primary/20 bg-white p-5 sm:p-6 space-y-5 shadow-sm">
-                        <div className="flex items-center gap-2.5 pb-3 border-b border-primary/10">
-                            <Package className="w-4 h-4 text-primary" />
-                            <h4 className="text-[18px] !font-extrabold !text-primary">Chi tiết vật tư điều chuyển</h4>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
-                            <div className="space-y-1.5">
-                                <label className="flex items-center gap-1.5 text-[14px] font-semibold text-primary">
-                                    <Info className="w-4 h-4 text-primary/70" /> Loại hàng hóa <span className="text-red-500">*</span>
-                                </label>
-                                <div className="flex gap-2 p-1 bg-slate-100 rounded-2xl">
-                                    {['MAY', 'BINH', 'VAT_TU'].map(type => (
-                                        <button
-                                            key={type}
-                                            type="button"
-                                            onClick={() => setFormData(prev => ({ ...prev, item_type: type, specific_codes: [] }))}
-                                            className={clsx(
-                                                "flex-1 !h-9 md:!h-10 py-1 px-2 rounded-xl text-[12px] md:text-[13px] font-bold transition-all shadow-sm",
-                                                formData.item_type === type
-                                                    ? "bg-white text-primary border-transparent"
-                                                    : "bg-transparent text-slate-500 hover:text-slate-800"
-                                            )}
-                                        >
-                                            {type === 'MAY' ? 'Máy' : type === 'BINH' ? 'Bình' : 'Vật tư'}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <div className="space-y-1.5">
-                                <label className="flex items-center gap-1.5 text-[14px] font-semibold text-primary">
-                                    <Package className="w-4 h-4 text-primary/70" /> Tên hàng hóa <span className="text-red-500">*</span>
-                                </label>
-                                <SearchableSelect
-                                    options={itemOptions}
-                                    value={formData.item_name}
-                                    onValueChange={(val) => setFormData(prev => ({ ...prev, item_name: val, specific_codes: [] }))}
-                                    disabled={!formData.from_warehouse_id || availableItems.length === 0}
-                                    placeholder="Chọn hàng hóa..."
-                                    searchPlaceholder="Tìm hàng hóa..."
-                                />
-                                {!formData.from_warehouse_id && (
-                                    <div className="flex items-center gap-1.5 mt-1 text-[11px] text-amber-600 font-bold bg-amber-50 px-2 py-1 rounded-lg w-fit">
-                                        <Info size={12} /> Vui lòng chọn kho xuất trước
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
-                            <div className="space-y-1.5">
-                                <label className="flex items-center gap-1.5 text-[14px] font-semibold text-primary">
-                                    <Hash className="w-4 h-4 text-primary/70" /> Số lượng <span className="text-red-500">*</span>
-                                </label>
-                                <div className="relative">
-                                    <input
-                                        type="text"
-                                        inputMode="numeric"
-                                        className="w-full h-11 md:h-12 pl-4 pr-24 bg-slate-50 border border-slate-200 rounded-2xl text-[14.5px] font-black text-primary outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white transition-all shadow-inner"
-                                        value={formData.quantity}
-                                        onChange={(e) => {
-                                            const raw = e.target.value.replace(/\D/g, '');
-                                            const num = raw === '' ? '' : Math.min(parseInt(raw, 10), maxQuantity || 9999);
-                                            setFormData(prev => ({ ...prev, quantity: num }));
-                                        }}
-                                        onFocus={(e) => e.target.select()}
-                                        placeholder="0"
-                                        required
-                                    />
-                                    <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-primary text-white text-[10px] md:text-[11px] font-bold px-2 py-1.5 rounded-xl shadow-lg shadow-primary/20">
-                                        Tồn: {maxQuantity}
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="space-y-1.5">
-                                <label className="flex items-center gap-1.5 text-[14px] font-semibold text-primary">
-                                    <ClipboardList className="w-4 h-4 text-primary/70" /> Ghi chú (Tùy chọn)
-                                </label>
-                                <input
-                                    type="text"
-                                    className="w-full h-11 md:h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[14.5px] font-semibold text-slate-900 outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white transition-all shadow-inner"
-                                    placeholder="Lý do điều chuyển..."
-                                    value={formData.note}
-                                    onChange={(e) => setFormData(prev => ({ ...prev, note: e.target.value }))}
-                                />
-                            </div>
+                        <div className="pt-2">
+                            <label className="flex items-center gap-1.5 text-[14px] font-semibold text-primary mb-1.5">
+                                <ClipboardList className="w-4 h-4 text-primary/70" /> Ghi chú điều chuyển tổng (Tùy chọn)
+                            </label>
+                            <input
+                                type="text"
+                                className="w-full h-11 md:h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[14.5px] font-semibold text-slate-900 outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white transition-all shadow-inner"
+                                placeholder="Nhập chung lý do..."
+                                value={formData.note}
+                                onChange={(e) => setFormData(prev => ({ ...prev, note: e.target.value }))}
+                            />
                         </div>
                     </div>
 
-                    {/* ── SPECIFIC CODES SECTION (MAY / BINH only) ── */}
-                    {needsSpecificCodes && formData.quantity > 0 && formData.item_name && (
-                        <div className="rounded-3xl border border-primary/20 bg-white p-5 sm:p-6 space-y-5 shadow-sm">
-                            <div className="flex items-center justify-between pb-3 border-b border-primary/10">
-                                <div className="flex items-center gap-2.5">
-                                    <ScanLine className="w-4 h-4 text-primary" />
-                                    <h4 className="text-[18px] !font-extrabold !text-primary">
-                                        Mã {formData.item_type === 'BINH' ? 'bình (RFID)' : 'máy (Serial)'}
-                                    </h4>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className={clsx(
-                                        "text-[11px] font-bold px-2.5 py-1 rounded-full",
-                                        filledCount === totalSlots
-                                            ? "bg-emerald-100 text-emerald-700"
-                                            : "bg-amber-100 text-amber-700"
-                                    )}>
-                                        {filledCount}/{totalSlots}
-                                    </span>
-                                    <button
-                                        type="button"
-                                        onClick={startScanAll}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 text-primary text-[12px] font-bold rounded-xl hover:bg-primary/20 transition-all"
-                                    >
-                                        <ScanLine size={14} /> Quét hàng loạt
-                                    </button>
-                                </div>
+                    {/* ITEMS LIST */}
+                    <div className="rounded-3xl border border-primary/20 bg-white p-5 sm:p-6 space-y-4 shadow-sm">
+                        <div className="flex items-center justify-between pb-3 border-b border-primary/10">
+                            <div className="flex items-center gap-2.5">
+                                <Package className="w-4 h-4 text-primary" />
+                                <h4 className="text-[18px] !font-extrabold !text-primary">Các Món Hàng Điều Chuyển</h4>
                             </div>
+                            <button
+                                type="button"
+                                onClick={addRow}
+                                className="flex items-center gap-1 bg-primary text-white px-3 py-1.5 rounded-xl text-[12.5px] font-bold hover:bg-primary/90 transition-all shadow-md shadow-primary/20"
+                            >
+                                <Plus size={16} /> Thêm Dòng
+                            </button>
+                        </div>
 
-                            <div className="space-y-1">
-                                <p className="text-[12px] text-slate-500 font-medium">
-                                    Nhập hoặc quét mã {formData.item_type === 'BINH' ? 'RFID trên vỏ bình' : 'serial trên máy'} cho từng đơn vị cần điều chuyển.
-                                    Hệ thống sẽ kiểm tra mã thuộc kho xuất và cập nhật vị trí khi hoàn tất.
-                                </p>
-                            </div>
+                        <div className="space-y-4">
+                            {transferItems.map((item, itemIdx) => {
+                                const needsScan = item.item_type === 'MAY' || item.item_type === 'BINH';
+                                const filledCount = item.specific_codes ? item.specific_codes.filter(c => c.code).length : 0;
+                                const totalSlots = item.specific_codes ? item.specific_codes.length : 0;
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-72 overflow-y-auto p-1 custom-scrollbar">
-                                {formData.specific_codes.map((entry, idx) => {
-                                    const isDuplicate = duplicateIndices.has(idx);
-                                    return (
-                                        <div key={idx} className="relative group/code">
-                                            <div className="flex items-center gap-1.5 mb-1">
-                                                {getStatusIcon(isDuplicate ? 'invalid' : entry.status)}
-                                                <span className="text-[11px] font-bold text-slate-500">
-                                                    {formData.item_type === 'BINH' ? 'Mã bình' : 'Mã máy'} #{idx + 1}
-                                                </span>
-                                                {isDuplicate && (
-                                                    <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">TRÙNG</span>
-                                                )}
-                                            </div>
-                                            <div className="relative">
-                                                <input
-                                                    value={entry.code}
-                                                    onChange={(e) => handleCodeChange(idx, e.target.value)}
-                                                    placeholder={formData.item_type === 'BINH' ? `VD: QR04116` : `VD: PLT-25D1-50-TM`}
-                                                    className={clsx(
-                                                        "w-full h-10 pl-4 pr-20 border rounded-xl text-[13px] font-mono font-bold transition-all outline-none focus:ring-2 focus:ring-primary/10",
-                                                        getStatusBorder(isDuplicate ? 'invalid' : entry.status, isDuplicate)
-                                                    )}
-                                                />
-                                                <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                                                    {entry.code && (
+                                // Filter options for THIS item
+                                const availableForThisType = inventory.filter(i => {
+                                    if (item.item_type === 'MAY') return i.item_type === 'MAY';
+                                    if (item.item_type === 'BINH') return i.item_type === 'BINH';
+                                    if (item.item_type === 'VAT_TU') return i.item_type === 'VAT_TU';
+                                    return true;
+                                });
+                                const optionsList = availableForThisType.map(i => ({
+                                    value: i.item_name, label: `${i.item_name} (Tồn: ${i.quantity})`
+                                }));
+
+                                return (
+                                    <div key={item.id} className="relative rounded-2xl border border-slate-200 bg-slate-50/50 p-4 space-y-4 shadow-sm">
+                                        {/* Remove line button */}
+                                        {transferItems.length > 1 && (
+                                            <button 
+                                                type="button" 
+                                                onClick={() => removeRow(itemIdx)}
+                                                className="absolute top-4 right-4 text-rose-400 hover:text-rose-600 hover:bg-rose-50 p-1.5 rounded-lg transition-all"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
+                                        )}
+
+                                        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-3 pr-8 md:pr-10">
+                                            {/* Type */}
+                                            <div className="md:col-span-3 space-y-1">
+                                                <label className="text-[12px] font-bold text-slate-500">Phân loại</label>
+                                                <div className="flex gap-1 p-1 bg-white border border-slate-200 rounded-xl">
+                                                    {['MAY', 'BINH', 'VAT_TU'].map(type => (
                                                         <button
+                                                            key={type}
                                                             type="button"
-                                                            onClick={() => handleRemoveCode(idx)}
-                                                            className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+                                                            onClick={() => updateRowType(itemIdx, type)}
+                                                            className={clsx(
+                                                                "flex-1 !h-8 py-0.5 px-1 rounded-lg text-[11px] font-bold transition-all",
+                                                                item.item_type === type
+                                                                    ? "bg-slate-100 text-primary shadow-sm"
+                                                                    : "bg-transparent text-slate-400 hover:text-slate-600"
+                                                            )}
                                                         >
-                                                            <X size={14} />
+                                                            {type === 'MAY' ? 'Máy' : type === 'BINH' ? 'Bình' : 'Vật tư'}
                                                         </button>
-                                                    )}
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => startScanner(idx)}
-                                                        className="p-1.5 text-primary/40 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
-                                                    >
-                                                        <ScanLine size={14} />
-                                                    </button>
+                                                    ))}
                                                 </div>
                                             </div>
-                                            {entry.status !== 'pending' && entry.message && (
-                                                <p className={clsx(
-                                                    "text-[10px] font-bold mt-0.5 px-1",
-                                                    entry.status === 'valid' ? "text-emerald-600" : "text-rose-500"
-                                                )}>
-                                                    {entry.message}
-                                                </p>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            </div>
 
-                            {/* Validation button */}
-                            {filledCount > 0 && (
-                                <button
-                                    type="button"
-                                    onClick={validateCodes}
-                                    disabled={isValidating}
-                                    className="w-full py-2.5 flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[13px] rounded-2xl transition-all border border-slate-200 disabled:opacity-50"
-                                >
-                                    {isValidating ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-                                    {isValidating ? 'Đang kiểm tra...' : `Kiểm tra ${filledCount} mã`}
-                                </button>
+                                            {/* Name */}
+                                            <div className="md:col-span-6 space-y-1">
+                                                <label className="text-[12px] font-bold text-slate-500">Tên hàng hóa</label>
+                                                <SearchableSelect
+                                                    options={optionsList}
+                                                    value={item.item_name}
+                                                    onValueChange={(val) => updateRowName(itemIdx, val)}
+                                                    disabled={!formData.from_warehouse_id}
+                                                    placeholder="Chọn vật tư..."
+                                                    searchPlaceholder="Tìm kiếm..."
+                                                    className="!h-10 !rounded-xl text-[13px]"
+                                                />
+                                            </div>
+
+                                            {/* Quantity */}
+                                            <div className="md:col-span-3 space-y-1">
+                                                <label className="text-[12px] font-bold text-slate-500">Số lượng (SL)</label>
+                                                <div className="relative">
+                                                    <input
+                                                        type="text"
+                                                        inputMode="numeric"
+                                                        value={item.quantity}
+                                                        onChange={(e) => updateRowQuantity(itemIdx, e.target.value)}
+                                                        className="w-full h-10 pl-3 pr-16 bg-white border border-slate-200 rounded-xl text-[13px] font-bold outline-none focus:ring-2 focus:ring-primary/20"
+                                                        placeholder="0"
+                                                        disabled={!item.item_name}
+                                                    />
+                                                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center bg-slate-100 text-slate-500 text-[10px] font-bold px-1.5 py-1 rounded truncate max-w-[50px]">
+                                                        Max:{item.maxQuantity}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* SCANNERS FOR THIS ROW */}
+                                        {needsScan && item.quantity > 0 && item.item_name && (
+                                            <div className="mt-3 pt-3 border-t border-slate-200">
+                                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <ScanLine size={14} className="text-primary" />
+                                                        <span className="text-[13px] font-bold text-primary">Chi tiết mã {item.item_type === 'BINH' ? 'Bình' : 'Máy'} ({filledCount}/{totalSlots})</span>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={validateCodes}
+                                                            disabled={isValidating || filledCount === 0}
+                                                            className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 text-[12px] font-bold rounded-lg hover:bg-slate-50 transition-all disabled:opacity-50"
+                                                        >
+                                                            {isValidating ? 'Đang...' : 'Kiểm tra mã'}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => startScanAllForItem(itemIdx)}
+                                                            className="px-3 py-1.5 bg-primary/10 text-primary text-[12px] font-bold rounded-lg hover:bg-primary/20 transition-all"
+                                                        >
+                                                            <ScanLine size={14} className="inline mr-1"/> Quét Camera
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
+                                                    {item.specific_codes.map((entry, codeIdx) => {
+                                                        const isDup = duplicateIndicesSet.has(`${itemIdx}-${codeIdx}`);
+                                                        return (
+                                                            <div key={codeIdx} className="relative group">
+                                                                <div className="relative">
+                                                                    <div className="absolute left-2.5 top-1/2 -translate-y-1/2 z-10">
+                                                                        {getStatusIcon(isDup ? 'invalid' : entry.status)}
+                                                                    </div>
+                                                                    <input
+                                                                        value={entry.code}
+                                                                        onChange={(e) => handleCodeChange(itemIdx, codeIdx, e.target.value)}
+                                                                        placeholder={`Mã #${codeIdx + 1}`}
+                                                                        className={clsx(
+                                                                            "w-full h-9 pl-8 pr-16 border rounded-lg text-[12px] font-mono font-bold transition-all outline-none focus:ring-2 focus:ring-primary/10",
+                                                                            getStatusBorder(isDup ? 'invalid' : entry.status, isDup)
+                                                                        )}
+                                                                    />
+                                                                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => startScannerCode(itemIdx, codeIdx)}
+                                                                            className="p-1 text-primary/40 hover:text-primary transition-all"
+                                                                        >
+                                                                            <ScanLine size={12} />
+                                                                        </button>
+                                                                        {entry.code && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleRemoveCode(itemIdx, codeIdx)}
+                                                                                className="p-1 text-slate-400 hover:text-rose-500 transition-all ml-0.5"
+                                                                            >
+                                                                                <X size={12} />
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                                {entry.status !== 'pending' && entry.message && (
+                                                                    <p className={clsx("text-[9px] font-bold mt-0.5 ml-1", entry.status === 'valid' ? "text-emerald-600" : "text-rose-500")}>
+                                                                        {entry.message}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                            
+                            {transferItems.length === 0 && (
+                                <div className="text-center py-6 text-slate-400 text-[13px] font-semibold border-2 border-dashed border-slate-200 rounded-2xl">
+                                    Vui lòng nhấn "Thêm Dòng" để bắt đầu chọn hàng hóa
+                                </div>
                             )}
                         </div>
-                    )}
+                    </div>
 
-                    {/* BBBG & Handover Photo Section */}
+                    {/* Certs Section */}
                     <div className="rounded-3xl border border-primary/20 bg-white p-5 sm:p-6 space-y-5 shadow-sm">
-                         <div className="flex items-center justify-between pb-3 border-b border-primary/10">
+                        <div className="flex items-center justify-between pb-3 border-b border-primary/10">
                             <div className="flex items-center gap-2.5">
                                 <ClipboardList className="w-4 h-4 text-primary" />
                                 <h4 className="text-[18px] !font-extrabold !text-primary">Chứng từ và Hình Ảnh Bàn Giao</h4>
@@ -943,51 +975,36 @@ const InventoryTransfer = () => {
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
-                            {/* BBBG Button */}
                             <div className="space-y-2">
-                                <label className="flex items-center gap-1.5 text-[14px] font-semibold text-primary">Biên Bản Bàn Giao</label>
+                                <label className="flex items-center gap-1.5 text-[14px] font-semibold text-primary">Biên Bản Bàn Giao (In Hàng Loạt)</label>
                                 <button
                                     type="button"
                                     onClick={handlePrintBBBG}
-                                    disabled={!formData.to_warehouse_id || !formData.item_name}
+                                    disabled={!formData.to_warehouse_id || transferItems.filter(i => i.item_name).length === 0}
                                     className="w-full h-11 md:h-12 flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold border border-slate-300 rounded-2xl transition-all disabled:opacity-50"
                                 >
-                                    <Printer size={18} /> In Biên Bản Bàn Giao (Mẫu CHS)
+                                    <Printer size={18} /> In Biên Bản (Mẫu CHS)
                                 </button>
-                                <p className="text-[11px] text-slate-500 italic mt-1 px-1">Cho phép in BBBG lưu nháp để các bên ký nhận.</p>
+                                <p className="text-[11px] text-slate-500 italic mt-1 px-1">Cho phép in BBBG tổng hợp các mặt hàng.</p>
                             </div>
 
-                            {/* Photo Upload */}
                             <div className="space-y-2">
-                                <label className="flex items-center gap-1.5 text-[14px] font-semibold text-primary">Ảnh chụp bàn giao (BBBG đã ký, Hàng hóa...)</label>
+                                <label className="flex items-center gap-1.5 text-[14px] font-semibold text-primary">Ảnh chụp bàn giao (BBBG đã ký...)</label>
                                 {uploadedImage ? (
-                                     <div className="relative h-11 md:h-12 rounded-2xl border border-emerald-500 bg-emerald-50 flex items-center justify-between px-3 group overflow-hidden">
+                                    <div className="relative h-11 md:h-12 rounded-2xl border border-emerald-500 bg-emerald-50 flex items-center justify-between px-3 group overflow-hidden">
                                         <div className="flex items-center gap-2">
                                             <ImageIcon size={18} className="text-emerald-600" />
-                                            <span className="text-[13px] font-bold text-emerald-700 truncate max-w-[150px]">Đã tải lên ảnh chụp</span>
+                                            <span className="text-[13px] font-bold text-emerald-700 truncate max-w-[150px]">Ảnh đính kèm</span>
                                             <a href={uploadedImage} target="_blank" rel="noopener noreferrer" className="text-[11px] text-emerald-600 underline">Xem</a>
                                         </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => setUploadedImage(null)}
-                                            className="p-1.5 bg-rose-100 text-rose-600 rounded-lg hover:bg-rose-200 transition-colors"
-                                        >
-                                            <X size={14} />
-                                        </button>
-                                     </div>
+                                        <button type="button" onClick={() => setUploadedImage(null)} className="p-1.5 bg-rose-100 text-rose-600 rounded-lg hover:bg-rose-200 transition-colors"><X size={14} /></button>
+                                    </div>
                                 ) : (
                                     <div className="relative h-11 md:h-12">
-                                        <input
-                                            type="file"
-                                            accept="image/*"
-                                            capture="environment"
-                                            onChange={handleUploadImage}
-                                            disabled={uploading}
-                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                                        />
+                                        <input type="file" accept="image/*" capture="environment" onChange={handleUploadImage} disabled={uploading} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
                                         <div className="w-full h-full border border-dashed border-primary/40 rounded-2xl flex items-center justify-center gap-2 text-primary/70 bg-primary/5 hover:bg-primary/10 transition-colors">
                                             {uploading ? <Loader2 size={18} className="animate-spin" /> : <Camera size={18} />}
-                                            <span className="text-[13px] font-bold">{uploading ? 'Đang tải lên...' : 'Bấm tải ảnh bàn giao'}</span>
+                                            <span className="text-[13px] font-bold">{uploading ? 'Đang tải...' : 'Chụp/Tải ảnh'}</span>
                                         </div>
                                     </div>
                                 )}
@@ -995,7 +1012,6 @@ const InventoryTransfer = () => {
                         </div>
                     </div>
 
-                    {/* Hidden Print Template */}
                     {printBBBG && createPortal(
                         <div className="print-only-content">
                             <MachineHandoverPrintTemplate orders={[mockOrderForBBBG]} />
@@ -1003,40 +1019,26 @@ const InventoryTransfer = () => {
                         document.body
                     )}
 
-                    {/* Bottom Actions */}
                     <div className="fixed md:static z-40 bottom-0 left-0 right-0 border-t md:border-none border-slate-200 p-4 md:p-0 bg-white md:bg-transparent flex flex-col-reverse sm:flex-row gap-3 md:gap-4 pt-4 items-center justify-end shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)] md:shadow-none pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-16 mt-6 md:mt-0">
-                        <button
-                            type="button"
-                            onClick={() => navigate(-1)}
-                            className="w-full sm:w-auto px-6 py-3 font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all text-[14px]"
-                        >
+                        <button type="button" onClick={() => navigate(-1)} className="w-full sm:w-auto px-6 py-3 font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all text-[14px]">
                             Hủy bỏ
                         </button>
-                        <button
-                            type="submit"
-                            disabled={loading || isValidating}
-                            className={clsx(
-                                "w-full sm:w-auto px-6 py-3 font-bold text-[15px] rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 border disabled:opacity-50",
-                                "bg-primary text-white border-primary/40 hover:bg-primary/90 shadow-primary/20",
-                                (loading || isValidating) && "opacity-70 cursor-not-allowed"
-                            )}
-                        >
+                        <button type="submit" disabled={loading || isValidating} className={clsx("w-full sm:w-auto px-8 py-3 font-bold text-[15px] rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 border disabled:opacity-50", "bg-primary text-white border-primary/40 hover:bg-primary/90 shadow-primary/20", (loading || isValidating) && "opacity-70 cursor-not-allowed")}>
                             {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
-                            Xác nhận điều chuyển
+                            Ghi Nhận Chuyển Kho
                         </button>
                     </div>
                 </form>
             </div>
 
-            {/* Barcode Scanner Modal */}
             <BarcodeScanner
                 isOpen={isScannerOpen}
-                onClose={() => { setIsScannerOpen(false); setScanTargetIdx(-1); }}
+                onClose={() => { setIsScannerOpen(false); setScanTargetItemIdx(-1); setScanTargetCodeIdx(-1); }}
                 onScanSuccess={handleScanSuccess}
-                title={`Quét mã ${formData.item_type === 'BINH' ? 'bình' : 'máy'} #${scanTargetIdx + 1}`}
+                title={scanTargetItemIdx >= 0 ? `Quét Mã ${(transferItems[scanTargetItemIdx]?.item_type) === 'BINH' ? 'Bình' : 'Máy'} #${scanTargetCodeIdx + 1}` : 'Quét Mã'}
                 elementId="transfer-barcode-reader"
-                currentCount={filledCount}
-                totalCount={totalSlots}
+                currentCount={scanTargetItemIdx >= 0 ? transferItems[scanTargetItemIdx].specific_codes.filter(c => c.code).length : 0}
+                totalCount={scanTargetItemIdx >= 0 ? transferItems[scanTargetItemIdx].specific_codes.length : 0}
             />
         </div>
     );

@@ -166,19 +166,31 @@ const HandoverItem = ({ order }) => {
     const month = String(today.getMonth() + 1).padStart(2, '0');
     const year = today.getFullYear();
 
-    const productLabel = getProductLabel(order.product_type);
-
     // Build rows for the table
     const rows = [];
-    rows.push({
-        tt: 1,
-        content: productLabel,
-        qty: order.quantity || 1,
-        status: '',
-        machineCode: order.department || '',
-    });
-
-
+    if (order.items && order.items.length > 0) {
+        order.items.forEach((item, index) => {
+            const productLabel = getProductLabel(item.product_type) || item.product_name;
+            const isVatTu = item.product_type === 'VAT_TU';
+            
+            rows.push({
+                tt: index + 1,
+                content: isVatTu ? (item.product_name || productLabel) : productLabel,
+                qty: item.quantity || 1,
+                status: '',
+                machineCode: item.codesList || '',
+            });
+        });
+    } else {
+        const productLabel = getProductLabel(order.product_type);
+        rows.push({
+            tt: 1,
+            content: productLabel,
+            qty: order.quantity || 1,
+            status: '',
+            machineCode: order.department || '',
+        });
+    }
 
     return (
         <div className="order-print-page" style={S.page}>
