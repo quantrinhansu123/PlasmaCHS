@@ -30,6 +30,7 @@ import {
     BarChart2,
     Calendar,
     Clock,
+    User,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useEffect, useState, cloneElement } from 'react';
@@ -347,7 +348,7 @@ export default function MachineRecoveries() {
                                                     </span>
                                                 </td>
                                                 <td className="px-5 py-3.5">
-                                                    <div className="flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <div className="flex items-center justify-center gap-1.5 transition-opacity">
                                                         <button onClick={() => handlePrint(r)} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-all"><Printer size={16} /></button>
                                                         <button onClick={() => { setRecoveryToEdit(r); setIsFormModalOpen(true); }} className="p-1.5 text-slate-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-all"><Edit size={16} /></button>
                                                         <button onClick={() => handleDelete(r.id, r.recovery_code)} className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"><Trash2 size={16} /></button>

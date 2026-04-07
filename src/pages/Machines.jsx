@@ -33,7 +33,7 @@ import {
     Wrench,
     X
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { useNavigate } from 'react-router-dom';
@@ -128,8 +128,10 @@ const Machines = () => {
             const saved = JSON.parse(localStorage.getItem('columns_machines_order') || 'null');
             if (Array.isArray(saved) && saved.length > 0) {
                 const valid = saved.filter(key => defaultColOrder.includes(key));
-                const missing = defaultColOrder.filter(key => !valid.includes(key));
-                return [...valid, ...missing];
+                // Ensure 'quantity' is NOT in the valid list since it was removed
+                const filtered = valid.filter(key => key !== 'quantity');
+                const missing = defaultColOrder.filter(key => !filtered.includes(key));
+                return [...filtered, ...missing];
             }
         } catch { }
         return defaultColOrder;
@@ -151,6 +153,7 @@ const Machines = () => {
         .filter(key => visibleColumns.includes(key))
         .map(key => TABLE_COLUMNS.find(col => col.key === key))
         .filter(Boolean);
+
     const isColumnVisible = (key) => visibleColumns.includes(key);
     const visibleCount = visibleColumns.length;
     const totalCount = defaultColOrder.length;
@@ -178,6 +181,7 @@ const Machines = () => {
             if (selectedMachineTypes.length > 0) query = query.in('machine_type', selectedMachineTypes);
             if (selectedCustomers.length > 0) query = query.in('customer_name', selectedCustomers);
             if (selectedDepartments.length > 0) query = query.in('department_in_charge', selectedDepartments);
+            if (selectedWarehouses.length > 0) query = query.in('warehouse', selectedWarehouses);
 
             // Apply warehouse filter for warehouse managers/staff (Non-Admin)
             if (role !== 'Admin' && department) {
@@ -827,6 +831,12 @@ const Machines = () => {
                         onFilterClick={openMobileFilter}
                         hasActiveFilters={hasActiveFilters}
                         totalActiveFilters={totalActiveFilters}
+                        summary={
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200 shadow-sm">
+                                <span className="text-[11px] font-bold text-slate-600 uppercase tracking-tight">Số lượng máy:</span>
+                                <span className="text-[16px] font-black text-slate-900 font-mono leading-none">{totalRecords}</span>
+                            </div>
+                        }
                         actions={
                             <>
                                 <div className="relative">
@@ -937,9 +947,9 @@ const Machines = () => {
                                     <div className="grid grid-cols-2 gap-2 mb-3 rounded-xl bg-muted/10 border border-border/60 p-2.5">
                                         <div>
                                             <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Loại máy</p>
-                                            <p className="text-[12px] text-foreground font-medium">
+                                            <div className="flex items-center gap-1.5 mt-0.5">
                                                 <span className={getMachineTypeBadgeClass(machine.machine_type)}>{getLabel(MACHINE_TYPES, machine.machine_type)}</span>
-                                            </p>
+                                            </div>
                                         </div>
                                         <div>
                                             <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Đại lý</p>
@@ -1240,6 +1250,16 @@ const Machines = () => {
                                     Xóa bộ lọc
                                 </button>
                             )}
+
+                            <div className="ml-auto flex items-center gap-4 px-5 py-2.5 rounded-2xl bg-slate-50 border-2 border-slate-200 shadow-md animate-in fade-in slide-in-from-right-4 duration-500 ring-4 ring-slate-50">
+                                <div className="flex flex-col items-end">
+                                    <span className="text-[10px] font-black text-slate-800 uppercase tracking-[0.2em] leading-none mb-1.5">Tổng máy móc</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[24px] font-black text-slate-900 font-mono leading-none drop-shadow-sm">{totalRecords.toLocaleString()}</span>
+                                        <span className="text-[14px] font-bold text-slate-800 uppercase tracking-widest">máy</span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -1295,18 +1315,21 @@ const Machines = () => {
                                                 className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
                                             />
                                         </td>
-                                        {isColumnVisible('serial_number') && <td className={getSerialCellClass(machine.status)}>{machine.serial_number}</td>}
-                                        {isColumnVisible('machine_type') && <td className="px-4 py-4 text-sm text-muted-foreground">{getLabel(MACHINE_TYPES, machine.machine_type)}</td>}
-                                        {isColumnVisible('warehouse') && <td className="px-4 py-4 text-sm text-muted-foreground">{getWarehouseLabel(machine.warehouse)}</td>}
-                                        {isColumnVisible('customer_name') && <td className="px-4 py-4 text-sm font-semibold text-foreground">{machine.customer_name || '—'}</td>}
-                                        {isColumnVisible('status') && (
-                                            <td className="px-4 py-4">
-                                                <span className={clsx('inline-flex items-center px-3 py-1 text-[11px] font-bold rounded-full border', getStatusBadgeClass(machine.status))}>
-                                                    {getStatusLabel(machine.status)}
-                                                </span>
-                                            </td>
-                                        )}
-                                        {isColumnVisible('department_in_charge') && <td className="px-4 py-4 text-sm text-muted-foreground">{machine.department_in_charge || '—'}</td>}
+                                        {columnOrder.filter(isColumnVisible).map(colKey => {
+                                            if (colKey === 'serial_number') return <td key={colKey} className={getSerialCellClass(machine.status)}>{machine.serial_number}</td>;
+                                            if (colKey === 'machine_type') return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{getLabel(MACHINE_TYPES, machine.machine_type)}</td>;
+                                            if (colKey === 'warehouse') return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{getWarehouseLabel(machine.warehouse)}</td>;
+                                            if (colKey === 'customer_name') return <td key={colKey} className="px-4 py-4 text-sm font-semibold text-foreground">{machine.customer_name || '—'}</td>;
+                                            if (colKey === 'status') return (
+                                                <td key={colKey} className="px-4 py-4">
+                                                    <span className={clsx('inline-flex items-center px-3 py-1 text-[11px] font-bold rounded-full border', getStatusBadgeClass(machine.status))}>
+                                                        {getStatusLabel(machine.status)}
+                                                    </span>
+                                                </td>
+                                            );
+                                            if (colKey === 'department_in_charge') return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{machine.department_in_charge || '—'}</td>;
+                                            return null;
+                                        })}
                                         <td className="px-4 py-4 text-center border-l border-r border-primary/20">
                                             <div className="flex items-center justify-center gap-3">
                                                 <button onClick={() => handleViewMachine(machine)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="Xem chi tiết">
@@ -1369,6 +1392,12 @@ const Machines = () => {
                             onFilterClick={openMobileFilter}
                             hasActiveFilters={hasActiveFilters}
                             totalActiveFilters={totalActiveFilters}
+                            summary={
+                                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200 shadow-sm">
+                                    <span className="text-[11px] font-bold text-slate-600 uppercase tracking-tight">Số lượng máy:</span>
+                                    <span className="text-[16px] font-black text-slate-900 font-mono leading-none">{totalRecords}</span>
+                                </div>
+                            }
                         />
 
                         <div className="hidden md:block p-4 border-b border-border" ref={dropdownRef}>
@@ -1529,6 +1558,16 @@ const Machines = () => {
                                         Xóa bộ lọc
                                     </button>
                                 )}
+
+                                <div className="ml-auto flex items-center gap-4 px-5 py-2.5 rounded-2xl bg-slate-50 border-2 border-slate-200 shadow-md animate-in fade-in slide-in-from-right-4 duration-500 ring-4 ring-slate-50">
+                                    <div className="flex flex-col items-end">
+                                        <span className="text-[10px] font-black text-slate-800 uppercase tracking-[0.2em] leading-none mb-1.5">Kết quả lọc</span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[24px] font-black text-slate-900 font-mono leading-none drop-shadow-sm">{totalRecords.toLocaleString()}</span>
+                                            <span className="text-[14px] font-bold text-slate-800 uppercase tracking-widest">máy</span>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 

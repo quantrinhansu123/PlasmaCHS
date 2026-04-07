@@ -22,7 +22,7 @@ CREATE TABLE customers (
     customer_type VARCHAR(50), -- Loại khách hàng: công (BV công), tư (BV tư, TM, PK, NG, SP)
     last_order_date DATE, -- Ngày đặt hàng gần nhất (dùng tính KH quá hạn)
     care_expiry_date DATE, -- Ngày hết hạn chăm sóc (mặc định 60 ngày)
-    status VARCHAR(50) DEFAULT 'Chưa thành công', -- Trạng thái: Thành công, Chưa thành công
+    status VARCHAR(50) DEFAULT 'Thành công', -- Trạng thái: Thành công, Chưa thành công
     success_at TIMESTAMP WITH TIME ZONE, -- Thời điểm chuyển Thành công (ngày thành công); NULL nếu chưa TC
     
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

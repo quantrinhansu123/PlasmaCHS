@@ -151,19 +151,22 @@ SELECT
     cy.expiry_date AS ngay_het_han,
     GREATEST(0, CURRENT_DATE - cy.expiry_date) AS so_ngay_ton,
     c.care_by AS nhan_vien_kinh_doanh,
-    CASE 
-        WHEN w.name IS NOT NULL THEN w.name
-        WHEN c.warehouse_id = 'HN' THEN 'Kho Hà Nội'
-        WHEN c.warehouse_id = 'TP.HCM' THEN 'Kho TP.HCM'
-        WHEN c.warehouse_id = 'TH' THEN 'Kho Thanh Hóa'
-        WHEN c.warehouse_id = 'DN' THEN 'Kho Đà Nẵng'
-        ELSE c.warehouse_id 
-    END AS kho
+    COALESCE(
+        w_cyl.name,
+        w_cust.name,
+        CASE 
+            WHEN c.warehouse_id = 'HN' THEN 'Kho Hà Nội'
+            WHEN c.warehouse_id = 'TP.HCM' THEN 'Kho TP.HCM'
+            WHEN c.warehouse_id = 'TH' THEN 'Kho Thanh Hóa'
+            WHEN c.warehouse_id = 'DN' THEN 'Kho Đà Nẵng'
+            ELSE c.warehouse_id 
+        END
+    ) AS kho
 FROM cylinders cy
 LEFT JOIN customers c ON c.name = cy.customer_name
-LEFT JOIN warehouses w ON (w.id::text = c.warehouse_id OR w.name = c.warehouse_id)
-WHERE cy.expiry_date IS NOT NULL 
-AND cy.expiry_date < CURRENT_DATE;
+LEFT JOIN warehouses w_cyl ON w_cyl.id = cy.warehouse_id
+LEFT JOIN warehouses w_cust ON (w_cust.id::text = c.warehouse_id OR w_cust.name = c.warehouse_id)
+WHERE cy.expiry_date IS NOT NULL;
 
 -- ==============================================================================
 -- View: Khách hàng quá hạn (chưa phát sinh đơn trong X ngày)

@@ -42,6 +42,7 @@ import * as XLSX from 'xlsx';
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import RepairTicketForm from '../components/Repairs/RepairTicketForm';
+import { toast } from 'react-toastify';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
@@ -250,6 +251,24 @@ export default function RepairTickets() {
     }, [activeDropdown, showColumnPicker, showMobileMenu]);
 
     useEffect(() => { fetchData(); }, []);
+
+    // Setup Real-time subscription for repair_tickets
+    useEffect(() => {
+        const channel = supabase
+            .channel('public:repair_tickets_changes')
+            .on('postgres_changes', {
+                event: '*', // INSERT, UPDATE, DELETE
+                schema: 'public',
+                table: 'repair_tickets'
+            }, () => {
+                fetchData();
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, []);
 
     useEffect(() => {
         setCurrentPage(1);

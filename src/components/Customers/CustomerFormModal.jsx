@@ -42,7 +42,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
         invoice_email: '',
         care_expiry_date: '',
         care_assigned_at: '',
-        status: 'Chưa thành công'
+        status: 'Thành công'
     });
 
     useEffect(() => {
@@ -66,7 +66,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                 invoice_email: customer.invoice_email || '',
                 care_expiry_date: customer.care_expiry_date || '',
                 care_assigned_at: customer.care_assigned_at || '',
-                status: customer.status || 'Chưa thành công'
+                status: customer.status || 'Thành công'
             });
         } else {
             // Auto generate CODE
@@ -107,7 +107,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
     useEffect(() => {
         const fetchStaff = async () => {
             try {
-                const { data } = await supabase.from('app_users').select('id, name, role').order('name');
+                const { data } = await supabase.from('app_users').select('id, name, role, department').order('name');
                 if (data) setStaffList(data);
             } catch (err) {
                 console.error(err);
@@ -142,6 +142,21 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
             setFormData(prev => ({
                 ...prev,
                 care_assigned_at: value ? new Date(`${value}T12:00:00`).toISOString() : '',
+            }));
+        } else if (name === 'warehouse_id') {
+            const selectedWarehouse = warehouses?.find(w => w.id === value);
+            setFormData(prev => ({
+                ...prev,
+                warehouse_id: value,
+                legal_rep: selectedWarehouse?.manager_name || prev.legal_rep,
+                agency_name: selectedWarehouse?.branch_office || prev.agency_name
+            }));
+        } else if (name === 'managed_by') {
+            const selectedStaff = staffList?.find(u => u.name === value);
+            setFormData(prev => ({
+                ...prev,
+                managed_by: value,
+                agency_name: selectedStaff?.department || prev.agency_name
             }));
         } else {
             setFormData(prev => ({ ...prev, [name]: value }));

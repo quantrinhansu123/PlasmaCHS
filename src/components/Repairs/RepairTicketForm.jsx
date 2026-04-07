@@ -450,7 +450,7 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                     link: '/phieu-sua-chua'
                 });
 
-                toast.success('Tạo phiếu sửa chữa mới thành công');
+                toast.success('Gửi yêu cầu sửa chữa thành công');
             }
             onSuccess();
         } catch (error) {

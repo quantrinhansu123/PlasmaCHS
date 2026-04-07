@@ -1080,9 +1080,28 @@ const Orders = () => {
                                                 <button
                                                     onClick={() => handleEditOrder(order)}
                                                     className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg active:scale-90 transition-all"
+                                                    title="Sửa đơn hàng"
                                                 >
                                                     <Edit size={18} />
                                                 </button>
+                                                {order.order_type === 'DNXM' && (
+                                                    <>
+                                                        <button
+                                                            onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${order.id}&viewOnly=true`)}
+                                                            className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg active:scale-90 transition-all"
+                                                            title="Xem Phiếu ĐNXM"
+                                                        >
+                                                            <Eye size={18} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${order.id}`)}
+                                                            className="p-2 text-orange-700 bg-orange-50 border border-orange-100 rounded-lg active:scale-90 transition-all"
+                                                            title="Sửa Phiếu ĐNXM"
+                                                        >
+                                                            <Edit size={18} />
+                                                        </button>
+                                                    </>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -1487,11 +1506,7 @@ const Orders = () => {
                                                             >
                                                                 <button
                                                                     onClick={() => {
-                                                                        if (order.order_type === 'DNXM') {
-                                                                            navigate(`/de-nghi-xuat-may/tao?orderId=${order.id}&viewOnly=true`);
-                                                                        } else {
-                                                                            handleViewOrder(order);
-                                                                        }
+                                                                        handleViewOrder(order);
                                                                         setActiveRowMenu(null);
                                                                     }}
                                                                     className="w-full flex items-center gap-3 px-4 py-2.5 text-indigo-600 hover:bg-indigo-50 transition-colors text-[13px] font-bold"
@@ -1500,13 +1515,22 @@ const Orders = () => {
                                                                     Xem đơn hàng
                                                                 </button>
 
+                                                                {order.order_type === 'DNXM' && (
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            navigate(`/de-nghi-xuat-may/tao?orderId=${order.id}&viewOnly=true`);
+                                                                            setActiveRowMenu(null);
+                                                                        }}
+                                                                        className="w-full flex items-center gap-3 px-4 py-2.5 text-blue-600 hover:bg-blue-50 transition-colors text-[13px] font-bold"
+                                                                    >
+                                                                        <Eye className="w-4 h-4" />
+                                                                        Xem phiếu Đề nghị xuất máy
+                                                                    </button>
+                                                                )}
+
                                                                 <button
                                                                     onClick={() => {
-                                                                        if (order.order_type === 'DNXM') {
-                                                                            navigate(`/de-nghi-xuat-may/tao?orderId=${order.id}`);
-                                                                        } else {
-                                                                            handleEditOrder(order);
-                                                                        }
+                                                                        handleEditOrder(order);
                                                                         setActiveRowMenu(null);
                                                                     }}
                                                                     className="w-full flex items-center gap-3 px-4 py-2.5 text-amber-600 hover:bg-amber-50 transition-colors text-[13px] font-bold"
@@ -1514,6 +1538,19 @@ const Orders = () => {
                                                                     <Edit className="w-4 h-4" />
                                                                     Sửa đơn hàng
                                                                 </button>
+
+                                                                {order.order_type === 'DNXM' && (
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            navigate(`/de-nghi-xuat-may/tao?orderId=${order.id}`);
+                                                                            setActiveRowMenu(null);
+                                                                        }}
+                                                                        className="w-full flex items-center gap-3 px-4 py-2.5 text-orange-600 hover:bg-orange-50 transition-colors text-[13px] font-bold"
+                                                                    >
+                                                                        <Edit className="w-4 h-4" />
+                                                                        Sửa phiếu Đề nghị xuất máy
+                                                                    </button>
+                                                                )}
 
                                                                 <div className="h-px bg-slate-100 my-1 mx-2" />
 

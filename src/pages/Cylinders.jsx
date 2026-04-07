@@ -198,14 +198,9 @@ const Cylinders = () => {
 
     const fetchFilterOptions = async () => {
         try {
-            // Fetch unique volumes
-            const { data: volData } = await supabase.rpc('get_unique_cylinder_volumes');
-            if (volData) setUniqueVolumes(volData.map(v => v.volume).filter(Boolean));
-            else {
-                // Fallback if RPC doesn't exist
-                const { data } = await supabase.from('cylinders').select('volume').not('volume', 'is', null);
-                if (data) setUniqueVolumes([...new Set(data.map(d => d.volume))]);
-            }
+            // Lấy danh sách volume (thể tích) trực tiếp không qua RPC để tránh báo lỗi đỏ trong console
+            const { data: volData } = await supabase.from('cylinders').select('volume').not('volume', 'is', null);
+            if (volData) setUniqueVolumes([...new Set(volData.map(d => d.volume))]);
 
             // Fetch unique customers
             const { data: custData } = await supabase.from('customers').select('name').order('name');

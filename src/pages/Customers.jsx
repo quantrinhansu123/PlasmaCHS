@@ -30,7 +30,6 @@ import {
     Plus,
     Search,
     SlidersHorizontal,
-    Ticket,
     ToggleLeft,
     ToggleRight,
     Trash2,
@@ -49,7 +48,6 @@ import CustomerFormModal from '../components/Customers/CustomerFormModal';
 import MobilePageHeader from '../components/layout/MobilePageHeader';
 import MobilePagination from '../components/layout/MobilePagination';
 import PageViewSwitcher from '../components/layout/PageViewSwitcher';
-import RepairTicketForm from '../components/Repairs/RepairTicketForm';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
@@ -79,7 +77,6 @@ const Customers = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
-    const [isRepairModalOpen, setIsRepairModalOpen] = useState(false);
     const [selectedCustomer, setSelectedCustomer] = useState(null);
 
     const [selectedCategories, setSelectedCategories] = useState([]);
@@ -307,7 +304,7 @@ const Customers = () => {
 
     const fetchWarehouses = async () => {
         try {
-            const { data } = await supabase.from('warehouses').select('id, name').eq('status', 'Đang hoạt động').order('name');
+            const { data } = await supabase.from('warehouses').select('id, name, manager_name, branch_office').eq('status', 'Đang hoạt động').order('name');
             if (data) {
                 setWarehousesList(data);
             }
@@ -590,11 +587,6 @@ const Customers = () => {
         }
     };
 
-    const handleRepairSubmitSuccess = () => {
-        setIsRepairModalOpen(false);
-        // Maybe navigate to repair tickets or just show success
-        alert('✅ Đã tạo phiếu sửa chữa thành công!');
-    };
 
     const toggleSelectOne = (id) => {
         setSelectedIds(prev =>
@@ -1311,7 +1303,7 @@ const Customers = () => {
                                             >
                                                 {c.status === 'Thành công' ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
                                             </button>
-                                            {filterType === 'lead' ? (
+                                            {filterType === 'lead' && (
                                                 <button
                                                     type="button"
                                                     onClick={() =>
@@ -1329,18 +1321,6 @@ const Customers = () => {
                                                     title="Check trạng thái — chuyển Thành công / Chưa thành công"
                                                 >
                                                     <ClipboardCheck size={16} />
-                                                </button>
-                                            ) : (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setSelectedCustomer(c);
-                                                        setIsRepairModalOpen(true);
-                                                    }}
-                                                    className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg shrink-0"
-                                                    title="Báo hỏng"
-                                                >
-                                                    <Ticket size={16} />
                                                 </button>
                                             )}
                                             <button
@@ -1670,7 +1650,7 @@ const Customers = () => {
                                                             <FilePlus size={16} className="w-4 h-4" />
                                                         </button>
                                                     )}
-                                                    {filterType === 'lead' ? (
+                                                   {filterType === 'lead' && (
                                                         <button
                                                             type="button"
                                                             onClick={() =>
@@ -1688,18 +1668,6 @@ const Customers = () => {
                                                             title="Check trạng thái — nhấn để chuyển Thành công / Chưa thành công"
                                                         >
                                                             <ClipboardCheck size={16} className="w-4 h-4 pointer-events-none" />
-                                                        </button>
-                                                    ) : (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setSelectedCustomer(c);
-                                                                setIsRepairModalOpen(true);
-                                                            }}
-                                                            className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50 shrink-0 min-w-9 min-h-9 inline-flex items-center justify-center"
-                                                            title="Báo hỏng"
-                                                        >
-                                                            <Ticket size={16} className="w-4 h-4 pointer-events-none" />
                                                         </button>
                                                     )}
                                                     <button
@@ -2133,14 +2101,6 @@ const Customers = () => {
                 <CustomerDetailsModal
                     customer={selectedCustomer}
                     onClose={() => setIsDetailsModalOpen(false)}
-                />
-            )}
-
-            {isRepairModalOpen && selectedCustomer && (
-                <RepairTicketForm
-                    initialCustomer={selectedCustomer}
-                    onClose={() => setIsRepairModalOpen(false)}
-                    onSuccess={handleRepairSubmitSuccess}
                 />
             )}
         </div>

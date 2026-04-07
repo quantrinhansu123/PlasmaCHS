@@ -29,12 +29,17 @@ import {
   AlertTriangle,
   Hash,
   Calendar,
-  Clock
+  Clock,
+  Upload,
+  RefreshCw
 } from 'lucide-react';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import * as XLSX from 'xlsx';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
+import { supabase } from '../supabase/config';
+import { CYLINDER_STATUSES } from '../constants/machineConstants';
 import { useReports } from '../hooks/useReports';
 import { exportCylinderExpiryReport } from '../utils/exportExcel';
 import FilterDropdown from '../components/ui/FilterDropdown';
@@ -82,6 +87,7 @@ const CylinderExpiryReport = () => {
   const [data, setData] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
+  const [isImporting, setIsImporting] = useState(false);
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
@@ -158,8 +164,9 @@ const CylinderExpiryReport = () => {
   useEffect(() => { loadData(); }, [selectedWarehouses, selectedMinDays]);
 
   const loadData = async () => {
+    const selectedWarehouse = filterOptions.warehouses.find(w => w.id === selectedWarehouses[0]);
     const filters = {
-      warehouse_id: selectedWarehouses.length > 0 ? selectedWarehouses[0] : '',
+      warehouse_id: selectedWarehouse ? selectedWarehouse.name : '',
       min_days: !isDateRange && selectedMinDays.length > 0 ? selectedMinDays[0] : '',
       startDate: isDateRange ? dateRange.start : '',
       endDate: isDateRange ? dateRange.end : ''
@@ -193,6 +200,182 @@ const CylinderExpiryReport = () => {
     endDate: isDateRange ? dateRange.end : '',
     isDateRange 
   });
+
+  const downloadTemplate = () => {
+    const headers = [
+        'Mã RFID (Serial)',
+        'Mã bình khắc',
+        'Thể tích',
+        'Loại khí',
+        'Loại van',
+        'Loại quai',
+        'Phân loại (BV/TM)',
+        'Khối lượng tịnh (kg)',
+        'Kho quản lý',
+        'Trạng thái',
+        'Hạn kiểm định',
+        'Khách hàng',
+    ];
+
+    const exampleData = [
+        {
+            'Mã RFID (Serial)': 'RFID0001',
+            'Mã bình khắc': 'P0001',
+            'Thể tích': 'bình 4L/ CGA870',
+            'Loại khí': 'O2',
+            'Loại van': 'Van Messer/Phi 6/ CB Trắng',
+            'Loại quai': 'Có quai',
+            'Phân loại (BV/TM)': 'BV',
+            'Khối lượng tịnh (kg)': '8',
+            'Kho quản lý': filterOptions.warehouses[0]?.name || 'Kho tổng',
+            'Trạng thái': 'sẵn sàng',
+            'Hạn kiểm định': '2026-12-31',
+            'Khách hàng': 'Phòng khám đa khoa VH',
+        },
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Template Import Bình');
+    XLSX.writeFile(wb, 'mau_import_binh_khi.xlsx');
+  };
+
+  const handleImportExcel = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+        try {
+            const bstr = evt.target.result;
+            const wb = XLSX.read(bstr, { type: 'binary', cellDates: true });
+            const wsname = wb.SheetNames[0];
+            const ws = wb.Sheets[wsname];
+            const dataRow = XLSX.utils.sheet_to_json(ws, { raw: false, dateNF: 'yyyy-mm-dd' });
+
+            if (dataRow.length === 0) {
+                alert('File Excel không có dữ liệu!');
+                return;
+            }
+
+            setIsImporting(true);
+
+            // Helper: parse Excel date value to ISO string
+            const parseExcelDate = (val) => {
+                if (!val) return null;
+                // If it's a JS Date object (from cellDates:true)
+                if (val instanceof Date) {
+                    return val.toISOString().split('T')[0];
+                }
+                const str = val.toString().trim();
+                if (!str) return null;
+                // If it's an Excel serial number (pure digits, possibly with decimals)
+                if (/^\d+(\.\d+)?$/.test(str)) {
+                    const serial = parseFloat(str);
+                    // Excel epoch: Jan 0, 1900 = serial 1 (with the 1900 leap year bug)
+                    const excelEpoch = new Date(1899, 11, 30);
+                    const d = new Date(excelEpoch.getTime() + serial * 86400000);
+                    return d.toISOString().split('T')[0];
+                }
+                // Try parsing as a date string (dd/mm/yyyy, yyyy-mm-dd, etc.)
+                // Handle dd/mm/yyyy format common in Vietnamese Excel
+                const ddmmyyyy = str.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+                if (ddmmyyyy) {
+                    const [, day, month, year] = ddmmyyyy;
+                    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+                }
+                // Already yyyy-mm-dd
+                if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+                    return str.substring(0, 10);
+                }
+                // Fallback: try native Date parse
+                const parsed = new Date(str);
+                if (!isNaN(parsed.getTime())) {
+                    return parsed.toISOString().split('T')[0];
+                }
+                return null; // Unparseable — skip rather than crash
+            };
+
+            // Fetch all warehouses to map names to IDs
+            const { data: warehouses } = await supabase.from('warehouses').select('id, name');
+            const warehouseMap = (warehouses || []).reduce((acc, w) => {
+                acc[w.name.toLowerCase()] = w.id;
+                return acc;
+            }, {});
+
+            // Fetch all customers to map names to IDs
+            const { data: customers } = await supabase.from('customers').select('id, name');
+            const customerMap = (customers || []).reduce((acc, c) => {
+                acc[c.name.toLowerCase()] = c.id;
+                return acc;
+            }, {});
+
+            const cylindersToInsert = dataRow.map(row => {
+                const statusKey = Object.keys(row).find(k => k.toLowerCase() === 'trạng thái');
+                const statusVal = statusKey ? row[statusKey]?.toString().trim() : null;
+
+                let cylinderStatus = 'sẵn sàng';
+
+                if (statusVal) {
+                    const foundStatus = CYLINDER_STATUSES.find(s =>
+                        s.label.toLowerCase() === statusVal.toLowerCase() ||
+                        s.id.toLowerCase() === statusVal.toLowerCase()
+                    );
+                    cylinderStatus = foundStatus ? foundStatus.id : statusVal.toLowerCase();
+                }
+
+                const custName = row['Khách hàng']?.toString();
+                const custId = customerMap[custName?.toLowerCase()] || null;
+
+                return {
+                    serial_number: row['Mã RFID (Serial)']?.toString(),
+                    cylinder_code: row['Mã bình khắc']?.toString() || null,
+                    volume: row['Thể tích']?.toString(),
+                    gas_type: row['Loại khí']?.toString() || 'AirMAC',
+                    valve_type: row['Loại van']?.toString() || 'Van Messer/Phi 6/ CB Trắng',
+                    handle_type: row['Loại quai']?.toString() || 'Có quai',
+                    category: (() => {
+                        const raw = row['Phân loại (BV/TM)']?.toString().trim().toUpperCase();
+                        return (raw === 'BV' || raw === 'TM') ? raw : 'BV';
+                    })(),
+                    net_weight: row['Khối lượng tịnh (kg)']?.toString() || '8',
+                    status: cylinderStatus,
+                    warehouse_id: warehouseMap[row['Kho quản lý']?.toString()?.toLowerCase()] || null,
+                    customer_id: custId,
+                    customer_name: custName || null,
+                    expiry_date: parseExcelDate(row['Hạn kiểm định'])
+                };
+            }).filter(c => c.serial_number);
+
+            if (cylindersToInsert.length === 0) {
+                alert('Không tìm thấy dữ liệu hợp lệ (thiếu mã RFID)!');
+                setIsImporting(false);
+                return;
+            }
+
+            const { error } = await supabase
+                .from('cylinders')
+                .upsert(cylindersToInsert, {
+                    onConflict: 'serial_number',
+                    ignoreDuplicates: false
+                });
+
+            if (error) {
+                throw error;
+            } else {
+                alert(`🎉 Đã xử lý thành công ${cylindersToInsert.length} vỏ bình (Thêm mới/Cập nhật)!`);
+                loadData();
+            }
+        } catch (err) {
+            console.error('Error importing excel:', err);
+            alert('Có lỗi xảy ra khi xử lý file: ' + err.message);
+        } finally {
+            setIsImporting(false);
+            if (e.target) e.target.value = null; // Reset input
+        }
+    };
+    reader.readAsBinaryString(file);
+  };
 
   const filteredData = data.filter(item =>
     item.ma_binh?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -344,9 +527,17 @@ const CylinderExpiryReport = () => {
               hasActiveFilters={hasActiveFilters}
               totalActiveFilters={totalActiveFilters}
               actions={
-                  <button onClick={handleExport} className="p-2 rounded-xl bg-emerald-600 text-white shrink-0 shadow-md shadow-emerald-600/20 active:scale-95 transition-all">
-                      <Download size={20} />
-                  </button>
+                  <>
+                      <button onClick={handleExport} className="p-2 rounded-xl bg-emerald-600 text-white shrink-0 shadow-md shadow-emerald-600/20 active:scale-95 transition-all">
+                          <Download size={20} />
+                      </button>
+                      <div className="relative">
+                          <input type="file" accept=".xlsx, .xls" onChange={handleImportExcel} className="hidden" id="cylinder-excel-import-mobile" />
+                          <label htmlFor="cylinder-excel-import-mobile" className="flex items-center justify-center p-2 rounded-xl bg-indigo-600 text-white shrink-0 shadow-md shadow-indigo-600/20 active:scale-95 transition-all cursor-pointer">
+                              <Upload size={20} />
+                          </label>
+                      </div>
+                  </>
               }
               selectionBar={
                   selectedIds.length > 0 ? (
@@ -391,6 +582,16 @@ const CylinderExpiryReport = () => {
                       columnDefs={COLUMN_DEFS}
                     />
                   )}
+                </div>
+                <button onClick={downloadTemplate} className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-[13px] font-bold hover:bg-indigo-100 transition-all active:scale-95 shadow-sm">
+                    <Download size={14} /> Tải mẫu
+                </button>
+                <div className="relative">
+                    <input type="file" accept=".xlsx, .xls" onChange={handleImportExcel} className="hidden" id="cylinder-excel-import" disabled={isImporting} />
+                    <label htmlFor="cylinder-excel-import" className={clsx("flex items-center gap-2 px-3 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-[13px] font-bold transition-all shadow-sm", isImporting ? "opacity-50 cursor-not-allowed" : "hover:bg-emerald-100 cursor-pointer active:scale-95")}>
+                        {isImporting ? <RefreshCw size={14} className="animate-spin" /> : <Upload size={14} />} 
+                        {isImporting ? 'Đang xử lý...' : 'Import Excel'}
+                    </label>
                 </div>
                 <button onClick={handleExport} className="flex items-center gap-2 px-6 py-1.5 rounded-xl bg-emerald-600 text-white text-[13px] font-bold hover:bg-emerald-700 shadow-md shadow-emerald-600/20 transition-all"><Download size={16} /> Xuất Excel</button>
               </div>

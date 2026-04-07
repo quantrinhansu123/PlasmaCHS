@@ -27,6 +27,7 @@ function MobilePageHeader({
   onBack,
   actions,
   selectionBar,
+  summary,
   sticky = true,
   className,
 }) {
@@ -100,6 +101,13 @@ function MobilePageHeader({
         {/* Extra Action Buttons */}
         {actions}
       </div>
+
+      {/* Summary Area (optional) */}
+      {summary && (
+        <div className="mt-2.5 px-0.5">
+          {summary}
+        </div>
+      )}
 
       {/* Selection Indicator (optional) */}
       {selectionBar}

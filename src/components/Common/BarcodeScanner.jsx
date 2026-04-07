@@ -15,6 +15,7 @@ const BarcodeScanner = ({
 }) => {
     const [pendingScan, setPendingScan] = React.useState(null);
     const [scanTime, setScanTime] = React.useState(null);
+    const [manualInput, setManualInput] = React.useState('');
 
     const { isScanning, scanError, hasPermission, start, stop, resetLastScanned } = useBarcodeScanner({
         elementId,
@@ -41,6 +42,15 @@ const BarcodeScanner = ({
             setTimeout(() => {
                 resetLastScanned();
             }, 500);
+        }
+    };
+
+    const handleManualSubmit = (e) => {
+        e.preventDefault();
+        if (manualInput.trim()) {
+            setPendingScan(manualInput.trim());
+            setScanTime(getCurrentTimeVN());
+            setManualInput('');
         }
     };
 
@@ -167,23 +177,43 @@ const BarcodeScanner = ({
                 </div>
             )}
 
+            {/* Manual Input Form */}
+            <div className="flex-none bg-black/95 p-4 border-t border-white/10 z-[100] shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
+                <form onSubmit={handleManualSubmit} className="flex items-center gap-2 w-full max-w-sm mx-auto">
+                    <input
+                        type="text"
+                        value={manualInput}
+                        onChange={e => setManualInput(e.target.value.toUpperCase())}
+                        placeholder="Hoặc nhập mã thủ công..."
+                        className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm font-mono tracking-widest"
+                    />
+                    <button
+                        type="submit"
+                        disabled={!manualInput.trim()}
+                        className="px-5 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                    >
+                        OK
+                    </button>
+                </form>
+            </div>
+
             {/* Footer / Instructions */}
-            <div className="flex-none bg-black/80 backdrop-blur-md p-5 text-center shadow-[0_-10px_20px_rgba(0,0,0,0.5)] z-50">
-                <p className="text-gray-200 text-sm font-medium truncate">
+            <div className="flex-none bg-black/80 backdrop-blur-md p-3 text-center z-50">
+                <p className="text-gray-200 text-xs font-medium truncate">
                     {isScanning 
-                        ? 'Đưa mã vạch vào khung chữ nhật' 
-                        : 'Đang khởi động Camera...'}
+                        ? 'Đưa mã vạch vào khung hiển thị' 
+                        : 'Không tìm thấy hoặc hỏng Camera'}
                 </p>
                 {/* Visual indicator for scanning status */}
-                <div className="mt-2.5 flex justify-center gap-2 items-center">
-                    <span className="relative flex h-3 w-3">
+                <div className="mt-1.5 flex justify-center gap-2 items-center">
+                    <span className="relative flex h-2.5 w-2.5">
                         {isScanning && (
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
                         )}
-                        <span className={`relative inline-flex rounded-full h-3 w-3 ${isScanning ? 'bg-green-500' : 'bg-gray-500'}`}></span>
+                        <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isScanning ? 'bg-green-500' : 'bg-gray-500'}`}></span>
                     </span>
-                    <span className="text-xs font-bold text-gray-300">
-                        {isScanning ? 'Hệ thống đang hoạt động' : 'Tạm dừng'}
+                    <span className="text-[11px] font-bold text-gray-300">
+                        {isScanning ? 'Đang tự động quét' : 'Tạm dừng'}
                     </span>
                 </div>
             </div>

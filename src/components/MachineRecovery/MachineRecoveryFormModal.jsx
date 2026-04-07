@@ -42,6 +42,8 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
     const [uploadingPhoto, setUploadingPhoto] = useState(false);
     const photoInputRef = useRef(null);
 
+    const [orderCodeInput, setOrderCodeInput] = useState('');
+
     const [formData, setFormData] = useState({
         recovery_code: '',
         recovery_date: new Date().toISOString().split('T')[0],
@@ -62,6 +64,8 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
 
     const customersRef = useRef(customers);
     useEffect(() => { customersRef.current = customers; }, [customers]);
+
+    const debounceTimersRef = useRef({});
 
     const formDataRef = useRef(formData);
     useEffect(() => { formDataRef.current = formData; }, [formData]);
@@ -88,6 +92,11 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
             });
             setPhotoUrls(recovery.photos || []);
             fetchItems(recovery.id);
+            
+            if (recovery.order_id) {
+                supabase.from('orders').select('order_code').eq('id', recovery.order_id).maybeSingle()
+                    .then(({data}) => { if (data) setOrderCodeInput(data.order_code); });
+            }
         } else {
             generateCode();
         }
@@ -258,15 +267,16 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
         setIsScannerOpen(false);
 
         try {
+            const cleanCode = orderCode.trim().toUpperCase();
             const { data: orderData, error } = await supabase
                 .from('orders')
                 .select('id, order_code, customer_name')
-                .eq('order_code', orderCode)
+                .ilike('order_code', cleanCode)
                 .maybeSingle();
 
             if (error) throw error;
             if (!orderData) {
-                toast.error(`Không tìm thấy đơn hàng "${orderCode}"`);
+                toast.error(`Không tìm thấy đơn hàng "${cleanCode}"`);
                 return;
             }
 
@@ -279,11 +289,14 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                     customer_id: matchedCustomer.id,
                     order_id: orderData.id
                 }));
-                toast.success(`Đã quét được đơn hàng ${orderCode} của KH ${orderData.customer_name}`);
+                toast.success(`Đã lấy đơn hàng ${cleanCode} của KH ${orderData.customer_name}`);
             } else {
                 setFormData(prev => ({ ...prev, order_id: orderData.id }));
-                toast.success(`Đã quét được đơn hàng ${orderCode}`);
+                toast.success(`Đã lấy đơn hàng ${cleanCode}`);
             }
+            
+            // Cập nhật lại UI Input
+            setOrderCodeInput(orderData.order_code);
         } catch (err) {
             console.error(err);
             toast.error('Lỗi khi quét đơn hàng: ' + err.message);
@@ -327,8 +340,29 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
     const updateItem = (id, field, value) => {
         setItems(prev => prev.map(i => i._id === id ? { ...i, [field]: value } : i));
 
-        if (field === 'serial_number' && value.length >= 3) {
-            triggerItemValidation(id, value);
+        if (field === 'serial_number') {
+            if (debounceTimersRef.current[id]) clearTimeout(debounceTimersRef.current[id]);
+            
+            if (value.length >= 3) {
+                // Hiển thị trạng thái đang check ngay khi gõ đủ 3 ký tự (tùy chọn)
+                setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: true, isValid: null, error: null } : i));
+                
+                debounceTimersRef.current[id] = setTimeout(() => {
+                    triggerItemValidation(id, value);
+                }, 600);
+            } else {
+                setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: false, isValid: null, error: null } : i));
+            }
+        }
+    };
+
+    const handleItemKeyDown = (e, id, value) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if (debounceTimersRef.current[id]) clearTimeout(debounceTimersRef.current[id]);
+            if (value.length >= 3) {
+                triggerItemValidation(id, value);
+            }
         }
     };
 
@@ -345,8 +379,13 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                 .eq('serial_number', serial)
                 .maybeSingle();
 
+            // Chống cuộc đua (Race condition check): 
+            // Nếu người dùng đã gõ thêm ký tự mới đổi khác 'serial' ban đầu thì bỏ qua kết quả này
+            const latestItem = itemsRef.current.find(i => i._id === id);
+            if (latestItem && latestItem.serial_number !== serial) return;
+
             if (!machData) {
-                setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: false, isValid: false, error: 'Không tồn tại' } : i));
+                setItems(prev => prev.map(i => i._id === id && i.serial_number === serial ? { ...i, isValidating: false, isValid: false, error: 'Không tồn tại' } : i));
                 return;
             }
 
@@ -580,14 +619,35 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="space-y-1.5">
-                                        <label className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800"><ScanLine size={16} /> Quét mã đơn hàng</label>
+                                        <label className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800"><ScanLine size={16} /> Quét / Nhập mã Đơn hàng</label>
                                         <div className="flex gap-2 items-center">
                                             <div className="relative flex-1">
-                                                <select value={formData.order_id} onChange={e => setFormData({ ...formData, order_id: e.target.value })} disabled={isReadOnly || !formData.customer_id} className="w-full h-11 px-4 border border-slate-200 rounded-xl font-bold bg-slate-50 outline-none appearance-none">
-                                                    <option value=""></option>
-                                                    {customerOrders.map(o => <option key={o.id} value={o.id}>ĐH {o.order_code} ({o.status})</option>)}
-                                                </select>
-                                                {!isReadOnly && formData.customer_id && <ChevronDown className="w-4 h-4 text-primary absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />}
+                                                <input 
+                                                    list="customer-orders-list"
+                                                    value={orderCodeInput} 
+                                                    onChange={e => {
+                                                        const val = e.target.value.toUpperCase();
+                                                        setOrderCodeInput(val);
+                                                        const found = customerOrders.find(o => o.order_code.toUpperCase() === val);
+                                                        if (found) {
+                                                            setFormData(prev => ({...prev, order_id: found.id}));
+                                                        }
+                                                    }}
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter') {
+                                                            e.preventDefault();
+                                                            if (orderCodeInput.trim()) handleOrderScanSuccess(orderCodeInput.trim());
+                                                        }
+                                                    }}
+                                                    disabled={isReadOnly} 
+                                                    placeholder="Gõ mã ĐH và ấn Enter..." 
+                                                    className="w-full h-11 px-4 border border-slate-200 rounded-xl font-bold bg-slate-50 outline-none focus:ring-2 focus:ring-primary focus:bg-white transition-all uppercase"
+                                                />
+                                                <datalist id="customer-orders-list">
+                                                    {customerOrders.map(o => <option key={o.id} value={o.order_code}>ĐH {o.order_code} ({o.status})</option>)}
+                                                </datalist>
+                                                {/* Hiển thị dấu check xanh nếu đã map được order_id */}
+                                                {!isReadOnly && formData.order_id && <div className="absolute right-3 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]" title="Đã khớp đơn hàng"></div>}
                                             </div>
                                             {!isReadOnly && (
                                                 <button
@@ -617,28 +677,19 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="space-y-1.5">
                                         <label className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800"><Truck size={16} /> NV vận chuyển</label>
-                                        <div className="relative group">
-                                            <input
-                                                list="shipper-list-machine"
-                                                value={formData.driver_name}
-                                                onChange={(e) => {
-                                                    const name = e.target.value;
-                                                    setFormData(prev => ({
-                                                        ...prev,
-                                                        driver_name: name,
-                                                        status: (prev.status === 'CHO_PHAN_CONG' && name) ? 'DANG_THU_HOI' : prev.status
-                                                    }));
-                                                }}
-                                                placeholder="Chọn Shipper"
-                                                disabled={isReadOnly}
-                                                className="w-full h-11 px-4 border border-slate-200 rounded-xl font-bold bg-slate-50 outline-none focus:ring-2 focus:ring-primary focus:bg-white transition-all"
-                                            />
-                                            <datalist id="shipper-list-machine">
-                                                {shippers.map((name, idx) => (
-                                                    <option key={idx} value={name} />
-                                                ))}
-                                            </datalist>
-                                        </div>
+                                        <SearchableSelect 
+                                            options={shippers.map(s => ({ label: s, value: s }))} 
+                                            value={formData.driver_name} 
+                                            onValueChange={(name) => {
+                                                setFormData(prev => ({
+                                                    ...prev,
+                                                    driver_name: name,
+                                                    status: (prev.status === 'CHO_PHAN_CONG' && name) ? 'DANG_THU_HOI' : (!name && prev.status === 'DANG_THU_HOI') ? 'CHO_PHAN_CONG' : prev.status
+                                                }));
+                                            }} 
+                                            placeholder="-- Chọn NV Vận chuyển --" 
+                                            disabled={isReadOnly} 
+                                        />
                                     </div>
                                     <div className="space-y-1.5">
                                         <label className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800"><FileText size={16} /> Ghi chú</label>
@@ -674,7 +725,15 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
                                                     <div className="flex items-center justify-between gap-2">
                                                         <span className="text-[11px] font-black text-slate-300">{idx + 1}</span>
                                                         <div className="flex-1 relative">
-                                                            <input value={item.serial_number} onChange={e => updateItem(item._id, 'serial_number', e.target.value)} disabled={isReadOnly} placeholder="Mã Serial" className={clsx("w-full px-3 py-2 border rounded-xl font-black text-[14px] outline-none", item.isValid === true ? "text-green-700 bg-green-50 border-green-200" : item.isValid === false ? "text-red-700 bg-red-50 border-red-200" : "bg-white border-slate-100")} />
+                                                            <input 
+                                                                value={item.serial_number} 
+                                                                onChange={e => updateItem(item._id, 'serial_number', e.target.value)} 
+                                                                onKeyDown={e => handleItemKeyDown(e, item._id, item.serial_number)}
+                                                                disabled={isReadOnly} 
+                                                                placeholder="Mã Serial" 
+                                                                className={clsx("w-full px-3 py-2 border rounded-xl font-black text-[14px] outline-none", item.isValid === true ? "text-green-700 bg-green-50 border-green-200" : item.isValid === false ? "text-red-700 bg-red-50 border-red-200" : "bg-white border-slate-100")} 
+                                                            />
+                                                            {item.isValidating && <div className="absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />}
                                                         </div>
                                                         <select value={item.condition} onChange={e => updateItem(item._id, 'condition', e.target.value)} disabled={isReadOnly} className="w-28 px-2 py-2 bg-white border border-slate-200 rounded-xl font-bold text-[11px] outline-none">
                                                             {MACHINE_ITEM_CONDITIONS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
