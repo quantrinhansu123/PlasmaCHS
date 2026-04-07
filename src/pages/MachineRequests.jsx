@@ -30,11 +30,14 @@ import {
     Calendar,
     User,
     Eye,
+    CheckCircle,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useEffect, useState, cloneElement } from 'react';
 import { toast } from 'react-toastify';
 import { supabase } from '../supabase/config';
+import { ORDER_STATUSES } from '../constants/orderConstants';
+import { notificationService } from '../utils/notificationService';
 
 // Register Chart.js components
 ChartJS.register(
@@ -97,6 +100,34 @@ export default function MachineRequests() {
             fetchData();
         } catch (error) {
             toast.error('Lỗi xóa phiếu: ' + error.message);
+        }
+    };
+
+    const handleApprove = async (id, code, customer) => {
+        if (!window.confirm(`Xác nhận duyệt phiếu đề xuất ${code} để xuất máy đi?`)) return;
+        
+        try {
+            const { error } = await supabase
+                .from('orders')
+                .update({ 
+                    status: 'DA_DUYET',
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', id);
+
+            if (error) throw error;
+            
+            notificationService.add({
+                title: `✅ Đã duyệt xuất máy: ${customer}`,
+                description: `Phiếu ${code} đã được duyệt và chuyển trạng thái sang "Chờ giao hàng".`,
+                type: 'success',
+                link: '/de-nghi-xuat-may'
+            });
+
+            toast.success(`Đã duyệt phiếu ${code}`);
+            fetchData();
+        } catch (error) {
+            toast.error('Lỗi duyệt phiếu: ' + error.message);
         }
     };
 
@@ -187,6 +218,22 @@ export default function MachineRequests() {
                                                 {r.quantity} máy
                                             </p>
                                         </div>
+                                        <div className="col-span-2">
+                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Trạng thái</p>
+                                            <div className="flex mt-0.5">
+                                                {(() => {
+                                                    const isApproved = ['DA_DUYET', 'KHO_XU_LY', 'CHO_GIAO_HANG', 'DANG_GIAO_HANG', 'CHO_DOI_SOAT', 'HOAN_THANH'].includes(r.status);
+                                                    return (
+                                                        <span className={clsx(
+                                                            "px-2 py-0.5 rounded-full border text-[10px] font-bold",
+                                                            isApproved ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-yellow-50 text-yellow-700 border-yellow-200"
+                                                        )}>
+                                                            {isApproved ? 'Đã duyệt' : 'Chưa duyệt'}
+                                                        </span>
+                                                    );
+                                                })()}
+                                            </div>
+                                        </div>
                                     </div>
 
                                     <div className="flex items-center justify-between pt-2 border-t border-border/70">
@@ -195,6 +242,9 @@ export default function MachineRequests() {
                                             <span>{new Date(r.created_at).toLocaleDateString('vi-VN')}</span>
                                         </div>
                                         <div className="flex items-center gap-3">
+                                            {['CHO_DUYET', 'CHO_CTY_DUYET'].includes(r.status) && (
+                                                <button onClick={() => handleApprove(r.id, r.order_code, r.customer_name)} className="p-2 text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg shadow-sm active:scale-95" title="Duyệt xuất đi"><CheckCircle size={16} /></button>
+                                            )}
                                             <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)} className="p-2 text-slate-400 hover:text-primary bg-slate-50 hover:bg-primary/10 border border-slate-100 rounded-lg"><Eye size={16} /></button>
                                             <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
                                             <button onClick={() => handleDelete(r.id, r.order_code)} className="p-2 text-rose-700 bg-rose-50 border border-rose-100 rounded-lg"><Trash2 size={16} /></button>
@@ -252,6 +302,7 @@ export default function MachineRequests() {
                                         <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Khách hàng</th>
                                         <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Người yêu cầu</th>
                                         <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Số lượng</th>
+                                        <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Trạng thái</th>
                                         <th className="px-5 py-3.5 text-center text-[12px] font-bold text-slate-500 uppercase tracking-wider">Thao tác</th>
                                     </tr>
                                 </thead>
@@ -269,7 +320,23 @@ export default function MachineRequests() {
                                                 <td className="px-5 py-3.5 text-[13px] font-medium text-slate-500">{r.ordered_by || '—'}</td>
                                                 <td className="px-5 py-3.5"><span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-md font-bold text-[12px]">{r.quantity} máy</span></td>
                                                 <td className="px-5 py-3.5">
+                                                    {(() => {
+                                                        const isApproved = ['DA_DUYET', 'KHO_XU_LY', 'CHO_GIAO_HANG', 'DANG_GIAO_HANG', 'CHO_DOI_SOAT', 'HOAN_THANH'].includes(r.status);
+                                                        return (
+                                                            <span className={clsx(
+                                                                "px-2.5 py-1 rounded-full border text-[11px] font-bold inline-flex items-center",
+                                                                isApproved ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-yellow-50 text-yellow-700 border-yellow-200"
+                                                            )}>
+                                                                {isApproved ? 'Đã duyệt đơn' : 'Chưa duyệt đơn'}
+                                                            </span>
+                                                        );
+                                                    })()}
+                                                </td>
+                                                <td className="px-5 py-3.5">
                                                     <div className="flex items-center justify-center gap-1.5">
+                                                        {['CHO_DUYET', 'CHO_CTY_DUYET', 'DIEU_CHINH'].includes(r.status) && (
+                                                            <button onClick={() => handleApprove(r.id, r.order_code, r.customer_name)} className="p-1.5 text-emerald-600 hover:text-white hover:bg-emerald-600 border border-emerald-200 rounded-lg transition-all" title="Duyệt xuất đi"><CheckCircle size={16} /></button>
+                                                        )}
                                                         <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-all" title="Xem chi tiết"><Eye size={16} /></button>
                                                         <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)} className="p-1.5 text-slate-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-all" title="Chỉnh sửa"><Edit size={16} /></button>
                                                         <button onClick={() => handleDelete(r.id, r.order_code)} className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all" title="Xóa"><Trash2 size={16} /></button>

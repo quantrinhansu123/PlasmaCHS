@@ -143,14 +143,78 @@ const InventoryReport = () => {
     const fetchInventory = async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
+            // 1. Fetch Materials (VAT_TU) from inventory table
+            const { data: invData, error: invError } = await supabase
                 .from('inventory')
                 .select('*')
-                .order('warehouse_id');
-            if (error) throw error;
-            setInventory(data || []);
+                .eq('item_type', 'VAT_TU')
+                .gt('quantity', 0);
+            if (invError) throw invError;
+
+            // 2. Fetch Machines counts grouped by warehouse and type
+            const { data: machData, error: machError } = await supabase
+                .from('machines')
+                .select('warehouse, machine_type, status')
+                .eq('status', 'sẵn sàng');
+            if (machError) throw machError;
+
+            // 3. Fetch Cylinders counts grouped by warehouse and volume
+            const { data: cylData, error: cylError } = await supabase
+                .from('cylinders')
+                .select('warehouse_id, volume, status')
+                .eq('status', 'sẵn sàng');
+            if (cylError) throw cylError;
+
+            // Process Machine real-time records
+            const machRows = [];
+            const machGroups = (machData || []).reduce((acc, m) => {
+                const key = `${m.warehouse}-${m.machine_type}`;
+                if (!acc[key]) acc[key] = { warehouse_id: m.warehouse, name: `Máy ${m.machine_type}`, qty: 0 };
+                acc[key].qty++;
+                return acc;
+            }, {});
+            
+            Object.values(machGroups).forEach(g => {
+                machRows.push({
+                    id: `mach-${g.warehouse_id}-${g.name}`,
+                    warehouse_id: g.warehouse_id,
+                    item_type: 'MAY',
+                    item_name: g.name,
+                    quantity: g.qty,
+                    updated_at: new Date().toISOString()
+                });
+            });
+
+            // Process Cylinder real-time records
+            const cylRows = [];
+            const cylGroups = (cylData || []).reduce((acc, c) => {
+                const key = `${c.warehouse_id}-${c.volume}`;
+                if (!acc[key]) acc[key] = { warehouse_id: c.warehouse_id, name: `Bình ${c.volume || 'khác'}`, qty: 0 };
+                acc[key].qty++;
+                return acc;
+            }, {});
+
+            Object.values(cylGroups).forEach(g => {
+                cylRows.push({
+                    id: `cyl-${g.warehouse_id}-${g.name}`,
+                    warehouse_id: g.warehouse_id,
+                    item_type: 'BINH',
+                    item_name: g.name,
+                    quantity: g.qty,
+                    updated_at: new Date().toISOString()
+                });
+            });
+
+            // Combine all
+            const unifiedInventory = [
+                ...(invData || []),
+                ...machRows,
+                ...cylRows
+            ];
+
+            setInventory(unifiedInventory);
         } catch (error) {
-            console.error('Error fetching inventory:', error);
+            console.error('Error fetching real inventory report:', error);
         } finally {
             setLoading(false);
         }

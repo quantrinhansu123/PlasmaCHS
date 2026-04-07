@@ -151,9 +151,9 @@ const InventoryTransfer = () => {
         if (formData.item_type && inventory.length > 0) {
             // Smart filtering based on derived type
             const items = inventory.filter(i => {
-                if (formData.item_type === 'MAY') return isMachine(i) && !isCylinder(i);
-                if (formData.item_type === 'BINH') return isCylinder(i);
-                if (formData.item_type === 'VAT_TU') return !isMachine(i) && !isCylinder(i);
+                if (formData.item_type === 'MAY') return i.item_type === 'MAY';
+                if (formData.item_type === 'BINH') return i.item_type === 'BINH';
+                if (formData.item_type === 'VAT_TU') return i.item_type === 'VAT_TU';
                 return true;
             });
 
@@ -220,12 +220,66 @@ const InventoryTransfer = () => {
     };
 
     const fetchInventory = async (warehouseId) => {
-        const { data } = await supabase
-            .from('inventory')
-            .select('*')
-            .eq('warehouse_id', warehouseId)
-            .gt('quantity', 0);
-        if (data) setInventory(data);
+        try {
+            // 1. Fetch Materials (VAT_TU) from inventory table
+            const { data: invData } = await supabase
+                .from('inventory')
+                .select('*')
+                .eq('warehouse_id', warehouseId)
+                .eq('item_type', 'VAT_TU')
+                .gt('quantity', 0);
+
+            // 2. Fetch Machines (MAY) from machines table
+            const { data: machinesData } = await supabase
+                .from('machines')
+                .select('machine_type, status')
+                .eq('warehouse', warehouseId)
+                .eq('status', 'sẵn sàng');
+
+            // 3. Fetch Cylinders (BINH) from cylinders table
+            const { data: cylindersData } = await supabase
+                .from('cylinders')
+                .select('volume, status')
+                .eq('warehouse_id', warehouseId)
+                .eq('status', 'sẵn sàng');
+
+            // Process counts
+            const machCounts = (machinesData || []).reduce((acc, m) => {
+                const name = `Máy ${m.machine_type}`;
+                acc[name] = (acc[name] || 0) + 1;
+                return acc;
+            }, {});
+
+            const cylCounts = (cylindersData || []).reduce((acc, c) => {
+                const name = `Bình ${c.volume || 'khác'}`;
+                acc[name] = (acc[name] || 0) + 1;
+                return acc;
+            }, {});
+
+            // Create unified inventory list
+            const realInventory = [
+                ...(invData || []).map(i => ({ ...i, item_type: 'VAT_TU' })),
+                ...Object.entries(machCounts).map(([name, qty]) => ({
+                    id: `mach-${name}`,
+                    item_name: name,
+                    item_type: 'MAY',
+                    quantity: qty,
+                    warehouse_id: warehouseId
+                })),
+                ...Object.entries(cylCounts).map(([name, qty]) => ({
+                    id: `cyl-${name}`,
+                    item_name: name,
+                    item_type: 'BINH',
+                    quantity: qty,
+                    warehouse_id: warehouseId
+                }))
+            ];
+
+            setInventory(realInventory);
+        } catch (error) {
+            console.error('Error fetching real inventory:', error);
+            toast.error('Lỗi khi tải dữ liệu tồn thực tế');
+        }
     };
 
     const warehouseOptions = useMemo(() =>
@@ -443,12 +497,47 @@ const InventoryTransfer = () => {
                 return;
             }
 
-            // 1. Decrease source inventory count
-            const { error: decError } = await supabase
-                .from('inventory')
-                .update({ quantity: sourceItem.quantity - formData.quantity })
-                .eq('id', sourceItem.id);
-            if (decError) throw decError;
+            // 1. Resolve source inventory record and update count
+            let sourceInventoryId;
+            if (formData.item_type === 'VAT_TU') {
+                sourceInventoryId = sourceItem.id;
+                const { error: decError } = await supabase
+                    .from('inventory')
+                    .update({ quantity: sourceItem.quantity - formData.quantity })
+                    .eq('id', sourceInventoryId);
+                if (decError) throw decError;
+            } else {
+                // For MAY/BINH, find or create the summary record in inventory table
+                const { data: existingInv } = await supabase
+                    .from('inventory')
+                    .select('id, quantity')
+                    .eq('warehouse_id', formData.from_warehouse_id)
+                    .eq('item_type', formData.item_type)
+                    .eq('item_name', formData.item_name)
+                    .maybeSingle();
+
+                if (existingInv) {
+                    sourceInventoryId = existingInv.id;
+                    const { error: decError } = await supabase
+                        .from('inventory')
+                        .update({ quantity: sourceItem.quantity - formData.quantity })
+                        .eq('id', sourceInventoryId);
+                    if (decError) throw decError;
+                } else {
+                    // This shouldn't happen if UI shows it, but as fallback
+                    const { data: newInv, error: insError } = await supabase
+                        .from('inventory')
+                        .insert([{
+                            warehouse_id: formData.from_warehouse_id,
+                            item_type: formData.item_type,
+                            item_name: formData.item_name,
+                            quantity: sourceItem.quantity - formData.quantity
+                        }])
+                        .select().single();
+                    if (insError) throw insError;
+                    sourceInventoryId = newInv.id;
+                }
+            }
 
             // 2. Increase/Create destination inventory count
             const { data: destItemData, error: destQueryError } = await supabase
@@ -523,7 +612,7 @@ const InventoryTransfer = () => {
                 .from('inventory_transactions')
                 .insert([
                     {
-                        inventory_id: sourceItem.id,
+                        inventory_id: sourceInventoryId,
                         transaction_type: 'OUT',
                         reference_code: transferCode,
                         quantity_changed: formData.quantity,

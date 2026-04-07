@@ -56,22 +56,25 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
 
             setInventory(invData || []);
 
-            // 2. Get Recent Logs
-            const { data: logData } = await supabase
-                .from('cylinder_logs')
-                .select('*')
-                .eq('warehouse_id', warehouse.id)
-                .order('created_at', { ascending: false })
-                .limit(10);
+            // 3. Get Machines
+            const { data: machinesData } = await supabase
+                .from('machines')
+                .select('id')
+                .eq('warehouse', warehouse.id);
 
             setRecentLogs(logData || []);
 
-            // 3. Calc Stats
+            // 4. Calc Stats
+            const cylinderCount = invData?.length || 0;
+            const machineCount = machinesData?.length || 0;
+            const totalItems = cylinderCount + machineCount;
+            const capacity = warehouse.capacity || 0;
+
             setStats({
-                total_items: invData?.length || 0,
+                total_items: totalItems,
                 active_orders: 0, // Placeholder
                 recent_receipts: 0, // Placeholder
-                available_capacity: 1000 - (invData?.length || 0) // Assume capacity = 1000
+                available_capacity: Math.max(0, capacity - totalItems)
             });
 
         } catch (error) {
