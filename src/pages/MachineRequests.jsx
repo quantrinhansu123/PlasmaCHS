@@ -14,7 +14,7 @@ import {
     PointElement,
     Title
 } from 'chart.js';
-import { Bar as BarChartJS, Doughnut as DoughnutChartJS } from 'react-chartjs-2';
+import { Bar as BarChartJS } from 'react-chartjs-2';
 import {
     ChevronLeft,
     ChevronRight,
@@ -23,22 +23,17 @@ import {
     List,
     Monitor,
     Plus,
-    Printer,
     Search,
     Trash2,
     X,
     BarChart2,
     Calendar,
-    Clock,
     User,
+    Eye,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useEffect, useState, cloneElement } from 'react';
-import { createPortal } from 'react-dom';
 import { toast } from 'react-toastify';
-import MachineRecoveryFormModal from '../components/MachineRecovery/MachineRecoveryFormModal';
-import MachineRecoveryPrintTemplate from '../components/MachineRecovery/MachineRecoveryPrintTemplate';
-import { MACHINE_RECOVERY_STATUSES, MACHINE_RECOVERY_TABLE_COLUMNS } from '../constants/machineRecoveryConstants';
 import { supabase } from '../supabase/config';
 
 // Register Chart.js components
@@ -54,35 +49,29 @@ ChartJS.register(
     ChartLegend
 );
 
-export default function MachineRecoveries() {
+export default function MachineRequests() {
     const navigate = useNavigate();
-    const [recoveries, setRecoveries] = useState([]);
+    const [requests, setRequests] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
     const [searchTerm, setSearchTerm] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(50);
-    const [isFormModalOpen, setIsFormModalOpen] = useState(false);
-    const [recoveryToEdit, setRecoveryToEdit] = useState(null);
-    const [recoveryToPrint, setRecoveryToPrint] = useState(null);
-
-    const [customers, setCustomers] = useState([]);
-    const [warehouses, setWarehouses] = useState([]);
 
     useEffect(() => {
         fetchData();
-        loadMetadata();
     }, []);
 
     const fetchData = async () => {
         setLoading(true);
         try {
             const { data, error } = await supabase
-                .from('machine_recoveries')
+                .from('orders')
                 .select('*')
+                .eq('order_type', 'DNXM')
                 .order('created_at', { ascending: false });
             if (error) throw error;
-            setRecoveries(data || []);
+            setRequests(data || []);
         } catch (error) {
             toast.error('Lỗi tải dữ liệu: ' + error.message);
         } finally {
@@ -90,30 +79,19 @@ export default function MachineRecoveries() {
         }
     };
 
-    const loadMetadata = async () => {
-        const { data: custData } = await supabase.from('customers').select('id, name, address');
-        if (custData) setCustomers(custData);
-        const { data: whData } = await supabase.from('warehouses').select('id, name');
-        if (whData) setWarehouses(whData);
-    };
-
-    const getCustomerName = (id) => customers.find(c => c.id === id)?.name || '—';
-    const getCustomerAddress = (id) => customers.find(c => c.id === id)?.address || '';
-    const getWarehouseName = (id) => warehouses.find(w => w.id === id)?.name || id || '—';
-
-    const filteredRecoveries = recoveries.filter(r =>
-        r.recovery_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        getCustomerName(r.customer_id).toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (r.driver_name || '').toLowerCase().includes(searchTerm.toLowerCase())
+    const filteredRequests = requests.filter(r =>
+        (r.order_code || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (r.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (r.ordered_by || '').toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-    const totalRecords = filteredRecoveries.length;
-    const paginatedRecoveries = filteredRecoveries.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+    const totalRecords = filteredRequests.length;
+    const paginatedRequests = filteredRequests.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
     const handleDelete = async (id, code) => {
-        if (!window.confirm(`Bạn có chắc muốn xóa phiếu ${code}?`)) return;
+        if (!window.confirm(`Bạn có chắc muốn xóa phiếu đề nghị ${code}?`)) return;
         try {
-            const { error } = await supabase.from('machine_recoveries').delete().eq('id', id);
+            const { error } = await supabase.from('orders').delete().eq('id', id);
             if (error) throw error;
             toast.success(`Đã xóa phiếu ${code}`);
             fetchData();
@@ -122,32 +100,11 @@ export default function MachineRecoveries() {
         }
     };
 
-    const handlePrint = (recovery) => {
-        setRecoveryToPrint(recovery);
-    };
-
-    const handleStatusColor = (statusId) => {
-        const found = MACHINE_RECOVERY_STATUSES.find(s => s.id === statusId);
-        if (!found) return 'bg-slate-100 text-slate-600';
-        switch (found.color) {
-            case 'amber': return 'bg-amber-100 text-amber-700 border-amber-200';
-            case 'emerald': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-            case 'rose': return 'bg-rose-100 text-rose-700 border-rose-200';
-            case 'blue': return 'bg-blue-100 text-blue-700 border-blue-200';
-            case 'yellow': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
-            default: return 'bg-slate-100 text-slate-700 border-slate-200';
-        }
-    };
-
-    const getStatusLabel = (statusId) => MACHINE_RECOVERY_STATUSES.find(s => s.id === statusId)?.label || statusId;
-
     const getChartData = () => {
         const customerData = {};
-        recoveries.forEach(r => {
-            if (r.status !== 'HUY') {
-                const name = getCustomerName(r.customer_id);
-                customerData[name] = (customerData[name] || 0) + (r.total_items || 0);
-            }
+        requests.forEach(r => {
+            const name = r.customer_name || 'Không rõ';
+            customerData[name] = (customerData[name] || 0) + (r.quantity || 0);
         });
 
         const sortedCustomers = Object.entries(customerData)
@@ -157,30 +114,11 @@ export default function MachineRecoveries() {
         return {
             labels: sortedCustomers.map(c => c[0].length > 15 ? c[0].substring(0, 15) + '...' : c[0]),
             datasets: [{
-                label: 'Số lượng máy thu hồi',
+                label: 'Số lượng máy đề nghị',
                 data: sortedCustomers.map(c => c[1]),
                 backgroundColor: 'rgba(56, 189, 248, 0.8)',
                 borderRadius: 6,
                 barThickness: 24
-            }]
-        };
-    };
-
-    const getStatusChartData = () => {
-        const counts = { 'Hoàn thành': 0, 'Đang xử lý': 0, 'Đã hủy': 0 };
-        recoveries.forEach(r => {
-            if (r.status === 'HOAN_THANH') counts['Hoàn thành']++;
-            else if (r.status === 'HUY') counts['Đã hủy']++;
-            else counts['Đang xử lý']++;
-        });
-
-        return {
-            labels: Object.keys(counts),
-            datasets: [{
-                data: Object.values(counts),
-                backgroundColor: ['rgba(16, 185, 129, 0.8)', 'rgba(245, 158, 11, 0.8)', 'rgba(244, 63, 94, 0.8)'],
-                borderWidth: 0,
-                hoverOffset: 4
             }]
         };
     };
@@ -201,10 +139,10 @@ export default function MachineRecoveries() {
                     <MobilePageHeader
                         searchTerm={searchTerm}
                         setSearchTerm={setSearchTerm}
-                        searchPlaceholder="Tìm kiếm phiếu thu..."
+                        searchPlaceholder="Tìm kiếm đề nghị xuất máy..."
                         actions={
                             <button
-                                onClick={() => { setRecoveryToEdit(null); setIsFormModalOpen(true); }}
+                                onClick={() => navigate('/de-nghi-xuat-may/tao')}
                                 className="p-2 rounded-xl bg-primary text-white shadow-lg shadow-primary/30 active:scale-95 transition-all"
                             >
                                 <Plus size={20} />
@@ -216,62 +154,50 @@ export default function MachineRecoveries() {
                     <div className="md:hidden flex-1 overflow-y-auto p-3 pb-4 flex flex-col gap-3">
                         {loading ? (
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
-                        ) : paginatedRecoveries.length === 0 ? (
+                        ) : paginatedRequests.length === 0 ? (
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy kết quả phù hợp</div>
                         ) : (
-                            paginatedRecoveries.map((r, index) => (
+                            paginatedRequests.map((r, index) => (
                                 <div key={r.id} className="rounded-2xl border border-primary/15 bg-white shadow-sm p-4 transition-all duration-200">
                                     <div className="flex items-start justify-between gap-2 mb-2">
                                         <div className="flex gap-3">
                                             <div>
                                                 <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">#{((currentPage - 1) * pageSize) + index + 1}</p>
-                                                <h3 className="text-[14px] font-bold text-foreground leading-tight mt-0.5 font-mono text-primary cursor-pointer" onClick={() => { setRecoveryToEdit(r); setIsFormModalOpen(true); }}>{r.recovery_code}</h3>
+                                                <h3 className="text-[14px] font-bold text-foreground leading-tight mt-0.5 font-mono text-primary cursor-pointer" onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)}>{r.order_code}</h3>
                                             </div>
                                         </div>
-                                        <span className={clsx('inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border', handleStatusColor(r.status))}>
-                                            {getStatusLabel(r.status)}
-                                        </span>
                                     </div>
 
                                     <div className="grid grid-cols-2 gap-2 mb-3 rounded-xl bg-muted/10 border border-border/60 p-2.5">
+                                        <div className="col-span-2">
+                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Khách hàng</p>
+                                            <p className="text-[12px] text-foreground font-bold truncate">
+                                                {r.customer_name}
+                                            </p>
+                                        </div>
                                         <div>
-                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Kho nhập</p>
+                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Người yêu cầu</p>
                                             <p className="text-[12px] text-foreground font-medium truncate">
-                                                {getWarehouseName(r.warehouse_id)}
+                                                {r.ordered_by || '—'}
                                             </p>
                                         </div>
                                         <div>
                                             <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Số lượng</p>
                                             <p className="text-[12px] text-foreground text-emerald-600 font-bold">
-                                                {r.total_items} máy
+                                                {r.quantity} máy
                                             </p>
-                                        </div>
-                                        <div className="col-span-2">
-                                            <div className="space-y-3">
-                                                <div className="flex items-center gap-2">
-                                                    <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
-                                                        <User size={14} />
-                                                    </div>
-                                                    <div className="min-w-0 flex-1">
-                                                        <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Khách hàng</p>
-                                                        <p className="text-[12px] text-foreground font-bold truncate">
-                                                            {getCustomerName(r.customer_id)}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </div>
                                         </div>
                                     </div>
 
                                     <div className="flex items-center justify-between pt-2 border-t border-border/70">
                                         <div className="flex items-center gap-2 text-[11px] text-muted-foreground font-medium">
                                             <Calendar size={12} />
-                                            <span>{new Date(r.recovery_date).toLocaleDateString('vi-VN')}</span>
+                                            <span>{new Date(r.created_at).toLocaleDateString('vi-VN')}</span>
                                         </div>
                                         <div className="flex items-center gap-3">
-                                            <button onClick={() => handlePrint(r)} className="p-2 text-slate-400 hover:text-primary bg-slate-50 hover:bg-primary/10 border border-slate-100 rounded-lg"><Printer size={16} /></button>
-                                            <button onClick={() => { setRecoveryToEdit(r); setIsFormModalOpen(true); }} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
-                                            <button onClick={() => handleDelete(r.id, r.recovery_code)} className="p-2 text-rose-700 bg-rose-50 border border-rose-100 rounded-lg"><Trash2 size={16} /></button>
+                                            <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)} className="p-2 text-slate-400 hover:text-primary bg-slate-50 hover:bg-primary/10 border border-slate-100 rounded-lg"><Eye size={16} /></button>
+                                            <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
+                                            <button onClick={() => handleDelete(r.id, r.order_code)} className="p-2 text-rose-700 bg-rose-50 border border-rose-100 rounded-lg"><Trash2 size={16} /></button>
                                         </div>
                                     </div>
                                 </div>
@@ -296,7 +222,7 @@ export default function MachineRecoveries() {
                                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
                                         <input
                                             type="text"
-                                            placeholder="Tìm kiếm . . ."
+                                            placeholder="Tìm kiếm đãi nghị xuất máy . . ."
                                             value={searchTerm}
                                             onChange={(e) => setSearchTerm(e.target.value)}
                                             className="w-full pl-10 pr-8 py-1.5 bg-muted/20 border border-border/80 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
@@ -309,9 +235,9 @@ export default function MachineRecoveries() {
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <button onClick={() => { setRecoveryToEdit(null); setIsFormModalOpen(true); }} className="flex items-center gap-2 px-6 h-10 rounded-lg bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all active:scale-95">
+                                    <button onClick={() => navigate('/de-nghi-xuat-may/tao')} className="flex items-center gap-2 px-6 h-10 rounded-lg bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all active:scale-95">
                                         <Plus size={18} />
-                                        Thêm
+                                        Tạo đề nghị
                                     </button>
                                 </div>
                             </div>
@@ -321,37 +247,32 @@ export default function MachineRecoveries() {
                             <table className="w-full text-left border-collapse">
                                 <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur shadow-sm">
                                     <tr>
-                                        {MACHINE_RECOVERY_TABLE_COLUMNS.map(col => (
-                                            <th key={col.key} className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">{col.label}</th>
-                                        ))}
+                                        <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Mã phiếu</th>
+                                        <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Ngày tạo</th>
+                                        <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Khách hàng</th>
+                                        <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Người yêu cầu</th>
+                                        <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Số lượng</th>
                                         <th className="px-5 py-3.5 text-center text-[12px] font-bold text-slate-500 uppercase tracking-wider">Thao tác</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-border/60 bg-white">
                                     {loading ? (
-                                        <tr><td colSpan={10} className="px-6 py-20 text-center text-slate-400 font-bold italic">Đang tải dữ liệu...</td></tr>
-                                    ) : paginatedRecoveries.length === 0 ? (
-                                        <tr><td colSpan={10} className="px-6 py-20 text-center text-slate-400 font-bold italic">Không tìm thấy phiếu nào</td></tr>
+                                        <tr><td colSpan={6} className="px-6 py-20 text-center text-slate-400 font-bold italic">Đang tải dữ liệu...</td></tr>
+                                    ) : paginatedRequests.length === 0 ? (
+                                        <tr><td colSpan={6} className="px-6 py-20 text-center text-slate-400 font-bold italic">Không tìm thấy phiếu nào</td></tr>
                                     ) : (
-                                        paginatedRecoveries.map(r => (
+                                        paginatedRequests.map(r => (
                                             <tr key={r.id} className="group hover:bg-muted/30 transition-colors">
-                                                <td className="px-5 py-3.5"><span className="text-[14px] font-bold text-primary hover:underline cursor-pointer" onClick={() => { setRecoveryToEdit(r); setIsFormModalOpen(true); }}>{r.recovery_code}</span></td>
-                                                <td className="px-5 py-3.5 text-[13px] font-semibold text-slate-600">{new Date(r.recovery_date).toLocaleDateString('vi-VN')}</td>
-                                                <td className="px-5 py-3.5"><div className="text-[14px] font-bold text-slate-900 line-clamp-1">{getCustomerName(r.customer_id)}</div></td>
-                                                <td className="px-5 py-3.5 text-[13px] font-medium text-slate-500">{r.order_id ? 'Có liên kết' : '—'}</td>
-                                                <td className="px-5 py-3.5 text-[13px] font-semibold text-slate-700">{getWarehouseName(r.warehouse_id)}</td>
-                                                <td className="px-5 py-3.5 text-[13px] font-medium text-slate-500">{r.driver_name || '—'}</td>
-                                                <td className="px-5 py-3.5"><span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-md font-bold text-[12px]">{r.total_items} máy</span></td>
+                                                <td className="px-5 py-3.5"><span className="text-[14px] font-bold text-primary hover:underline cursor-pointer" onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)}>{r.order_code}</span></td>
+                                                <td className="px-5 py-3.5 text-[13px] font-semibold text-slate-600">{new Date(r.created_at).toLocaleDateString('vi-VN')}</td>
+                                                <td className="px-5 py-3.5"><div className="text-[14px] font-bold text-slate-900 line-clamp-1">{r.customer_name}</div></td>
+                                                <td className="px-5 py-3.5 text-[13px] font-medium text-slate-500">{r.ordered_by || '—'}</td>
+                                                <td className="px-5 py-3.5"><span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-md font-bold text-[12px]">{r.quantity} máy</span></td>
                                                 <td className="px-5 py-3.5">
-                                                    <span className={clsx("px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider border", handleStatusColor(r.status))}>
-                                                        {getStatusLabel(r.status)}
-                                                    </span>
-                                                </td>
-                                                <td className="px-5 py-3.5">
-                                                    <div className="flex items-center justify-center gap-1.5 transition-opacity">
-                                                        <button onClick={() => handlePrint(r)} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-all"><Printer size={16} /></button>
-                                                        <button onClick={() => { setRecoveryToEdit(r); setIsFormModalOpen(true); }} className="p-1.5 text-slate-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-all"><Edit size={16} /></button>
-                                                        <button onClick={() => handleDelete(r.id, r.recovery_code)} className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"><Trash2 size={16} /></button>
+                                                    <div className="flex items-center justify-center gap-1.5">
+                                                        <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-all" title="Xem chi tiết"><Eye size={16} /></button>
+                                                        <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)} className="p-1.5 text-slate-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-all" title="Chỉnh sửa"><Edit size={16} /></button>
+                                                        <button onClick={() => handleDelete(r.id, r.order_code)} className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all" title="Xóa"><Trash2 size={16} /></button>
                                                     </div>
                                                 </td>
                                             </tr>
@@ -434,7 +355,7 @@ export default function MachineRecoveries() {
                                 <ChevronLeft size={18} />
                             </button>
                             <h2 className="text-base font-bold text-foreground flex-1 text-center">Thống kê</h2>
-                            <div className="w-9" /> {/* Spacer for centering */}
+                            <div className="w-9" />
                         </div>
 
                         {/* Desktop Header */}
@@ -452,71 +373,31 @@ export default function MachineRecoveries() {
 
                         {/* Stats Content */}
                         <div className="w-full px-3 md:px-4 pt-4 md:pt-5 pb-5 md:pb-6 space-y-5 flex-1 overflow-y-auto bg-slate-50/30">
-                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                                <StatCard icon={<FileText />} label="Tổng số phiếu" value={recoveries.length} color="blue" />
-                                <StatCard icon={<Monitor />} label="Máy thu hồi" value={recoveries.reduce((acc, r) => acc + (r.total_items || 0), 0)} color="emerald" />
-                                <StatCard icon={<Clock />} label="Chờ duyệt" value={recoveries.filter(r => r.status === 'CHO_DUYET').length} color="amber" />
-                                <StatCard icon={<X />} label="Đã hủy" value={recoveries.filter(r => r.status === 'HUY').length} color="rose" />
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
+                                <StatCard icon={<FileText />} label="Tổng số phiếu" value={requests.length} color="blue" />
+                                <StatCard icon={<Monitor />} label="Máy đề nghị" value={requests.reduce((acc, r) => acc + (r.quantity || 0), 0)} color="emerald" />
                             </div>
 
-                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mt-6">
-                                <div className="lg:col-span-2 bg-white border border-border rounded-2xl p-5 md:p-6 shadow-sm">
-                                    <h3 className="text-[14px] md:text-base font-black text-slate-800 uppercase tracking-tight mb-6">Top 10 Khách hàng <span className="text-muted-foreground text-[12px] font-medium normal-case">(Theo số lượng máy thu hồi)</span></h3>
-                                    <div style={{ height: '280px' }}>
-                                        <BarChartJS 
-                                            data={getChartData()}
-                                            options={{
-                                                responsive: true,
-                                                maintainAspectRatio: false,
-                                                plugins: { legend: { display: false } },
-                                                scales: {
-                                                    y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { stepSize: 5 } },
-                                                    x: { grid: { display: false }, ticks: { font: { size: 11, weight: 'bold' } } }
-                                                }
-                                            }}
-                                        />
-                                    </div>
-                                </div>
-                                <div className="bg-white border border-border rounded-2xl p-5 md:p-6 shadow-sm">
-                                    <h3 className="text-[14px] md:text-base font-black text-slate-800 uppercase tracking-tight mb-6">Tỷ lệ theo trạng thái</h3>
-                                    <div style={{ height: '280px' }} className="flex items-center justify-center">
-                                        <DoughnutChartJS 
-                                            data={getStatusChartData()}
-                                            options={{
-                                                responsive: true,
-                                                maintainAspectRatio: false,
-                                                plugins: { 
-                                                    legend: { position: 'bottom', labels: { padding: 20, font: { weight: 'bold' } } }
-                                                },
-                                                cutout: '72%'
-                                            }}
-                                        />
-                                    </div>
+                            <div className="mt-6 bg-white border border-border rounded-2xl p-5 md:p-6 shadow-sm">
+                                <h3 className="text-[14px] md:text-base font-black text-slate-800 uppercase tracking-tight mb-6">Top 10 Khách hàng <span className="text-muted-foreground text-[12px] font-medium normal-case">(Theo số lượng máy đề nghị)</span></h3>
+                                <div style={{ height: '320px' }}>
+                                    <BarChartJS 
+                                        data={getChartData()}
+                                        options={{
+                                            responsive: true,
+                                            maintainAspectRatio: false,
+                                            plugins: { legend: { display: false } },
+                                            scales: {
+                                                y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { stepSize: 5 } },
+                                                x: { grid: { display: false }, ticks: { font: { size: 11, weight: 'bold' } } }
+                                            }
+                                        }}
+                                    />
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
-            )}
-
-            {/* Modals */}
-            {isFormModalOpen && (
-                <MachineRecoveryFormModal
-                    recovery={recoveryToEdit}
-                    onClose={() => setIsFormModalOpen(false)}
-                    onSuccess={() => { setIsFormModalOpen(false); fetchData(); }}
-                />
-            )}
-
-            {recoveryToPrint && createPortal(
-                <MachineRecoveryPrintTemplate
-                    recovery={recoveryToPrint}
-                    customerName={getCustomerName(recoveryToPrint.customer_id)}
-                    customerAddress={getCustomerAddress(recoveryToPrint.customer_id)}
-                    warehouseName={getWarehouseName(recoveryToPrint.warehouse_id)}
-                    onPrinted={() => setRecoveryToPrint(null)}
-                />,
-                document.body
             )}
         </div>
     );

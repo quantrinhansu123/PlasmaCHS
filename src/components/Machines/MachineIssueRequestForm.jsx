@@ -307,9 +307,10 @@ Ghi chú: ${formData.notes}`,
                     title: `📝 Đã cập nhật Đề nghị xuất máy: ${orderData.customer_name}`,
                     description: `NV Kinh doanh (${orderData.ordered_by || 'Không rõ'}) vừa cập nhật phiếu yêu cầu xuất máy.`,
                     type: 'info',
-                    link: '/don-hang'
+                    link: '/de-nghi-xuat-may'
                 });
                 toast.success('Đã cập nhật Phiếu Đề Nghị Xuất Máy thành công!');
+                setTimeout(() => navigate('/de-nghi-xuat-may'), 1000);
             } else {
                 orderData.status = 'CHO_DUYET';
                 orderData.created_at = new Date().toISOString();
@@ -322,9 +323,10 @@ Ghi chú: ${formData.notes}`,
                     title: `💡 Yêu cầu xuất máy mới: ${orderData.customer_name}`,
                     description: `NV Kinh doanh (${orderData.ordered_by || 'Không rõ'}) vừa lập phiếu đề nghị xuất máy mới.`,
                     type: 'info',
-                    link: '/don-hang'
+                    link: '/de-nghi-xuat-may'
                 });
                 toast.success('Đã được lưu vào hệ thống!');
+                setTimeout(() => navigate('/de-nghi-xuat-may'), 1000);
             }
         } catch (error) {
             console.error('Error saving DNXM:', error);

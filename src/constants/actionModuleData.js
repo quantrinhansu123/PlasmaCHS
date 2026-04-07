@@ -39,6 +39,13 @@ export const actionModuleGroups = [
         colorScheme: 'blue',
       },
       {
+        icon: Monitor,
+        title: 'Đề nghị xuất máy',
+        description: 'Danh sách phiếu đề nghị xuất máy và quản lý luân chuyển thiết bị.',
+        href: '/de-nghi-xuat-may',
+        colorScheme: 'amber',
+      },
+      {
         icon: Users,
         title: 'Danh sách khách hàng',
         description: 'Quản lý dữ liệu người liên hệ và theo dõi tài sản, máy móc phân bổ.',

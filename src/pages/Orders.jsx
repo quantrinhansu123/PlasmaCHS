@@ -283,7 +283,8 @@ const Orders = () => {
         try {
             let query = supabase
                 .from('orders')
-                .select('*, order_items(*)');
+                .select('*, order_items(*)')
+                .neq('order_type', 'DNXM');
 
             // Apply warehouse filter for warehouse managers/staff (Non-Admin)
             if (role !== 'Admin' && department) {

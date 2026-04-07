@@ -44,6 +44,7 @@ import MachineInventoryReport from './pages/MachineInventoryReport';
 import SalesReport from './pages/SalesReport';
 import ErrorReport from './pages/ErrorReport';
 import MachineRecoveries from './pages/MachineRecoveries';
+import MachineRequests from './pages/MachineRequests';
 import ShippingTasks from './pages/ShippingTasks';
 import InventoryReport from './pages/InventoryReport';
 import InventoryTransfer from './pages/InventoryTransfer';
@@ -125,6 +126,7 @@ function App() {
                 <Route key={path} path={path} element={<ModulePage />} />
               ))}
               <Route path="/don-hang" element={<Orders />} />
+              <Route path="/de-nghi-xuat-may" element={<MachineRequests />} />
               <Route path="/binh" element={<Cylinders />} />
               <Route path="/binh/tao" element={<Cylinders />} />
               <Route path="/may" element={<Machines />} />
