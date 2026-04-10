@@ -1,14 +1,31 @@
 import { clsx } from 'clsx';
-import { Printer, Save, Eye, EyeOff } from 'lucide-react';
+import { Printer, Save, Eye, EyeOff, Edit } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase/config';
 import { toast } from 'react-toastify';
 import usePermissions from '../../hooks/usePermissions';
 import { notificationService } from '../../utils/notificationService';
 
+const dmyToYmd = (dmy) => {
+    if (!dmy || typeof dmy !== 'string') return "";
+    const parts = dmy.split('/');
+    if (parts.length !== 3) return "";
+    const [d, m, y] = parts;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+};
+
+const ymdToDmy = (ymd) => {
+    if (!ymd || typeof ymd !== 'string') return "";
+    const parts = ymd.split('-');
+    if (parts.length !== 3) return ymd; // Might be already d/m/y if something went wrong
+    const [y, m, d] = parts;
+    return `${d}/${m}/${y}`;
+};
+
 const MachineIssueRequestForm = () => {
     const location = useLocation();
+    const navigate = useNavigate();
     const { role, user } = usePermissions();
     
     // Authorization check for Machine Code
@@ -137,9 +154,9 @@ const MachineIssueRequestForm = () => {
                     },
                     quantity: data.quantity?.toString() || '',
                     machineCode: parseField('Mã máy:'),
-                    dateNeeded: parseField('Ngày cần:'),
-                    dateDelivery: parseField('Giao:'),
-                    dateRecall: parseField('Thu hồi dự kiến:'),
+                    dateNeeded: dmyToYmd(parseField('Ngày cần:')),
+                    dateDelivery: dmyToYmd(parseField('Giao:')),
+                    dateRecall: dmyToYmd(parseField('Thu hồi dự kiến:')),
                     shippingMethod: {
                         'KD tự vận chuyển': pShipping.includes('KD tự vận chuyển'),
                         'Xe Công ty': pShipping.includes('Xe Công ty')
@@ -293,9 +310,9 @@ const MachineIssueRequestForm = () => {
                 note: `Loại máy: ${selectedMachineTypes.join(', ')}. 
 Hình thức: ${issueTypesList || 'Chưa chọn'}.
 Màu máy: ${selectedColors}. 
-Ngày cần: ${formData.dateNeeded}. 
-Giao: ${formData.dateDelivery}. 
-Thu hồi dự kiến: ${formData.dateRecall}. 
+Ngày cần: ${ymdToDmy(formData.dateNeeded)}. 
+Giao: ${ymdToDmy(formData.dateDelivery)}. 
+Thu hồi dự kiến: ${ymdToDmy(formData.dateRecall)}. 
 Phụ trách máy: ${formData.machineManager}. 
 PT Vận chuyển: ${shippingList}. 
 Mã máy: ${formData.machineCode}. 
@@ -312,26 +329,29 @@ Ghi chú: ${formData.notes}`,
                 if (error) throw error;
                 
                 notificationService.add({
-                    title: `📝 Đã cập nhật Đề nghị xuất máy: ${orderData.customer_name}`,
-                    description: `NV Kinh doanh (${orderData.ordered_by || 'Không rõ'}) vừa cập nhật phiếu yêu cầu xuất máy.`,
+                    title: `📝 Cập nhật ĐNXM: ${orderData.customer_name}`,
+                    description: `${orderData.ordered_by || 'Nhân viên'} vừa chỉnh sửa phiếu ĐNXM.`,
                     type: 'info',
-                    link: '/de-nghi-xuat-may'
+                    link: `/de-nghi-xuat-may/tao?orderId=${editOrderId}&viewOnly=true`
                 });
                 toast.success('Đã cập nhật Phiếu Đề Nghị Xuất Máy thành công!');
                 setTimeout(() => navigate('/de-nghi-xuat-may'), 1000);
             } else {
                 orderData.status = 'CHO_DUYET';
                 orderData.created_at = new Date().toISOString();
-                const { error } = await supabase
+                const { data: insertedData, error } = await supabase
                     .from('orders')
-                    .insert([orderData]);
+                    .insert([orderData])
+                    .select('id')
+                    .single();
                 if (error) throw error;
                 
+                const newOrderId = insertedData?.id;
                 notificationService.add({
-                    title: `💡 Yêu cầu xuất máy mới: ${orderData.customer_name}`,
-                    description: `NV Kinh doanh (${orderData.ordered_by || 'Không rõ'}) vừa lập phiếu đề nghị xuất máy mới.`,
+                    title: `💡 ĐNXM mới: ${orderData.customer_name}`,
+                    description: `${orderData.ordered_by || 'Nhân viên'} vừa lập phiếu đề nghị xuất máy mới.`,
                     type: 'info',
-                    link: '/de-nghi-xuat-may'
+                    link: newOrderId ? `/de-nghi-xuat-may/tao?orderId=${newOrderId}&viewOnly=true` : '/de-nghi-xuat-may'
                 });
                 toast.success('Đã được lưu vào hệ thống!');
                 setTimeout(() => navigate('/de-nghi-xuat-may'), 1000);
@@ -344,36 +364,57 @@ Ghi chú: ${formData.notes}`,
         }
     };
 
+    // Auto-assign machines to customer when warehouse approves
+    const assignMachinesToCustomer = async (machineCodes, customerName) => {
+        if (!machineCodes) return;
+        const codes = machineCodes.split(',').map(c => c.trim()).filter(Boolean);
+        if (codes.length === 0) return;
+
+        for (const code of codes) {
+            const { error } = await supabase
+                .from('machines')
+                .update({
+                    status: 'thuộc khách hàng',
+                    customer_name: customerName,
+                    warehouse: null
+                })
+                .eq('serial_number', code);
+            if (error) console.error(`Lỗi gán máy ${code}:`, error);
+        }
+    };
+
     const handleApproveStatus = async () => {
         if (!formData.status) return;
         let nextStatus = '';
         let confirmMsg = '';
         let successMsg = '';
+        let notifTitle = '';
+        let notifDesc = '';
 
         switch (formData.status) {
             case 'CHO_DUYET':
+                nextStatus = 'CHO_CTY_DUYET';
+                confirmMsg = 'Leader Duyệt (1/3): Chuyển phiếu cho Công ty duyệt?';
+                successMsg = 'Leader đã duyệt → Chờ Công ty duyệt';
+                notifTitle = '✅ Leader đã duyệt ĐNXM';
+                notifDesc = `Phiếu ĐNXM${formData.orangeNumber || ''} - KH: ${formData.customerName} → Chờ Công ty duyệt`;
+                break;
             case 'CHO_CTY_DUYET':
-                nextStatus = 'TRUONG_KD_XU_LY';
-                confirmMsg = 'Duyệt (Cấp 1): Chuyển cho Trưởng kinh doanh xử lý?';
-                successMsg = 'Đã chuyển cho Trưởng kinh doanh xử lý';
-                break;
-            case 'TRUONG_KD_XU_LY':
-                nextStatus = 'KD_XU_LY';
-                confirmMsg = 'Duyệt (Cấp 2): Chuyển cho Kinh doanh xử lý?';
-                successMsg = 'Đã chuyển cho Kinh doanh xử lý';
-                break;
-            case 'KD_XU_LY':
                 nextStatus = 'KHO_XU_LY';
-                confirmMsg = 'Duyệt (Cấp 3): Chuyển cho Kho xử lý xuất máy?';
-                successMsg = 'Đã chuyển cho Kho xử lý';
+                confirmMsg = 'Công ty Duyệt (2/3): Chuyển phiếu cho Kho xử lý?';
+                successMsg = 'Công ty đã duyệt → Chờ Kho duyệt';
+                notifTitle = '✅ Công ty đã duyệt ĐNXM';
+                notifDesc = `Phiếu ĐNXM${formData.orangeNumber || ''} - KH: ${formData.customerName} → Chờ Kho xử lý`;
                 break;
             case 'KHO_XU_LY':
                 nextStatus = 'DA_DUYET';
-                confirmMsg = 'Duyệt (Cấp 4): Kho xác nhận hoàn tất (Đã duyệt)?';
-                successMsg = 'Kho đã xử lý thành công';
+                confirmMsg = 'Kho Duyệt (3/3): Xác nhận xuất máy cho khách hàng?';
+                successMsg = 'Kho đã duyệt xuất máy thành công!';
+                notifTitle = '🏭 Kho đã duyệt xuất máy';
+                notifDesc = `Phiếu ĐNXM${formData.orangeNumber || ''} hoàn tất. Máy đã giao cho ${formData.customerName}`;
                 break;
             default:
-                toast.info('Phiếu đã xử lý không thể duyệt tiếp.');
+                toast.info('Phiếu đã xử lý, không thể duyệt tiếp.');
                 return;
         }
 
@@ -387,15 +428,20 @@ Ghi chú: ${formData.notes}`,
             }).eq('id', editOrderId);
 
             if (error) throw error;
+
+            // Khi Kho duyệt → tự động gán máy cho khách hàng
+            if (nextStatus === 'DA_DUYET') {
+                await assignMachinesToCustomer(formData.machineCode, formData.customerName);
+            }
             
             setFormData(prev => ({ ...prev, status: nextStatus }));
             toast.success(successMsg);
             
             notificationService.add({
-                title: `✅ Đã duyệt xuất máy`,
-                description: `Phiếu ĐNXM${formData.orangeNumber || ''} chuyển trạng thái: ${successMsg}`,
+                title: notifTitle,
+                description: notifDesc,
                 type: 'success',
-                link: '/de-nghi-xuat-may'
+                link: `/de-nghi-xuat-may/tao?orderId=${editOrderId}&viewOnly=true`
             });
         } catch (error) {
             toast.error('Lỗi khi duyệt: ' + error.message);
@@ -418,6 +464,13 @@ Ghi chú: ${formData.notes}`,
             
             setFormData(prev => ({ ...prev, status: 'TU_CHOI' }));
             toast.error('Đã từ chối phiếu đề xuất.');
+
+            notificationService.add({
+                title: `❌ ĐNXM bị từ chối`,
+                description: `Phiếu ĐNXM${formData.orangeNumber || ''} - KH: ${formData.customerName} đã bị từ chối.`,
+                type: 'warning',
+                link: `/de-nghi-xuat-may/tao?orderId=${editOrderId}&viewOnly=true`
+            });
         } catch (error) {
             toast.error('Lỗi khi từ chối: ' + error.message);
         } finally {
@@ -647,20 +700,18 @@ Ghi chú: ${formData.notes}`,
                             <div>
                                 <label className="block text-sm font-medium text-foreground mb-1.5">Ngày cần máy</label>
                                 <input
-                                    type="text"
+                                    type="date"
                                     value={formData.dateNeeded}
                                     onChange={(e) => handleInputChange('dateNeeded', e.target.value)}
-                                    placeholder="dd/MM/yyyy"
                                     className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
                                 />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-foreground mb-1.5">Ngày giao</label>
                                 <input
-                                    type="text"
+                                    type="date"
                                     value={formData.dateDelivery}
                                     onChange={(e) => handleInputChange('dateDelivery', e.target.value)}
-                                    placeholder="dd/MM/yyyy"
                                     className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
                                 />
                             </div>
@@ -668,10 +719,9 @@ Ghi chú: ${formData.notes}`,
                                 <div>
                                     <label className="block text-sm font-medium text-foreground mb-1.5">Thu hồi dự kiến</label>
                                     <input
-                                        type="text"
+                                        type="date"
                                         value={formData.dateRecall}
                                         onChange={(e) => handleInputChange('dateRecall', e.target.value)}
-                                        placeholder="dd/MM/yyyy"
                                         className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
                                     />
                                 </div>
@@ -718,43 +768,61 @@ Ghi chú: ${formData.notes}`,
             {isReadOnly && (
                 <div className="no-print max-w-[210mm] mx-auto flex flex-wrap justify-end gap-4 print:hidden mb-6">
                     {(() => {
-                        const isLevel1 = formData.status === 'CHO_DUYET' || formData.status === 'CHO_CTY_DUYET';
-                        const isLevel2 = formData.status === 'TRUONG_KD_XU_LY';
-                        const isLevel3 = formData.status === 'KD_XU_LY';
-                        const isLevel4 = formData.status === 'KHO_XU_LY';
+                        const isLevel1 = formData.status === 'CHO_DUYET';
+                        const isLevel2 = formData.status === 'CHO_CTY_DUYET';
+                        const isLevel3 = formData.status === 'KHO_XU_LY';
 
                         const r = role?.toLowerCase() || '';
                         let canApprove = false;
                         if (r === 'admin' || r === 'giám đốc') canApprove = true;
                         else if (isLevel1 && (r.includes('lead') || r.includes('trưởng'))) canApprove = true;
-                        else if (isLevel2 && (r.includes('sale') || r.includes('kinh doanh') || r.includes('trưởng'))) canApprove = true;
+                        else if (isLevel2 && (r === 'admin' || r === 'giám đốc')) canApprove = true;
                         else if (isLevel3 && (r.includes('kho'))) canApprove = true;
-                        else if (isLevel4 && (r.includes('kho'))) canApprove = true;
 
-                        if (!canApprove || !['CHO_DUYET', 'CHO_CTY_DUYET', 'TRUONG_KD_XU_LY', 'KD_XU_LY', 'KHO_XU_LY'].includes(formData.status)) return null;
+                        const canEdit = ['CHO_DUYET', 'CHO_CTY_DUYET', 'KHO_XU_LY'].includes(formData.status);
 
                         return (
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={handleApproveStatus}
-                                    disabled={isSaving}
-                                    className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-emerald-700 transition-all font-bold text-sm disabled:opacity-50"
-                                >
-                                    {isSaving ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" /> : <Save size={18} />}
-                                    DUYỆT PHIẾU ({
-                                        formData.status === 'CHO_DUYET' || formData.status === 'CHO_CTY_DUYET' ? '1/4' :
-                                        formData.status === 'TRUONG_KD_XU_LY' ? '2/4' :
-                                        formData.status === 'KD_XU_LY' ? '3/4' : '4/4'
-                                    })
-                                </button>
-                                <button
-                                    onClick={handleRejectStatus}
-                                    disabled={isSaving}
-                                    className="flex items-center justify-center gap-2 bg-rose-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-rose-700 transition-all font-bold text-sm disabled:opacity-50"
-                                >
-                                    {isSaving ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" /> : <EyeOff size={18} />}
-                                    TỪ CHỐI
-                                </button>
+                            <div className="flex flex-wrap gap-2">
+                                {/* Nút Chỉnh sửa - hiện ở mọi bước chưa hoàn tất */}
+                                {canEdit && (
+                                    <button
+                                        onClick={() => {
+                                            setIsReadOnly(false);
+                                            setShowPreview(false);
+                                        }}
+                                        className="flex items-center justify-center gap-2 bg-amber-500 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-amber-600 transition-all font-bold text-sm"
+                                    >
+                                        <Edit size={18} />
+                                        CHỈNH SỬA
+                                    </button>
+                                )}
+
+                                {/* Nút Duyệt - chỉ hiện nếu user có quyền */}
+                                {canApprove && ['CHO_DUYET', 'CHO_CTY_DUYET', 'KHO_XU_LY'].includes(formData.status) && (
+                                    <button
+                                        onClick={handleApproveStatus}
+                                        disabled={isSaving}
+                                        className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-emerald-700 transition-all font-bold text-sm disabled:opacity-50"
+                                    >
+                                        {isSaving ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" /> : <Save size={18} />}
+                                        DUYỆT PHIẾU ({
+                                            formData.status === 'CHO_DUYET' ? '1/3 - Leader' :
+                                            formData.status === 'CHO_CTY_DUYET' ? '2/3 - Công ty' : '3/3 - Kho'
+                                        })
+                                    </button>
+                                )}
+
+                                {/* Nút Từ chối */}
+                                {canApprove && ['CHO_DUYET', 'CHO_CTY_DUYET', 'KHO_XU_LY'].includes(formData.status) && (
+                                    <button
+                                        onClick={handleRejectStatus}
+                                        disabled={isSaving}
+                                        className="flex items-center justify-center gap-2 bg-rose-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-rose-700 transition-all font-bold text-sm disabled:opacity-50"
+                                    >
+                                        {isSaving ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" /> : <EyeOff size={18} />}
+                                        TỪ CHỐI
+                                    </button>
+                                )}
                             </div>
                         );
                     })()}
@@ -929,7 +997,7 @@ Ghi chú: ${formData.notes}`,
                         <span className="min-w-[200px]">9. Ngày CHS cần máy:</span>
                         <input
                             type="text"
-                            value={formData.dateNeeded}
+                            value={ymdToDmy(formData.dateNeeded)}
                             readOnly
                             className="focus:outline-none w-32 px-2 bg-transparent print:border-none print:p-0"
                             placeholder="dd/MM/yyyy"
@@ -941,7 +1009,7 @@ Ghi chú: ${formData.notes}`,
                             <span className="min-w-[200px]">10. Ngày giao cho Khách hàng:</span>
                             <input
                                 type="text"
-                                value={formData.dateDelivery}
+                                value={ymdToDmy(formData.dateDelivery)}
                                 readOnly
                                 className="focus:outline-none w-32 px-2 bg-transparent print:border-none print:p-0"
                                 placeholder="dd/MM/yyyy"
@@ -952,7 +1020,7 @@ Ghi chú: ${formData.notes}`,
                                 <span className="mr-2">11. Thời gian thu hồi:</span>
                                 <input
                                     type="text"
-                                    value={formData.dateRecall}
+                                    value={ymdToDmy(formData.dateRecall)}
                                     readOnly
                                     className="focus:outline-none w-32 px-2 bg-transparent print:border-none print:p-0"
                                     placeholder="dd/MM/yyyy"

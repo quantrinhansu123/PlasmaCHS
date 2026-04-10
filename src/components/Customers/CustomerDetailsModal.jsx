@@ -42,6 +42,7 @@ export default function CustomerDetailsModal({ customer, onClose }) {
     const [orders, setOrders] = useState([]);
     const [transactions, setTransactions] = useState([]);
     const [cylinders, setCylinders] = useState([]);
+    const [careHistory, setCareHistory] = useState([]);
 
     // States for Payment Form
     const [showPaymentForm, setShowPaymentForm] = useState(false);
@@ -94,9 +95,21 @@ export default function CustomerDetailsModal({ customer, onClose }) {
 
             if (err3) throw err3;
 
+            // Fetch care history
+            const { data: histData, error: err4 } = await supabase
+                .from('customer_care_history')
+                .select('*')
+                .eq('customer_id', customer.id)
+                .order('assigned_at', { ascending: false });
+
+            if (err4) {
+                console.error('Error fetching care history:', err4);
+            }
+
             setOrders(ordersData || []);
             setTransactions(txData || []);
             setCylinders(cylData || []);
+            setCareHistory(histData || []);
 
             const validOrders = (ordersData || []).filter(o =>
                 !['HUY_DON'].includes(o.status)
@@ -308,11 +321,14 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                         </button>
                     </div>
 
-                    <div className="flex items-center gap-6 mt-5 border-b border-slate-200">
-                        <button onClick={() => setActiveTab('overview')} className={clsx("pb-4 text-sm font-black transition-all border-b-2", activeTab === 'overview' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Tổng quan</button>
-                        <button onClick={() => setActiveTab('orders')} className={clsx("pb-4 text-sm font-black transition-all border-b-2", activeTab === 'orders' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Đơn hàng ({orders.length})</button>
-                        <button onClick={() => setActiveTab('transactions')} className={clsx("pb-4 text-sm font-black transition-all border-b-2", activeTab === 'transactions' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Thu / Chi ({transactions.length})</button>
-                        <button onClick={() => setActiveTab('cylinders')} className={clsx("pb-4 text-sm font-black transition-all border-b-2", activeTab === 'cylinders' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Danh sách bình ({cylinders.length})</button>
+                    <div className="flex items-center gap-6 mt-5 border-b border-slate-200 overflow-x-auto scrollbar-hide scroll-smooth">
+                        <button onClick={() => setActiveTab('overview')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'overview' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Tổng quan</button>
+                        <button onClick={() => setActiveTab('orders')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'orders' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Đơn hàng ({orders.length})</button>
+                        <button onClick={() => setActiveTab('transactions')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'transactions' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Thu / Chi ({transactions.length})</button>
+                        <button onClick={() => setActiveTab('cylinders')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'cylinders' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Danh sách bình ({cylinders.length})</button>
+                        {customer.status !== 'Thành công' && (
+                            <button onClick={() => setActiveTab('care_history')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'care_history' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Lịch sử chăm sóc ({careHistory.length})</button>
+                        )}
                     </div>
                 </div>
 
@@ -324,20 +340,22 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                         <div className="space-y-6">
                             {activeTab === 'overview' && (
                                 <div className="space-y-6">
-                                    <div className="grid grid-cols-3 gap-6 text-center">
-                                        <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100">
-                                            <p className="text-[10px] font-black text-rose-400 uppercase tracking-widest mb-1">Công Nợ</p>
-                                            <h3 className="text-xl font-black text-rose-700">{formatCurrency(stats.currentDebt)}</h3>
+                                    {customer.status === 'Thành công' && (
+                                        <div className="grid grid-cols-3 gap-6 text-center">
+                                            <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100">
+                                                <p className="text-[10px] font-black text-rose-400 uppercase tracking-widest mb-1">Công Nợ</p>
+                                                <h3 className="text-xl font-black text-rose-700">{formatCurrency(stats.currentDebt)}</h3>
+                                            </div>
+                                            <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100">
+                                                <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-1">Tổng Tiền Hàng</p>
+                                                <h3 className="text-xl font-black text-emerald-700">{formatCurrency(stats.totalOrderValue)}</h3>
+                                            </div>
+                                            <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100">
+                                                <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Đã Thanh Toán</p>
+                                                <h3 className="text-xl font-black text-indigo-700">{formatCurrency(stats.totalPaid)}</h3>
+                                            </div>
                                         </div>
-                                        <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100">
-                                            <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-1">Tổng Tiền Hàng</p>
-                                            <h3 className="text-xl font-black text-emerald-700">{formatCurrency(stats.totalOrderValue)}</h3>
-                                        </div>
-                                        <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100">
-                                            <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Đã Thanh Toán</p>
-                                            <h3 className="text-xl font-black text-indigo-700">{formatCurrency(stats.totalPaid)}</h3>
-                                        </div>
-                                    </div>
+                                    )}
 
                                     {/* Care Info section */}
                                     <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200">
@@ -548,6 +566,44 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                                             </td>
                                                             <td className="px-4 py-3 font-bold text-slate-500 text-xs">
                                                                 {cyl.expiry_date ? formatDate(cyl.expiry_date) : '—'}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {activeTab === 'care_history' && (
+                                <div className="space-y-4">
+                                    {careHistory.length === 0 ? (
+                                        <div className="py-12 text-center font-bold text-slate-300 italic">Chưa có lịch sử chăm sóc</div>
+                                    ) : (
+                                        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                                            <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                                                <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nhân viên đã chăm sóc</h5>
+                                            </div>
+                                            <table className="w-full text-left text-sm">
+                                                <thead className="bg-slate-50 border-b border-slate-100">
+                                                    <tr>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Tên nhân viên</th>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Ngày phân công</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-50">
+                                                    {careHistory.map((item, idx) => (
+                                                        <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
+                                                            <td className="px-4 py-3">
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className={clsx("w-2 h-2 rounded-full", idx === 0 ? "bg-emerald-500 animate-pulse" : "bg-slate-300")} />
+                                                                    <span className="font-black text-slate-700">{item.staff_name}</span>
+                                                                    {idx === 0 && <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-md font-black uppercase">Hiện tại</span>}
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-4 py-3 font-bold text-slate-500 italic">
+                                                                {formatDate(item.assigned_at)}
                                                             </td>
                                                         </tr>
                                                     ))}

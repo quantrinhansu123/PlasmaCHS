@@ -58,8 +58,20 @@ export default function MachineRequests() {
     const [loading, setLoading] = useState(true);
     const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
     const [searchTerm, setSearchTerm] = useState('');
+    const [statusFilter, setStatusFilter] = useState('ALL');
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(50);
+
+    const COMMON_STATUSES = [
+        { id: 'ALL', label: 'Tất cả' },
+        { id: 'CHO_DUYET', label: 'Chờ Lead duyệt' },
+        { id: 'CHO_CTY_DUYET', label: 'Chờ Cty duyệt' },
+        { id: 'KHO_XU_LY', label: 'Chờ Kho duyệt' },
+        { id: 'DA_DUYET', label: 'Đã duyệt' },
+        { id: 'HOAN_THANH', label: 'Hoàn thành' },
+        { id: 'TU_CHOI', label: 'Từ chối' },
+        { id: 'HUY_DON', label: 'Hủy đơn' },
+    ];
 
     useEffect(() => {
         fetchData();
@@ -82,11 +94,15 @@ export default function MachineRequests() {
         }
     };
 
-    const filteredRequests = requests.filter(r =>
-        (r.order_code || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (r.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (r.ordered_by || '').toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const filteredRequests = requests.filter(r => {
+        const matchesSearch = (r.order_code || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (r.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (r.ordered_by || '').toLowerCase().includes(searchTerm.toLowerCase());
+        
+        const matchesStatus = statusFilter === 'ALL' || r.status === statusFilter;
+        
+        return matchesSearch && matchesStatus;
+    });
 
     const totalRecords = filteredRequests.length;
     const paginatedRequests = filteredRequests.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -130,11 +146,9 @@ export default function MachineRequests() {
 
     const getStatusInfo = (status) => {
         switch (status) {
-            case 'CHO_DUYET': return { label: 'Chờ duyệt', colorCls: 'bg-yellow-50 text-yellow-700 border-yellow-200' };
+            case 'CHO_DUYET': return { label: 'Chờ Lead duyệt', colorCls: 'bg-yellow-50 text-yellow-700 border-yellow-200' };
             case 'CHO_CTY_DUYET': return { label: 'Chờ Công ty duyệt', colorCls: 'bg-orange-50 text-orange-700 border-orange-200' };
-            case 'TRUONG_KD_XU_LY': return { label: 'Trưởng kinh doanh xử lý', colorCls: 'bg-blue-50 text-blue-700 border-blue-200' };
-            case 'KD_XU_LY': return { label: 'Kinh doanh xử lý', colorCls: 'bg-purple-50 text-purple-700 border-purple-200' };
-            case 'KHO_XU_LY': return { label: 'Kho xử lý', colorCls: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+            case 'KHO_XU_LY': return { label: 'Chờ Kho duyệt', colorCls: 'bg-cyan-50 text-cyan-700 border-cyan-200' };
             case 'TU_CHOI': return { label: 'Từ chối', colorCls: 'bg-rose-50 text-rose-700 border-rose-200' };
             case 'DA_DUYET': return { label: 'Đã duyệt', colorCls: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
             case 'CHO_GIAO_HANG': return { label: 'Chờ giao hàng', colorCls: 'bg-amber-50 text-amber-700 border-amber-200' };
@@ -167,6 +181,27 @@ export default function MachineRequests() {
                         searchTerm={searchTerm}
                         setSearchTerm={setSearchTerm}
                         searchPlaceholder="Tìm kiếm đề nghị xuất máy..."
+                        summary={
+                            <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-1 -mx-0.5 px-0.5">
+                                {COMMON_STATUSES.map(s => (
+                                    <button
+                                        key={s.id}
+                                        onClick={() => {
+                                            setStatusFilter(s.id);
+                                            setCurrentPage(1);
+                                        }}
+                                        className={clsx(
+                                            "px-3 py-1.5 rounded-xl text-[11px] font-bold whitespace-nowrap transition-all border shadow-sm",
+                                            statusFilter === s.id
+                                                ? "bg-primary text-white border-primary shadow-primary/20 scale-105"
+                                                : "bg-white text-muted-foreground border-border active:scale-95"
+                                        )}
+                                    >
+                                        {s.label}
+                                    </button>
+                                ))}
+                            </div>
+                        }
                         actions={
                             <button
                                 onClick={() => navigate('/de-nghi-xuat-may/tao')}
@@ -273,6 +308,18 @@ export default function MachineRequests() {
                                             </button>
                                         )}
                                     </div>
+                                    <select
+                                        value={statusFilter}
+                                        onChange={(e) => {
+                                            setStatusFilter(e.target.value);
+                                            setCurrentPage(1);
+                                        }}
+                                        className="h-9 px-3 rounded-lg border border-border bg-white text-[12px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all cursor-pointer shadow-sm min-w-[150px]"
+                                    >
+                                        {COMMON_STATUSES.map(s => (
+                                            <option key={s.id} value={s.id}>{s.label}</option>
+                                        ))}
+                                    </select>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <button onClick={() => navigate('/de-nghi-xuat-may/tao')} className="flex items-center gap-2 px-6 h-10 rounded-lg bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all active:scale-95">

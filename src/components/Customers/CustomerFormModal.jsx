@@ -250,6 +250,19 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
 
                         if (stealError) throw stealError;
 
+                        // Log Care History for "Steal"
+                        try {
+                            await supabase
+                                .from('customer_care_history')
+                                .insert([{
+                                    customer_id: existingCustomer.id,
+                                    staff_name: updateData.care_by,
+                                    assigned_at: now.toISOString()
+                                }]);
+                        } catch (historyError) {
+                            console.error('Error logging care history (steal):', historyError);
+                        }
+
                         notificationService.add({
                             title: `🎯 Đã nhận khách quá hạn: ${existingCustomer.name}`,
                             description: `Bạn đã tiếp nhận chăm sóc khách hàng này từ hôm nay.`,
@@ -276,6 +289,21 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                     .eq('id', customer.id);
                 if (error) throw error;
                 
+                // Log Care History if care_by changed during edit
+                if (payload.care_by && payload.care_by !== customer.care_by) {
+                    try {
+                        await supabase
+                            .from('customer_care_history')
+                            .insert([{
+                                customer_id: customer.id,
+                                staff_name: payload.care_by,
+                                assigned_at: new Date().toISOString()
+                            }]);
+                    } catch (historyError) {
+                        console.error('Error logging care history (edit):', historyError);
+                    }
+                }
+                
                 // Nv KD thay đổi trạng thái sang Thành công
                 if (payload.status === 'Thành công' && prevStatus !== 'Thành công') {
                     notificationService.add({
@@ -286,10 +314,28 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                     });
                 }
             } else {
-                const { error } = await supabase
+                const { data: newCustomer, error } = await supabase
                     .from('customers')
-                    .insert([payload]);
+                    .insert([payload])
+                    .select('id')
+                    .single();
+                
                 if (error) throw error;
+
+                // Log Initial Care History
+                if (newCustomer && payload.care_by) {
+                    try {
+                        await supabase
+                            .from('customer_care_history')
+                            .insert([{
+                                customer_id: newCustomer.id,
+                                staff_name: payload.care_by,
+                                assigned_at: new Date().toISOString()
+                            }]);
+                    } catch (historyError) {
+                        console.error('Error logging care history (new):', historyError);
+                    }
+                }
 
                 // Notification for new customer
                 notificationService.add({
