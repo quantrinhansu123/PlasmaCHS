@@ -23,7 +23,7 @@ const ymdToDmy = (ymd) => {
     return `${d}/${m}/${y}`;
 };
 
-const MachineIssueRequestForm = () => {
+const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePopup }) => {
     const location = useLocation();
     const navigate = useNavigate();
     const { role, user } = usePermissions();
@@ -79,8 +79,8 @@ const MachineIssueRequestForm = () => {
 
     useEffect(() => {
         const queryParams = new URLSearchParams(location.search);
-        const orderId = queryParams.get('orderId');
-        const viewOnly = queryParams.get('viewOnly');
+        const orderId = overrideOrderId || queryParams.get('orderId');
+        const viewOnly = overrideViewOnly ? 'true' : queryParams.get('viewOnly');
         const phone = queryParams.get('phone');
         
         if (viewOnly === 'true') {
@@ -839,6 +839,22 @@ Ghi chú: ${formData.notes}`,
                         <Printer size={20} />
                         IN PHIẾU PDF
                     </button>
+
+                    {onClosePopup ? (
+                        <button
+                            onClick={onClosePopup}
+                            className="flex items-center justify-center gap-2 bg-slate-200 text-slate-700 px-8 py-3 rounded-xl shadow-lg hover:bg-slate-300 transition-all font-bold text-sm"
+                        >
+                            ĐÓNG PHIẾU
+                        </button>
+                    ) : (
+                        <button
+                            onClick={() => navigate('/machines')}
+                            className="flex items-center justify-center gap-2 bg-slate-200 text-slate-700 px-8 py-3 rounded-xl shadow-lg hover:bg-slate-300 transition-all font-bold text-sm"
+                        >
+                            THOÁT
+                        </button>
+                    )}
                 </div>
             )}
 

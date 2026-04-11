@@ -1,4 +1,4 @@
-import { AlertCircle, AlertTriangle, ArrowRightCircle, Camera, Check, CheckCircle, CheckCircle2, Clock, CloudUpload, Package, Plus, ScanBarcode, Truck, X, XCircle, ZoomIn } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowRightCircle, Camera, Check, CheckCircle, CheckCircle2, Clock, CloudUpload, Package, Plus, ScanBarcode, Truck, X, XCircle, ZoomIn, FileText } from 'lucide-react';
 import clsx from 'clsx';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -7,6 +7,8 @@ import { supabase } from '../../supabase/config';
 import BarcodeScanner from '../Common/BarcodeScanner';
 import OrderHistoryTimeline from './OrderHistoryTimeline';
 import { notificationService } from '../../utils/notificationService';
+import MachineIssueRequestForm from '../Machines/MachineIssueRequestForm';
+
 
 export default function OrderStatusUpdater({ order, warehouseName, userRole, onClose, onUpdateSuccess }) {
     const [isLoading, setIsLoading] = useState(false);
@@ -28,7 +30,10 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     const [confirmDeliveryCheck, setConfirmDeliveryCheck] = useState(false);
     const [deliveryProofBase64, setDeliveryProofBase64] = useState(order?.delivery_proof_base64 || '');
     const [showProofModal, setShowProofModal] = useState(false);
+    const [showMachinePreviewPopup, setShowMachinePreviewPopup] = useState(false);
     const [realWarehouseName, setRealWarehouseName] = useState(warehouseName || order?.warehouse);
+
+    const isDNXM = order?.order_code?.startsWith('DNXM-');
 
     useEffect(() => {
         if (order?.warehouse && (realWarehouseName === order.warehouse || /^[0-9a-fA-F]{8}-/.test(realWarehouseName))) {
@@ -58,7 +63,22 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     checklist[`BINH:${serial}`] = false;
                 });
             }
-            if (order.department) {
+            if (isDNXM) {
+                // Đối với đơn máy, lấy mã từ department hoặc note
+                let machineSerials = [];
+                if (order.department) {
+                    machineSerials = order.department.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
+                } else if (order.note && order.note.includes('Mã máy:')) {
+                    const match = order.note.match(/Mã máy:\s*(.*)/);
+                    if (match && match[1]) {
+                        machineSerials = match[1].split(',').map(s => s.trim()).filter(Boolean);
+                    }
+                }
+                
+                machineSerials.forEach(serial => {
+                    checklist[`MAY:${serial}`] = false;
+                });
+            } else if (order.department) {
                 const machineSerials = order.department.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
                 machineSerials.forEach(serial => {
                     checklist[`MAY:${serial}`] = false;
@@ -763,6 +783,18 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
 
                                     return (
                                         <div className="space-y-5">
+                                            {/* SECTION NÚT XEM PHIẾU ĐỀ XUẤT CHO MÁY */}
+                                            {isDNXM && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowMachinePreviewPopup(true)}
+                                                    className="w-full flex items-center justify-center gap-2 p-3.5 bg-blue-50 border border-blue-200 text-blue-700 rounded-2xl font-bold hover:bg-blue-100 hover:border-blue-300 transition-all shadow-sm group"
+                                                >
+                                                    <FileText className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                                                    Xem Phiếu Đề Xuất Trực Tuyến
+                                                </button>
+                                            )}
+
                                             {/* SECTION 1: Danh sách hàng hóa */}
                                             {totalItems > 0 && (
                                                 <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
@@ -1065,6 +1097,32 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                         className="max-w-full max-h-[90vh] object-contain rounded-lg"
                         onClick={(e) => e.stopPropagation()}
                     />
+                </div>
+            )}
+
+            {/* Machine Preview Popup */}
+            {showMachinePreviewPopup && (
+                <div
+                    className="fixed inset-0 z-[100010] bg-black/90 flex flex-col items-center justify-center p-4 animate-in fade-in duration-200"
+                >
+                    <div className="w-full max-w-4xl max-h-[95vh] bg-slate-50 rounded-2xl overflow-hidden flex flex-col shadow-2xl">
+                        <div className="flex items-center justify-between p-4 bg-white border-b border-slate-200">
+                            <h3 className="font-black text-slate-800 text-lg uppercase tracking-wider">Phiếu Đề Xuất Máy</h3>
+                            <button
+                                onClick={() => setShowMachinePreviewPopup(false)}
+                                className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500"
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                            <MachineIssueRequestForm 
+                                overrideOrderId={order.id} 
+                                overrideViewOnly={true} 
+                                onClosePopup={() => setShowMachinePreviewPopup(false)}
+                            />
+                        </div>
+                    </div>
                 </div>
             )}
 
