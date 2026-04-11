@@ -328,12 +328,18 @@ Ghi chú: ${formData.notes}`,
                     .eq('id', editOrderId);
                 if (error) throw error;
                 
+                const userWhoEdited = user?.name || 'Nhân viên';
                 notificationService.add({
                     title: `📝 Cập nhật ĐNXM: ${orderData.customer_name}`,
-                    description: `${orderData.ordered_by || 'Nhân viên'} vừa chỉnh sửa phiếu ĐNXM.`,
+                    description: `${userWhoEdited} vừa cập nhật thông tin phiếu ĐNXM${formData.orangeNumber ? ' ' + formData.orangeNumber : ''} - KH: ${orderData.customer_name}`,
                     type: 'info',
                     link: `/de-nghi-xuat-may/tao?orderId=${editOrderId}&viewOnly=true`
                 });
+
+                // Nếu phiếu đã duyệt xong, cập nhật lại gán máy trong kho nếu có thay đổi mã máy
+                if (formData.status === 'DA_DUYET') {
+                    await assignMachinesToCustomer(formData.machineCode, formData.customerName);
+                }
                 toast.success('Đã cập nhật Phiếu Đề Nghị Xuất Máy thành công!');
                 setTimeout(() => navigate('/de-nghi-xuat-may'), 1000);
             } else {
@@ -779,7 +785,7 @@ Ghi chú: ${formData.notes}`,
                         else if (isLevel2 && (r === 'admin' || r === 'giám đốc')) canApprove = true;
                         else if (isLevel3 && (r.includes('kho'))) canApprove = true;
 
-                        const canEdit = ['CHO_DUYET', 'CHO_CTY_DUYET', 'KHO_XU_LY'].includes(formData.status);
+                        const canEdit = ['CHO_DUYET', 'CHO_CTY_DUYET', 'KHO_XU_LY', 'DA_DUYET'].includes(formData.status);
 
                         return (
                             <div className="flex flex-wrap gap-2">

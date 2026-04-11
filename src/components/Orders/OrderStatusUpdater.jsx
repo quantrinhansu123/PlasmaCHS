@@ -1,4 +1,4 @@
-import { AlertCircle, AlertTriangle, ArrowRightCircle, Camera, CheckCircle, CheckCircle2, Clock, CloudUpload, Plus, ScanBarcode, Truck, X, XCircle } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowRightCircle, Camera, Check, CheckCircle, CheckCircle2, Clock, CloudUpload, Package, Plus, ScanBarcode, Truck, X, XCircle, ZoomIn } from 'lucide-react';
 import clsx from 'clsx';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -6,6 +6,7 @@ import { ORDER_STATE_TRANSITIONS, PRODUCT_TYPES } from '../../constants/orderCon
 import { supabase } from '../../supabase/config';
 import BarcodeScanner from '../Common/BarcodeScanner';
 import OrderHistoryTimeline from './OrderHistoryTimeline';
+import { notificationService } from '../../utils/notificationService';
 
 export default function OrderStatusUpdater({ order, warehouseName, userRole, onClose, onUpdateSuccess }) {
     const [isLoading, setIsLoading] = useState(false);
@@ -23,6 +24,59 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     const [showAdjustmentInput, setShowAdjustmentInput] = useState(false);
     const [orderItems, setOrderItems] = useState([]);
     const [isFetchingItems, setIsFetchingItems] = useState(true);
+    const [deliveryChecklist, setDeliveryChecklist] = useState({});
+    const [confirmDeliveryCheck, setConfirmDeliveryCheck] = useState(false);
+    const [deliveryProofBase64, setDeliveryProofBase64] = useState(order?.delivery_proof_base64 || '');
+    const [showProofModal, setShowProofModal] = useState(false);
+    const [realWarehouseName, setRealWarehouseName] = useState(warehouseName || order?.warehouse);
+
+    useEffect(() => {
+        if (order?.warehouse && (realWarehouseName === order.warehouse || /^[0-9a-fA-F]{8}-/.test(realWarehouseName))) {
+            const fetchWName = async () => {
+                const { data } = await supabase.from('warehouses').select('name').eq('id', order.warehouse).maybeSingle();
+                if (data?.name) {
+                    setRealWarehouseName(data.name);
+                } else {
+                    const { data: bData } = await supabase.from('branches').select('name').eq('id', order.warehouse).maybeSingle();
+                    if (bData?.name) {
+                        setRealWarehouseName(bData.name);
+                    } else {
+                        setRealWarehouseName('—');
+                    }
+                }
+            };
+            fetchWName();
+        }
+    }, [order?.warehouse, warehouseName]);
+
+    // Initialize delivery checklist from assigned items
+    useEffect(() => {
+        if (order?.status === 'DANG_GIAO_HANG') {
+            const checklist = {};
+            if (order.assigned_cylinders?.length > 0) {
+                order.assigned_cylinders.forEach(serial => {
+                    checklist[`BINH:${serial}`] = false;
+                });
+            }
+            if (order.department) {
+                const machineSerials = order.department.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
+                machineSerials.forEach(serial => {
+                    checklist[`MAY:${serial}`] = false;
+                });
+            }
+            setDeliveryChecklist(checklist);
+        }
+    }, [order?.id]);
+
+    const handleProofImageChange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            setDeliveryProofBase64(reader.result);
+        };
+        reader.readAsDataURL(file);
+    };
 
     const STATUS_TRANSITIONS_METADATA = [
         { nextStatus: 'DIEU_CHINH', icon: AlertTriangle },
@@ -254,8 +308,27 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             }
 
             if ((transition.nextStatus === 'CHO_DOI_SOAT' || transition.nextStatus === 'HOAN_THANH') && order.status === 'DANG_GIAO_HANG') {
-                if (!selectedFile && !imageUrl) {
-                    throw new Error('Bạn cần upload ảnh chứng từ giao hàng thành công để đối soát.');
+                if (!confirmDeliveryCheck) {
+                    throw new Error('Bạn cần tick xác nhận đã giao hàng cho khách hàng.');
+                }
+                if (!deliveryProofBase64) {
+                    throw new Error('Bạn cần chụp ảnh phiếu xác nhận giao hàng.');
+                }
+
+                const totalItems = Object.keys(deliveryChecklist).length;
+                const checkedItems = Object.values(deliveryChecklist).filter(Boolean).length;
+
+                if (totalItems > 0 && checkedItems < totalItems) {
+                    const missingSerials = Object.entries(deliveryChecklist)
+                        .filter(([_, checked]) => !checked)
+                        .map(([key]) => key.split(':')[1]);
+
+                    await notificationService.add({
+                        title: `⚠️ Giao hàng thiếu — Đơn ${order.order_code}`,
+                        description: `Shipper xác nhận thiếu ${totalItems - checkedItems} mã hàng: ${missingSerials.join(', ')}. Khách: ${order.customer_name}`,
+                        type: 'error',
+                        link: `/don-hang`
+                    });
                 }
             }
 
@@ -377,6 +450,10 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             if (imageUrl) {
                 updatePayload.delivery_image_url = imageUrl;
             }
+            if (order.status === 'DANG_GIAO_HANG' && deliveryProofBase64) {
+                updatePayload.delivery_proof_base64 = deliveryProofBase64;
+                updatePayload.delivery_checklist = deliveryChecklist;
+            }
 
             const { error: dbError } = await supabase
                 .from('orders')
@@ -467,7 +544,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
 
                         <div className="flex justify-between pt-1"><span className="text-slate-500 font-bold uppercase text-[11px]">Cơ sở / Phòng:</span><span className="font-black text-primary">{order.department || '—'}</span></div>
                         {order.warehouse && (
-                            <div className="flex justify-between pt-1"><span className="text-slate-500 font-bold uppercase text-[11px]">Kho xuất:</span><span className="font-black text-slate-900">{warehouseName || order.warehouse}</span></div>
+                            <div className="flex justify-between pt-1"><span className="text-slate-500 font-bold uppercase text-[11px]">Kho xuất:</span><span className="font-black text-slate-900">{realWarehouseName}</span></div>
                         )}
                     </div>
 
@@ -677,13 +754,182 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                     </div>
                                 )}
 
-                                {(order.status === 'DANG_GIAO_HANG' || order.status === 'CHO_DOI_SOAT' || order.status === 'HOAN_THANH') && (
+                                {/* DELIVERY CONFIRMATION FORM — Shipper */}
+                                {order.status === 'DANG_GIAO_HANG' && (() => {
+                                    const checklistEntries = Object.entries(deliveryChecklist);
+                                    const totalItems = checklistEntries.length;
+                                    const checkedItems = checklistEntries.filter(([_, v]) => v).length;
+                                    const allChecked = totalItems > 0 && checkedItems === totalItems;
+
+                                    return (
+                                        <div className="space-y-5">
+                                            {/* SECTION 1: Danh sách hàng hóa */}
+                                            {totalItems > 0 && (
+                                                <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <label className="flex items-center gap-1.5 text-xs font-black text-slate-600 uppercase tracking-widest">
+                                                            <Package className="w-4 h-4 text-primary" />
+                                                            Hàng hóa đã giao ({checkedItems}/{totalItems})
+                                                        </label>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                const newChecklist = { ...deliveryChecklist };
+                                                                const shouldCheckAll = !allChecked;
+                                                                Object.keys(newChecklist).forEach(k => newChecklist[k] = shouldCheckAll);
+                                                                setDeliveryChecklist(newChecklist);
+                                                            }}
+                                                            className="text-[10px] font-black text-primary uppercase tracking-wider hover:underline"
+                                                        >
+                                                            {allChecked ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
+                                                        </button>
+                                                    </div>
+                                                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                                                        {checklistEntries.map(([key, checked]) => {
+                                                            const [type, serial] = key.split(':');
+                                                            const isCylinder = type === 'BINH';
+                                                            return (
+                                                                <label
+                                                                    key={key}
+                                                                    className={clsx(
+                                                                        "flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all",
+                                                                        checked
+                                                                            ? "bg-emerald-50 border-emerald-200"
+                                                                            : "bg-slate-50 border-slate-200 hover:bg-slate-100"
+                                                                    )}
+                                                                >
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={checked}
+                                                                        onChange={() => setDeliveryChecklist(prev => ({ ...prev, [key]: !prev[key] }))}
+                                                                        className="w-5 h-5 rounded-md border-slate-300 text-emerald-600 focus:ring-emerald-500/20 cursor-pointer"
+                                                                    />
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <span className="text-sm font-bold text-slate-800 font-mono tracking-wider">{serial}</span>
+                                                                    </div>
+                                                                    <span className={clsx(
+                                                                        "px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border",
+                                                                        isCylinder
+                                                                            ? "bg-blue-50 text-blue-600 border-blue-200"
+                                                                            : "bg-amber-50 text-amber-600 border-amber-200"
+                                                                    )}>
+                                                                        {isCylinder ? 'Bình' : 'Máy'}
+                                                                    </span>
+                                                                </label>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                    {!allChecked && totalItems > 0 && (
+                                                        <div className="flex items-center gap-2 p-2.5 bg-rose-50 border border-rose-200 rounded-xl animate-in fade-in duration-300">
+                                                            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                                                            <span className="text-[11px] font-bold text-rose-600">
+                                                                Thiếu {totalItems - checkedItems} mã hàng! Giao thiếu sẽ báo cáo lên Leader.
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {/* SECTION 2: Ảnh phiếu xác nhận */}
+                                            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                                                <label className="flex items-center gap-1.5 text-xs font-black text-slate-600 uppercase tracking-widest">
+                                                    <Camera className="w-4 h-4 text-primary" />
+                                                    Ảnh phiếu xác nhận <span className="text-rose-500">*</span>
+                                                </label>
+
+                                                {deliveryProofBase64 ? (
+                                                    <div className="relative">
+                                                        <img
+                                                            src={deliveryProofBase64}
+                                                            alt="Phiếu xác nhận"
+                                                            className="w-full max-h-[200px] object-contain rounded-xl border border-slate-200 bg-slate-50 cursor-pointer"
+                                                            onClick={() => setShowProofModal(true)}
+                                                        />
+                                                        <div className="absolute top-2 right-2 flex gap-1.5">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setShowProofModal(true)}
+                                                                className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors"
+                                                                title="Phóng to"
+                                                            >
+                                                                <ZoomIn size={14} />
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setDeliveryProofBase64('')}
+                                                                className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-rose-600 transition-colors"
+                                                                title="Xóa ảnh"
+                                                            >
+                                                                <X size={14} />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <label className="flex flex-col items-center justify-center w-full h-32 bg-slate-50 border-2 border-dashed border-slate-300 rounded-2xl cursor-pointer hover:bg-primary/5 hover:border-primary/40 transition-all group">
+                                                        <div className="flex flex-col items-center justify-center gap-2">
+                                                            <Camera className="w-8 h-8 text-slate-400 group-hover:text-primary transition-colors" />
+                                                            <p className="text-[12px] font-bold text-slate-500 group-hover:text-primary">
+                                                                Chụp / chọn ảnh phiếu xác nhận
+                                                            </p>
+                                                        </div>
+                                                        <input
+                                                            type="file"
+                                                            accept="image/*"
+                                                            capture="environment"
+                                                            className="hidden"
+                                                            onChange={handleProofImageChange}
+                                                        />
+                                                    </label>
+                                                )}
+                                            </div>
+
+                                            {/* SECTION 3: Checkbox xác nhận */}
+                                            <label className={clsx(
+                                                "flex items-center gap-3 p-4 rounded-2xl border-2 cursor-pointer transition-all",
+                                                confirmDeliveryCheck
+                                                    ? "bg-emerald-50 border-emerald-400 shadow-sm"
+                                                    : "bg-white border-slate-200 hover:border-primary/30"
+                                            )}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={confirmDeliveryCheck}
+                                                    onChange={() => setConfirmDeliveryCheck(!confirmDeliveryCheck)}
+                                                    className="w-6 h-6 rounded-lg border-slate-300 text-emerald-600 focus:ring-emerald-500/20 cursor-pointer"
+                                                />
+                                                <span className={clsx(
+                                                    "text-sm font-bold",
+                                                    confirmDeliveryCheck ? "text-emerald-700" : "text-slate-600"
+                                                )}>
+                                                    Tôi xác nhận đã giao hàng hóa cho khách hàng
+                                                </span>
+                                            </label>
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* View proof for completed orders */}
+                                {(order.status === 'CHO_DOI_SOAT' || order.status === 'HOAN_THANH') && (
                                     <div className="space-y-3">
                                         <label className="block text-xs font-black text-slate-500 uppercase tracking-widest">
                                             Ảnh chứng từ giao hàng
                                         </label>
-
-                                        {order.delivery_image_url && !selectedFile ? (
+                                        {order.delivery_proof_base64 ? (
+                                            <div className="space-y-2">
+                                                <img
+                                                    src={order.delivery_proof_base64}
+                                                    alt="Phiếu xác nhận"
+                                                    className="w-full max-h-[200px] object-contain rounded-xl border border-slate-200 bg-slate-50 cursor-pointer"
+                                                    onClick={() => setShowProofModal(true)}
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowProofModal(true)}
+                                                    className="w-full py-2 text-[11px] font-black text-primary uppercase tracking-wider bg-primary/5 rounded-xl hover:bg-primary/10 transition-all flex items-center justify-center gap-1.5"
+                                                >
+                                                    <ZoomIn size={14} /> Xem phóng to
+                                                </button>
+                                            </div>
+                                        ) : order.delivery_image_url ? (
                                             <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl flex items-center justify-between shadow-sm">
                                                 <div className="flex items-center gap-2">
                                                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
@@ -691,23 +937,30 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                                 </div>
                                                 <a href={order.delivery_image_url} target="_blank" rel="noreferrer" className="text-[10px] font-black text-primary hover:underline hover:text-primary/80 uppercase tracking-wider">Xem ảnh</a>
                                             </div>
-                                        ) : null}
+                                        ) : (
+                                            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-center">
+                                                <span className="text-[12px] text-slate-400 italic">Chưa có ảnh chứng từ</span>
+                                            </div>
+                                        )}
 
-                                        {order.status === 'DANG_GIAO_HANG' && (
-                                            <label className="flex flex-col items-center justify-center w-full h-32 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl cursor-pointer hover:bg-slate-100 hover:border-primary/40 transition-all group">
-                                                <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                                                    <CloudUpload className="w-8 h-8 text-slate-400 group-hover:text-primary transition-colors mb-2" />
-                                                    <p className="text-[12px] font-bold text-slate-500 group-hover:text-slate-700">
-                                                        {selectedFile ? selectedFile.name : 'Upload ảnh chứng từ'}
-                                                    </p>
-                                                </div>
-                                                <input
-                                                    type="file"
-                                                    accept="image/*"
-                                                    className="hidden"
-                                                    onChange={e => setSelectedFile(e.target.files[0])}
-                                                />
-                                            </label>
+                                        {/* Checklist review */}
+                                        {order.delivery_checklist && Object.keys(order.delivery_checklist).length > 0 && (
+                                            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1.5">
+                                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Checklist giao hàng</span>
+                                                {Object.entries(order.delivery_checklist).map(([key, checked]) => {
+                                                    const [type, serial] = key.split(':');
+                                                    return (
+                                                        <div key={key} className="flex items-center gap-2 text-[12px]">
+                                                            {checked
+                                                                ? <Check className="w-4 h-4 text-emerald-500" />
+                                                                : <X className="w-4 h-4 text-rose-500" />
+                                                            }
+                                                            <span className={clsx("font-mono font-bold", checked ? "text-slate-700" : "text-rose-600 line-through")}>{serial}</span>
+                                                            <span className="text-slate-400 text-[9px] uppercase">{type === 'BINH' ? 'Bình' : 'Máy'}</span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
                                         )}
                                     </div>
                                 )}
@@ -793,6 +1046,27 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     </button>
                 </div>
             </div>
+
+            {/* Proof Image Modal */}
+            {showProofModal && (
+                <div
+                    className="fixed inset-0 z-[100010] bg-black/90 flex items-center justify-center p-4 animate-in fade-in duration-200"
+                    onClick={() => setShowProofModal(false)}
+                >
+                    <button
+                        className="absolute top-4 right-4 p-2 bg-white/20 text-white rounded-full hover:bg-white/40 transition-colors z-10"
+                        onClick={() => setShowProofModal(false)}
+                    >
+                        <X size={24} />
+                    </button>
+                    <img
+                        src={deliveryProofBase64 || order?.delivery_proof_base64}
+                        alt="Phiếu xác nhận giao hàng"
+                        className="max-w-full max-h-[90vh] object-contain rounded-lg"
+                        onClick={(e) => e.stopPropagation()}
+                    />
+                </div>
+            )}
 
             <BarcodeScanner
                 isOpen={isScannerOpen}

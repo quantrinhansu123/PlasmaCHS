@@ -311,7 +311,7 @@ const Orders = () => {
 
     const fetchWarehouses = async () => {
         try {
-            const { data } = await supabase.from('warehouses').select('id, name').eq('status', 'Đang hoạt động').order('name');
+            const { data } = await supabase.from('warehouses').select('id, name').order('name');
             if (data) {
                 setWarehousesList(data);
             }
@@ -465,8 +465,14 @@ const Orders = () => {
     );
 
     const getLabel = (list, id) => {
+        if (!id) return '—';
         const matched = list.find(item => item.id === id);
-        return matched?.label || matched?.name || id;
+        if (matched) return matched.label || matched.name;
+        // Tránh nhả UUID thẳng ra màn hình
+        if (typeof id === 'string' && /^[0-9a-fA-F]{8}-/.test(id)) {
+            return '—';
+        }
+        return id;
     };
 
     const hasActiveFilters = selectedStatuses.length > 0 || selectedCustomerCategories.length > 0 ||
