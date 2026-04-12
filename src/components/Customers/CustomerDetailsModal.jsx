@@ -25,9 +25,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
 import { supabase } from '../../supabase/config';
+import { fetchCareHistoryRows } from '../../utils/customerCareHistory';
 import * as XLSX from 'xlsx';
 
-export default function CustomerDetailsModal({ customer, onClose }) {
+export default function CustomerDetailsModal({ customer, onClose, hideCommerceTabs = false }) {
     const [activeTab, setActiveTab] = useState('overview'); // overview, orders, transactions
     const [loading, setLoading] = useState(true);
     const [isClosing, setIsClosing] = useState(false);
@@ -69,6 +70,23 @@ export default function CustomerDetailsModal({ customer, onClose }) {
         fetchCustomerData();
     }, [customer]);
 
+    useEffect(() => {
+        if (hideCommerceTabs && ['orders', 'transactions', 'cylinders'].includes(activeTab)) {
+            setActiveTab('overview');
+        }
+    }, [hideCommerceTabs, activeTab]);
+
+    useEffect(() => {
+        if (!customer || activeTab !== 'care_history') return undefined;
+        let cancelled = false;
+        fetchCareHistoryRows(customer).then((rows) => {
+            if (!cancelled) setCareHistory(rows);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [activeTab, customer?.id, customer?.phone]);
+
     const fetchCustomerData = async () => {
         setLoading(true);
         try {
@@ -95,21 +113,12 @@ export default function CustomerDetailsModal({ customer, onClose }) {
 
             if (err3) throw err3;
 
-            // Fetch care history
-            const { data: histData, error: err4 } = await supabase
-                .from('customer_care_history')
-                .select('*')
-                .eq('customer_id', customer.id)
-                .order('assigned_at', { ascending: false });
-
-            if (err4) {
-                console.error('Error fetching care history:', err4);
-            }
+            const histRows = await fetchCareHistoryRows(customer);
 
             setOrders(ordersData || []);
             setTransactions(txData || []);
             setCylinders(cylData || []);
-            setCareHistory(histData || []);
+            setCareHistory(histRows);
 
             const validOrders = (ordersData || []).filter(o =>
                 !['HUY_DON'].includes(o.status)
@@ -323,9 +332,13 @@ export default function CustomerDetailsModal({ customer, onClose }) {
 
                     <div className="flex items-center gap-6 mt-5 border-b border-slate-200 overflow-x-auto scrollbar-hide scroll-smooth">
                         <button onClick={() => setActiveTab('overview')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'overview' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Tổng quan</button>
-                        <button onClick={() => setActiveTab('orders')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'orders' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Đơn hàng ({orders.length})</button>
-                        <button onClick={() => setActiveTab('transactions')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'transactions' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Thu / Chi ({transactions.length})</button>
-                        <button onClick={() => setActiveTab('cylinders')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'cylinders' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Danh sách bình ({cylinders.length})</button>
+                        {!hideCommerceTabs && (
+                            <>
+                                <button onClick={() => setActiveTab('orders')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'orders' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Đơn hàng ({orders.length})</button>
+                                <button onClick={() => setActiveTab('transactions')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'transactions' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Thu / Chi ({transactions.length})</button>
+                                <button onClick={() => setActiveTab('cylinders')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'cylinders' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Danh sách bình ({cylinders.length})</button>
+                            </>
+                        )}
                         {customer.status !== 'Thành công' && (
                             <button onClick={() => setActiveTab('care_history')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'care_history' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Lịch sử chăm sóc ({careHistory.length})</button>
                         )}
@@ -457,7 +470,7 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                 </div>
                             )}
 
-                            {activeTab === 'orders' && (
+                            {!hideCommerceTabs && activeTab === 'orders' && (
                                 <div className="space-y-4">
                                     {orders.length === 0 ? (
                                         <div className="py-12 text-center font-bold text-slate-300 italic">Khách hàng chưa có đơn hàng</div>
@@ -490,7 +503,7 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                 </div>
                             )}
 
-                            {activeTab === 'transactions' && (
+                            {!hideCommerceTabs && activeTab === 'transactions' && (
                                 <div className="space-y-4">
                                     {transactions.length === 0 ? (
                                         <div className="py-12 text-center font-bold text-slate-300 italic">Chưa có giao dịch thu/chi</div>
@@ -531,7 +544,7 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                 </div>
                             )}
 
-                            {activeTab === 'cylinders' && (
+                            {!hideCommerceTabs && activeTab === 'cylinders' && (
                                 <div className="space-y-4">
                                     {cylinders.length === 0 ? (
                                         <div className="py-12 text-center font-bold text-slate-300 italic">Khách hàng hiện không giữ bình nào</div>
@@ -597,9 +610,9 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                                         <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
                                                             <td className="px-4 py-3">
                                                                 <div className="flex items-center gap-2">
-                                                                    <div className={clsx("w-2 h-2 rounded-full", idx === 0 ? "bg-emerald-500 animate-pulse" : "bg-slate-300")} />
+                                                                    <div className={clsx("w-2 h-2 rounded-full", idx === careHistory.length - 1 ? "bg-emerald-500 animate-pulse" : "bg-slate-300")} />
                                                                     <span className="font-black text-slate-700">{item.staff_name}</span>
-                                                                    {idx === 0 && <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-md font-black uppercase">Hiện tại</span>}
+                                                                    {idx === careHistory.length - 1 && <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-md font-black uppercase">Hiện tại</span>}
                                                                 </div>
                                                             </td>
                                                             <td className="px-4 py-3 font-bold text-slate-500 italic">
