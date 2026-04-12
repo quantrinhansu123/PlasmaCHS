@@ -13,6 +13,7 @@ import {
 import { clsx } from 'clsx';
 import {
     BarChart2,
+    Calendar,
     ClipboardCheck,
     ChevronDown,
     ChevronLeft,
@@ -67,6 +68,50 @@ ChartJS.register(
     ChartLegend
 );
 
+/** Bộ lọc lead trên Supabase (khớp phân trang + đếm tổng). */
+function appendLeadCustomerFilters(query, {
+    searchTrimmed,
+    leadCreatedFrom,
+    leadCreatedTo,
+    selectedCareBy,
+    selectedManagedBy,
+    selectedCategories,
+    selectedStatuses,
+    categoryDefinitions,
+}) {
+    let q = query;
+    const t = (searchTrimmed || '').trim();
+    if (t) {
+        const esc = t.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_').replace(/,/g, '');
+        const p = `%${esc}%`;
+        q = q.or(`code.ilike.${p},name.ilike.${p},phone.ilike.${p},address.ilike.${p}`);
+    }
+    if (leadCreatedFrom) {
+        q = q.gte('created_at', new Date(`${leadCreatedFrom}T00:00:00`).toISOString());
+    }
+    if (leadCreatedTo) {
+        q = q.lte('created_at', new Date(`${leadCreatedTo}T23:59:59.999`).toISOString());
+    }
+    if (selectedCareBy?.length) q = q.in('care_by', selectedCareBy);
+    if (selectedManagedBy?.length) q = q.in('managed_by', selectedManagedBy);
+    if (selectedCategories?.length) {
+        const vals = new Set();
+        for (const catId of selectedCategories) {
+            vals.add(catId);
+            const def = categoryDefinitions.find((d) => d.id === catId);
+            if (def?.label) vals.add(def.label);
+        }
+        q = q.in('category', [...vals]);
+    }
+    if (selectedStatuses?.length === 1) {
+        if (selectedStatuses[0] === 'Thành công') q = q.eq('status', 'Thành công');
+        else if (selectedStatuses[0] === 'Chưa thành công') {
+            q = q.or('status.eq.Chưa thành công,status.is.null');
+        }
+    }
+    return q;
+}
+
 const Customers = () => {
     const { role } = usePermissions();
     const location = useLocation();
@@ -99,6 +144,13 @@ const Customers = () => {
     const [pendingManagedBy, setPendingManagedBy] = useState([]);
     const [pendingCareBy, setPendingCareBy] = useState([]);
     const [pendingStatuses, setPendingStatuses] = useState([]);
+    const [leadCreatedFrom, setLeadCreatedFrom] = useState('');
+    const [leadCreatedTo, setLeadCreatedTo] = useState('');
+    const [pendingLeadCreatedFrom, setPendingLeadCreatedFrom] = useState('');
+    const [pendingLeadCreatedTo, setPendingLeadCreatedTo] = useState('');
+    const [leadDistinctCareBy, setLeadDistinctCareBy] = useState([]);
+    const [leadDistinctManagedBy, setLeadDistinctManagedBy] = useState([]);
+    const [debouncedLeadSearch, setDebouncedLeadSearch] = useState('');
     const [showMoreActions, setShowMoreActions] = useState(false);
     const [isSearchExpanded, setIsSearchExpanded] = useState(false);
     const searchInputRef = useRef(null);
@@ -137,6 +189,9 @@ const Customers = () => {
         { key: 'borrowed_cylinders', label: 'Vỏ mượn' },
         { key: 'care_by', label: 'KD chăm sóc' },
     ];
+
+    /** Trang đăng ký lead: không hiển thị các cột tồn vỏ/máy (chưa phải khách thành công). */
+    const LEAD_HIDDEN_COLUMN_KEYS = ['current_cylinders', 'current_machines', 'borrowed_cylinders'];
 
     const CUSTOMER_CATEGORIES = [
         { id: 'BV', label: 'Bệnh viện' },
@@ -181,14 +236,59 @@ const Customers = () => {
     const [showColumnPicker, setShowColumnPicker] = useState(false);
     const visibleTableColumns = columnOrder
         .filter(key => visibleColumns.includes(key))
+        .filter(key => filterType !== 'lead' || !LEAD_HIDDEN_COLUMN_KEYS.includes(key))
         .map(key => TABLE_COLUMNS_DEF.find(col => col.key === key))
         .filter(Boolean);
-    const visibleCount = visibleColumns.length;
-    const totalCount = defaultColOrder.length;
+    const pickerDisplayKeys =
+        filterType === 'lead'
+            ? defaultColOrder.filter((k) => !LEAD_HIDDEN_COLUMN_KEYS.includes(k))
+            : defaultColOrder;
+    const visibleCount = visibleColumns.filter((k) => pickerDisplayKeys.includes(k)).length;
+    const totalCount = pickerDisplayKeys.length;
 
     useEffect(() => {
         fetchWarehouses();
     }, []);
+
+    useEffect(() => {
+        if (filterType !== 'lead') {
+            setDebouncedLeadSearch('');
+            return;
+        }
+        const t = setTimeout(() => setDebouncedLeadSearch(searchTerm), 320);
+        return () => clearTimeout(t);
+    }, [searchTerm, filterType]);
+
+    useEffect(() => {
+        if (filterType !== 'lead') return;
+        let cancelled = false;
+        (async () => {
+            const { data, error } = await supabase.from('customers').select('care_by,managed_by').limit(10000);
+            if (cancelled || error) return;
+            const rows = data || [];
+            const care = [...new Set(rows.map((r) => r.care_by).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'vi'));
+            const man = [...new Set(rows.map((r) => r.managed_by).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'vi'));
+            setLeadDistinctCareBy(care);
+            setLeadDistinctManagedBy(man);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [filterType]);
+
+    useEffect(() => {
+        if (filterType !== 'lead') return;
+        setCurrentPage(1);
+    }, [
+        filterType,
+        leadCreatedFrom,
+        leadCreatedTo,
+        selectedCareBy,
+        selectedManagedBy,
+        selectedCategories,
+        selectedStatuses,
+        debouncedLeadSearch,
+    ]);
 
     const fetchCustomers = useCallback(async () => {
         setIsLoading(true);
@@ -208,7 +308,16 @@ const Customers = () => {
                 .select('*', { count: 'exact' });
 
             if (filterType === 'lead') {
-                // Group unresolved first: nulls first, then "Chưa thành công", then "Thành công" at the bottom
+                query = appendLeadCustomerFilters(query, {
+                    searchTrimmed: debouncedLeadSearch,
+                    leadCreatedFrom,
+                    leadCreatedTo,
+                    selectedCareBy,
+                    selectedManagedBy,
+                    selectedCategories,
+                    selectedStatuses,
+                    categoryDefinitions: CUSTOMER_CATEGORIES,
+                });
                 query = query
                     .order('status', { ascending: true, nullsFirst: true })
                     .order('created_at', { ascending: false });
@@ -230,7 +339,18 @@ const Customers = () => {
         } finally {
             setIsLoading(false);
         }
-    }, [currentPage, pageSize, filterType]);
+    }, [
+        currentPage,
+        pageSize,
+        filterType,
+        debouncedLeadSearch,
+        leadCreatedFrom,
+        leadCreatedTo,
+        selectedCareBy,
+        selectedManagedBy,
+        selectedCategories,
+        selectedStatuses,
+    ]);
 
     useEffect(() => {
         fetchCustomers();
@@ -251,11 +371,12 @@ const Customers = () => {
     }, [isSearchExpanded]);
 
     useEffect(() => {
+        if (filterType === 'lead') return;
         const managedBy = [...new Set(customers.map((c) => c.managed_by).filter(Boolean))];
         const careBy = [...new Set(customers.map((c) => c.care_by).filter(Boolean))];
         setUniqueManagedBy(managedBy);
         setUniqueCareBy(careBy);
-    }, [customers]);
+    }, [customers, filterType]);
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -294,6 +415,8 @@ const Customers = () => {
         setPendingManagedBy(selectedManagedBy);
         setPendingCareBy(selectedCareBy);
         setPendingStatuses(selectedStatuses);
+        setPendingLeadCreatedFrom(leadCreatedFrom);
+        setPendingLeadCreatedTo(leadCreatedTo);
         setShowMobileFilter(true);
     };
 
@@ -302,6 +425,8 @@ const Customers = () => {
         setSelectedManagedBy(pendingManagedBy);
         setSelectedCareBy(pendingCareBy);
         setSelectedStatuses(pendingStatuses);
+        setLeadCreatedFrom(pendingLeadCreatedFrom);
+        setLeadCreatedTo(pendingLeadCreatedTo);
         closeMobileFilter();
     };
 
@@ -407,31 +532,36 @@ const Customers = () => {
     );
 
 
-    const filteredCustomers = customers.filter((c) => {
-        const search = searchTerm.toLowerCase();
-        const matchesSearch = (
-            (c.code?.toLowerCase().includes(search)) ||
-            (c.name?.toLowerCase().includes(search)) ||
-            (c.phone?.toLowerCase().includes(search)) ||
-            (c.address?.toLowerCase().includes(search))
-        );
+    const filteredCustomers =
+        filterType === 'lead'
+            ? customers
+            : customers.filter((c) => {
+                  const search = searchTerm.toLowerCase();
+                  const matchesSearch =
+                      (c.code?.toLowerCase().includes(search)) ||
+                      (c.name?.toLowerCase().includes(search)) ||
+                      (c.phone?.toLowerCase().includes(search)) ||
+                      (c.address?.toLowerCase().includes(search));
 
-        const matchesCategory = selectedCategories.length === 0 || selectedCategories.some(catId => {
-            const catDef = CUSTOMER_CATEGORIES.find(def => def.id === catId);
-            return c.category === catId || (catDef && c.category === catDef.label);
-        });
-        const matchesManagedBy = selectedManagedBy.length === 0 || selectedManagedBy.includes(c.managed_by);
-        const matchesCareBy = selectedCareBy.length === 0 || selectedCareBy.includes(c.care_by);
-        const matchesStatus =
-            selectedStatuses.length === 0 ||
-            selectedStatuses.some((s) => {
-                if (s === 'Chưa thành công') {
-                    if (c.status === 'Chưa thành công') return true;
-                    if (filterType === 'lead' && (c.status == null || c.status === '')) return true;
-                    return false;
-                }
-                return c.status === s;
-            });
+                  const matchesCategory =
+                      selectedCategories.length === 0 ||
+                      selectedCategories.some((catId) => {
+                          const catDef = CUSTOMER_CATEGORIES.find((def) => def.id === catId);
+                          return c.category === catId || (catDef && c.category === catDef.label);
+                      });
+                  const matchesManagedBy =
+                      selectedManagedBy.length === 0 || selectedManagedBy.includes(c.managed_by);
+                  const matchesCareBy = selectedCareBy.length === 0 || selectedCareBy.includes(c.care_by);
+                  const matchesStatus =
+                      selectedStatuses.length === 0 ||
+                      selectedStatuses.some((s) => {
+                          if (s === 'Chưa thành công') {
+                              if (c.status === 'Chưa thành công') return true;
+                              if (filterType === 'lead' && (c.status == null || c.status === '')) return true;
+                              return false;
+                          }
+                          return c.status === s;
+                      });
 
         const matchesDate = (() => {
             if (!fromDate && !toDate) return true;
@@ -463,39 +593,32 @@ const Customers = () => {
     const hasActiveFilters = selectedCategories.length > 0 || selectedManagedBy.length > 0 || selectedCareBy.length > 0 || selectedStatuses.length > 0 || !!fromDate || !!toDate;
     const totalActiveFilters = selectedCategories.length + selectedManagedBy.length + selectedCareBy.length + selectedStatuses.length + (fromDate ? 1 : 0) + (toDate ? 1 : 0);
 
-    const categoryOptions = CUSTOMER_CATEGORIES.map(c => ({
+    const managedByNames = filterType === 'lead' ? leadDistinctManagedBy : uniqueManagedBy;
+    const careByNames = filterType === 'lead' ? leadDistinctCareBy : uniqueCareBy;
+
+    const categoryOptions = CUSTOMER_CATEGORIES.map((c) => ({
         id: c.id,
         label: c.label,
-        count: customers.filter((x) => x.category === c.id || x.category === c.label).length
+        count: filterType === 'lead' ? '—' : customers.filter((x) => x.category === c.id || x.category === c.label).length,
     }));
 
-    const managedByOptions = uniqueManagedBy.map(name => ({
+    const managedByOptions = managedByNames.map((name) => ({
         id: name,
         label: name,
-        count: customers.filter((x) => x.managed_by === name).length
+        count: filterType === 'lead' ? '—' : customers.filter((x) => x.managed_by === name).length,
     }));
 
-    const careByOptions = uniqueCareBy.map(name => ({
+    const careByOptions = careByNames.map((name) => ({
         id: name,
         label: name,
-        count: customers.filter((x) => x.care_by === name).length
+        count: filterType === 'lead' ? '—' : customers.filter((x) => x.care_by === name).length,
     }));
 
     const statusOptions = useMemo(() => {
         if (filterType === 'lead') {
             return [
-                {
-                    id: 'Chưa thành công',
-                    label: 'Chưa thành công',
-                    count: customers.filter(
-                        (x) => x.status === 'Chưa thành công' || x.status == null || x.status === ''
-                    ).length,
-                },
-                {
-                    id: 'Thành công',
-                    label: 'Thành công',
-                    count: customers.filter((x) => x.status === 'Thành công').length,
-                },
+                { id: 'Chưa thành công', label: 'Chưa thành công', count: '—' },
+                { id: 'Thành công', label: 'Thành công', count: '—' },
             ];
         }
         return [
@@ -533,9 +656,14 @@ const Customers = () => {
         }
     };
 
-    const handleFormSubmitSuccess = () => {
-        fetchCustomers();
+    const handleFormSubmitSuccess = async () => {
+        const keepDetailId = selectedCustomer?.id;
+        await fetchCustomers();
         setIsFormModalOpen(false);
+        if (keepDetailId) {
+            const { data, error } = await supabase.from('customers').select('*').eq('id', keepDetailId).single();
+            if (!error && data) setSelectedCustomer(data);
+        }
     };
 
     const isLikelyNetworkFailure = (err) => {
@@ -1101,6 +1229,16 @@ const Customers = () => {
         setToDate('');
     };
 
+    const leadSummarySlot =
+        filterType === 'lead' ? (
+            <div className="rounded-2xl border-2 border-primary/25 bg-gradient-to-br from-primary/[0.12] to-primary/[0.04] px-4 py-3.5 shadow-sm">
+                <p className="text-[10px] font-bold text-primary uppercase tracking-wider">Tổng đơn (theo bộ lọc)</p>
+                <p className="text-2xl font-black text-foreground tabular-nums tracking-tight mt-0.5">
+                    {isLoading ? '…' : formatNumber(totalRecords)}
+                </p>
+            </div>
+        ) : null;
+
     return (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5">
             <PageViewSwitcher
@@ -1121,6 +1259,7 @@ const Customers = () => {
                         onFilterClick={openMobileFilter}
                         hasActiveFilters={hasActiveFilters}
                         totalActiveFilters={totalActiveFilters}
+                        summary={leadSummarySlot}
                         actions={
                             <>
                                 <div className="relative">
@@ -1501,6 +1640,40 @@ const Customers = () => {
                             </div>
                         </div>
 
+                        {filterType === 'lead' && (
+                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-stretch">
+                                <div className="lg:col-span-4 xl:col-span-3">
+                                    <div className="rounded-2xl border-2 border-primary/25 bg-gradient-to-br from-primary/[0.12] to-primary/[0.04] px-5 py-4 shadow-sm h-full flex flex-col justify-center min-h-[5.5rem]">
+                                        <p className="text-[11px] font-bold text-primary uppercase tracking-wider">Tổng đơn (theo bộ lọc)</p>
+                                        <p className="text-4xl font-black text-foreground tabular-nums tracking-tight mt-1 leading-none">
+                                            {isLoading ? '…' : formatNumber(totalRecords)}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="lg:col-span-8 xl:col-span-9 flex flex-wrap items-end gap-3 rounded-xl border border-border/80 bg-muted/10 px-4 py-3">
+                                    <Calendar size={18} className="text-primary shrink-0 mb-2 opacity-80" aria-hidden />
+                                    <div className="flex flex-col gap-1 min-w-[155px] flex-1 sm:flex-none">
+                                        <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide">Ngày tạo — Từ ngày</span>
+                                        <input
+                                            type="date"
+                                            value={leadCreatedFrom}
+                                            onChange={(e) => setLeadCreatedFrom(e.target.value)}
+                                            className="w-full px-3 py-2 rounded-xl border border-border bg-white text-[13px] font-medium focus:outline-none focus:ring-2 focus:ring-primary/15"
+                                        />
+                                    </div>
+                                    <div className="flex flex-col gap-1 min-w-[155px] flex-1 sm:flex-none">
+                                        <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide">Đến ngày</span>
+                                        <input
+                                            type="date"
+                                            value={leadCreatedTo}
+                                            onChange={(e) => setLeadCreatedTo(e.target.value)}
+                                            className="w-full px-3 py-2 rounded-xl border border-border bg-white text-[13px] font-medium focus:outline-none focus:ring-2 focus:ring-primary/15"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         <div className="flex flex-wrap items-center gap-2" ref={dropdownRef}>
                             <div className="relative">
                                 <button
@@ -1557,6 +1730,36 @@ const Customers = () => {
                                     />
                                 )}
                             </div>
+
+                            {filterType === 'lead' && (
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setActiveDropdown(activeDropdown === 'careBy' ? null : 'careBy')}
+                                        className={clsx(
+                                            'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
+                                            getFilterButtonClass('careBy', activeDropdown === 'careBy' || selectedCareBy.length > 0)
+                                        )}
+                                    >
+                                        <User size={14} className={getFilterIconClass('careBy', activeDropdown === 'careBy' || selectedCareBy.length > 0)} />
+                                        NV kinh doanh
+                                        {selectedCareBy.length > 0 && (
+                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('careBy'))}>
+                                                {selectedCareBy.length}
+                                            </span>
+                                        )}
+                                        <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'careBy' ? 'rotate-180' : '')} />
+                                    </button>
+                                    {activeDropdown === 'careBy' && (
+                                        <FilterDropdown
+                                            options={careByOptions}
+                                            selected={selectedCareBy}
+                                            setSelected={setSelectedCareBy}
+                                            filterSearch={filterSearch}
+                                            setFilterSearch={setFilterSearch}
+                                        />
+                                    )}
+                                </div>
+                            )}
 
                             <div className="relative">
                                 <button
@@ -1753,12 +1956,14 @@ const Customers = () => {
                     <div className="hidden md:flex px-4 py-4 border-t border-border items-center justify-between bg-muted/5">
                         <div className="flex items-center gap-3 text-[12px] text-muted-foreground font-medium">
                             <span>{totalRecords > 0 ? `${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, totalRecords)}` : '0'}/Tổng {totalRecords}</span>
-                            <div className="flex items-center gap-1 ml-2">
-                                <span className="text-[11px] font-bold">│</span>
-                                <span className="text-primary font-bold">{formatNumber(totalCylinders)} vỏ</span>
-                                <span className="text-muted-foreground">•</span>
-                                <span className="text-primary font-bold">{formatNumber(totalMachines)} máy</span>
-                            </div>
+                            {filterType !== 'lead' && (
+                                <div className="flex items-center gap-1 ml-2">
+                                    <span className="text-[11px] font-bold">│</span>
+                                    <span className="text-primary font-bold">{formatNumber(totalCylinders)} vỏ</span>
+                                    <span className="text-muted-foreground">•</span>
+                                    <span className="text-primary font-bold">{formatNumber(totalMachines)} máy</span>
+                                </div>
+                            )}
                         </div>
                         <div className="flex items-center gap-1">
                             <button
@@ -1931,8 +2136,13 @@ const Customers = () => {
                         </div>
 
                         <div className="w-full px-3 md:px-4 pt-4 md:pt-5 pb-5 md:pb-6 space-y-5">
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                                <div className="bg-blue-50/70 border border-blue-100 rounded-2xl p-4 md:p-5 shadow-sm col-span-2 md:col-span-1">
+                            <div className={clsx('grid gap-3', filterType === 'lead' ? 'grid-cols-1 max-w-md mx-auto' : 'grid-cols-2 md:grid-cols-3')}>
+                                <div
+                                    className={clsx(
+                                        'bg-blue-50/70 border border-blue-100 rounded-2xl p-4 md:p-5 shadow-sm',
+                                        filterType !== 'lead' && 'col-span-2 md:col-span-1'
+                                    )}
+                                >
                                     <div className="flex flex-row items-center justify-center md:justify-start text-center md:text-left gap-3 md:gap-4">
                                         <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-100/80 rounded-full flex items-center justify-center shrink-0 ring-1 ring-blue-200/70">
                                             <Users className="w-5 h-5 md:w-6 md:h-6 text-blue-600" />
@@ -1944,29 +2154,33 @@ const Customers = () => {
                                     </div>
                                 </div>
 
-                                <div className="bg-green-50/70 border border-green-100 rounded-2xl p-4 md:p-5 shadow-sm">
-                                    <div className="flex flex-col md:flex-row items-center md:items-center justify-center md:justify-start text-center md:text-left gap-3 md:gap-4">
-                                        <div className="w-10 h-10 md:w-12 md:h-12  bg-green-100/80 rounded-full flex items-center justify-center shrink-0 ring-1 ring-green-200/70">
-                                            <BarChart2 className="w-5 h-5 md:w-6 md:h-6 text-green-600" />
+                                {filterType !== 'lead' && (
+                                    <>
+                                        <div className="bg-green-50/70 border border-green-100 rounded-2xl p-4 md:p-5 shadow-sm">
+                                            <div className="flex flex-col md:flex-row items-center md:items-center justify-center md:justify-start text-center md:text-left gap-3 md:gap-4">
+                                                <div className="w-10 h-10 md:w-12 md:h-12  bg-green-100/80 rounded-full flex items-center justify-center shrink-0 ring-1 ring-green-200/70">
+                                                    <BarChart2 className="w-5 h-5 md:w-6 md:h-6 text-green-600" />
+                                                </div>
+                                                <div>
+                                                    <p className="text-[10px] md:text-[11px] font-semibold text-green-600 uppercase tracking-wider">Tổng vỏ bình</p>
+                                                    <p className="text-2xl md:text-3xl font-bold text-foreground mt-0.5 md:mt-1 leading-none">{formatNumber(totalCylinders)}</p>
+                                                </div>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <p className="text-[10px] md:text-[11px] font-semibold text-green-600 uppercase tracking-wider">Tổng vỏ bình</p>
-                                            <p className="text-2xl md:text-3xl font-bold text-foreground mt-0.5 md:mt-1 leading-none">{formatNumber(totalCylinders)}</p>
-                                        </div>
-                                    </div>
-                                </div>
 
-                                <div className="bg-amber-50/70 border border-amber-100 rounded-2xl p-4 md:p-5 shadow-sm">
-                                    <div className="flex flex-col md:flex-row items-center md:items-center justify-center md:justify-start text-center md:text-left gap-3 md:gap-4">
-                                        <div className="w-10 h-10 md:w-12 md:h-12  bg-amber-100/80 rounded-full flex items-center justify-center shrink-0 ring-1 ring-amber-200/70">
-                                            <BarChart2 className="w-5 h-5 md:w-6 md:h-6 text-amber-600" />
+                                        <div className="bg-amber-50/70 border border-amber-100 rounded-2xl p-4 md:p-5 shadow-sm">
+                                            <div className="flex flex-col md:flex-row items-center md:items-center justify-center md:justify-start text-center md:text-left gap-3 md:gap-4">
+                                                <div className="w-10 h-10 md:w-12 md:h-12  bg-amber-100/80 rounded-full flex items-center justify-center shrink-0 ring-1 ring-amber-200/70">
+                                                    <BarChart2 className="w-5 h-5 md:w-6 md:h-6 text-amber-600" />
+                                                </div>
+                                                <div>
+                                                    <p className="text-[10px] md:text-[11px] font-semibold text-amber-600 uppercase tracking-wider">Tổng máy</p>
+                                                    <p className="text-2xl md:text-3xl font-bold text-foreground mt-0.5 md:mt-1 leading-none">{formatNumber(totalMachines)}</p>
+                                                </div>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <p className="text-[10px] md:text-[11px] font-semibold text-amber-600 uppercase tracking-wider">Tổng máy</p>
-                                            <p className="text-2xl md:text-3xl font-bold text-foreground mt-0.5 md:mt-1 leading-none">{formatNumber(totalMachines)}</p>
-                                        </div>
-                                    </div>
-                                </div>
+                                    </>
+                                )}
                             </div>
 
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -2097,7 +2311,29 @@ const Customers = () => {
                     isClosing={mobileFilterClosing}
                     onClose={closeMobileFilter}
                     onApply={applyMobileFilter}
+                    hasActiveFilters={hasActiveFilters}
+                    totalActiveFilters={totalActiveFilters}
                     sections={[
+                        ...(filterType === 'lead'
+                            ? [
+                                  {
+                                      id: 'leadDates',
+                                      label: 'Ngày tạo',
+                                      type: 'dateRange',
+                                      icon: <Calendar size={16} className="text-primary" />,
+                                      value: {
+                                          start_date: pendingLeadCreatedFrom,
+                                          end_date: pendingLeadCreatedTo,
+                                      },
+                                      onValueChange: (v) => {
+                                          setPendingLeadCreatedFrom(v?.start_date || '');
+                                          setPendingLeadCreatedTo(v?.end_date || '');
+                                      },
+                                      selectedValues: [],
+                                      onSelectionChange: () => {},
+                                  },
+                              ]
+                            : []),
                         {
                             id: 'categories',
                             label: 'Loại khách',
@@ -2116,7 +2352,7 @@ const Customers = () => {
                         },
                         {
                             id: 'careBy',
-                            label: 'KD chăm sóc',
+                            label: filterType === 'lead' ? 'Nhân viên kinh doanh' : 'KD chăm sóc',
                             icon: <User size={16} className="text-primary" />,
                             options: careByOptions,
                             selectedValues: pendingCareBy,
@@ -2129,6 +2365,7 @@ const Customers = () => {
                             options: statusOptions,
                             selectedValues: pendingStatuses,
                             onSelectionChange: setPendingStatuses,
+                            searchable: false,
                         },
                     ]}
                 />
@@ -2148,6 +2385,7 @@ const Customers = () => {
                 <CustomerDetailsModal
                     customer={selectedCustomer}
                     onClose={() => setIsDetailsModalOpen(false)}
+                    hideCommerceTabs={location.pathname === '/khach-hang-lead'}
                 />
             )}
         </div>

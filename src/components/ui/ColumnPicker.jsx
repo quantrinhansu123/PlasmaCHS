@@ -1,6 +1,13 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { RotateCcw, GripVertical } from 'lucide-react';
 import { clsx } from 'clsx';
+
+/** Ghép lại thứ tự đầy đủ sau khi kéo chỉ các cột không bị loại (giữ vị trí các cột ẩn cố định). */
+function mergeExcludedIntoOrder(originalFull, reorderedVisible, excludeIds) {
+  const ex = new Set(excludeIds);
+  const q = [...reorderedVisible];
+  return originalFull.map((id) => (ex.has(id) ? id : q.shift()));
+}
 
 const ColumnPicker = ({
   columnOrder,
@@ -9,16 +16,28 @@ const ColumnPicker = ({
   setVisibleColumns,
   defaultColOrder,
   columnDefs,
+  excludeColumnIds,
 }) => {
   const dragColIdx = useRef(null);
   const [dragOverIdx, setDragOverIdx] = useState(null);
+
+  const displayOrder = useMemo(() => {
+    if (!excludeColumnIds?.length) return columnOrder;
+    const ex = new Set(excludeColumnIds);
+    return columnOrder.filter((id) => !ex.has(id));
+  }, [columnOrder, excludeColumnIds]);
+
+  const visibleInPicker = useMemo(
+    () => visibleColumns.filter((id) => displayOrder.includes(id)).length,
+    [visibleColumns, displayOrder],
+  );
 
   return (
     <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-2xl shadow-xl border border-border z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-right">
       <div className="px-4 py-2.5 border-b border-border bg-muted/5 flex items-center justify-between">
         <span className="text-[12px] font-bold text-foreground">Cột hiển thị</span>
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-muted-foreground font-medium">{visibleColumns.length}/{columnOrder.length}</span>
+          <span className="text-[11px] text-muted-foreground font-medium">{visibleInPicker}/{displayOrder.length}</span>
           <button
             onClick={() => { setVisibleColumns(defaultColOrder); setColumnOrder(defaultColOrder); }}
             className="text-muted-foreground hover:text-primary transition-colors"
@@ -29,7 +48,7 @@ const ColumnPicker = ({
         </div>
       </div>
       <div className="py-1 max-h-72 overflow-y-auto">
-        {columnOrder.map((colId, idx) => (
+        {displayOrder.map((colId, idx) => (
           <div
             key={colId}
             draggable
@@ -37,10 +56,17 @@ const ColumnPicker = ({
             onDragOver={(e) => { e.preventDefault(); setDragOverIdx(idx); }}
             onDrop={() => {
               if (dragColIdx.current === null || dragColIdx.current === idx) return;
-              const next = [...columnOrder];
-              const [removed] = next.splice(dragColIdx.current, 1);
-              next.splice(idx, 0, removed);
-              setColumnOrder(next);
+              if (excludeColumnIds?.length) {
+                const next = [...displayOrder];
+                const [removed] = next.splice(dragColIdx.current, 1);
+                next.splice(idx, 0, removed);
+                setColumnOrder(mergeExcludedIntoOrder(columnOrder, next, excludeColumnIds));
+              } else {
+                const next = [...columnOrder];
+                const [removed] = next.splice(dragColIdx.current, 1);
+                next.splice(idx, 0, removed);
+                setColumnOrder(next);
+              }
               dragColIdx.current = null;
               setDragOverIdx(null);
             }}

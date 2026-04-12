@@ -25,9 +25,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
 import { supabase } from '../../supabase/config';
+import { fetchCareHistoryRows } from '../../utils/customerCareHistory';
 import * as XLSX from 'xlsx';
 
-export default function CustomerDetailsModal({ customer, onClose }) {
+export default function CustomerDetailsModal({ customer, onClose, hideCommerceTabs = false }) {
     const [activeTab, setActiveTab] = useState('overview'); // overview, orders, transactions
     const [loading, setLoading] = useState(true);
     const [isClosing, setIsClosing] = useState(false);
@@ -68,6 +69,23 @@ export default function CustomerDetailsModal({ customer, onClose }) {
         if (!customer) return;
         fetchCustomerData();
     }, [customer]);
+
+    useEffect(() => {
+        if (hideCommerceTabs && ['orders', 'transactions', 'cylinders'].includes(activeTab)) {
+            setActiveTab('overview');
+        }
+    }, [hideCommerceTabs, activeTab]);
+
+    useEffect(() => {
+        if (!customer || activeTab !== 'care_history') return undefined;
+        let cancelled = false;
+        fetchCareHistoryRows(customer).then((rows) => {
+            if (!cancelled) setCareHistory(rows);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [activeTab, customer?.id, customer?.phone]);
 
     const fetchCustomerData = async () => {
         setLoading(true);
@@ -122,7 +140,7 @@ export default function CustomerDetailsModal({ customer, onClose }) {
             setOrders(ordersData || []);
             setTransactions(txData || []);
             setCylinders(cylData || []);
-            setCareHistory(histData || []);
+            setCareHistory(histRows);
 
             const validOrders = (ordersData || []).filter(o =>
                 !['HUY_DON'].includes(o.status)
