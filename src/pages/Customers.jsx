@@ -108,6 +108,9 @@ const Customers = () => {
     const dropdownRef = useRef(null);
     const columnPickerRef = useRef(null);
 
+    const [fromDate, setFromDate] = useState('');
+    const [toDate, setToDate] = useState('');
+
     const searchParams = new URLSearchParams(location.search);
     const filterType = searchParams.get('filter') || (location.pathname === '/khach-hang-lead' ? 'lead' : null);
 
@@ -430,7 +433,26 @@ const Customers = () => {
                 return c.status === s;
             });
 
-        return matchesSearch && matchesCategory && matchesManagedBy && matchesCareBy && matchesStatus;
+        const matchesDate = (() => {
+            if (!fromDate && !toDate) return true;
+            if (!c.created_at) return false;
+            const createdDate = new Date(c.created_at);
+            createdDate.setHours(0, 0, 0, 0);
+            
+            if (fromDate) {
+                const fDate = new Date(fromDate);
+                fDate.setHours(0, 0, 0, 0);
+                if (createdDate < fDate) return false;
+            }
+            if (toDate) {
+                const tDate = new Date(toDate);
+                tDate.setHours(0, 0, 0, 0);
+                if (createdDate > tDate) return false;
+            }
+            return true;
+        })();
+
+        return matchesSearch && matchesCategory && matchesManagedBy && matchesCareBy && matchesStatus && matchesDate;
     });
 
     const filteredCustomersCount = filteredCustomers.length;
@@ -438,8 +460,8 @@ const Customers = () => {
     const totalMachines = filteredCustomers.reduce((sum, c) => sum + (c.current_machines || 0), 0);
     const totalBorrowed = filteredCustomers.reduce((sum, c) => sum + (c.borrowed_cylinders || 0), 0);
 
-    const hasActiveFilters = selectedCategories.length > 0 || selectedManagedBy.length > 0 || selectedCareBy.length > 0 || selectedStatuses.length > 0;
-    const totalActiveFilters = selectedCategories.length + selectedManagedBy.length + selectedCareBy.length + selectedStatuses.length;
+    const hasActiveFilters = selectedCategories.length > 0 || selectedManagedBy.length > 0 || selectedCareBy.length > 0 || selectedStatuses.length > 0 || !!fromDate || !!toDate;
+    const totalActiveFilters = selectedCategories.length + selectedManagedBy.length + selectedCareBy.length + selectedStatuses.length + (fromDate ? 1 : 0) + (toDate ? 1 : 0);
 
     const categoryOptions = CUSTOMER_CATEGORIES.map(c => ({
         id: c.id,
@@ -1075,6 +1097,8 @@ const Customers = () => {
         setSelectedManagedBy([]);
         setSelectedCareBy([]);
         setSelectedStatuses([]);
+        setFromDate('');
+        setToDate('');
     };
 
     return (
@@ -1563,15 +1587,38 @@ const Customers = () => {
                                 )}
                             </div>
 
+                            <div className="flex items-center gap-1.5 ml-1">
+                                <input
+                                    type="date"
+                                    value={fromDate}
+                                    onChange={(e) => setFromDate(e.target.value)}
+                                    className="px-3 py-2 rounded-xl border border-slate-200 text-[13px] text-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white shadow-sm font-medium"
+                                    title="Từ ngày"
+                                />
+                                <span className="text-slate-400 text-[13px] font-bold">—</span>
+                                <input
+                                    type="date"
+                                    value={toDate}
+                                    onChange={(e) => setToDate(e.target.value)}
+                                    className="px-3 py-2 rounded-xl border border-slate-200 text-[13px] text-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white shadow-sm font-medium"
+                                    title="Đến ngày"
+                                />
+                            </div>
+
                             {hasActiveFilters && (
                                 <button
                                     onClick={clearAllFilters}
-                                    className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-red-300 text-red-500 text-[12px] font-bold hover:bg-red-50 transition-all"
+                                    className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-red-300 text-red-500 text-[12px] font-bold hover:bg-red-50 transition-all shrink-0"
                                 >
                                     <X size={14} />
                                     Xóa bộ lọc
                                 </button>
                             )}
+                            
+                            <div className="ml-auto flex shrink-0 items-center px-4 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-[13px] font-bold shadow-sm">
+                                Tổng hiển thị: <span className="text-emerald-800 ml-1.5 text-[15px]">{filteredCustomersCount}</span>
+                                {totalRecords > 0 && <span className="text-emerald-600/70 ml-1.5 font-semibold text-[13px]">/ {totalRecords}</span>}
+                            </div>
                         </div>
                     </div>
 

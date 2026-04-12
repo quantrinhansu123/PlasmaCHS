@@ -95,15 +95,28 @@ export default function CustomerDetailsModal({ customer, onClose }) {
 
             if (err3) throw err3;
 
-            // Fetch care history
-            const { data: histData, error: err4 } = await supabase
-                .from('customer_care_history')
-                .select('*')
-                .eq('customer_id', customer.id)
-                .order('assigned_at', { ascending: false });
+            // Fetch care history by phone
+            let histData = [];
+            if (customer.phone && customer.phone.trim() !== '') {
+                const { data: phoneLeads, error: err4 } = await supabase
+                    .from('customers')
+                    .select('id, name, status, care_by, created_at')
+                    .eq('phone', customer.phone)
+                    .order('created_at', { ascending: false });
 
-            if (err4) {
-                console.error('Error fetching care history:', err4);
+                if (err4) {
+                    console.error('Error fetching leads by phone:', err4);
+                } else {
+                    histData = phoneLeads;
+                }
+            } else {
+                // Fallback nếu không có phone
+                histData = [{
+                    id: customer.id,
+                    status: customer.status,
+                    care_by: customer.care_by,
+                    created_at: customer.created_at
+                }];
             }
 
             setOrders(ordersData || []);
@@ -323,9 +336,6 @@ export default function CustomerDetailsModal({ customer, onClose }) {
 
                     <div className="flex items-center gap-6 mt-5 border-b border-slate-200 overflow-x-auto scrollbar-hide scroll-smooth">
                         <button onClick={() => setActiveTab('overview')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'overview' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Tổng quan</button>
-                        <button onClick={() => setActiveTab('orders')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'orders' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Đơn hàng ({orders.length})</button>
-                        <button onClick={() => setActiveTab('transactions')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'transactions' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Thu / Chi ({transactions.length})</button>
-                        <button onClick={() => setActiveTab('cylinders')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'cylinders' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Danh sách bình ({cylinders.length})</button>
                         {customer.status !== 'Thành công' && (
                             <button onClick={() => setActiveTab('care_history')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'care_history' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Lịch sử chăm sóc ({careHistory.length})</button>
                         )}
@@ -457,125 +467,6 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                 </div>
                             )}
 
-                            {activeTab === 'orders' && (
-                                <div className="space-y-4">
-                                    {orders.length === 0 ? (
-                                        <div className="py-12 text-center font-bold text-slate-300 italic">Khách hàng chưa có đơn hàng</div>
-                                    ) : (
-                                        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                                            <table className="w-full text-left text-sm">
-                                                <thead className="bg-slate-50 border-b border-slate-100">
-                                                    <tr>
-                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Mã đơn</th>
-                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Ngày tạo</th>
-                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px] text-right">Tổng tiền</th>
-                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px] text-center">Trạng thái</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-slate-50">
-                                                    {orders.map(o => (
-                                                        <tr key={o.id} className="hover:bg-slate-50/50 transition-colors">
-                                                            <td className="px-4 py-3 font-black text-slate-700">{o.order_code}</td>
-                                                            <td className="px-4 py-3 font-bold text-slate-500">{formatDate(o.created_at)}</td>
-                                                            <td className="px-4 py-3 font-black text-emerald-600 text-right">{formatCurrency(o.total_amount)}</td>
-                                                            <td className="px-4 py-3 text-center">
-                                                                <span className={clsx("px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest", o.status === 'DA_DUYET' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500')}>{o.status}</span>
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {activeTab === 'transactions' && (
-                                <div className="space-y-4">
-                                    {transactions.length === 0 ? (
-                                        <div className="py-12 text-center font-bold text-slate-300 italic">Chưa có giao dịch thu/chi</div>
-                                    ) : (
-                                        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                                            <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
-                                                <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Lịch sử thu chi</h5>
-                                                <button onClick={handleExportTransactions} className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded-lg text-emerald-600 font-bold text-[10px] hover:bg-emerald-50 transition-colors">
-                                                    <Download className="w-3 h-3" /> Xuất Excel
-                                                </button>
-                                            </div>
-                                            <table className="w-full text-left text-sm">
-                                                <thead className="bg-slate-50 border-b border-slate-100">
-                                                    <tr>
-                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Mã GD</th>
-                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Ngày</th>
-                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px] text-right">Số tiền</th>
-                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px] text-center">Thao tác</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-slate-50">
-                                                    {transactions.map(tx => (
-                                                        <tr key={tx.id} className="hover:bg-slate-50/50 transition-colors">
-                                                            <td className="px-4 py-3 font-black text-slate-700">{tx.transaction_code}</td>
-                                                            <td className="px-4 py-3 font-bold text-slate-500">{formatDate(tx.transaction_date)}</td>
-                                                            <td className="px-4 py-3 font-black text-rose-600 text-right">{formatCurrency(tx.amount)}</td>
-                                                            <td className="px-4 py-3 text-center">
-                                                                <div className="flex items-center justify-center gap-2">
-                                                                    <button onClick={() => handleDeleteTransaction(tx.id, tx.transaction_code)} className="p-1.5 text-slate-400 hover:text-rose-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
-                                                                </div>
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {activeTab === 'cylinders' && (
-                                <div className="space-y-4">
-                                    {cylinders.length === 0 ? (
-                                        <div className="py-12 text-center font-bold text-slate-300 italic">Khách hàng hiện không giữ bình nào</div>
-                                    ) : (
-                                        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                                            <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
-                                                <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Danh sách bình đang dùng</h5>
-                                            </div>
-                                            <table className="w-full text-left text-sm">
-                                                <thead className="bg-slate-50 border-b border-slate-100">
-                                                    <tr>
-                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Serial</th>
-                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Mã Khắc</th>
-                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Thể tích</th>
-                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Trạng thái</th>
-                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Hạn kiểm định</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-slate-50">
-                                                    {cylinders.map(cyl => (
-                                                        <tr key={cyl.id} className="hover:bg-slate-50/50 transition-colors">
-                                                            <td className="px-4 py-3 font-black text-slate-700">{cyl.serial_number}</td>
-                                                            <td className="px-4 py-3 font-bold text-slate-500">{cyl.cylinder_code || '—'}</td>
-                                                            <td className="px-4 py-3 font-bold text-slate-600">{cyl.volume || '—'}</td>
-                                                            <td className="px-4 py-3">
-                                                                <span className={clsx(
-                                                                    "px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest",
-                                                                    cyl.status === 'thuộc khách hàng' ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-500'
-                                                                )}>
-                                                                    {cyl.status}
-                                                                </span>
-                                                            </td>
-                                                            <td className="px-4 py-3 font-bold text-slate-500 text-xs">
-                                                                {cyl.expiry_date ? formatDate(cyl.expiry_date) : '—'}
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
                             {activeTab === 'care_history' && (
                                 <div className="space-y-4">
                                     {careHistory.length === 0 ? (
@@ -583,27 +474,39 @@ export default function CustomerDetailsModal({ customer, onClose }) {
                                     ) : (
                                         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
                                             <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
-                                                <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nhân viên đã chăm sóc</h5>
+                                                <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                                    Danh sách đơn (Cùng SĐT: {customer.phone || 'Không có'})
+                                                </h5>
                                             </div>
                                             <table className="w-full text-left text-sm">
                                                 <thead className="bg-slate-50 border-b border-slate-100">
                                                     <tr>
-                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Tên nhân viên</th>
-                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Ngày phân công</th>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Trạng thái</th>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">Ngày tạo</th>
+                                                        <th className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest text-[10px]">KD chăm sóc</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-50">
-                                                    {careHistory.map((item, idx) => (
-                                                        <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
+                                                    {careHistory.map((item) => (
+                                                        <tr key={item.id} className={clsx("hover:bg-slate-50/50 transition-colors", item.id === customer.id && "bg-blue-50/30")}>
                                                             <td className="px-4 py-3">
-                                                                <div className="flex items-center gap-2">
-                                                                    <div className={clsx("w-2 h-2 rounded-full", idx === 0 ? "bg-emerald-500 animate-pulse" : "bg-slate-300")} />
-                                                                    <span className="font-black text-slate-700">{item.staff_name}</span>
-                                                                    {idx === 0 && <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-md font-black uppercase">Hiện tại</span>}
-                                                                </div>
+                                                                <span className={clsx(
+                                                                    "px-2.5 py-1 rounded-md text-[11px] font-black uppercase tracking-wider",
+                                                                    item.status === 'Thành công' ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"
+                                                                )}>
+                                                                    {item.status || 'Chưa thành công'}
+                                                                </span>
                                                             </td>
                                                             <td className="px-4 py-3 font-bold text-slate-500 italic">
-                                                                {formatDate(item.assigned_at)}
+                                                                {item.created_at ? new Date(item.created_at).toLocaleString('vi-VN', {
+                                                                    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                                                                }) : '—'}
+                                                            </td>
+                                                            <td className="px-4 py-3 font-bold text-slate-700">
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className={clsx("w-2 h-2 rounded-full", item.id === customer.id ? "bg-primary" : "bg-slate-300")} />
+                                                                    <span>{item.care_by || '—'}</span>
+                                                                </div>
                                                             </td>
                                                         </tr>
                                                     ))}

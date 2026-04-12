@@ -46,6 +46,7 @@ import ErrorReport from './pages/ErrorReport';
 import MachineRecoveries from './pages/MachineRecoveries';
 import MachineRequests from './pages/MachineRequests';
 import ShippingTasks from './pages/ShippingTasks';
+import DeliveryHistory from './pages/DeliveryHistory';
 import InventoryReport from './pages/InventoryReport';
 import InventoryTransfer from './pages/InventoryTransfer';
 import ReturnOrders from './pages/ReturnOrders';
@@ -144,6 +145,7 @@ function App() {
               <Route path="/thu-hoi-may" element={<MachineRecoveries />} />
               <Route path="/kho/dieu-chuyen" element={<InventoryTransfer />} />
               <Route path="/nhiem-vu-giao-hang" element={<ShippingTasks />} />
+              <Route path="/lich-su-giao-hang" element={<DeliveryHistory />} />
 
               <Route path="/nha-cung-cap" element={<Suppliers />} />
               <Route path="/nha-cung-cap/tao" element={<Suppliers />} />

@@ -31,13 +31,17 @@ import {
     User,
     Eye,
     CheckCircle,
+    Package,
+    ChevronDown,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useEffect, useState, cloneElement } from 'react';
+import { useEffect, useState, cloneElement, useRef } from 'react';
 import { toast } from 'react-toastify';
 import { supabase } from '../supabase/config';
 import { ORDER_STATUSES } from '../constants/orderConstants';
 import { notificationService } from '../utils/notificationService';
+import OrderStatusUpdater from '../components/Orders/OrderStatusUpdater';
+import FilterDropdown from '../components/ui/FilterDropdown';
 
 // Register Chart.js components
 ChartJS.register(
@@ -58,9 +62,21 @@ export default function MachineRequests() {
     const [loading, setLoading] = useState(true);
     const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
     const [searchTerm, setSearchTerm] = useState('');
-    const [statusFilter, setStatusFilter] = useState('ALL');
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(50);
+    
+    // Filters States
+    const [fromDate, setFromDate] = useState('');
+    const [toDate, setToDate] = useState('');
+    const [selectedStatuses, setSelectedStatuses] = useState([]);
+    const [selectedCustomers, setSelectedCustomers] = useState([]);
+
+    const [activeDropdown, setActiveDropdown] = useState(null);
+    const [filterSearch, setFilterSearch] = useState('');
+    
+    // States for View Order Modal
+    const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
+    const [orderToView, setOrderToView] = useState(null);
 
     const COMMON_STATUSES = [
         { id: 'ALL', label: 'Tất cả' },
@@ -99,10 +115,34 @@ export default function MachineRequests() {
             (r.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
             (r.ordered_by || '').toLowerCase().includes(searchTerm.toLowerCase());
         
-        const matchesStatus = statusFilter === 'ALL' || r.status === statusFilter;
-        
-        return matchesSearch && matchesStatus;
+        const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(r.status);
+        const matchesCustomer = selectedCustomers.length === 0 || selectedCustomers.includes(r.customer_name);
+
+        const rDate = new Date(r.created_at).getTime();
+        let matchesDate = true;
+        if (fromDate) {
+            matchesDate = matchesDate && rDate >= new Date(fromDate).getTime();
+        }
+        if (toDate) {
+             const toTime = new Date(toDate).getTime() + 86399999;
+             matchesDate = matchesDate && rDate <= toTime;
+        }
+
+        return matchesSearch && matchesStatus && matchesCustomer && matchesDate;
     });
+
+    const uniqueCustomers = Array.from(new Set(requests.map(r => r.customer_name).filter(Boolean)));
+    const customerOptions = uniqueCustomers.map(c => ({
+        id: c,
+        label: c,
+        count: requests.filter(o => o.customer_name === c).length
+    }));
+
+    const statusOptions = COMMON_STATUSES.filter(s => s.id !== 'ALL').map(s => ({
+        id: s.id,
+        label: s.label,
+        count: requests.filter(o => o.status === s.id).length
+    }));
 
     const totalRecords = filteredRequests.length;
     const paginatedRequests = filteredRequests.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -117,6 +157,11 @@ export default function MachineRequests() {
         } catch (error) {
             toast.error('Lỗi xóa phiếu: ' + error.message);
         }
+    };
+
+    const handleViewAsOrder = (order) => {
+        setOrderToView(order);
+        setIsOrderModalOpen(true);
     };
 
     // Đã chuyển logic duyệt sang MachineIssueRequestForm.jsx
@@ -183,23 +228,9 @@ export default function MachineRequests() {
                         searchPlaceholder="Tìm kiếm đề nghị xuất máy..."
                         summary={
                             <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-1 -mx-0.5 px-0.5">
-                                {COMMON_STATUSES.map(s => (
-                                    <button
-                                        key={s.id}
-                                        onClick={() => {
-                                            setStatusFilter(s.id);
-                                            setCurrentPage(1);
-                                        }}
-                                        className={clsx(
-                                            "px-3 py-1.5 rounded-xl text-[11px] font-bold whitespace-nowrap transition-all border shadow-sm",
-                                            statusFilter === s.id
-                                                ? "bg-primary text-white border-primary shadow-primary/20 scale-105"
-                                                : "bg-white text-muted-foreground border-border active:scale-95"
-                                        )}
-                                    >
-                                        {s.label}
-                                    </button>
-                                ))}
+                                <span className="bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-xl text-[11px] font-bold whitespace-nowrap shadow-sm">
+                                    Tổng hiển thị: {totalRecords} / {requests.length}
+                                </span>
                             </div>
                         }
                         actions={
@@ -271,6 +302,7 @@ export default function MachineRequests() {
                                         </div>
                                         <div className="flex items-center gap-3">
                                             <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)} className="p-2 text-slate-400 hover:text-primary bg-slate-50 hover:bg-primary/10 border border-slate-100 rounded-lg"><Eye size={16} /></button>
+                                            <button onClick={() => handleViewAsOrder(r)} className="p-2 text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg" title="Thao tác Đơn hàng"><Package size={16} /></button>
                                             <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
                                             <button onClick={() => handleDelete(r.id, r.order_code)} className="p-2 text-rose-700 bg-rose-50 border border-rose-100 rounded-lg"><Trash2 size={16} /></button>
                                         </div>
@@ -308,18 +340,69 @@ export default function MachineRequests() {
                                             </button>
                                         )}
                                     </div>
-                                    <select
-                                        value={statusFilter}
-                                        onChange={(e) => {
-                                            setStatusFilter(e.target.value);
-                                            setCurrentPage(1);
-                                        }}
-                                        className="h-9 px-3 rounded-lg border border-border bg-white text-[12px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all cursor-pointer shadow-sm min-w-[150px]"
-                                    >
-                                        {COMMON_STATUSES.map(s => (
-                                            <option key={s.id} value={s.id}>{s.label}</option>
-                                        ))}
-                                    </select>
+                                    <div className="flex items-center gap-1.5 ml-2">
+                                        <input
+                                            type="date"
+                                            value={fromDate}
+                                            onChange={(e) => setFromDate(e.target.value)}
+                                            className="px-3 py-1.5 rounded-xl border border-slate-200 text-[13px] text-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white shadow-sm font-medium"
+                                            title="Từ ngày"
+                                        />
+                                        <span className="text-slate-400 text-[13px] font-bold">—</span>
+                                        <input
+                                            type="date"
+                                            value={toDate}
+                                            onChange={(e) => setToDate(e.target.value)}
+                                            className="px-3 py-1.5 rounded-xl border border-slate-200 text-[13px] text-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white shadow-sm font-medium"
+                                            title="Đến ngày"
+                                        />
+                                    </div>
+                                    <div className="relative ml-2">
+                                        <button
+                                            onClick={() => setActiveDropdown(activeDropdown === 'customers' ? null : 'customers')}
+                                            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[13px] font-bold transition-all ${selectedCustomers.length > 0 ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white text-muted-foreground border-border hover:text-foreground'}`}
+                                        >
+                                            <User size={14} />
+                                            Khách hàng
+                                            {selectedCustomers.length > 0 && (
+                                                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-600 text-white font-bold">{selectedCustomers.length}</span>
+                                            )}
+                                            <ChevronDown size={14} className={activeDropdown === 'customers' ? 'rotate-180' : ''} />
+                                        </button>
+                                        {activeDropdown === 'customers' && (
+                                            <FilterDropdown
+                                                options={customerOptions}
+                                                selected={selectedCustomers}
+                                                setSelected={setSelectedCustomers}
+                                                filterSearch={filterSearch}
+                                                setFilterSearch={setFilterSearch}
+                                                showSearch={true}
+                                            />
+                                        )}
+                                    </div>
+                                    <div className="relative ml-2">
+                                        <button
+                                            onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
+                                            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[13px] font-bold transition-all ${selectedStatuses.length > 0 ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white text-muted-foreground border-border hover:text-foreground'}`}
+                                        >
+                                            <List size={14} />
+                                            Trạng thái
+                                            {selectedStatuses.length > 0 && (
+                                                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-blue-600 text-white font-bold">{selectedStatuses.length}</span>
+                                            )}
+                                            <ChevronDown size={14} className={activeDropdown === 'status' ? 'rotate-180' : ''} />
+                                        </button>
+                                        {activeDropdown === 'status' && (
+                                            <FilterDropdown
+                                                options={statusOptions}
+                                                selected={selectedStatuses}
+                                                setSelected={setSelectedStatuses}
+                                                filterSearch={filterSearch}
+                                                setFilterSearch={setFilterSearch}
+                                                showSearch={false}
+                                            />
+                                        )}
+                                    </div>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <button onClick={() => navigate('/de-nghi-xuat-may/tao')} className="flex items-center gap-2 px-6 h-10 rounded-lg bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all active:scale-95">
@@ -369,6 +452,7 @@ export default function MachineRequests() {
                                                 <td className="px-5 py-3.5">
                                                     <div className="flex items-center justify-center gap-1.5">
                                                         <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-all" title="Xem chi tiết"><Eye size={16} /></button>
+                                                        <button onClick={() => handleViewAsOrder(r)} className="p-1.5 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 rounded-lg transition-all" title="Thao tác Đơn hàng"><Package size={16} /></button>
                                                         <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)} className="p-1.5 text-slate-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-all" title="Chỉnh sửa"><Edit size={16} /></button>
                                                         <button onClick={() => handleDelete(r.id, r.order_code)} className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all" title="Xóa"><Trash2 size={16} /></button>
                                                     </div>
@@ -382,9 +466,12 @@ export default function MachineRequests() {
 
                         {/* Desktop Pagination */}
                         <div className="hidden md:flex items-center justify-between p-3 border-t border-border bg-slate-50/50 mt-auto">
-                            <div className="flex items-center gap-2 text-[12px] text-muted-foreground font-medium">
+                            <div className="flex items-center gap-3 text-[12px] text-muted-foreground font-medium">
+                                <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded font-bold">
+                                    Tổng hiển thị: {totalRecords} / {requests.length}
+                                </span>
                                 <span>
-                                    {totalRecords > 0 ? `${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, totalRecords)}` : '0'} / Tổng {totalRecords}
+                                    {totalRecords > 0 ? `${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, totalRecords)}` : '0'} / {totalRecords}
                                 </span>
                             </div>
                             <div className="flex items-center gap-1">
@@ -496,6 +583,21 @@ export default function MachineRequests() {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {isOrderModalOpen && orderToView && (
+                <OrderStatusUpdater
+                    isOpen={isOrderModalOpen}
+                    onClose={() => {
+                        setIsOrderModalOpen(false);
+                        setTimeout(() => setOrderToView(null), 300);
+                    }}
+                    order={orderToView}
+                    onSuccess={() => {
+                        fetchData();
+                        setIsOrderModalOpen(false);
+                    }}
+                />
             )}
         </div>
     );
