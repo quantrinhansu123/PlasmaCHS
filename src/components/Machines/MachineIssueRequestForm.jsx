@@ -36,6 +36,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
         formNumber: '',
         requesterName: '',
         machineManager: '',
+        customerId: '',
         customerName: '',
         phone: '',
         facilityName: '',
@@ -76,6 +77,11 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
 
     const [editOrderId, setEditOrderId] = useState(null);
     const [isReadOnly, setIsReadOnly] = useState(false);
+    const currentActorName =
+        user?.name ||
+        localStorage.getItem('user_name') ||
+        sessionStorage.getItem('user_name') ||
+        'Nhân viên';
 
     useEffect(() => {
         const queryParams = new URLSearchParams(location.search);
@@ -132,6 +138,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
                     orangeNumber: data.order_code?.replace('DNXM-', '') || '',
                     requesterName: data.ordered_by || '',
                     machineManager: parseField('Phụ trách máy:'),
+                    customerId: data.customer_id || '',
                     customerName: data.customer_name || '',
                     phone: data.recipient_phone || '',
                     facilityName: data.recipient_name || '',
@@ -208,10 +215,10 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
                     const customer = data[0];
                     setFormData(prev => ({
                         ...prev,
+                        customerId: customer.id || prev.customerId,
                         customerName: customer.name || '',
                         facilityName: customer.agency_name || customer.invoice_company_name || customer.name || '',
                         placementAddress: customer.address || '',
-                        requesterName: customer.care_by || prev.requesterName,
                         machineManager: customer.managed_by || prev.machineManager
                     }));
                 }
@@ -298,6 +305,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
             // Map ĐNXM fields to orders table
             const orderData = {
                 order_code: formData.orangeNumber || `DNXM-${Date.now().toString().slice(-6)}`,
+                customer_id: formData.customerId || null,
                 customer_name: formData.customerName,
                 recipient_name: formData.facilityName || formData.customerName, // Required NOT NULL
                 recipient_address: formData.placementAddress || 'N/A', // Required NOT NULL
@@ -317,7 +325,7 @@ Phụ trách máy: ${formData.machineManager}.
 PT Vận chuyển: ${shippingList}. 
 Mã máy: ${formData.machineCode}. 
 Ghi chú: ${formData.notes}`,
-                ordered_by: formData.requesterName,
+                ordered_by: formData.requesterName || currentActorName,
                 customer_category: 'TM' 
             };
 
@@ -328,10 +336,9 @@ Ghi chú: ${formData.notes}`,
                     .eq('id', editOrderId);
                 if (error) throw error;
                 
-                const userWhoEdited = user?.name || 'Nhân viên';
                 notificationService.add({
                     title: `📝 Cập nhật ĐNXM: ${orderData.customer_name}`,
-                    description: `${userWhoEdited} vừa cập nhật thông tin phiếu ĐNXM${formData.orangeNumber ? ' ' + formData.orangeNumber : ''} - KH: ${orderData.customer_name}`,
+                    description: `${currentActorName} vừa cập nhật thông tin phiếu ĐNXM${formData.orangeNumber ? ' ' + formData.orangeNumber : ''} - KH: ${orderData.customer_name}`,
                     type: 'info',
                     link: `/de-nghi-xuat-may/tao?orderId=${editOrderId}&viewOnly=true`
                 });
@@ -355,7 +362,7 @@ Ghi chú: ${formData.notes}`,
                 const newOrderId = insertedData?.id;
                 notificationService.add({
                     title: `💡 ĐNXM mới: ${orderData.customer_name}`,
-                    description: `${orderData.ordered_by || 'Nhân viên'} vừa lập phiếu đề nghị xuất máy mới.`,
+                    description: `${currentActorName} vừa lập phiếu đề nghị xuất máy mới.`,
                     type: 'info',
                     link: newOrderId ? `/de-nghi-xuat-may/tao?orderId=${newOrderId}&viewOnly=true` : '/de-nghi-xuat-may'
                 });
@@ -445,7 +452,7 @@ Ghi chú: ${formData.notes}`,
             
             notificationService.add({
                 title: notifTitle,
-                description: notifDesc,
+                description: `${notifDesc} • Thực hiện bởi: ${currentActorName}`,
                 type: 'success',
                 link: `/de-nghi-xuat-may/tao?orderId=${editOrderId}&viewOnly=true`
             });
@@ -473,7 +480,7 @@ Ghi chú: ${formData.notes}`,
 
             notificationService.add({
                 title: `❌ ĐNXM bị từ chối`,
-                description: `Phiếu ĐNXM${formData.orangeNumber || ''} - KH: ${formData.customerName} đã bị từ chối.`,
+                description: `Phiếu ĐNXM${formData.orangeNumber || ''} - KH: ${formData.customerName} đã bị từ chối • Thực hiện bởi: ${currentActorName}.`,
                 type: 'warning',
                 link: `/de-nghi-xuat-may/tao?orderId=${editOrderId}&viewOnly=true`
             });
