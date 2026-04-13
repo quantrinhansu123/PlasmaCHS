@@ -24,7 +24,7 @@ const ModulePage = () => {
     );
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full">
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full pb-24 md:pb-0">
       {/* Filter Bar */}
       <div className="bg-card bg-white rounded-xl shadow-sm border border-border p-1.5 sm:p-2 flex items-center gap-1.5 sm:gap-4 mb-4 sm:mb-6 relative z-10 overflow-hidden">
         <button 
