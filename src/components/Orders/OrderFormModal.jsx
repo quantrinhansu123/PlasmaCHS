@@ -11,6 +11,7 @@ import usePermissions from '../../hooks/usePermissions';
 import { useReports } from '../../hooks/useReports';
 import { supabase } from '../../supabase/config';
 import BarcodeScanner from '../Common/BarcodeScanner';
+import OrderFormReadOnlyView from './OrderFormReadOnlyView';
 import clsx from 'clsx';
 
 export default function OrderFormModal({ order, onClose, onSuccess, initialMode = 'edit' }) {
@@ -19,6 +20,11 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
     const isEdit = !!order;
     const [mode, setMode] = useState(initialMode);
     const isReadOnly = mode === 'view';
+
+    useEffect(() => {
+        setMode(initialMode);
+    }, [initialMode]);
+
     const [isLoading, setIsLoading] = useState(false);
     const [isFetchingCustomers, setIsFetchingCustomers] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
@@ -46,6 +52,10 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
     const [editReason, setEditReason] = useState('');
     const [reasonSource, setReasonSource] = useState('initial-edit'); // 'initial-edit' | 'submit'
     const hasLoadedItemsRef = useRef(false);
+
+    useEffect(() => {
+        hasLoadedItemsRef.current = false;
+    }, [order?.id]);
 
     // Custom dropdown states
     const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
@@ -771,6 +781,21 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                         </div>
                     )}
 
+                    {isReadOnly ? (
+                        <OrderFormReadOnlyView
+                            formData={formData}
+                            order={order}
+                            customers={customers}
+                            warehousesList={warehousesList}
+                            shippersList={shippersList}
+                            promotionsList={promotionsList}
+                            cylinderDebt={cylinderDebt}
+                            formatNumber={formatNumber}
+                            calculatedTotalAmount={calculatedTotalAmount}
+                            freeCylinders={freeCylinders}
+                            billedQuantity={billedQuantity}
+                        />
+                    ) : (
                     <form id="orderForm" onSubmit={handleSubmit} className="space-y-6">
                         <div className="rounded-3xl border border-primary/20 bg-white p-5 sm:p-6 space-y-5 shadow-sm [&_label]:text-primary [&_label_svg]:text-primary/80">
                             <div className="flex items-center gap-2.5 pb-3 border-b border-primary/10">
@@ -1240,6 +1265,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                             </div>
                         </div>
                     </form>
+                    )}
                 </div>
 
                 <div className="sticky bottom-0 z-40 px-6 py-4 pb-12 md:px-10 md:py-6 bg-[#F9FAFB] border-t border-slate-200 shrink-0 flex flex-col-reverse md:flex-row items-center justify-between gap-4 md:gap-6 shadow-[0_-8px_20px_rgba(0,0,0,0.08)]">

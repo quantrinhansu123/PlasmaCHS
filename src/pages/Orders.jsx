@@ -38,7 +38,7 @@ import {
     Warehouse,
     X
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
@@ -75,6 +75,16 @@ ChartJS.register(
     ChartLegend
 );
 
+/** Trạng thái cần xử lý (duyệt / KD / điều chỉnh / kho) — dùng cho bộ đếm nhanh */
+const PIPELINE_ATTENTION_STATUSES = new Set([
+    'CHO_DUYET',
+    'CHO_CTY_DUYET',
+    'TRUONG_KD_XU_LY',
+    'KD_XU_LY',
+    'DIEU_CHINH',
+    'KHO_XU_LY'
+]);
+
 const Orders = () => {
     const { role, department } = usePermissions();
     const navigate = useNavigate();
@@ -96,7 +106,6 @@ const Orders = () => {
     const rowMenuRef = useRef(null);
     const [serialsModalOrder, setSerialsModalOrder] = useState(null);
     const [warehousesList, setWarehousesList] = useState([]);
-    const [showMoreActions, setShowMoreActions] = useState(false);
     const defaultColOrder = TABLE_COLUMNS.map(col => col.key);
     const columnDefs = TABLE_COLUMNS.reduce((acc, col) => {
         acc[col.key] = { label: col.label };
@@ -263,16 +272,6 @@ const Orders = () => {
                 setActiveDropdown(null);
                 setFilterSearch('');
             }
-
-            // Close more actions menu on mobile
-            if (showMoreActions) {
-                const moreActionsMenu = document.getElementById('more-actions-menu-orders');
-                const moreActionsButton = document.getElementById('more-actions-button-orders');
-                if (moreActionsMenu && !moreActionsMenu.contains(event.target) &&
-                    moreActionsButton && !moreActionsButton.contains(event.target)) {
-                    setShowMoreActions(false);
-                }
-            }
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -371,6 +370,40 @@ const Orders = () => {
     const totalAmount = filteredOrders.reduce((sum, order) => {
         return sum + (order.total_amount || (order.quantity || 0) * (order.unit_price || 0));
     }, 0);
+
+    const filteredStatusCounts = useMemo(() => {
+        const map = {};
+        filteredOrders.forEach(o => {
+            map[o.status] = (map[o.status] || 0) + 1;
+        });
+        return map;
+    }, [filteredOrders]);
+
+    const filteredPipelineCount = useMemo(
+        () => filteredOrders.filter(o => PIPELINE_ATTENTION_STATUSES.has(o.status)).length,
+        [filteredOrders]
+    );
+
+    const statusChipsForStrip = useMemo(() => {
+        const known = ORDER_STATUSES.filter(s => s.id !== 'ALL').map(s => ({
+            id: s.id,
+            label: s.label,
+            color: s.color,
+            count: filteredStatusCounts[s.id] || 0
+        }));
+        const knownIds = new Set(known.map(s => s.id));
+        const extra = Object.entries(filteredStatusCounts)
+            .filter(([id]) => !knownIds.has(id))
+            .map(([id, count]) => ({
+                id,
+                label: id,
+                color: 'gray',
+                count
+            }));
+        return [...known, ...extra]
+            .filter(s => s.count > 0)
+            .sort((a, b) => (STATUS_PRIORITY[a.id] || 99) - (STATUS_PRIORITY[b.id] || 99));
+    }, [filteredStatusCounts]);
 
     const getStatusConfig = (statusId) => {
         return ORDER_STATUSES.find(s => s.id === statusId) || ORDER_STATUSES[0];
@@ -850,48 +883,34 @@ const Orders = () => {
                         onFilterClick={openMobileFilter}
                         hasActiveFilters={hasActiveFilters}
                         totalActiveFilters={totalActiveFilters}
+                        summary={
+                            <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-0.5 -mx-0.5 px-0.5">
+                                <span className="bg-emerald-100 text-emerald-800 px-3 py-1.5 rounded-xl text-[11px] font-bold whitespace-nowrap shadow-sm border border-emerald-200/60">
+                                    Hiển thị{' '}
+                                    <span className="tabular-nums">{filteredOrders.length}</span>
+                                    <span className="text-emerald-600/80 font-semibold"> / </span>
+                                    <span className="tabular-nums">{orders.length}</span> đơn
+                                </span>
+                                <span className="bg-primary/10 text-primary px-3 py-1.5 rounded-xl text-[11px] font-bold whitespace-nowrap shadow-sm border border-primary/15">
+                                    Giá trị{' '}
+                                    <span className="tabular-nums">{formatNumber(totalAmount)}</span> đ
+                                </span>
+                                <span className="bg-amber-100 text-amber-900 px-3 py-1.5 rounded-xl text-[11px] font-bold whitespace-nowrap shadow-sm border border-amber-200/70">
+                                    Chờ xử lý{' '}
+                                    <span className="tabular-nums">{filteredPipelineCount}</span>
+                                </span>
+                            </div>
+                        }
                         actions={
-                            <>
-                                <div className="relative">
-                                    <button
-                                        id="more-actions-button-orders"
-                                        onClick={() => setShowMoreActions(!showMoreActions)}
-                                        className={clsx(
-                                            "p-2 rounded-xl border shrink-0 transition-all active:scale-95 shadow-sm",
-                                            showMoreActions ? "bg-slate-100 border-slate-300" : "bg-white border-slate-200 text-slate-600"
-                                        )}
-                                    >
-                                        <MoreVertical size={20} />
-                                    </button>
-                                    {showMoreActions && (
-                                        <div id="more-actions-menu-orders" className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl shadow-xl border border-slate-100 py-2 z-[100] animate-in fade-in slide-in-from-top-2 duration-200 origin-top-right">
-                                            <div
-                                                role="button"
-                                                onClick={() => {
-                                                    setOrderToEdit(null);
-                                                    navigate('/de-nghi-xuat-may/tao');
-                                                    setShowMoreActions(false);
-                                                }}
-                                                className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-slate-700 hover:bg-slate-50 transition-colors text-left cursor-pointer"
-                                            >
-                                                <div className="w-5 flex justify-center flex-shrink-0">
-                                                    <Plus size={18} className="text-slate-400" />
-                                                </div>
-                                                Đề nghị xuất máy
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                                <button
-                                    onClick={() => {
-                                        setOrderToEdit(null);
-                                        setIsFormModalOpen(true);
-                                    }}
-                                    className="p-2 rounded-xl bg-primary text-white shadow-lg shadow-primary/30 active:scale-95 transition-all"
-                                >
-                                    <Plus size={20} />
-                                </button>
-                            </>
+                            <button
+                                onClick={() => {
+                                    setOrderToEdit(null);
+                                    setIsFormModalOpen(true);
+                                }}
+                                className="p-2 rounded-xl bg-primary text-white shadow-lg shadow-primary/30 active:scale-95 transition-all"
+                            >
+                                <Plus size={20} />
+                            </button>
                         }
                         selectionBar={
                             selectedIds.length > 0 ? (
@@ -1218,16 +1237,50 @@ const Orders = () => {
                                     <Plus size={18} />
                                     Thêm
                                 </button>
-                                <button
-                                    onClick={() => {
-                                        setOrderToEdit(null);
-                                        navigate('/de-nghi-xuat-may/tao');
-                                    }}
-                                    className="flex items-center gap-2 px-6 py-1.5 rounded-xl bg-emerald-600 text-white text-[13px] font-bold hover:bg-emerald-700 shadow-md shadow-emerald-600/20 transition-all"
+                            </div>
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200/90 bg-gradient-to-br from-slate-50 to-white px-3 py-2.5 shadow-sm space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span className="inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-[12px] font-bold text-slate-800 border border-slate-200 shadow-sm">
+                                    Hiển thị{' '}
+                                    <span className="text-primary tabular-nums">{filteredOrders.length}</span>
+                                    <span className="text-slate-400 font-semibold">/</span>
+                                    <span className="tabular-nums text-slate-600">{orders.length}</span>
+                                    <span className="text-slate-500 font-semibold">đơn</span>
+                                </span>
+                                <span className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-2.5 py-1.5 text-[12px] font-bold text-primary border border-primary/20">
+                                    Giá trị lọc{' '}
+                                    <span className="tabular-nums">{formatNumber(totalAmount)}</span> đ
+                                </span>
+                                <span
+                                    className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[12px] font-bold text-amber-900 border border-amber-200/80"
+                                    title="Chờ duyệt, điều chỉnh, kho hoặc KD xử lý"
                                 >
-                                    <Plus size={18} />
-                                    Đề nghị xuất máy
-                                </button>
+                                    Chờ xử lý{' '}
+                                    <span className="tabular-nums">{filteredPipelineCount}</span>
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 -mx-0.5 px-0.5 custom-scrollbar">
+                                {statusChipsForStrip.length === 0 ? (
+                                    <span className="text-[11px] text-muted-foreground italic px-1 py-0.5">
+                                        Không có đơn sau bộ lọc
+                                    </span>
+                                ) : (
+                                    statusChipsForStrip.map(s => (
+                                        <span
+                                            key={s.id}
+                                            title={`${s.label}: ${s.count} đơn`}
+                                            className={clsx(
+                                                getStatusBadgeClass(s.color),
+                                                'shrink-0 text-[10px] px-2.5 py-1 gap-1 border border-black/5'
+                                            )}
+                                        >
+                                            <span className="max-w-[min(10rem,28vw)] truncate">{s.label}</span>
+                                            <span className="tabular-nums font-black opacity-90">{s.count}</span>
+                                        </span>
+                                    ))
+                                )}
                             </div>
                         </div>
 
@@ -1613,11 +1666,22 @@ const Orders = () => {
 
                     {/* Footer / Pagination */}
                     <div className="hidden md:flex px-4 py-4 border-t border-border items-center justify-between bg-muted/5">
-                        <div className="flex items-center gap-3 text-[12px] text-muted-foreground font-medium">
-                            <span>{filteredOrders.length > 0 ? `1–${filteredOrders.length}` : '0'}/Tổng {filteredOrders.length}</span>
-                            <div className="flex items-center gap-1 ml-2">
-                                <span className="text-[11px] font-bold">│</span>
-                                <span className="text-primary font-bold">{formatNumber(totalAmount)} đ</span>
+                        <div className="flex items-center gap-3 text-[12px] text-muted-foreground font-medium flex-wrap">
+                            <span>
+                                {filteredOrders.length > 0 ? `1–${filteredOrders.length}` : '0'} trong{' '}
+                                <span className="font-bold text-foreground tabular-nums">{filteredOrders.length}</span>
+                                <span className="text-slate-400"> / </span>
+                                <span className="font-bold text-foreground tabular-nums">{orders.length}</span> đơn
+                            </span>
+                            <div className="flex items-center gap-1">
+                                <span className="text-[11px] font-bold text-slate-300">│</span>
+                                <span className="text-primary font-bold tabular-nums">{formatNumber(totalAmount)} đ</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                                <span className="text-[11px] font-bold text-slate-300">│</span>
+                                <span className="text-amber-700 font-bold">
+                                    Chờ xử lý: <span className="tabular-nums">{filteredPipelineCount}</span>
+                                </span>
                             </div>
                         </div>
                         <div className="flex items-center gap-1">

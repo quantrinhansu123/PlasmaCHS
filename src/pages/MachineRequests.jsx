@@ -42,6 +42,7 @@ import { ORDER_STATUSES } from '../constants/orderConstants';
 import { notificationService } from '../utils/notificationService';
 import OrderStatusUpdater from '../components/Orders/OrderStatusUpdater';
 import FilterDropdown from '../components/ui/FilterDropdown';
+import usePermissions from '../hooks/usePermissions';
 
 // Register Chart.js components
 ChartJS.register(
@@ -58,6 +59,7 @@ ChartJS.register(
 
 export default function MachineRequests() {
     const navigate = useNavigate();
+    const { role } = usePermissions();
     const [requests, setRequests] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
@@ -587,13 +589,13 @@ export default function MachineRequests() {
 
             {isOrderModalOpen && orderToView && (
                 <OrderStatusUpdater
-                    isOpen={isOrderModalOpen}
+                    order={orderToView}
+                    userRole={role}
                     onClose={() => {
                         setIsOrderModalOpen(false);
                         setTimeout(() => setOrderToView(null), 300);
                     }}
-                    order={orderToView}
-                    onSuccess={() => {
+                    onUpdateSuccess={() => {
                         fetchData();
                         setIsOrderModalOpen(false);
                     }}
