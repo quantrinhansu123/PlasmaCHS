@@ -296,6 +296,7 @@ const Orders = () => {
             const isAdmin = normalizedRole === 'admin';
             const isLeader = normalizedRole.includes('lead');
             const isThuKhoRole = normalizedRole.includes('thu_kho');
+            const isShipperRole = normalizedRole.includes('shipper') || normalizedRole.includes('giao_hang');
             const isWarehouseRole =
                 !isThuKhoRole && normalizedRole.includes('kho');
             const storageUserName =
@@ -329,6 +330,11 @@ const Orders = () => {
                 query = query.eq('status', 'KHO_XU_LY');
             }
 
+            // Shipper chỉ nhìn thấy đơn được giao cho mình
+            if (isShipperRole && !isAdmin) {
+                query = query.eq('delivery_unit', storageUserName);
+            }
+
             // Apply warehouse filter only for warehouse roles
             if (!isAdmin && isWarehouseRole && department) {
                 // Logic: Extract warehouse code from department (e.g., "OCP1-CHS" -> "OCP1")
@@ -341,7 +347,7 @@ const Orders = () => {
             }
 
             // Non-leader users only see orders from managed sales list (including self)
-            if (!isAdmin && !isLeader && !isThuKhoRole) {
+            if (!isAdmin && !isLeader && !isThuKhoRole && !isShipperRole) {
                 if (visibleSalesNames.length > 0) {
                     query = query.in('ordered_by', visibleSalesNames);
                 } else if (storageUserName) {

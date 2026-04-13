@@ -24,6 +24,7 @@ import { toast } from 'react-toastify';
 import { supabase } from '../supabase/config';
 import OrderStatusUpdater from '../components/Orders/OrderStatusUpdater';
 import FilterDropdown from '../components/ui/FilterDropdown';
+import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import OrderHistoryTimeline from '../components/Orders/OrderHistoryTimeline';
 
 // Delivery type constants
@@ -51,6 +52,13 @@ export default function DeliveryHistory() {
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [filterSearch, setFilterSearch] = useState('');
 
+    // Mobile filter sheet state
+    const [showMobileFilter, setShowMobileFilter] = useState(false);
+    const [mobileFilterClosing, setMobileFilterClosing] = useState(false);
+    const [pendingStatuses, setPendingStatuses] = useState([]);
+    const [pendingTypes, setPendingTypes] = useState([]);
+    const [pendingDateRange, setPendingDateRange] = useState({ start_date: '', end_date: '' });
+
     // Modals
     const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
     const [orderToView, setOrderToView] = useState(null);
@@ -65,6 +73,30 @@ export default function DeliveryHistory() {
     useEffect(() => {
         fetchAllData();
     }, []);
+
+    // Mobile filter handlers
+    const closeMobileFilter = () => {
+        setMobileFilterClosing(true);
+        setTimeout(() => {
+            setShowMobileFilter(false);
+            setMobileFilterClosing(false);
+        }, 280);
+    };
+
+    const openMobileFilter = () => {
+        setPendingStatuses(selectedStatuses);
+        setPendingTypes(selectedTypes);
+        setPendingDateRange({ start_date: fromDate, end_date: toDate });
+        setShowMobileFilter(true);
+    };
+
+    const applyMobileFilter = () => {
+        setSelectedStatuses(pendingStatuses);
+        setSelectedTypes(pendingTypes);
+        setFromDate(pendingDateRange.start_date);
+        setToDate(pendingDateRange.end_date);
+        closeMobileFilter();
+    };
 
     const fetchAllData = async () => {
         setLoading(true);
@@ -256,6 +288,9 @@ export default function DeliveryHistory() {
     const totalRecords = filteredRecords.length;
     const paginatedRecords = filteredRecords.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
+    const hasActiveFilters = selectedTypes.length > 0 || selectedStatuses.length > 0 || fromDate || toDate;
+    const totalActiveFilters = selectedTypes.length + selectedStatuses.length + (fromDate ? 1 : 0) + (toDate ? 1 : 0);
+
     // --- Filter options ---
     const typeOptions = DELIVERY_TYPES.map(d => ({
         id: d.id,
@@ -300,126 +335,117 @@ export default function DeliveryHistory() {
             />
 
             {activeView === 'list' && (
-            <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full mb-16 md:mb-0">
-                <MobilePageHeader
-                    searchTerm={searchTerm}
-                    setSearchTerm={setSearchTerm}
-                    searchPlaceholder="Tìm kiếm mã, khách hàng, nhân viên..."
-                    summary={
-                        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-1 -mx-0.5 px-0.5">
-                            <span className="bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-xl text-[11px] font-bold whitespace-nowrap shadow-sm">
+            <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full mb-2 md:mb-0">
+                    <MobilePageHeader
+                        searchTerm={searchTerm}
+                        setSearchTerm={setSearchTerm}
+                        searchPlaceholder="Tìm kiếm mã, khách hàng, nhân viên..."
+                        onFilterClick={openMobileFilter}
+                        hasActiveFilters={hasActiveFilters}
+                        totalActiveFilters={totalActiveFilters}
+                        summary={
+                        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-1.5 -mx-0.5 px-0.5">
+                            <span className="bg-emerald-100 text-emerald-700 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap shadow-sm">
                                 Tổng: {totalRecords} / {records.length}
                             </span>
                             {DELIVERY_TYPES.map(t => {
                                 const cnt = filteredRecords.filter(r => r.type === t.id).length;
                                 return cnt > 0 ? (
-                                    <span key={t.id} className={clsx('px-2.5 py-1.5 rounded-xl text-[10px] font-bold whitespace-nowrap border', t.colorCls)}>
+                                    <span key={t.id} className={clsx('px-3 py-2 rounded-xl text-[11px] font-bold whitespace-nowrap border', t.colorCls)}>
                                         {t.label}: {cnt}
                                     </span>
                                 ) : null;
                             })}
                         </div>
-                    }
-                    actions={<></>}
-                />
+                        }
+                        actions={<></>}
+                    />
 
                 {/* Mobile Card List */}
-                <div className="md:hidden flex-1 overflow-auto bg-slate-50/50 p-3 custom-scrollbar">
+                <div className="md:hidden flex-1 overflow-y-auto p-3 flex flex-col gap-3">
                     <div className="space-y-3">
                         {loading ? (
-                            Array(5).fill(0).map((_, i) => (
-                                <div key={i} className="bg-white p-4 rounded-2xl border border-slate-100 animate-pulse h-[140px]" />
-                            ))
+                            <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
                         ) : paginatedRecords.length === 0 ? (
-                            <div className="text-center py-10 bg-white rounded-2xl border border-dashed border-slate-200">
-                                <p className="text-slate-500 font-medium text-[13px]">Không tìm thấy bản ghi nào!</p>
-                            </div>
+                            <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy bản ghi nào!</div>
                         ) : (
                             paginatedRecords.map(r => {
                                 const typeInfo = getTypeInfo(r.type);
                                 const TypeIcon = typeInfo.icon;
                                 return (
-                                <div key={`${r.type}-${r.id}`} className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm relative overflow-hidden">
-                                    <div className="flex items-start justify-between mb-3">
+                                <div key={`${r.type}-${r.id}`} className="rounded-2xl border border-primary/15 bg-white shadow-sm p-4 transition-all duration-200">
+                                    <div className="flex items-start justify-between gap-2 mb-2">
+                                        <div className="flex gap-3">
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <h3 className="font-bold text-[14px] text-foreground leading-tight">#{r.code}</h3>
+                                                    <span className={clsx('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase', typeInfo.colorCls)}>
+                                                        <TypeIcon size={10} />
+                                                        {typeInfo.label}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <span className={clsx('text-[10px] font-bold uppercase px-3 py-1.5 rounded-full', r.statusCls)}>
+                                            {r.statusLabel}
+                                        </span>
+                                    </div>
+
+                                    <div className="mb-3">
+                                        <h3 className="text-[14px] font-black text-foreground leading-snug">{r.customerName}</h3>
+                                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+                                            <span className="text-[11px] font-medium text-muted-foreground">{new Date(r.date).toLocaleDateString('vi-VN')}</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2 mb-3 rounded-xl bg-muted/10 border border-border/60 p-2.5">
                                         <div>
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <h3 className="font-black text-slate-800 text-[14px]">#{r.code}</h3>
-                                                <span className={clsx('px-2 py-0.5 rounded-md text-[10px] font-bold border whitespace-nowrap', r.statusCls)}>
-                                                    {r.statusLabel}
-                                                </span>
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <span className={clsx('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase', typeInfo.colorCls)}>
-                                                    <TypeIcon size={10} />
-                                                    {typeInfo.label}
-                                                </span>
-                                                <p className="text-[13px] text-slate-600 font-bold">{r.customerName}</p>
-                                            </div>
+                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                                                <User className="w-3 h-3 text-blue-600" /> Người thực hiện
+                                            </p>
+                                            <p className="text-[12px] text-foreground font-bold mt-0.5 truncate">{r.executor}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Số lượng</p>
+                                            <div className="text-[14px] text-foreground font-black mt-0.5">{r.quantity} SP</div>
                                         </div>
                                         {r.images.length > 0 && (
-                                            <button onClick={() => openImagePreview(r)} className="shrink-0">
-                                                <div className="flex -space-x-2">
-                                                    {r.images.slice(0, 2).map((img, i) => (
-                                                        <img key={i} src={img} alt="" className="w-10 h-10 rounded-lg object-cover border-2 border-white shadow-sm" onError={(e) => { e.target.style.display = 'none'; }} />
+                                            <div className="col-span-2">
+                                                <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-0.5 px-0.5 pt-2">
+                                                    {r.images.slice(0, 4).map((img, i) => (
+                                                        <img
+                                                            key={i}
+                                                            src={img}
+                                                            alt={`Ảnh ${i + 1}`}
+                                                            onClick={() => setPreviewImages({ images: r.images, index: i })}
+                                                            className="w-16 h-16 rounded-lg object-cover border border-slate-200 shadow-sm cursor-pointer active:scale-95 transition-transform shrink-0"
+                                                            onError={(e) => { e.target.style.display = 'none'; }}
+                                                        />
                                                     ))}
-                                                    {r.images.length > 2 && (
-                                                        <div className="w-10 h-10 rounded-lg bg-slate-100 border-2 border-white shadow-sm flex items-center justify-center text-[10px] font-bold text-slate-500">
-                                                            +{r.images.length - 2}
-                                                        </div>
+                                                    {r.images.length > 4 && (
+                                                        <button
+                                                            onClick={() => openImagePreview(r)}
+                                                            className="w-16 h-16 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-xs font-bold text-slate-500 shrink-0 active:scale-95 transition-transform"
+                                                        >
+                                                            +{r.images.length - 4}
+                                                        </button>
                                                     )}
                                                 </div>
-                                            </button>
+                                            </div>
                                         )}
                                     </div>
-                                    <div className="flex bg-slate-50 rounded-xl p-3 mb-3 border border-slate-100">
-                                        <div className="flex-1 space-y-1.5">
-                                            <div className="flex items-center gap-2 text-[12px] font-medium text-slate-600">
-                                                <User size={14} className="text-slate-400" />
-                                                <span>{r.executor}</span>
-                                            </div>
-                                            <div className="flex items-center gap-2 text-[12px] font-medium text-slate-600">
-                                                <Package size={14} className="text-slate-400" />
-                                                <span className="font-bold text-emerald-700">{r.quantity} SP</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    {/* Image thumbnails row */}
-                                    {r.images.length > 0 && (
-                                        <div className="flex gap-2 mb-3 overflow-x-auto scrollbar-hide">
-                                            {r.images.slice(0, 4).map((img, i) => (
-                                                <img
-                                                    key={i}
-                                                    src={img}
-                                                    alt={`Ảnh ${i + 1}`}
-                                                    onClick={() => setPreviewImages({ images: r.images, index: i })}
-                                                    className="w-16 h-16 rounded-xl object-cover border border-slate-200 shadow-sm cursor-pointer hover:opacity-80 transition-opacity shrink-0"
-                                                    onError={(e) => { e.target.style.display = 'none'; }}
-                                                />
-                                            ))}
-                                            {r.images.length > 4 && (
-                                                <button
-                                                    onClick={() => openImagePreview(r)}
-                                                    className="w-16 h-16 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-[12px] font-bold text-slate-500 shrink-0 hover:bg-slate-200 transition-colors"
-                                                >
-                                                    +{r.images.length - 4}
+
+                                    <div className="flex items-center justify-end gap-2 pt-3 border-t border-border/70">
+                                        {r.rawOrder && (
+                                            <>
+                                                <button onClick={() => setHistoryModalOrder(r.rawOrder)} className="p-2 text-muted-foreground bg-slate-50 border border-slate-200 rounded-lg active:scale-90 transition-all" title="Xem lịch sử">
+                                                    <Eye size={18} />
                                                 </button>
-                                            )}
-                                        </div>
-                                    )}
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-[11px] text-slate-400 font-medium">{new Date(r.date).toLocaleDateString('vi-VN')}</span>
-                                        <div className="flex gap-2">
-                                            {r.rawOrder && (
-                                                <>
-                                                    <button onClick={() => setHistoryModalOrder(r.rawOrder)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg font-bold text-[12px] flex items-center gap-1.5" title="Xem lịch sử">
-                                                        <Eye size={16} />
-                                                    </button>
-                                                    <button onClick={() => handleViewAsOrder(r)} className="p-2 text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg font-bold text-[12px] flex items-center gap-1.5" title="Thao tác">
-                                                        <Package size={16} />
-                                                    </button>
-                                                </>
-                                            )}
-                                        </div>
+                                                <button onClick={() => handleViewAsOrder(r)} className="p-2 text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg active:scale-90 transition-all" title="Thao tác">
+                                                    <Package size={18} />
+                                                </button>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                                 );
@@ -616,7 +642,7 @@ export default function DeliveryHistory() {
 
             {/* Stats View */}
             {activeView === 'stats' && (
-                <div className="bg-white rounded-2xl border border-border shadow-sm p-6 space-y-6 mb-16 md:mb-0">
+                <div className="bg-white rounded-2xl border border-border shadow-sm p-6 space-y-6 mb-2 md:mb-0">
                     <h2 className="text-xl font-black text-slate-900">Thống kê Lịch sử Giao hàng</h2>
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                         <div className="bg-white p-5 rounded-2xl justify-between border border-border shadow-sm flex flex-col gap-2 relative overflow-hidden group hover:border-primary transition-colors">
@@ -731,6 +757,41 @@ export default function DeliveryHistory() {
                     </div>
                 </div>
             )}
+
+            <MobileFilterSheet
+                isOpen={showMobileFilter}
+                isClosing={mobileFilterClosing}
+                onClose={closeMobileFilter}
+                onApply={applyMobileFilter}
+                title="Bộ lọc lịch sử giao hàng"
+                sections={[
+                    {
+                        id: 'dateRange',
+                        label: 'Khoảng thời gian',
+                        type: 'dateRange',
+                        value: pendingDateRange,
+                        onValueChange: setPendingDateRange,
+                    },
+                    {
+                        id: 'types',
+                        label: 'Loại giao dịch',
+                        icon: <Package size={16} />,
+                        options: typeOptions,
+                        selectedValues: pendingTypes,
+                        onSelectionChange: setPendingTypes,
+                        searchable: false,
+                    },
+                    {
+                        id: 'status',
+                        label: 'Trạng thái',
+                        icon: <List size={16} />,
+                        options: statusOptions,
+                        selectedValues: pendingStatuses,
+                        onSelectionChange: setPendingStatuses,
+                        searchable: false,
+                    },
+                ]}
+            />
         </div>
     );
 }

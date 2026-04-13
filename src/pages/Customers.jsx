@@ -714,9 +714,15 @@ const Customers = () => {
             if (newStatus === 'Thành công') {
                 const updatedCustomer = customers.find(c => c.id === id);
                 if (updatedCustomer && updatedCustomer.status !== 'Thành công') {
+                    // Get current logged-in user
+                    const currentUser =
+                        localStorage.getItem('user_name') ||
+                        sessionStorage.getItem('user_name') ||
+                        'Không rõ';
+                    
                     notificationService.add({
                         title: `🎉 Khách hàng chốt Thành công: ${updatedCustomer.name}`,
-                        description: `NV Kinh doanh (${updatedCustomer.care_by || 'Không rõ'}) vừa chuyển trạng thái khách hàng này sang Thành công.`,
+                        description: `NV Kinh doanh (${currentUser}) vừa chuyển trạng thái khách hàng này sang Thành công.`,
                         type: 'success',
                         link: '/khach-hang'
                     });

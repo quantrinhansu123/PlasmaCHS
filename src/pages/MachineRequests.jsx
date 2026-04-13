@@ -42,6 +42,7 @@ import { ORDER_STATUSES } from '../constants/orderConstants';
 import { notificationService } from '../utils/notificationService';
 import OrderStatusUpdater from '../components/Orders/OrderStatusUpdater';
 import FilterDropdown from '../components/ui/FilterDropdown';
+import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import usePermissions from '../hooks/usePermissions';
 
 // Register Chart.js components
@@ -59,7 +60,7 @@ ChartJS.register(
 
 export default function MachineRequests() {
     const navigate = useNavigate();
-    const { role } = usePermissions();
+    const { role, department, user, loading: permissionsLoading } = usePermissions();
     const [requests, setRequests] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
@@ -72,6 +73,13 @@ export default function MachineRequests() {
     const [toDate, setToDate] = useState('');
     const [selectedStatuses, setSelectedStatuses] = useState([]);
     const [selectedCustomers, setSelectedCustomers] = useState([]);
+
+    // Mobile filter sheet state
+    const [showMobileFilter, setShowMobileFilter] = useState(false);
+    const [mobileFilterClosing, setMobileFilterClosing] = useState(false);
+    const [pendingStatuses, setPendingStatuses] = useState([]);
+    const [pendingCustomers, setPendingCustomers] = useState([]);
+    const [pendingDateRange, setPendingDateRange] = useState({ start_date: '', end_date: '' });
 
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [filterSearch, setFilterSearch] = useState('');
@@ -92,17 +100,99 @@ export default function MachineRequests() {
     ];
 
     useEffect(() => {
+        if (permissionsLoading) return;
         fetchData();
-    }, []);
+    }, [permissionsLoading, role, department, user?.name]);
+
+    // Mobile filter handlers
+    const closeMobileFilter = () => {
+        setMobileFilterClosing(true);
+        setTimeout(() => {
+            setShowMobileFilter(false);
+            setMobileFilterClosing(false);
+        }, 280);
+    };
+
+    const openMobileFilter = () => {
+        setPendingStatuses(selectedStatuses);
+        setPendingCustomers(selectedCustomers);
+        setPendingDateRange({ start_date: fromDate, end_date: toDate });
+        setShowMobileFilter(true);
+    };
+
+    const applyMobileFilter = () => {
+        setSelectedStatuses(pendingStatuses);
+        setSelectedCustomers(pendingCustomers);
+        setFromDate(pendingDateRange.start_date);
+        setToDate(pendingDateRange.end_date);
+        closeMobileFilter();
+    };
 
     const fetchData = async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
+            // Normalize role
+            const normalizeRoleKey = (value) =>
+                (value || '')
+                    .toString()
+                    .trim()
+                    .toLowerCase()
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '')
+                    .replace(/\s+/g, '_');
+
+            const normalizedRole = normalizeRoleKey(role);
+            const isAdmin = normalizedRole === 'admin';
+            const isLeader = normalizedRole.includes('lead');
+            const isThuKhoRole = normalizedRole.includes('thu_kho');
+            const isShipperRole = normalizedRole.includes('shipper') || normalizedRole.includes('giao_hang');
+            
+            // Get user info
+            const storageUserName = localStorage.getItem('user_name') || sessionStorage.getItem('user_name') || '';
+            const managedNames = (user?.nguoi_quan_ly || '')
+                .split(',')
+                .map(name => name.trim())
+                .filter(Boolean);
+            
+            const visibleSalesNames = [
+                ...new Set(
+                    [
+                        user?.name,
+                        user?.username,
+                        storageUserName,
+                        ...managedNames
+                    ]
+                        .map(v => (v || '').trim())
+                        .filter(Boolean)
+                )
+            ];
+
+            let query = supabase
                 .from('orders')
                 .select('*')
-                .eq('order_type', 'DNXM')
-                .order('created_at', { ascending: false });
+                .eq('order_type', 'DNXM');
+
+            // Thủ kho chỉ nhìn thấy đơn ở trạng thái Kho xử lý
+            if (isThuKhoRole) {
+                query = query.eq('status', 'KHO_XU_LY');
+            }
+
+            // Shipper chỉ nhìn thấy đơn được giao cho mình
+            if (isShipperRole && !isAdmin) {
+                query = query.eq('delivery_unit', storageUserName);
+            }
+
+            // Non-leader users only see orders from managed sales list (including self)
+            if (!isAdmin && !isLeader && !isThuKhoRole && !isShipperRole) {
+                if (visibleSalesNames.length > 0) {
+                    query = query.in('ordered_by', visibleSalesNames);
+                } else if (storageUserName) {
+                    query = query.eq('ordered_by', storageUserName);
+                }
+            }
+
+            const { data, error } = await query.order('created_at', { ascending: false });
+            
             if (error) throw error;
             setRequests(data || []);
         } catch (error) {
@@ -148,6 +238,9 @@ export default function MachineRequests() {
 
     const totalRecords = filteredRequests.length;
     const paginatedRequests = filteredRequests.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+    const hasActiveFilters = selectedStatuses.length > 0 || selectedCustomers.length > 0 || fromDate || toDate;
+    const totalActiveFilters = selectedStatuses.length + selectedCustomers.length + (fromDate ? 1 : 0) + (toDate ? 1 : 0);
 
     const handleDelete = async (id, code) => {
         if (!window.confirm(`Bạn có chắc muốn xóa phiếu đề nghị ${code}?`)) return;
@@ -223,14 +316,17 @@ export default function MachineRequests() {
             />
 
             {activeView === 'list' && (
-                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full mb-16 md:mb-0">
+                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full mb-2 md:mb-0">
                     <MobilePageHeader
                         searchTerm={searchTerm}
                         setSearchTerm={setSearchTerm}
                         searchPlaceholder="Tìm kiếm đề nghị xuất máy..."
+                        onFilterClick={openMobileFilter}
+                        hasActiveFilters={hasActiveFilters}
+                        totalActiveFilters={totalActiveFilters}
                         summary={
-                            <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-1 -mx-0.5 px-0.5">
-                                <span className="bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-xl text-[11px] font-bold whitespace-nowrap shadow-sm">
+                            <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-1.5 -mx-0.5 px-0.5">
+                                <span className="bg-emerald-100 text-emerald-700 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap shadow-sm">
                                     Tổng hiển thị: {totalRecords} / {requests.length}
                                 </span>
                             </div>
@@ -238,79 +334,69 @@ export default function MachineRequests() {
                         actions={
                             <button
                                 onClick={() => navigate('/de-nghi-xuat-may/tao')}
-                                className="p-2 rounded-xl bg-primary text-white shadow-lg shadow-primary/30 active:scale-95 transition-all"
+                                className="p-2.5 rounded-xl bg-primary text-white shadow-lg shadow-primary/30 active:scale-95 transition-all"
                             >
-                                <Plus size={20} />
+                                <Plus size={22} />
                             </button>
                         }
                     />
 
                     {/* Mobile View */}
-                    <div className="md:hidden flex-1 overflow-y-auto p-3 pb-4 flex flex-col gap-3">
+                    <div className="md:hidden flex-1 overflow-y-auto p-3 flex flex-col gap-3">
                         {loading ? (
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
                         ) : paginatedRequests.length === 0 ? (
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy kết quả phù hợp</div>
                         ) : (
-                            paginatedRequests.map((r, index) => (
-                                <div key={r.id} className="rounded-2xl border border-primary/15 bg-white shadow-sm p-4 transition-all duration-200">
-                                    <div className="flex items-start justify-between gap-2 mb-2">
-                                        <div className="flex gap-3">
+                            paginatedRequests.map((r, index) => {
+                                const sInfo = getStatusInfo(r.status);
+                                return (
+                                    <div key={r.id} className="rounded-2xl border border-primary/15 bg-white shadow-sm p-4 transition-all duration-200">
+                                        <div className="flex items-start justify-between gap-2 mb-2">
+                                            <div className="flex gap-3">
+                                                <div>
+                                                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">#{((currentPage - 1) * pageSize) + index + 1}</p>
+                                                    <h3 className="text-[14px] font-bold text-foreground leading-tight mt-0.5 cursor-pointer" onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)}>{r.order_code}</h3>
+                                                </div>
+                                            </div>
+                                            <span className={clsx("text-[10px] font-bold uppercase px-3 py-1.5 rounded-full", sInfo.colorCls)}>
+                                                {sInfo.label}
+                                            </span>
+                                        </div>
+
+                                        <div className="mb-3">
+                                            <h3 className="text-[14px] font-black text-foreground leading-snug">{r.customer_name}</h3>
+                                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+                                                <span className="text-[11px] font-medium text-muted-foreground">{new Date(r.created_at).toLocaleDateString('vi-VN')}</span>
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-2 mb-3 rounded-xl bg-muted/10 border border-border/60 p-2.5">
                                             <div>
-                                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">#{((currentPage - 1) * pageSize) + index + 1}</p>
-                                                <h3 className="text-[14px] font-bold text-foreground leading-tight mt-0.5 font-mono text-primary cursor-pointer" onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)}>{r.order_code}</h3>
+                                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                                                    <User className="w-3 h-3 text-blue-600" /> Người yêu cầu
+                                                </p>
+                                                <p className="text-[12px] text-foreground font-bold mt-0.5 truncate">
+                                                    {r.ordered_by || '—'}
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Số lượng</p>
+                                                <div className="text-[14px] text-foreground font-black mt-0.5">
+                                                    {r.quantity} máy
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
 
-                                    <div className="grid grid-cols-2 gap-2 mb-3 rounded-xl bg-muted/10 border border-border/60 p-2.5">
-                                        <div className="col-span-2">
-                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Khách hàng</p>
-                                            <p className="text-[12px] text-foreground font-bold truncate">
-                                                {r.customer_name}
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Người yêu cầu</p>
-                                            <p className="text-[12px] text-foreground font-medium truncate">
-                                                {r.ordered_by || '—'}
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Số lượng</p>
-                                            <p className="text-[12px] text-foreground text-emerald-600 font-bold">
-                                                {r.quantity} máy
-                                            </p>
-                                        </div>
-                                        <div className="col-span-2">
-                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Trạng thái</p>
-                                            <div className="flex mt-0.5">
-                                                {(() => {
-                                                    const sInfo = getStatusInfo(r.status);
-                                                    return (
-                                                        <span className={clsx("px-2 py-0.5 rounded-full border text-[10px] font-bold", sInfo.colorCls)}>
-                                                            {sInfo.label}
-                                                        </span>
-                                                    );
-                                                })()}
-                                            </div>
+                                        <div className="flex items-center justify-end gap-2 pt-3 border-t border-border/70">
+                                            <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)} className="p-2 text-muted-foreground bg-slate-50 border border-slate-200 rounded-lg active:scale-90 transition-all"><Eye size={18} /></button>
+                                            <button onClick={() => handleViewAsOrder(r)} className="p-2 text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg active:scale-90 transition-all" title="Thao tác Đơn hàng"><Package size={18} /></button>
+                                            <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg active:scale-90 transition-all"><Edit size={18} /></button>
+                                            <button onClick={() => handleDelete(r.id, r.order_code)} className="p-2 text-rose-700 bg-rose-50 border border-rose-100 rounded-lg active:scale-90 transition-all"><Trash2 size={18} /></button>
                                         </div>
                                     </div>
-
-                                    <div className="flex items-center justify-between pt-2 border-t border-border/70">
-                                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground font-medium">
-                                            <Calendar size={12} />
-                                            <span>{new Date(r.created_at).toLocaleDateString('vi-VN')}</span>
-                                        </div>
-                                        <div className="flex items-center gap-3">
-                                            <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)} className="p-2 text-slate-400 hover:text-primary bg-slate-50 hover:bg-primary/10 border border-slate-100 rounded-lg"><Eye size={16} /></button>
-                                            <button onClick={() => handleViewAsOrder(r)} className="p-2 text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg" title="Thao tác Đơn hàng"><Package size={16} /></button>
-                                            <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
-                                            <button onClick={() => handleDelete(r.id, r.order_code)} className="p-2 text-rose-700 bg-rose-50 border border-rose-100 rounded-lg"><Trash2 size={16} /></button>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))
+                                );
+                            })
                         )}
                     </div>
 
@@ -531,7 +617,7 @@ export default function MachineRequests() {
             )}
 
             {activeView === 'stats' && (
-                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full mb-16 md:mb-0">
+                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full mb-2 md:mb-0">
                     <div className="space-y-0">
                         {/* Mobile Header */}
                         <div className="md:hidden flex items-center gap-2 p-3 border-b border-border">
@@ -601,6 +687,41 @@ export default function MachineRequests() {
                     }}
                 />
             )}
+
+            <MobileFilterSheet
+                isOpen={showMobileFilter}
+                isClosing={mobileFilterClosing}
+                onClose={closeMobileFilter}
+                onApply={applyMobileFilter}
+                title="Bộ lọc đề nghị xuất máy"
+                sections={[
+                    {
+                        id: 'dateRange',
+                        label: 'Khoảng thời gian',
+                        type: 'dateRange',
+                        value: pendingDateRange,
+                        onValueChange: setPendingDateRange,
+                    },
+                    {
+                        id: 'status',
+                        label: 'Trạng thái',
+                        icon: <List size={16} />,
+                        options: statusOptions,
+                        selectedValues: pendingStatuses,
+                        onSelectionChange: setPendingStatuses,
+                        searchable: false,
+                    },
+                    {
+                        id: 'customers',
+                        label: 'Khách hàng',
+                        icon: <User size={16} />,
+                        options: customerOptions,
+                        selectedValues: pendingCustomers,
+                        onSelectionChange: setPendingCustomers,
+                        searchable: true,
+                    },
+                ]}
+            />
         </div>
     );
 }

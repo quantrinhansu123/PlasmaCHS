@@ -358,14 +358,31 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                     }
                 }
 
-                // Map customer ID once customers are theoretically available or use order's raw data
-                const matchedCustomer = customers.find(c => c.name === order.customer_name || c.id === order.customerId);
+                // Map customer ID - PRIORITY: Use order.customer_id first, then fallback to name matching
+                // This prevents customer ID mapping errors when multiple customers have similar names
+                let matchedCustomerId = '';
+                
+                if (order.customer_id) {
+                    // First priority: Use the stored customer_id from order
+                    const customerExists = customers.find(c => c.id === order.customer_id);
+                    if (customerExists) {
+                        matchedCustomerId = order.customer_id;
+                    }
+                }
+                
+                // Fallback: If no customer_id or customer not found, try matching by name
+                if (!matchedCustomerId && order.customer_name) {
+                    const matchedCustomer = customers.find(c => c.name === order.customer_name);
+                    if (matchedCustomer) {
+                        matchedCustomerId = matchedCustomer.id;
+                    }
+                }
 
                 setFormData({
                     orderCode: order.order_code,
                     customerCategory: order.customer_category || 'TM',
                     warehouse: order.warehouse || '',
-                    customerId: matchedCustomer?.id || order.customerId || '',
+                    customerId: matchedCustomerId,
                     orderedBy: order.ordered_by || '',
                     recipientName: order.recipient_name || '',
                     recipientAddress: order.recipient_address || '',
@@ -381,9 +398,25 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 hasLoadedItemsRef.current = true;
             } else if (isEdit && order && hasLoadedItemsRef.current && customers.length > 0 && !formData.customerId) {
                 // If we already loaded items but were waiting for customers to map the ID
-                const matchedCustomer = customers.find(c => c.name === order.customer_name || c.id === order.customerId);
-                if (matchedCustomer) {
-                    setFormData(prev => ({ ...prev, customerId: matchedCustomer.id }));
+                // PRIORITY: Use order.customer_id first
+                let matchedCustomerId = '';
+                
+                if (order.customer_id) {
+                    const customerExists = customers.find(c => c.id === order.customer_id);
+                    if (customerExists) {
+                        matchedCustomerId = order.customer_id;
+                    }
+                }
+                
+                if (!matchedCustomerId && order.customer_name) {
+                    const matchedCustomer = customers.find(c => c.name === order.customer_name);
+                    if (matchedCustomer) {
+                        matchedCustomerId = matchedCustomer.id;
+                    }
+                }
+                
+                if (matchedCustomerId) {
+                    setFormData(prev => ({ ...prev, customerId: matchedCustomerId }));
                 }
             }
         };
@@ -668,6 +701,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 order_code: formData.orderCode,
                 customer_category: formData.customerCategory,
                 warehouse: formData.warehouse,
+                customer_id: formData.customerId, // CRITICAL: Store customer_id to prevent mapping errors
                 customer_name: customerName,
                 recipient_name: formData.recipientName,
                 recipient_address: formData.recipientAddress,

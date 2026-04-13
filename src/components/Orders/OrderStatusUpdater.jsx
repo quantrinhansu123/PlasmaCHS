@@ -482,13 +482,18 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
 
             if (dbError) throw dbError;
 
-            // Log history
+            // Log history with actual user
+            const currentUser =
+                localStorage.getItem('user_name') ||
+                sessionStorage.getItem('user_name') ||
+                'Hệ thống';
+            
             await supabase.from('order_history').insert([{
                 order_id: order.id,
                 action: 'STATUS_CHANGED',
                 old_status: order.status,
                 new_status: transition.nextStatus,
-                created_by: 'Hệ thống'
+                created_by: currentUser
             }]);
 
             onUpdateSuccess();
