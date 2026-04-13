@@ -523,19 +523,19 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             {/* Panel */}
             <div 
                 className={clsx(
-                    "relative bg-white shadow-2xl w-full max-w-md overflow-hidden flex flex-col h-full border-l border-slate-200 animate-in slide-in-from-right duration-500",
+                    "relative bg-slate-50 shadow-2xl w-full max-w-md overflow-hidden flex flex-col h-full border-l border-slate-200 animate-in slide-in-from-right duration-500",
                     isClosing && "animate-out slide-out-to-right duration-300"
                 )}
                 onClick={(e) => e.stopPropagation()}
             >
-                <div className="p-6 border-b border-gray-100 flex items-center justify-between shrink-0 bg-white sticky top-0 z-20">
+                <div className="p-4 border-b border-slate-200 flex items-center justify-between shrink-0 bg-white/95 backdrop-blur sticky top-0 z-20">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
-                            <AlertCircle className="w-6 h-6" />
+                        <div className="w-9 h-9 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
+                            <Package className="w-5 h-5" />
                         </div>
-                        <div>
-                            <h3 className="text-xl font-black text-gray-900 tracking-tight leading-nonde uppercase mb-1">Thao tác đơn hàng</h3>
-                            <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">Mã: #{order.order_code}</p>
+                        <div className="leading-tight">
+                            <h3 className="text-lg font-black text-slate-900 tracking-tight">Thao tác đơn hàng</h3>
+                            <p className="text-xs font-bold text-slate-500 tracking-wide">Mã: #{order.order_code}</p>
                         </div>
                     </div>
                     <button onClick={handleClose} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all">
@@ -543,10 +543,10 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     </button>
                 </div>
 
-                <div className="p-6 space-y-6 overflow-y-auto flex-1 custom-scrollbar">
+                <div className="p-4 space-y-4 overflow-y-auto flex-1 custom-scrollbar">
                     {/* Order Summary */}
-                    <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200/60 space-y-2 text-sm shadow-sm">
-                        <div className="flex justify-between"><span className="text-slate-500 font-bold uppercase text-[11px]">Khách hàng:</span><span className="font-black text-slate-900">{order.customer_name || '—'}</span></div>
+                    <div className="bg-white rounded-2xl p-4 border border-slate-200 space-y-2.5 text-sm shadow-sm">
+                        <div className="flex justify-between gap-3"><span className="text-slate-500 font-bold uppercase text-[10px] tracking-wider">Khách hàng</span><span className="font-black text-slate-900 text-right">{order.customer_name || '—'}</span></div>
                         
                         {isFetchingItems ? (
                             <div className="animate-pulse flex space-x-2 py-2">
@@ -554,36 +554,46 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                             </div>
                         ) : orderItems.length > 0 ? (
                             orderItems.map((it, idx) => (
-                                <div key={idx} className="flex justify-between border-b border-slate-100 pb-1.5 mb-1.5 last:border-0 last:pb-0 last:mb-0">
-                                    <span className="text-slate-500 font-bold uppercase text-[11px]">SP {idx + 1}:</span>
-                                    <span className="font-black text-slate-900">
+                                <div key={idx} className="flex justify-between gap-3 border-b border-slate-100 pb-1.5 mb-1.5 last:border-0 last:pb-0 last:mb-0">
+                                    <span className="text-slate-500 font-bold uppercase text-[10px] tracking-wider">SP {idx + 1}</span>
+                                    <span className="font-black text-slate-900 text-right">
                                         {PRODUCT_TYPES.find(p => p.id === it.product_type)?.label || it.product_type} x {it.quantity}
                                     </span>
                                 </div>
                             ))
                         ) : (
-                            <div className="flex justify-between border-b border-slate-100 pb-1.5 mb-1.5 text-orange-600 italic">
+                            <div className="flex justify-between border-b border-slate-100 pb-1.5 mb-1.5 text-slate-500 italic">
                                 <span>(Không có chi tiết sản phẩm)</span>
                             </div>
                         )}
 
-                        <div className="flex justify-between pt-1"><span className="text-slate-500 font-bold uppercase text-[11px]">Cơ sở / Phòng:</span><span className="font-black text-primary">{order.department || '—'}</span></div>
+                        <div className="flex justify-between gap-3 pt-1"><span className="text-slate-500 font-bold uppercase text-[10px] tracking-wider">Cơ sở / Phòng</span><span className="font-black text-primary text-right">{order.department || '—'}</span></div>
                         {order.warehouse && (
-                            <div className="flex justify-between pt-1"><span className="text-slate-500 font-bold uppercase text-[11px]">Kho xuất:</span><span className="font-black text-slate-900">{realWarehouseName}</span></div>
+                            <div className="flex justify-between gap-3 pt-1"><span className="text-slate-500 font-bold uppercase text-[10px] tracking-wider">Kho xuất</span><span className="font-black text-slate-900 text-right">{realWarehouseName}</span></div>
                         )}
                     </div>
 
                     {/* Tabs */}
-                    <div className="flex gap-4 border-b border-slate-200">
+                    <div className="bg-white rounded-2xl p-1.5 border border-slate-200 shadow-sm grid grid-cols-2 gap-1.5">
                         <button
                             onClick={() => setActiveTab('actions')}
-                            className={`pb-3 text-xs font-black uppercase tracking-wider transition-all border-b-2 ${activeTab === 'actions' ? 'border-primary text-primary' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                            className={clsx(
+                                "h-10 text-xs font-black uppercase tracking-wider rounded-xl transition-all flex items-center justify-center",
+                                activeTab === 'actions'
+                                    ? 'bg-primary text-white shadow'
+                                    : 'text-slate-500 hover:bg-slate-100'
+                            )}
                         >
                             Thao tác
                         </button>
                         <button
                             onClick={() => setActiveTab('history')}
-                            className={`pb-3 text-xs font-black uppercase tracking-wider transition-all border-b-2 flex items-center gap-1.5 ${activeTab === 'history' ? 'border-primary text-primary' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                            className={clsx(
+                                "h-10 text-xs font-black uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-1.5",
+                                activeTab === 'history'
+                                    ? 'bg-primary text-white shadow'
+                                    : 'text-slate-500 hover:bg-slate-100'
+                            )}
                         >
                             <Clock className="w-4 h-4" /> Lịch sử
                         </button>
@@ -1025,11 +1035,11 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                             )}
 
                             {/* Final Actions */}
-                            <div className="pt-4 border-t border-slate-100 space-y-3">
-                                <label className="block text-[10px] font-black text-primary uppercase tracking-widest mb-4">Các thao tác khả dụng</label>
+                            <div className="pt-4 border-t border-slate-200 space-y-3">
+                                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Các thao tác khả dụng</label>
                                 {availableActions.length === 0 ? (
-                                    <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                                        <p className="text-sm font-bold text-slate-400 italic">Không có quyền thao tác</p>
+                                    <div className="p-5 text-center bg-white rounded-2xl border border-dashed border-slate-300">
+                                        <p className="text-sm font-bold text-slate-500 italic">Không có quyền thao tác</p>
                                     </div>
                                 ) : (
                                     <div className="grid grid-cols-1 gap-3">
@@ -1073,11 +1083,11 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     )}
                 </div>
 
-                <div className="p-4 bg-slate-50 border-t border-slate-200 shrink-0 flex items-center justify-center px-6">
+                <div className="p-4 bg-white border-t border-slate-200 shrink-0 flex items-center justify-center">
                     <button
                         onClick={handleClose}
                         disabled={isLoading}
-                        className="w-full py-3 text-slate-500 font-black text-[11px] uppercase tracking-widest bg-white hover:bg-slate-100 transition-all rounded-xl border border-slate-200 shadow-sm"
+                        className="w-full h-11 text-slate-600 font-black text-[11px] uppercase tracking-widest bg-slate-100 hover:bg-slate-200 transition-all rounded-xl border border-slate-200"
                     >
                         Quay lại bảng điều khiển
                     </button>
