@@ -140,7 +140,7 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
             setOrders(ordersData || []);
             setTransactions(txData || []);
             setCylinders(cylData || []);
-            setCareHistory(histRows);
+            setCareHistory(histData || []);
 
             const validOrders = (ordersData || []).filter(o =>
                 !['HUY_DON'].includes(o.status)

@@ -1,6 +1,8 @@
 import { normalizeVnPhoneDigits } from './phoneNormalize';
 import { supabase } from '../supabase/config';
 
+let canUsePhoneLookupRpc = true;
+
 /**
  * Mọi customer_id có cùng SĐT (sau chuẩn hóa) — dùng gom lịch sử chăm sóc.
  * Ưu tiên RPC DB; fallback quét bảng customers (khi chưa chạy migration).
@@ -8,13 +10,21 @@ import { supabase } from '../supabase/config';
 export async function getCustomerIdsForCareHistory(customer) {
     if (!customer?.id) return [];
 
-    const { data, error } = await supabase.rpc('customer_ids_by_same_phone', {
-        p_customer_id: customer.id,
-    });
+    if (canUsePhoneLookupRpc) {
+        const { data, error } = await supabase.rpc('customer_ids_by_same_phone', {
+            p_customer_id: customer.id,
+        });
 
-    if (!error && Array.isArray(data) && data.length > 0) {
-        const ids = data.map((row) => row.customer_id).filter(Boolean);
-        if (ids.length) return [...new Set(ids)];
+        if (!error && Array.isArray(data) && data.length > 0) {
+            const ids = data.map((row) => row.customer_id).filter(Boolean);
+            if (ids.length) return [...new Set(ids)];
+        } else if (
+            error &&
+            (error.code === 'PGRST202' || /could not find the function/i.test(error.message || ''))
+        ) {
+            // RPC is not deployed in this environment, skip future RPC calls.
+            canUsePhoneLookupRpc = false;
+        }
     }
 
     const norm = normalizeVnPhoneDigits(customer.phone);
