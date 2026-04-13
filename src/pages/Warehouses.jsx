@@ -23,7 +23,6 @@ import {
     MapPin,
     MoreVertical,
     Plus,
-    Printer,
     Search,
     SlidersHorizontal,
     Trash2,
@@ -40,7 +39,6 @@ import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 import WarehouseDetailsModal from '../components/Warehouses/WarehouseDetailsModal';
 import WarehouseFormModal from '../components/Warehouses/WarehouseFormModal';
-import WarehousePrintTemplate from '../components/Warehouses/WarehousePrintTemplate';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
@@ -86,7 +84,6 @@ const Warehouses = () => {
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
     const [selectedWarehouse, setSelectedWarehouse] = useState(null);
-    const [warehouseToPrint, setWarehouseToPrint] = useState(null);
 
     const [selectedStatuses, setSelectedStatuses] = useState([]);
     const [selectedManagers, setSelectedManagers] = useState([]);
@@ -200,7 +197,47 @@ const Warehouses = () => {
                 .order('created_at', { ascending: false });
 
             if (error && error.code !== '42P01') throw error;
-            setWarehouses(data || []);
+
+            const baseWarehouses = data || [];
+            if (baseWarehouses.length === 0) {
+                setWarehouses([]);
+                setSelectedIds([]);
+                return;
+            }
+
+            // Rebuild machine/cylinder counts from source tables to avoid stale values in UI cards
+            const [{ data: machinesData }, { data: cylindersData }] = await Promise.all([
+                supabase.from('machines').select('warehouse'),
+                supabase.from('cylinders').select('warehouse_id')
+            ]);
+
+            const machineCountMap = new Map();
+            (machinesData || []).forEach(m => {
+                const key = (m.warehouse || '').toString().trim();
+                if (!key) return;
+                machineCountMap.set(key, (machineCountMap.get(key) || 0) + 1);
+            });
+
+            const cylinderCountMap = new Map();
+            (cylindersData || []).forEach(c => {
+                const key = (c.warehouse_id || '').toString().trim();
+                if (!key) return;
+                cylinderCountMap.set(key, (cylinderCountMap.get(key) || 0) + 1);
+            });
+
+            const warehousesWithCounts = baseWarehouses.map(w => {
+                const idKey = (w.id || '').toString().trim();
+                const nameKey = (w.name || '').toString().trim();
+                const machineCount = (machineCountMap.get(idKey) || 0) + (nameKey ? (machineCountMap.get(nameKey) || 0) : 0);
+                const cylinderCount = (cylinderCountMap.get(idKey) || 0) + (nameKey ? (cylinderCountMap.get(nameKey) || 0) : 0);
+                return {
+                    ...w,
+                    machine_count: machineCount,
+                    cylinder_count: cylinderCount
+                };
+            });
+
+            setWarehouses(warehousesWithCounts);
             setSelectedIds([]); // Clear selection on refresh
         } catch (error) {
             console.error('Error fetching warehouses:', error);
@@ -359,10 +396,6 @@ const Warehouses = () => {
     const handleViewWarehouse = (warehouse) => {
         setSelectedWarehouse(warehouse);
         setIsDetailsModalOpen(true);
-    };
-
-    const handlePrint = (warehouse) => {
-        setWarehouseToPrint(warehouse);
     };
 
     const handleFormSubmitSuccess = () => {
@@ -620,58 +653,84 @@ const Warehouses = () => {
                         ) : (
                             paginatedWarehouses.map((w, index) => {
                                 const globalIndex = (currentPage - 1) * pageSize + index;
+                                const machineCount = Number(w.machine_count || 0);
+                                const cylinderCount = Number(w.cylinder_count || 0);
                                 return (
-                                <div key={w.id} className={clsx(
-                                    "rounded-2xl border shadow-sm p-4 transition-all duration-200",
-                                    selectedIds.includes(w.id) 
-                                        ? "border-primary bg-primary/[0.05] ring-1 ring-primary/20" 
-                                        : "border-primary/15 bg-white"
-                                )}>
-                                    <div className="flex items-start justify-between gap-2 mb-2 ml-1">
-                                        <div className="flex gap-3">
-                                            <div className="pt-1">
+                                    <div
+                                        key={w.id}
+                                        className={clsx(
+                                            "rounded-xl border bg-white p-3.5 shadow-[0_4px_16px_rgba(25,27,35,0.04)] transition-all",
+                                            selectedIds.includes(w.id)
+                                                ? "border-primary ring-1 ring-primary/20 bg-primary/[0.03]"
+                                                : "border-slate-200"
+                                        )}
+                                    >
+                                        <div className="flex items-start justify-between mb-2">
+                                            <div className="flex items-start gap-2">
                                                 <input
                                                     type="checkbox"
                                                     checked={selectedIds.includes(w.id)}
                                                     onChange={() => toggleSelectOne(w.id)}
-                                                    className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                                                    className="mt-1 w-4.5 h-4.5 rounded border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
                                                 />
+                                                <div>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="font-black text-primary-container bg-primary/10 px-1.5 py-0.5 rounded text-[9px]">#{globalIndex + 1}</span>
+                                                        <span className={clsx('inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase tracking-tight', getStatusStyle(w.status))}>
+                                                            {w.status || 'Không xác định'}
+                                                        </span>
+                                                    </div>
+                                                    <h3 className="font-extrabold text-[14px] text-foreground tracking-tight mt-1 leading-tight">{w.name}</h3>
+                                                </div>
                                             </div>
-                                            <div>
-                                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">#{globalIndex + 1}</p>
-                                                <h3 className="text-[15px] font-bold text-foreground leading-tight mt-0.5 font-mono text-primary">{w.name}</h3>
+                                        </div>
+
+                                        <p className="text-[10px] text-muted-foreground flex items-start gap-1 mt-0.5 mb-2">
+                                            <MapPin className="w-3 h-3 mt-0.5 shrink-0" />
+                                            <span className="line-clamp-1">{w.address || '—'}</span>
+                                        </p>
+
+                                        <div className="bg-slate-50 rounded-lg p-2 mb-2.5 flex items-center justify-between border border-slate-200/70">
+                                            <div className="flex items-center gap-3">
+                                                <div className="flex items-center gap-1">
+                                                    <Warehouse className="w-3.5 h-3.5 text-blue-500" />
+                                                    <span className="font-bold text-[11px] text-foreground">{formatNumber(machineCount)} Máy</span>
+                                                </div>
+                                                <div className="flex items-center gap-1 border-l border-slate-300 pl-3">
+                                                    <User className="w-3.5 h-3.5 text-orange-500" />
+                                                    <span className="font-bold text-[11px] text-foreground">{formatNumber(cylinderCount)} Bình</span>
+                                                </div>
                                             </div>
+                                            <span className="text-[9px] font-bold text-muted-foreground/80 uppercase tracking-tight">Sức chứa</span>
                                         </div>
-                                        <span className={clsx('inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border', getStatusStyle(w.status))}>
-                                            {w.status || 'Không xác định'}
-                                        </span>
-                                    </div>
 
-                                    <div className="space-y-1.5 mb-3 rounded-xl border border-border/60 bg-slate-50/80 px-3 py-2.5 mt-3">
-                                        <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-                                            <User className="w-3.5 h-3.5" />
-                                            <span className="font-medium text-foreground">{w.manager_name || '—'}</span>
+                                        <div className="text-[11px] text-slate-600 mb-2.5">
+                                            <span className="font-semibold">Thủ kho:</span> <span className="font-bold text-foreground">{w.manager_name || '—'}</span>
                                         </div>
-                                        <div className="flex items-start gap-2 text-[12px] text-muted-foreground">
-                                            <MapPin className="w-3.5 h-3.5 mt-0.5" />
-                                            <span className="line-clamp-2">{w.address || '—'}</span>
+
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => handleViewWarehouse(w)}
+                                                className="flex-1 py-1.5 bg-slate-100 text-primary font-bold text-[11px] rounded-md hover:bg-slate-200 transition-colors active:scale-[0.98]"
+                                            >
+                                                Chi tiết
+                                            </button>
+                                            <button
+                                                onClick={() => handleEditWarehouse(w)}
+                                                className="flex-1 py-1.5 bg-primary text-white font-bold text-[11px] rounded-md shadow-sm hover:opacity-90 transition-opacity active:scale-[0.98]"
+                                            >
+                                                Sửa
+                                            </button>
+                                            {(role === 'admin' || role === 'manager') && (
+                                                <button
+                                                    onClick={() => handleDeleteWarehouse(w.id, w.name)}
+                                                    className="px-2.5 py-1.5 rounded-md border border-rose-100 text-rose-500 hover:bg-rose-50 transition-all active:scale-[0.98]"
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
-
-                                    <div className="rounded-xl bg-primary/5 border border-primary/10 p-2.5 mb-3 flex items-center justify-between">
-                                        <span className="text-[10px] font-bold uppercase tracking-wider text-primary">Sức chứa</span>
-                                        <span className="text-[13px] font-black text-primary">{formatNumber(w.capacity || 0)} vỏ</span>
-                                    </div>
-
-                                    <div className="flex items-center gap-2 pt-3 border-t border-slate-100 mt-2 text-[12px] text-muted-foreground">
-                                        <button onClick={() => handleViewWarehouse(w)} className="flex items-center justify-center gap-1.5 flex-1 bg-slate-50 hover:bg-blue-50 hover:text-blue-600 text-slate-600 py-2 rounded-xl transition-all border border-slate-100 font-medium active:scale-95"><Eye size={14} /> Chi tiết</button>
-                                        <button onClick={() => handleEditWarehouse(w)} className="flex items-center justify-center gap-1.5 flex-1 bg-slate-50 hover:bg-amber-50 hover:text-amber-600 text-slate-600 py-2 rounded-xl transition-all border border-slate-100 font-medium active:scale-95"><Edit size={14} /> Sửa</button>
-                                        {(role === 'admin' || role === 'manager') && (
-                                            <button onClick={() => handleDeleteWarehouse(w.id, w.name)} className="flex items-center justify-center p-2 rounded-xl border border-rose-100 text-rose-500 hover:bg-rose-50 transition-all active:scale-95 shrink-0"><Trash2 size={16} /></button>
-                                        )}
-                                        <button onClick={() => handlePrint(w)} className="flex items-center justify-center p-2 rounded-xl border border-indigo-100 text-indigo-500 hover:bg-indigo-50 transition-all active:scale-95 shrink-0"><Printer size={16} /></button>
-                                    </div>
-                                </div>
                                 );
                             })
                         )}
@@ -916,9 +975,6 @@ const Warehouses = () => {
                                             <div className="flex items-center justify-center gap-3">
                                                 <button onClick={() => handleViewWarehouse(w)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="Xem chi tiết">
                                                     <Eye size={18} />
-                                                </button>
-                                                <button onClick={() => handlePrint(w)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="In thông tin">
-                                                    <Printer size={18} />
                                                 </button>
                                                 <button onClick={() => handleEditWarehouse(w)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
                                                     <Edit size={18} />
@@ -1242,13 +1298,6 @@ const Warehouses = () => {
                     warehouse={selectedWarehouse}
                     onClose={() => setIsDetailsModalOpen(false)}
                 />
-            )}
-            {createPortal(
-                <WarehousePrintTemplate 
-                    warehouse={warehouseToPrint} 
-                    onPrinted={() => setWarehouseToPrint(null)}
-                />,
-                document.body
             )}
         </div>
     );

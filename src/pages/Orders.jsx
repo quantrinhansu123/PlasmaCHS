@@ -1295,21 +1295,21 @@ const Orders = () => {
                             </div>
                         </div>
 
-                        <div className="rounded-xl border border-slate-200/90 bg-gradient-to-br from-slate-50 to-white px-3 py-2.5 shadow-sm">
+                        <div className="rounded-lg border border-slate-200/90 bg-gradient-to-br from-slate-50 to-white px-2 py-1.5 shadow-sm">
                             <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 -mx-0.5 px-0.5 custom-scrollbar whitespace-nowrap">
-                                <span className="inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-[12px] font-bold text-slate-800 border border-slate-200 shadow-sm">
+                                <span className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[11px] font-bold text-slate-800 border border-slate-200 shadow-sm">
                                     Hiển thị{' '}
                                     <span className="text-primary tabular-nums">{filteredOrders.length}</span>
                                     <span className="text-slate-400 font-semibold">/</span>
                                     <span className="tabular-nums text-slate-600">{orders.length}</span>
                                     <span className="text-slate-500 font-semibold">đơn</span>
                                 </span>
-                                <span className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-2.5 py-1.5 text-[12px] font-bold text-primary border border-primary/20">
+                                <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-[11px] font-bold text-primary border border-primary/20">
                                     Giá trị lọc{' '}
                                     <span className="tabular-nums">{formatNumber(totalAmount)}</span> đ
                                 </span>
                                 <span
-                                    className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[12px] font-bold text-amber-900 border border-amber-200/80"
+                                    className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-900 border border-amber-200/80"
                                     title="Chờ duyệt, điều chỉnh, kho hoặc KD xử lý"
                                 >
                                     Chờ xử lý{' '}
@@ -1326,7 +1326,7 @@ const Orders = () => {
                                             title={`${s.label}: ${s.count} đơn`}
                                             className={clsx(
                                                 getStatusBadgeClass(s.color),
-                                                'shrink-0 text-[10px] px-2.5 py-1 gap-1 border border-black/5'
+                                                'shrink-0 text-[9px] px-2 py-0.5 gap-1 border border-black/5'
                                             )}
                                         >
                                             <span className="max-w-[min(10rem,28vw)] truncate">{s.label}</span>
