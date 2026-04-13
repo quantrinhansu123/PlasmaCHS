@@ -50,6 +50,7 @@ import DeliveryHistory from './pages/DeliveryHistory';
 import InventoryReport from './pages/InventoryReport';
 import InventoryTransfer from './pages/InventoryTransfer';
 import ReturnOrders from './pages/ReturnOrders';
+import TransferList from './pages/TransferList';
 
 const moduleRoutes = ['/don-hang-kinh-doanh', '/quan-ly-thiet-bi', '/van-chuyen', '/thu-hoi', '/mua-hang-nha-cung-cap', '/kho', '/he-thong', '/vat-tu', '/thong-ke'];
 
@@ -127,6 +128,7 @@ function App() {
                 <Route key={path} path={path} element={<ModulePage />} />
               ))}
               <Route path="/don-hang" element={<Orders />} />
+              <Route path="/danh-sach-hang-luan-chuyen" element={<TransferList />} />
               <Route path="/de-nghi-xuat-may" element={<MachineRequests />} />
               <Route path="/binh" element={<Cylinders />} />
               <Route path="/binh/tao" element={<Cylinders />} />

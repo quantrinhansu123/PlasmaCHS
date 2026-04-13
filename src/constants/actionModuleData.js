@@ -39,6 +39,13 @@ export const actionModuleGroups = [
         colorScheme: 'blue',
       },
       {
+        icon: RefreshCw,
+        title: 'Danh sách hàng luân chuyển',
+        description: 'Theo dõi danh sách hàng luân chuyển với giao diện xử lý đơn hàng đầy đủ.',
+        href: '/danh-sach-hang-luan-chuyen',
+        colorScheme: 'emerald',
+      },
+      {
         icon: Monitor,
         title: 'Đề nghị xuất máy',
         description: 'Danh sách phiếu đề nghị xuất máy và quản lý luân chuyển thiết bị.',

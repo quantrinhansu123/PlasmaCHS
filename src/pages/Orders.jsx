@@ -1007,7 +1007,7 @@ const Orders = () => {
                     />
 
                     {/* ── MOBILE CARD LIST ── */}
-                    <div className="md:hidden flex-1 overflow-y-auto p-3 flex flex-col gap-3">
+                    <div className="md:hidden flex-1 overflow-y-auto p-2.5 flex flex-col gap-2.5">
                         {isLoading ? (
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
                         ) : filteredOrders.length === 0 ? (
@@ -1018,12 +1018,12 @@ const Orders = () => {
                                 const isSelected = selectedIds.includes(order.id);
                                 return (
                                     <div key={order.id} className={clsx(
-                                        "rounded-2xl border shadow-sm p-4 transition-all duration-200",
+                                        "rounded-xl border shadow-sm p-3 transition-all duration-200",
                                         isSelected
                                             ? "border-primary bg-primary/[0.05] ring-1 ring-primary/20"
                                             : "border-primary/15 bg-white"
                                     )}>
-                                        <div className="flex items-start justify-between gap-2 mb-2">
+                                        <div className="flex items-start justify-between gap-2 mb-1.5">
                                             <div className="flex gap-3">
                                                 <div className="pt-1">
                                                     <input
@@ -1035,7 +1035,7 @@ const Orders = () => {
                                                 </div>
                                                 <div>
                                                     <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">#{index + 1}</p>
-                                                    <h3 className="text-[14px] font-bold text-foreground leading-tight mt-0.5">{order.order_code}</h3>
+                                                    <h3 className="text-[13px] font-bold text-foreground leading-tight mt-0.5">{order.order_code}</h3>
                                                 </div>
                                             </div>
                                             <span className={clsx(getStatusBadgeClass(status.color), 'text-[10px] font-bold uppercase')}>
@@ -1044,19 +1044,21 @@ const Orders = () => {
                                         </div>
 
                                         <div className="mb-3">
-                                            <h3 className="text-[14px] font-black text-foreground leading-snug">{order.customer_name}</h3>
-                                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
-                                                <span className={getCategoryBadgeClass(order.customer_category)}>{getLabel(CUSTOMER_CATEGORIES, order.customer_category)}</span>
-                                                <span className="text-[11px] font-medium text-muted-foreground">{order.created_at ? new Date(order.created_at).toLocaleDateString('vi-VN') : '---'}</span>
+                                            <h3 className="text-[13px] font-black text-foreground leading-snug">{order.customer_name}</h3>
+                                            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 mt-1.5">
+                                                <span className={clsx(getCategoryBadgeClass(order.customer_category), 'text-[9px] px-2 py-0.5 tracking-wide')}>
+                                                    {getLabel(CUSTOMER_CATEGORIES, order.customer_category)}
+                                                </span>
+                                                <span className="text-[10px] font-medium text-muted-foreground">{order.created_at ? new Date(order.created_at).toLocaleDateString('vi-VN') : '---'}</span>
                                             </div>
                                         </div>
 
-                                        <div className="grid grid-cols-2 gap-2 mb-3 rounded-xl bg-muted/10 border border-border/60 p-2.5">
+                                        <div className="grid grid-cols-2 gap-2 mb-2.5 rounded-xl bg-muted/10 border border-border/60 p-2">
                                             <div>
                                                 <p className="text-[9px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                                                     <Package className="w-3 h-3 text-blue-600" /> Hàng hóa
                                                 </p>
-                                                <div className="text-[12px] text-foreground font-bold mt-0.5">
+                                                <div className="text-[11px] text-foreground font-bold mt-0.5">
                                                     <div className="flex flex-col gap-1 items-start">
                                                         {order.order_items && order.order_items.length > 0 ? (
                                                             order.order_items.map((it, idx) => (
@@ -1081,41 +1083,39 @@ const Orders = () => {
                                             </div>
                                             <div>
                                                 <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Số lượng</p>
-                                                <div className="text-[14px] text-foreground font-black mt-0.5">
+                                                <div className="text-[13px] text-foreground font-black mt-0.5">
                                                     {order.order_items && order.order_items.length > 0 
                                                         ? formatNumber(order.order_items.reduce((sum, it) => sum + (it.quantity || 0), 0))
                                                         : formatNumber(order.quantity)}
                                                 </div>
                                             </div>
-                                            <div className="col-span-2">
-                                                <div className="space-y-3">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
-                                                            <User size={14} />
-                                                        </div>
-                                                        <div className="min-w-0 flex-1">
-                                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Người nhận</p>
-                                                            <p className="text-[12px] text-foreground font-bold truncate">
-                                                                {order.recipient_name || '---'} {order.recipient_phone && `(${order.recipient_phone})`}
-                                                            </p>
-                                                        </div>
+                                            <div className="col-span-2 grid grid-cols-2 gap-2">
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
+                                                        <User size={14} />
                                                     </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
-                                                            <Warehouse size={14} />
-                                                        </div>
-                                                        <div className="min-w-0 flex-1">
-                                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Kho / Vị trí</p>
-                                                            <p className="text-[12px] text-foreground font-bold truncate">
-                                                                {getLabel(warehousesList, order.warehouse)} {order.department && ` / ${order.department}`}
-                                                            </p>
-                                                        </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Người nhận</p>
+                                                        <p className="text-[11px] text-foreground font-bold truncate">
+                                                            {order.recipient_name || '---'} {order.recipient_phone && `(${order.recipient_phone})`}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
+                                                        <Warehouse size={14} />
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Kho / Vị trí</p>
+                                                        <p className="text-[11px] text-foreground font-bold truncate">
+                                                            {getLabel(warehousesList, order.warehouse)} {order.department && ` / ${order.department}`}
+                                                        </p>
                                                     </div>
                                                 </div>
                                             </div>
                                         </div>
 
-                                        <div className="bg-amber-50/40 rounded-xl p-2.5 border border-amber-100/50 mb-3 shadow-inner">
+                                        <div className="bg-amber-50/40 rounded-xl p-2 border border-amber-100/50 mb-2.5 shadow-inner">
                                             <div className="text-[10px] font-bold text-amber-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
                                                 <div className="w-1.5 h-3 bg-amber-400 rounded-full"></div>
                                                 Nợ vỏ tại khách
@@ -1134,14 +1134,14 @@ const Orders = () => {
                                             </div>
                                         </div>
 
-                                        <div className="flex items-center justify-between pt-3 border-t border-border/70">
+                                        <div className="flex items-center justify-between pt-2.5 border-t border-border/70">
                                             <div className="flex flex-col">
                                                 <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest leading-none mb-1">Thành tiền</span>
-                                                <span className="text-[15px] font-black text-primary">
+                                                <span className="text-[14px] font-black text-primary">
                                                     {formatNumber(order.total_amount || (order.quantity || 0) * (order.unit_price || 0))} <small className="text-[10px] font-medium opacity-70">đ</small>
                                                 </span>
                                             </div>
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-1.5">
                                                 <button
                                                     onClick={() => { setSelectedOrder(order); setIsActionModalOpen(true); }}
                                                     className="p-2 text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg active:scale-90 transition-all"
