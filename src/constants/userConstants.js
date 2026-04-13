@@ -18,6 +18,8 @@ export const USER_STATUSES = [
 
 export const TABLE_COLUMNS = [
     { key: 'info', label: 'Thông tin nhân sự' },
+    { key: 'nguoi_quan_ly', label: 'Người quản lý' },
+    { key: 'team', label: 'Team' },
     { key: 'department', label: 'Phòng ban' },
     { key: 'sales_group', label: 'Nhóm kinh doanh' },
     { key: 'role', label: 'Vai trò / Công việc' },

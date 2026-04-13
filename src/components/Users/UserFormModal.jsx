@@ -20,6 +20,8 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
         username: '',
         role: USER_ROLES[0].id,
         phone: '',
+        nguoi_quan_ly: '',
+        team: '',
         department: '',
         sales_group: '',
         approval_level: 'Staff',
@@ -29,33 +31,41 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
 
     const [formData, setFormData] = useState(defaultState);
     const [showPassword, setShowPassword] = useState(false);
+    const [managerSuggestions, setManagerSuggestions] = useState([]);
     const [departmentSuggestions, setDepartmentSuggestions] = useState([]);
     const [salesGroupSuggestions, setSalesGroupSuggestions] = useState([]);
+    const [teamSuggestions, setTeamSuggestions] = useState([]);
 
     useEffect(() => {
         let cancelled = false;
         (async () => {
             try {
                 const [usersRes, custRes] = await Promise.all([
-                    supabase.from('app_users').select('department, sales_group'),
+                    supabase.from('app_users').select('name, department, sales_group, team'),
                     supabase.from('customers').select('agency_name, business_group'),
                 ]);
                 if (cancelled) return;
+                const managers = new Set();
                 const dep = new Set();
                 const sg = new Set();
+                const teams = new Set();
                 (usersRes.data || []).forEach((u) => {
+                    if (u.name?.trim()) managers.add(u.name.trim());
                     if (u.department?.trim()) dep.add(u.department.trim());
                     if (u.sales_group?.trim()) sg.add(u.sales_group.trim());
+                    if (u.team?.trim()) teams.add(u.team.trim());
                 });
                 (custRes.data || []).forEach((c) => {
                     if (c.agency_name?.trim()) dep.add(c.agency_name.trim());
                     if (c.business_group?.trim()) sg.add(c.business_group.trim());
                 });
                 const sortVi = (a, b) => a.localeCompare(b, 'vi', { sensitivity: 'base' });
+                setManagerSuggestions([...managers].sort(sortVi));
                 setDepartmentSuggestions([...dep].sort(sortVi));
                 setSalesGroupSuggestions([...sg].sort(sortVi));
+                setTeamSuggestions([...teams].sort(sortVi));
             } catch (e) {
-                console.error('Load department/sales_group suggestions:', e);
+                console.error('Load manager/department/sales_group/team suggestions:', e);
             }
         })();
         return () => {
@@ -77,6 +87,8 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                 username: user.username || '',
                 role: user.role || USER_ROLES[0].id,
                 phone: user.phone || '',
+                nguoi_quan_ly: user.nguoi_quan_ly || '',
+                team: user.team || '',
                 department: user.department || '',
                 sales_group: user.sales_group || '',
                 approval_level: user.approval_level || 'Staff',
@@ -142,6 +154,8 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                 username: formData.username.trim(),
                 role: formData.role,
                 phone: formData.phone.trim(),
+                nguoi_quan_ly: formData.nguoi_quan_ly.trim(),
+                team: formData.team.trim(),
                 department: formData.department.trim(),
                 sales_group: formData.sales_group.trim(),
                 approval_level: formData.approval_level,
@@ -155,6 +169,8 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                 payload.password = bcrypt.hashSync(formData.password.trim(), salt);
             }
 
+            let savedUserId = user?.id;
+
             if (isEdit) {
                 const { error } = await supabase
                     .from('app_users')
@@ -162,11 +178,39 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                     .eq('id', user.id);
                 if (error) throw error;
             } else {
-                const { error } = await supabase
+                const { data: insertedUser, error } = await supabase
                     .from('app_users')
-                    .insert([payload]);
+                    .insert([payload])
+                    .select('id')
+                    .single();
                 if (error) throw error;
+                savedUserId = insertedUser?.id;
             }
+
+            // Business rule:
+            // - approval_level = Supervisor: nguoi_quan_ly = danh sách toàn bộ nhân sự cùng team
+            // - các cấp khác: nguoi_quan_ly = chính tên user đó
+            let managerListValue = payload.name;
+            if (payload.approval_level === 'Supervisor' && payload.team) {
+                const { data: teamUsers, error: teamErr } = await supabase
+                    .from('app_users')
+                    .select('name')
+                    .eq('team', payload.team);
+                if (teamErr) throw teamErr;
+
+                const members = [...new Set(
+                    (teamUsers || [])
+                        .map(u => u.name?.trim())
+                        .filter(Boolean)
+                )];
+                managerListValue = members.length > 0 ? members.join(', ') : payload.name;
+            }
+
+            const { error: updateManagerErr } = await supabase
+                .from('app_users')
+                .update({ nguoi_quan_ly: managerListValue })
+                .eq('id', savedUserId);
+            if (updateManagerErr) throw updateManagerErr;
 
             onSuccess();
         } catch (error) {
@@ -334,6 +378,39 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                                     </div>
                                 </div>
                                 
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div className="space-y-1.5">
+                                        <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                            Người quản lý
+                                        </label>
+                                        <Combobox
+                                            options={managerSuggestions.filter((name) => name !== formData.name)}
+                                            value={formData.nguoi_quan_ly}
+                                            onChange={(v) =>
+                                                setFormData((prev) => ({ ...prev, nguoi_quan_ly: v }))
+                                            }
+                                            placeholder="Chọn quản lý hoặc nhập mới..."
+                                            emptyMessage="Không khớp gợi ý — Enter để dùng text đã gõ."
+                                            className="!h-12 rounded-2xl text-[15px] font-semibold bg-slate-50 border-slate-200"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                            Team
+                                        </label>
+                                        <Combobox
+                                            options={teamSuggestions}
+                                            value={formData.team}
+                                            onChange={(v) =>
+                                                setFormData((prev) => ({ ...prev, team: v }))
+                                            }
+                                            placeholder="Chọn team hoặc nhập mới..."
+                                            emptyMessage="Không khớp gợi ý — Enter để dùng text đã gõ."
+                                            className="!h-12 rounded-2xl text-[15px] font-semibold bg-slate-50 border-slate-200"
+                                        />
+                                    </div>
+                                </div>
+
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="space-y-1.5">
                                         <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">

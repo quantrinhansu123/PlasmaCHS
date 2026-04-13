@@ -86,7 +86,7 @@ const PIPELINE_ATTENTION_STATUSES = new Set([
 ]);
 
 const Orders = () => {
-    const { role, department } = usePermissions();
+    const { role, department, user, loading: permissionsLoading } = usePermissions();
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
     const [searchTerm, setSearchTerm] = useState('');
@@ -126,7 +126,9 @@ const Orders = () => {
         try {
             const saved = JSON.parse(localStorage.getItem('columns_orders') || 'null');
             if (Array.isArray(saved) && saved.length > 0) {
-                return saved.filter(key => defaultColOrder.includes(key));
+                const valid = saved.filter(key => defaultColOrder.includes(key));
+                const missing = defaultColOrder.filter(key => !valid.includes(key));
+                return [...valid, ...missing];
             }
         } catch { }
         return defaultColOrder;
@@ -187,9 +189,10 @@ const Orders = () => {
     const [allCustomerDebts, setAllCustomerDebts] = useState({}); // customer_id -> debt array
 
     useEffect(() => {
+        if (permissionsLoading) return;
         fetchOrders();
         fetchWarehouses();
-    }, []);
+    }, [permissionsLoading, role, department, user?.name]);
 
     useEffect(() => {
         // Extract unique customers from orders
@@ -280,13 +283,54 @@ const Orders = () => {
     const fetchOrders = async () => {
         setIsLoading(true);
         try {
+            const normalizeRoleKey = (value) =>
+                (value || '')
+                    .toString()
+                    .trim()
+                    .toLowerCase()
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '')
+                    .replace(/\s+/g, '_');
+
+            const normalizedRole = normalizeRoleKey(role);
+            const isAdmin = normalizedRole === 'admin';
+            const isLeader = normalizedRole.includes('lead');
+            const isThuKhoRole = normalizedRole.includes('thu_kho');
+            const isWarehouseRole =
+                !isThuKhoRole && normalizedRole.includes('kho');
+            const storageUserName =
+                localStorage.getItem('user_name') ||
+                sessionStorage.getItem('user_name') ||
+                '';
+            const managedNames = (user?.nguoi_quan_ly || '')
+                .split(',')
+                .map(name => name.trim())
+                .filter(Boolean);
+            const visibleSalesNames = [
+                ...new Set(
+                    [
+                        user?.name,
+                        user?.username,
+                        storageUserName,
+                        ...managedNames
+                    ]
+                        .map(v => (v || '').trim())
+                        .filter(Boolean)
+                )
+            ];
+
             let query = supabase
                 .from('orders')
                 .select('*, order_items(*)')
                 .neq('order_type', 'DNXM');
 
-            // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-            if (role !== 'Admin' && department) {
+            // Thủ kho chỉ nhìn thấy đơn ở trạng thái Kho xử lý
+            if (isThuKhoRole) {
+                query = query.eq('status', 'KHO_XU_LY');
+            }
+
+            // Apply warehouse filter only for warehouse roles
+            if (!isAdmin && isWarehouseRole && department) {
                 // Logic: Extract warehouse code from department (e.g., "OCP1-CHS" -> "OCP1")
                 // We'll take the first part before the hyphen if it exists, otherwise use full string
                 const warehouseCode = department.includes('-') 
@@ -294,6 +338,15 @@ const Orders = () => {
                     : department.trim();
                 
                 query = query.eq('warehouse', warehouseCode);
+            }
+
+            // Non-leader users only see orders from managed sales list (including self)
+            if (!isAdmin && !isLeader && !isThuKhoRole) {
+                if (visibleSalesNames.length > 0) {
+                    query = query.in('ordered_by', visibleSalesNames);
+                } else if (storageUserName) {
+                    query = query.eq('ordered_by', storageUserName);
+                }
             }
 
             const { data, error } = await query.order('created_at', { ascending: false });
@@ -776,6 +829,8 @@ const Orders = () => {
                 );
             case 'customer':
                 return <span className="text-[13px] font-medium text-foreground">{order.customer_name}</span>;
+            case 'sales':
+                return <span className="text-[13px] text-muted-foreground font-medium">{order.ordered_by || '—'}</span>;
             case 'recipient':
                 return <span className="text-[13px] text-muted-foreground font-normal">{order.recipient_name}</span>;
             case 'type':
@@ -1240,8 +1295,8 @@ const Orders = () => {
                             </div>
                         </div>
 
-                        <div className="rounded-xl border border-slate-200/90 bg-gradient-to-br from-slate-50 to-white px-3 py-2.5 shadow-sm space-y-2">
-                            <div className="flex flex-wrap items-center gap-2">
+                        <div className="rounded-xl border border-slate-200/90 bg-gradient-to-br from-slate-50 to-white px-3 py-2.5 shadow-sm">
+                            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 -mx-0.5 px-0.5 custom-scrollbar whitespace-nowrap">
                                 <span className="inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-[12px] font-bold text-slate-800 border border-slate-200 shadow-sm">
                                     Hiển thị{' '}
                                     <span className="text-primary tabular-nums">{filteredOrders.length}</span>
@@ -1260,8 +1315,6 @@ const Orders = () => {
                                     Chờ xử lý{' '}
                                     <span className="tabular-nums">{filteredPipelineCount}</span>
                                 </span>
-                            </div>
-                            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 -mx-0.5 px-0.5 custom-scrollbar">
                                 {statusChipsForStrip.length === 0 ? (
                                     <span className="text-[11px] text-muted-foreground italic px-1 py-0.5">
                                         Không có đơn sau bộ lọc

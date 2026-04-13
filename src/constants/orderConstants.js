@@ -79,6 +79,7 @@ export const TABLE_COLUMNS = [
     { key: 'code', label: 'Mã ĐH' },
     { key: 'category', label: 'Loại khách' },
     { key: 'customer', label: 'Khách hàng' },
+    { key: 'sales', label: 'Nhân viên kinh doanh' },
     { key: 'recipient', label: 'Người nhận' },
     { key: 'type', label: 'Loại đơn' },
     { key: 'product', label: 'Hàng hóa' },

@@ -82,6 +82,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         customerCategory: 'TM',
         warehouse: '',
         customerId: '',
+        orderedBy: '',
         recipientName: '',
         recipientAddress: '',
         recipientPhone: '',
@@ -107,6 +108,17 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
     const [cylinderDebt, setCylinderDebt] = useState([]);
     const [availableProductTypes, setAvailableProductTypes] = useState(PRODUCT_TYPES);
     const [isFetchingStock, setIsFetchingStock] = useState(false);
+
+    useEffect(() => {
+        if (isEdit) return;
+        const currentUserName =
+            user?.name ||
+            localStorage.getItem('user_name') ||
+            sessionStorage.getItem('user_name') ||
+            '';
+        if (!currentUserName) return;
+        setFormData(prev => (prev.orderedBy ? prev : { ...prev, orderedBy: currentUserName }));
+    }, [isEdit, user?.name]);
 
     useEffect(() => {
         fetchRealCustomers();
@@ -354,6 +366,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                     customerCategory: order.customer_category || 'TM',
                     warehouse: order.warehouse || '',
                     customerId: matchedCustomer?.id || order.customerId || '',
+                    orderedBy: order.ordered_by || '',
                     recipientName: order.recipient_name || '',
                     recipientAddress: order.recipient_address || '',
                     recipientPhone: order.recipient_phone || '',
@@ -608,7 +621,12 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
 
         try {
             const customerName = customers.find(c => c.id.toString() === formData.customerId.toString())?.name || '';
-            const currentUser = user?.name || user?.email || localStorage.getItem('user_name') || 'Admin hệ thống';
+            const currentUser =
+                user?.name ||
+                user?.email ||
+                localStorage.getItem('user_name') ||
+                sessionStorage.getItem('user_name') ||
+                'Admin hệ thống';
 
             let initialStatus = 'CHO_DUYET';
             if (!isEdit && (role === 'admin' || role === 'thu_kho')) {
@@ -669,7 +687,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 shipper_id: formData.shipperId || null,
                 shipping_fee: formData.shippingFee || 0,
                 status: isEdit ? order.status : initialStatus,
-                ordered_by: isEdit ? order.ordered_by : currentUser,
+                ordered_by: (formData.orderedBy || currentUser).trim(),
                 updated_at: new Date().toISOString()
             };
 
@@ -933,6 +951,21 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                             isReadOnly ? "text-slate-500 cursor-default" : "focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
                                         )}
                                         required
+                                    />
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800"><User className="w-4 h-4 text-primary/70" />Kinh doanh phụ trách</label>
+                                    <input
+                                        name="orderedBy"
+                                        value={formData.orderedBy}
+                                        onChange={handleChange}
+                                        readOnly={isReadOnly}
+                                        placeholder="Tên nhân sự phụ trách đơn hàng"
+                                        className={clsx(
+                                            "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-800 transition-all",
+                                            isReadOnly ? "text-slate-500 cursor-default" : "focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                        )}
                                     />
                                 </div>
                             </div>

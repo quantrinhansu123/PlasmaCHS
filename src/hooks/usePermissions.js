@@ -11,15 +11,15 @@ export const usePermissions = () => {
     useEffect(() => {
         const fetchPermissionsAndUser = async () => {
             try {
-                const userName = localStorage.getItem('user_name') || 'Lê Minh Công';
-                const userRoleFromStorage = localStorage.getItem('user_role') || 'Admin';
-                const userDeptFromStorage = localStorage.getItem('user_department') || '';
+                const userName = localStorage.getItem('user_name') || sessionStorage.getItem('user_name') || 'Lê Minh Công';
+                const userRoleFromStorage = localStorage.getItem('user_role') || sessionStorage.getItem('user_role') || 'Admin';
+                const userDeptFromStorage = localStorage.getItem('user_department') || sessionStorage.getItem('user_department') || '';
 
                 // 1. Fetch user info to get the actual ID and current role from app_users table
                 const { data: userData, error: userError } = await supabase
                     .from('app_users')
-                    .select('id, name, role, username, department')
-                    .eq('name', userName)
+                    .select('id, name, role, username, department, nguoi_quan_ly')
+                    .or(`name.eq.${userName},username.eq.${userName}`)
                     .maybeSingle();
 
                 if (!userError && userData) {
@@ -41,7 +41,13 @@ export const usePermissions = () => {
                     }
                 } else {
                     // Fallback for development if user is not in the database yet
-                    const fallbackUser = { id: '00000000-0000-0000-0000-000000000000', name: userName, role: userRoleFromStorage, department: userDeptFromStorage };
+                    const fallbackUser = {
+                        id: '00000000-0000-0000-0000-000000000000',
+                        name: userName,
+                        role: userRoleFromStorage,
+                        department: userDeptFromStorage,
+                        nguoi_quan_ly: userName
+                    };
                     setUser(fallbackUser);
                     setRole(userRoleFromStorage);
                     setDepartment(userDeptFromStorage);

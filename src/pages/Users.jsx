@@ -101,7 +101,9 @@ const Users = () => {
         try {
             const saved = JSON.parse(localStorage.getItem('columns_users') || 'null');
             if (Array.isArray(saved) && saved.length > 0) {
-                return saved.filter(key => defaultColOrder.includes(key));
+                const valid = saved.filter(key => defaultColOrder.includes(key));
+                const missing = defaultColOrder.filter(key => !valid.includes(key));
+                return [...valid, ...missing];
             }
         } catch { }
         return defaultColOrder;
@@ -121,12 +123,16 @@ const Users = () => {
     // Filter states
     const [selectedRoles, setSelectedRoles] = useState([]);
     const [selectedStatuses, setSelectedStatuses] = useState([]);
+    const [selectedDepartments, setSelectedDepartments] = useState([]);
+    const [selectedTeams, setSelectedTeams] = useState([]);
     
     // Mobile filter sheet state
     const [showMobileFilter, setShowMobileFilter] = useState(false);
     const [mobileFilterClosing, setMobileFilterClosing] = useState(false);
     const [pendingRoles, setPendingRoles] = useState([]);
     const [pendingStatuses, setPendingStatuses] = useState([]);
+    const [pendingDepartments, setPendingDepartments] = useState([]);
+    const [pendingTeams, setPendingTeams] = useState([]);
 
     // Dropdown state
     const [activeDropdown, setActiveDropdown] = useState(null);
@@ -194,12 +200,16 @@ const Users = () => {
     const openMobileFilter = () => {
         setPendingRoles(selectedRoles);
         setPendingStatuses(selectedStatuses);
+        setPendingDepartments(selectedDepartments);
+        setPendingTeams(selectedTeams);
         setShowMobileFilter(true);
     };
 
     const applyMobileFilter = () => {
         setSelectedRoles(pendingRoles);
         setSelectedStatuses(pendingStatuses);
+        setSelectedDepartments(pendingDepartments);
+        setSelectedTeams(pendingTeams);
         closeMobileFilter();
     };
 
@@ -265,6 +275,10 @@ const Users = () => {
                 return <div className="text-[13px] font-medium text-foreground tracking-tight">{user.department || '-'}</div>;
             case 'sales_group':
                 return <div className="text-[13px] font-medium text-foreground tracking-tight">{user.sales_group || '-'}</div>;
+            case 'nguoi_quan_ly':
+                return <div className="text-[13px] font-medium text-foreground tracking-tight">{user.nguoi_quan_ly || '-'}</div>;
+            case 'team':
+                return <div className="text-[13px] font-medium text-foreground tracking-tight">{user.team || '-'}</div>;
             case 'role':
                 return (
                     <div className="flex items-center gap-2">
@@ -389,8 +403,16 @@ const Users = () => {
         return isActive ? activeColor : baseColor;
     };
 
-    const hasActiveFilters = selectedRoles.length > 0 || selectedStatuses.length > 0;
-    const totalActiveFilters = selectedRoles.length + selectedStatuses.length;
+    const hasActiveFilters =
+        selectedRoles.length > 0 ||
+        selectedStatuses.length > 0 ||
+        selectedDepartments.length > 0 ||
+        selectedTeams.length > 0;
+    const totalActiveFilters =
+        selectedRoles.length +
+        selectedStatuses.length +
+        selectedDepartments.length +
+        selectedTeams.length;
 
     // Filter options
     const roleOptions = USER_ROLES.map(r => ({
@@ -405,18 +427,42 @@ const Users = () => {
         count: users.filter(u => u.status === s.id).length
     }));
 
+    const departmentOptions = Array.from(
+        new Set(users.map(u => (u.department || '').trim()).filter(Boolean))
+    )
+        .sort((a, b) => a.localeCompare(b, 'vi', { sensitivity: 'base' }))
+        .map(dep => ({
+            id: dep,
+            label: dep,
+            count: users.filter(u => (u.department || '').trim() === dep).length
+        }));
+
+    const teamOptions = Array.from(
+        new Set(users.map(u => (u.team || '').trim()).filter(Boolean))
+    )
+        .sort((a, b) => a.localeCompare(b, 'vi', { sensitivity: 'base' }))
+        .map(team => ({
+            id: team,
+            label: team,
+            count: users.filter(u => (u.team || '').trim() === team).length
+        }));
+
     const filteredUsers = users.filter(user => {
         const matchesSearch = !searchTerm || (
             user.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             user.username?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             user.phone?.includes(searchTerm) ||
-            user.role?.toLowerCase().includes(searchTerm.toLowerCase())
+            user.role?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            user.nguoi_quan_ly?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            user.team?.toLowerCase().includes(searchTerm.toLowerCase())
         );
 
         const matchesRole = selectedRoles.length === 0 || selectedRoles.includes(user.role);
         const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(user.status);
+        const matchesDepartment = selectedDepartments.length === 0 || selectedDepartments.includes(user.department);
+        const matchesTeam = selectedTeams.length === 0 || selectedTeams.includes(user.team);
 
-        return matchesSearch && matchesRole && matchesStatus;
+        return matchesSearch && matchesRole && matchesStatus && matchesDepartment && matchesTeam;
     });
 
     const getRowStyle = (status, isSelected) => {
@@ -462,7 +508,7 @@ const Users = () => {
     // Reset pagination when filters change
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchTerm, selectedRoles, selectedStatuses]);
+    }, [searchTerm, selectedRoles, selectedStatuses, selectedDepartments, selectedTeams]);
 
     return (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5 font-sans">
@@ -606,11 +652,71 @@ const Users = () => {
                                     )}
                                 </div>
 
+
+
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setActiveDropdown(activeDropdown === 'department' ? null : 'department')}
+                                        className={clsx(
+                                            "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
+                                            getFilterButtonClass(activeDropdown === 'department' || selectedDepartments.length > 0)
+                                        )}
+                                    >
+                                        <UsersIcon size={14} className={getFilterIconClass(activeDropdown === 'department' || selectedDepartments.length > 0, "text-indigo-600")} />
+                                        Phòng ban
+                                        {selectedDepartments.length > 0 && (
+                                            <span className="px-1.5 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold">
+                                                {selectedDepartments.length}
+                                            </span>
+                                        )}
+                                        <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'department' ? "rotate-180" : "")} />
+                                    </button>
+                                    {activeDropdown === 'department' && (
+                                        <FilterDropdown
+                                            options={departmentOptions}
+                                            selected={selectedDepartments}
+                                            setSelected={setSelectedDepartments}
+                                            filterSearch={filterSearch}
+                                            setFilterSearch={setFilterSearch}
+                                        />
+                                    )}
+                                </div>
+
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setActiveDropdown(activeDropdown === 'team' ? null : 'team')}
+                                        className={clsx(
+                                            "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
+                                            getFilterButtonClass(activeDropdown === 'team' || selectedTeams.length > 0)
+                                        )}
+                                    >
+                                        <UsersIcon size={14} className={getFilterIconClass(activeDropdown === 'team' || selectedTeams.length > 0, "text-emerald-600")} />
+                                        Team
+                                        {selectedTeams.length > 0 && (
+                                            <span className="px-1.5 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-bold">
+                                                {selectedTeams.length}
+                                            </span>
+                                        )}
+                                        <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'team' ? "rotate-180" : "")} />
+                                    </button>
+                                    {activeDropdown === 'team' && (
+                                        <FilterDropdown
+                                            options={teamOptions}
+                                            selected={selectedTeams}
+                                            setSelected={setSelectedTeams}
+                                            filterSearch={filterSearch}
+                                            setFilterSearch={setFilterSearch}
+                                        />
+                                    )}
+                                </div>
+
                                 {hasActiveFilters && (
                                     <button
                                         onClick={() => {
                                             setSelectedRoles([]);
                                             setSelectedStatuses([]);
+                                            setSelectedDepartments([]);
+                                            setSelectedTeams([]);
                                         }}
                                         className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-red-300 text-red-500 text-[12px] font-bold hover:bg-red-50 transition-all"
                                     >
@@ -989,11 +1095,69 @@ const Users = () => {
                                     )}
                                 </div>
 
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setActiveDropdown(activeDropdown === 'department' ? null : 'department')}
+                                        className={clsx(
+                                            "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
+                                            getFilterButtonClass(activeDropdown === 'department' || selectedDepartments.length > 0)
+                                        )}
+                                    >
+                                        <UsersIcon size={14} className={getFilterIconClass(activeDropdown === 'department' || selectedDepartments.length > 0, "text-indigo-600")} />
+                                        Phòng ban
+                                        {selectedDepartments.length > 0 && (
+                                            <span className="px-1.5 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold">
+                                                {selectedDepartments.length}
+                                            </span>
+                                        )}
+                                        <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'department' ? "rotate-180" : "")} />
+                                    </button>
+                                    {activeDropdown === 'department' && (
+                                        <FilterDropdown
+                                            options={departmentOptions}
+                                            selected={selectedDepartments}
+                                            setSelected={setSelectedDepartments}
+                                            filterSearch={filterSearch}
+                                            setFilterSearch={setFilterSearch}
+                                        />
+                                    )}
+                                </div>
+
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setActiveDropdown(activeDropdown === 'team' ? null : 'team')}
+                                        className={clsx(
+                                            "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
+                                            getFilterButtonClass(activeDropdown === 'team' || selectedTeams.length > 0)
+                                        )}
+                                    >
+                                        <UsersIcon size={14} className={getFilterIconClass(activeDropdown === 'team' || selectedTeams.length > 0, "text-emerald-600")} />
+                                        Team
+                                        {selectedTeams.length > 0 && (
+                                            <span className="px-1.5 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-bold">
+                                                {selectedTeams.length}
+                                            </span>
+                                        )}
+                                        <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'team' ? "rotate-180" : "")} />
+                                    </button>
+                                    {activeDropdown === 'team' && (
+                                        <FilterDropdown
+                                            options={teamOptions}
+                                            selected={selectedTeams}
+                                            setSelected={setSelectedTeams}
+                                            filterSearch={filterSearch}
+                                            setFilterSearch={setFilterSearch}
+                                        />
+                                    )}
+                                </div>
+
                                 {hasActiveFilters && (
                                     <button
                                         onClick={() => {
                                             setSelectedRoles([]);
                                             setSelectedStatuses([]);
+                                            setSelectedDepartments([]);
+                                            setSelectedTeams([]);
                                         }}
                                         className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-red-300 text-red-500 text-[12px] font-bold hover:bg-red-50 transition-all"
                                     >
@@ -1129,6 +1293,22 @@ const Users = () => {
                             options: statusOptions,
                             selectedValues: pendingStatuses,
                             onSelectionChange: setPendingStatuses,
+                        },
+                        {
+                            id: 'department',
+                            label: 'Phòng ban',
+                            icon: <UsersIcon size={16} />,
+                            options: departmentOptions,
+                            selectedValues: pendingDepartments,
+                            onSelectionChange: setPendingDepartments,
+                        },
+                        {
+                            id: 'team',
+                            label: 'Team',
+                            icon: <UsersIcon size={16} />,
+                            options: teamOptions,
+                            selectedValues: pendingTeams,
+                            onSelectionChange: setPendingTeams,
                         }
                     ]}
                 />
