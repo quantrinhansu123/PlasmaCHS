@@ -25,7 +25,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
 import { supabase } from '../../supabase/config';
-import { fetchCareHistoryRows } from '../../utils/customerCareHistory';
+import { getCustomerIdsForCareHistory } from '../../utils/customerCareHistory';
 import * as XLSX from 'xlsx';
 
 export default function CustomerDetailsModal({ customer, onClose, hideCommerceTabs = false }) {
@@ -44,6 +44,7 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
     const [transactions, setTransactions] = useState([]);
     const [cylinders, setCylinders] = useState([]);
     const [careHistory, setCareHistory] = useState([]);
+    const [careHistoryCount, setCareHistoryCount] = useState(0);
 
     // States for Payment Form
     const [showPaymentForm, setShowPaymentForm] = useState(false);
@@ -71,6 +72,27 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
     }, [customer]);
 
     useEffect(() => {
+        if (!customer) return undefined;
+        let cancelled = false;
+
+        (async () => {
+            try {
+                const ids = await getCustomerIdsForCareHistory(customer);
+                const validIds = (ids || []).filter(Boolean);
+                const count = validIds.length > 0 ? validIds.length : (customer?.id ? 1 : 0);
+                if (!cancelled) setCareHistoryCount(count);
+            } catch (error) {
+                console.error('Error loading care history count:', error);
+                if (!cancelled) setCareHistoryCount(customer?.id ? 1 : 0);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [customer?.id, customer?.phone]);
+
+    useEffect(() => {
         if (hideCommerceTabs && ['orders', 'transactions', 'cylinders'].includes(activeTab)) {
             setActiveTab('overview');
         }
@@ -79,9 +101,47 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
     useEffect(() => {
         if (!customer || activeTab !== 'care_history') return undefined;
         let cancelled = false;
-        fetchCareHistoryRows(customer).then((rows) => {
-            if (!cancelled) setCareHistory(rows);
-        });
+        (async () => {
+            try {
+                const ids = await getCustomerIdsForCareHistory(customer);
+                const validIds = (ids || []).filter(Boolean);
+
+                let rows = [];
+                if (validIds.length > 0) {
+                    const { data, error } = await supabase
+                        .from('customers')
+                        .select('id, status, care_by, created_at')
+                        .in('id', validIds)
+                        .order('created_at', { ascending: false });
+
+                    if (error) {
+                        console.error('Error fetching care history customers:', error);
+                    } else {
+                        rows = data || [];
+                    }
+                }
+
+                if ((!rows || rows.length === 0) && customer?.id) {
+                    rows = [{
+                        id: customer.id,
+                        status: customer.status,
+                        care_by: customer.care_by,
+                        created_at: customer.created_at
+                    }];
+                }
+
+                if (!cancelled) {
+                    setCareHistory(rows);
+                    setCareHistoryCount(rows.length);
+                }
+            } catch (error) {
+                console.error('Error loading care history tab:', error);
+                if (!cancelled) {
+                    setCareHistory([]);
+                    setCareHistoryCount(0);
+                }
+            }
+        })();
         return () => {
             cancelled = true;
         };
@@ -113,34 +173,9 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
 
             if (err3) throw err3;
 
-            // Fetch care history by phone
-            let histData = [];
-            if (customer.phone && customer.phone.trim() !== '') {
-                const { data: phoneLeads, error: err4 } = await supabase
-                    .from('customers')
-                    .select('id, name, status, care_by, created_at')
-                    .eq('phone', customer.phone)
-                    .order('created_at', { ascending: false });
-
-                if (err4) {
-                    console.error('Error fetching leads by phone:', err4);
-                } else {
-                    histData = phoneLeads;
-                }
-            } else {
-                // Fallback nếu không có phone
-                histData = [{
-                    id: customer.id,
-                    status: customer.status,
-                    care_by: customer.care_by,
-                    created_at: customer.created_at
-                }];
-            }
-
             setOrders(ordersData || []);
             setTransactions(txData || []);
             setCylinders(cylData || []);
-            setCareHistory(histData || []);
 
             const validOrders = (ordersData || []).filter(o =>
                 !['HUY_DON'].includes(o.status)
@@ -355,7 +390,7 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
                     <div className="flex items-center gap-6 mt-5 border-b border-slate-200 overflow-x-auto scrollbar-hide scroll-smooth">
                         <button onClick={() => setActiveTab('overview')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'overview' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Tổng quan</button>
                         {customer.status !== 'Thành công' && (
-                            <button onClick={() => setActiveTab('care_history')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'care_history' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Lịch sử chăm sóc ({careHistory.length})</button>
+                        <button onClick={() => setActiveTab('care_history')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'care_history' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Lịch sử chăm sóc ({careHistoryCount})</button>
                         )}
                     </div>
                 </div>
