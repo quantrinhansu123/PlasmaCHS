@@ -1369,7 +1369,7 @@ const Customers = () => {
                     />
 
 
-                    <div className="md:hidden flex-1 overflow-y-auto p-3 flex flex-col gap-3">
+                    <div className="md:hidden flex-1 overflow-y-auto p-2.5 flex flex-col gap-2.5">
                         {isLoading ? (
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
                         ) : filteredCustomers.length === 0 ? (
@@ -1379,18 +1379,19 @@ const Customers = () => {
                                 const leadStt = filterType === 'lead' ? getLeadCreationStt(c.id) : null;
                                 return (
                                 <div key={c.id} className={clsx(
-                                    "rounded-2xl border shadow-sm p-4 transition-all duration-200 relative overflow-hidden",
+                                    "rounded-xl border shadow-sm p-3 transition-all duration-200 relative",
                                     selectedIds.includes(c.id)
                                         ? "border-primary bg-primary/[0.05] ring-1 ring-primary/20"
                                         : "border-primary/15 bg-white",
                                     filterType === 'lead' && c.status === 'Thành công' && "!bg-slate-50/80 !border-emerald-200 opacity-70"
                                 )}>
+                                    <div className="space-y-2.5">
                                     {filterType === 'lead' && c.status === 'Thành công' && (
                                         <div className="absolute top-0 right-0 px-2.5 py-0.5 bg-emerald-500 text-white text-[9px] font-bold rounded-bl-xl shadow-sm z-10 flex items-center gap-1">
                                             <ClipboardCheck size={10} /> ĐÃ THÀNH CÔNG
                                         </div>
                                     )}
-                                    <div className="flex items-start justify-between gap-2 mb-2">
+                                    <div className="flex items-start justify-between gap-2">
                                         <div className="flex gap-3">
                                             <div className="pt-1">
                                                 <input
@@ -1409,42 +1410,67 @@ const Customers = () => {
                                                         ? (leadStt != null ? `#${leadStt}` : '—')
                                                         : c.code}
                                                 </p>
-                                                <h3 className="text-[15px] font-bold text-foreground leading-tight mt-0.5">{c.name}</h3>
+                                                <h3 className="text-[14px] font-bold text-foreground leading-tight mt-0.5">{c.name}</h3>
                                             </div>
                                         </div>
-                                        <span className={getCategoryBadgeClass(c.category)}>
+                                        <span className={clsx(getCategoryBadgeClass(c.category), 'whitespace-nowrap shrink-0 text-[10px] px-2.5 py-1')}>
                                             {getLabel(CUSTOMER_CATEGORIES, c.category)}
                                         </span>
                                     </div>
 
-                                    <div className="space-y-1.5 mb-3">
-                                        <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-                                            <Phone className="w-3.5 h-3.5" />
-                                            <span>{c.phone || '—'}</span>
+                                    <div className="grid grid-cols-2 gap-2 rounded-xl bg-muted/10 border border-border/60 p-2">
+                                        <div className="min-w-0">
+                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                                                <Phone className="w-3 h-3 text-blue-600" /> Điện thoại
+                                            </p>
+                                            <p className="text-[11px] font-bold text-foreground truncate mt-0.5">{c.phone || '—'}</p>
                                         </div>
-                                        <div className="flex items-start gap-2 text-[12px] text-muted-foreground">
-                                            <MapPin className="w-3.5 h-3.5 mt-0.5" />
-                                            <span className="line-clamp-2">{c.address || '—'}</span>
+                                        <div className="min-w-0">
+                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                                                <User className="w-3 h-3 text-emerald-600" /> NV phụ trách
+                                            </p>
+                                            <p className="text-[11px] font-bold text-foreground truncate mt-0.5">{c.managed_by || '—'}</p>
+                                        </div>
+                                        <div className="col-span-2 min-w-0">
+                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                                                <MapPin className="w-3 h-3 text-amber-600" /> Địa chỉ
+                                            </p>
+                                            <p className="text-[11px] font-bold text-foreground truncate mt-0.5">{c.address || '—'}</p>
                                         </div>
                                         {c.invoice_email && (
-                                            <div className="flex items-center gap-2 text-[12px] text-primary/80 font-medium">
-                                                <Mail size={13} />
-                                                <span className="truncate">{c.invoice_email}</span>
+                                            <div className="col-span-2 min-w-0">
+                                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                                                    <Mail className="w-3 h-3 text-indigo-600" /> Email hóa đơn
+                                                </p>
+                                                <p className="text-[11px] font-medium text-primary/80 truncate mt-0.5">{c.invoice_email}</p>
                                             </div>
                                         )}
                                     </div>
 
-                                    <div className="flex items-center justify-between pt-2 border-t border-border/70">
-                                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                                            <User size={12} />
-                                            <span>{c.managed_by || '—'}</span>
+                                    {filterType !== 'lead' && (
+                                        <div className="grid grid-cols-3 gap-2">
+                                            <div className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5">
+                                                <p className="text-[9px] uppercase tracking-wider text-amber-700 font-bold">Bình</p>
+                                                <p className="text-[12px] font-black text-amber-800 tabular-nums">{formatNumber(c.current_cylinders || 0)}</p>
+                                            </div>
+                                            <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1.5">
+                                                <p className="text-[9px] uppercase tracking-wider text-indigo-700 font-bold">Máy</p>
+                                                <p className="text-[12px] font-black text-indigo-800 tabular-nums">{formatNumber(c.current_machines || 0)}</p>
+                                            </div>
+                                            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5">
+                                                <p className="text-[9px] uppercase tracking-wider text-emerald-700 font-bold">Chăm sóc</p>
+                                                <p className="text-[11px] font-black text-emerald-800 truncate">{c.care_by || '—'}</p>
+                                            </div>
                                         </div>
-                                        <div className="flex items-center gap-3">
+                                    )}
+
+                                    <div className="flex items-center justify-end pt-2 border-t border-border/70">
+                                        <div className="flex items-center gap-1.5">
                                             {c.status === 'Thành công' && (
                                                 <button
                                                     type="button"
                                                     onClick={() => navigate(`/de-nghi-xuat-may/tao?phone=${c.phone || ''}`)}
-                                                    className="p-2 text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg shrink-0"
+                                                    className="p-2 text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg shrink-0 active:scale-90 transition-all"
                                                     title="Mẫu đề nghị máy"
                                                 >
                                                     <FilePlus size={16} />
@@ -1495,7 +1521,7 @@ const Customers = () => {
                                             <button
                                                 type="button"
                                                 onClick={() => handleViewCustomer(c)}
-                                                className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg shrink-0"
+                                                    className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg shrink-0 active:scale-90 transition-all"
                                                 title="Xem chi tiết"
                                             >
                                                 <Eye size={16} />
@@ -1503,7 +1529,7 @@ const Customers = () => {
                                             <button
                                                 type="button"
                                                 onClick={() => handleEditCustomer(c)}
-                                                className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg shrink-0"
+                                                    className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg shrink-0 active:scale-90 transition-all"
                                                 title="Chỉnh sửa"
                                             >
                                                 <Edit size={16} />
@@ -1511,12 +1537,13 @@ const Customers = () => {
                                             <button
                                                 type="button"
                                                 onClick={() => handleDeleteCustomer(c.id, c.name)}
-                                                className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg shrink-0"
+                                                    className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg shrink-0 active:scale-90 transition-all"
                                                 title="Xóa"
                                             >
                                                 <Trash2 size={16} />
                                             </button>
                                         </div>
+                                    </div>
                                     </div>
                                 </div>
                                 );

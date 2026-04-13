@@ -20,6 +20,7 @@ import OrderFormModal from '../Orders/OrderFormModal';
 export default function MachineDetailsModal({ machine, onClose }) {
     const [loading, setLoading] = useState(true);
     const [orders, setOrders] = useState([]);
+    const [transferLogs, setTransferLogs] = useState([]);
     const [isClosing, setIsClosing] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState(null);
 
@@ -36,15 +37,26 @@ export default function MachineDetailsModal({ machine, onClose }) {
     const fetchMachineHistory = async () => {
         setLoading(true);
         try {
-            // Lấy các Đơn hàng (Orders) có đề cập đến Serial Máy này
-            const { data, error } = await supabase
-                .from('orders')
-                .select('*')
-                .ilike('department', `%${machine.serial_number}%`)
-                .order('created_at', { ascending: false });
+            const [ordersRes, transferRes] = await Promise.all([
+                supabase
+                    .from('orders')
+                    .select('*')
+                    .ilike('department', `%${machine.serial_number}%`)
+                    .order('created_at', { ascending: false }),
+                supabase
+                    .from('inventory_transactions')
+                    .select('*')
+                    .eq('transaction_type', 'OUT')
+                    .like('reference_code', 'TRF%')
+                    .ilike('note', `%${machine.serial_number}%`)
+                    .order('created_at', { ascending: false })
+            ]);
 
-            if (error) throw error;
-            setOrders(data || []);
+            if (ordersRes.error) throw ordersRes.error;
+            if (transferRes.error) throw transferRes.error;
+
+            setOrders(ordersRes.data || []);
+            setTransferLogs(transferRes.data || []);
         } catch (error) {
             console.error('Error fetching machine history:', error);
         } finally {
@@ -70,6 +82,23 @@ export default function MachineDetailsModal({ machine, onClose }) {
         }
         return 'bg-amber-50 text-amber-600 border-amber-100';
     };
+
+    const timeline = [
+        ...(orders || []).map((o) => ({
+            type: 'ORDER',
+            id: `order-${o.id}`,
+            created_at: o.created_at,
+            status: o.status,
+            order: o,
+        })),
+        ...(transferLogs || []).map((t) => ({
+            type: 'TRANSFER',
+            id: `transfer-${t.id}`,
+            created_at: t.created_at,
+            status: 'DA_LUAN_CHUYEN',
+            transfer: t,
+        })),
+    ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
     if (!machine) return null;
 
@@ -150,69 +179,82 @@ export default function MachineDetailsModal({ machine, onClose }) {
                             </div>
                         ) : (
                             <div className="space-y-4">
-                                {orders.map(o => (
-                                    <div key={o.id} className="group bg-white border border-primary/10 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-primary/20 transition-all duration-300">
-                                        <div className="flex items-center justify-between gap-3 mb-3">
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-[12px] font-black tracking-tight text-slate-500 uppercase">Mã đơn:</span>
-                                                <span className="font-mono text-[13px] font-bold text-primary group-hover:text-primary/80">{o.order_code}</span>
-                                            </div>
-                                            <span className={clsx(
-                                                "px-2.5 py-1 text-[10px] font-black tracking-wider uppercase rounded-lg border shadow-sm",
-                                                getStatusStyle(o.status)
-                                            )}>
-                                                {o.status}
-                                            </span>
-                                        </div>
-
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div className="col-span-2 bg-slate-50/80 border border-slate-100 rounded-xl p-3">
-                                                <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                                                    <MapPin size={12} className="text-indigo-400" />
-                                                    Khách hàng & Loại đơn
+                                {timeline.map((entry) => {
+                                    if (entry.type === 'ORDER') {
+                                        const o = entry.order;
+                                        return (
+                                            <div key={entry.id} className="group bg-white border border-primary/10 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-primary/20 transition-all duration-300">
+                                                <div className="flex items-center justify-between gap-3 mb-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">Đơn hàng</span>
+                                                        <span className="font-mono text-[13px] font-bold text-primary group-hover:text-primary/80">{o.order_code}</span>
+                                                    </div>
+                                                    <span className={clsx(
+                                                        "px-2.5 py-1 text-[10px] font-black tracking-wider uppercase rounded-lg border shadow-sm",
+                                                        getStatusStyle(o.status)
+                                                    )}>
+                                                        {o.status}
+                                                    </span>
                                                 </div>
-                                                <div className="flex items-start justify-between">
-                                                    <div>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <div className="col-span-2 bg-slate-50/80 border border-slate-100 rounded-xl p-3">
+                                                        <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                                                            <MapPin size={12} className="text-indigo-400" />
+                                                            Khách hàng & Loại đơn
+                                                        </div>
                                                         <p className="font-black text-[14px] text-slate-800 leading-tight">{o.customer_name || '—'}</p>
-                                                        <p className="text-[11px] text-indigo-600 font-bold mt-1 bg-indigo-50 px-2 py-0.5 rounded-md inline-block uppercase tracking-wider">{o.order_type || 'Giao dịch thường'}</p>
+                                                    </div>
+                                                    <div className="bg-slate-50/80 border border-slate-100 rounded-xl p-3">
+                                                        <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                                                            <ArrowRightLeft size={12} className="text-emerald-400" />
+                                                            Tác vụ
+                                                        </div>
+                                                        <p className="font-bold text-[12px] text-slate-700 leading-tight">{o.product_type || '—'}</p>
+                                                    </div>
+                                                    <div className="bg-slate-50/80 border border-slate-100 rounded-xl p-3">
+                                                        <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                                                            <Calendar size={12} className="text-amber-400" />
+                                                            Ngày tạo
+                                                        </div>
+                                                        <p className="text-[12px] font-bold text-slate-700">{formatDate(o.created_at)}</p>
                                                     </div>
                                                 </div>
+                                                <div className="mt-4 flex justify-end">
+                                                    <button
+                                                        onClick={() => setSelectedOrder(o)}
+                                                        className="flex items-center gap-1.5 text-[11px] font-black text-primary uppercase tracking-wider hover:underline"
+                                                    >
+                                                        CHI TIẾT ĐƠN
+                                                        <ChevronRight size={14} />
+                                                    </button>
+                                                </div>
                                             </div>
+                                        );
+                                    }
 
+                                    const t = entry.transfer;
+                                    return (
+                                        <div key={entry.id} className="group bg-white border border-emerald-100 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-emerald-200 transition-all duration-300">
+                                            <div className="flex items-center justify-between gap-3 mb-3">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">Luân chuyển</span>
+                                                    <span className="font-mono text-[13px] font-bold text-emerald-700">{t.reference_code || 'TRF'}</span>
+                                                </div>
+                                                <span className="px-2.5 py-1 text-[10px] font-black tracking-wider uppercase rounded-lg border shadow-sm bg-emerald-50 text-emerald-700 border-emerald-200">
+                                                    Đã luân chuyển
+                                                </span>
+                                            </div>
                                             <div className="bg-slate-50/80 border border-slate-100 rounded-xl p-3">
                                                 <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
                                                     <ArrowRightLeft size={12} className="text-emerald-400" />
-                                                    Tác vụ
+                                                    Ghi chú luân chuyển
                                                 </div>
-                                                <p className="font-bold text-[12px] text-slate-700 leading-tight">{o.product_type || '—'}</p>
-                                            </div>
-
-                                            <div className="bg-slate-50/80 border border-slate-100 rounded-xl p-3">
-                                                <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                                                    <Calendar size={12} className="text-amber-400" />
-                                                    Ngày tạo
-                                                </div>
-                                                <p className="text-[12px] font-bold text-slate-700">{formatDate(o.created_at)}</p>
+                                                <p className="text-[12px] font-bold text-slate-700 leading-tight">{t.note || '—'}</p>
+                                                <p className="text-[11px] font-semibold text-slate-500 mt-2">{formatDate(t.created_at)}</p>
                                             </div>
                                         </div>
-
-                                        {o.note && (
-                                            <div className="mt-3 pt-3 border-t border-slate-100">
-                                                <p className="text-[11px] italic text-slate-500 font-medium">" {o.note} "</p>
-                                            </div>
-                                        )}
-                                        
-                                        <div className="mt-4 flex justify-end">
-                                            <button 
-                                                onClick={() => setSelectedOrder(o)}
-                                                className="flex items-center gap-1.5 text-[11px] font-black text-primary uppercase tracking-wider hover:underline"
-                                            >
-                                                CHI TIẾT ĐƠN
-                                                <ChevronRight size={14} />
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </div>
@@ -224,7 +266,7 @@ export default function MachineDetailsModal({ machine, onClose }) {
                         <Activity size={14} />
                         PHỤ TRÁCH: {machine.department_in_charge || 'Phòng Kỹ Thuật'}
                     </div>
-                    <span>{orders.length} bản ghi</span>
+                    <span>{timeline.length} bản ghi</span>
                 </div>
 
                 {/* Nested Modals */}

@@ -373,20 +373,20 @@ export default function DeliveryHistory() {
                                 const typeInfo = getTypeInfo(r.type);
                                 const TypeIcon = typeInfo.icon;
                                 return (
-                                <div key={`${r.type}-${r.id}`} className="rounded-2xl border border-primary/15 bg-white shadow-sm p-4 transition-all duration-200">
+                                <div key={`${r.type}-${r.id}`} className="rounded-xl border border-primary/15 bg-white shadow-sm p-3 transition-all duration-200">
                                     <div className="flex items-start justify-between gap-2 mb-2">
-                                        <div className="flex gap-3">
+                                        <div className="flex gap-2.5 min-w-0">
                                             <div>
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    <h3 className="font-bold text-[14px] text-foreground leading-tight">#{r.code}</h3>
-                                                    <span className={clsx('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase', typeInfo.colorCls)}>
+                                                <div className="flex items-center gap-1.5 mb-1 min-w-0">
+                                                    <h3 className="font-bold text-[13px] text-foreground leading-tight whitespace-nowrap">#{r.code}</h3>
+                                                    <span className={clsx('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase whitespace-nowrap', typeInfo.colorCls)}>
                                                         <TypeIcon size={10} />
                                                         {typeInfo.label}
                                                     </span>
                                                 </div>
                                             </div>
                                         </div>
-                                        <span className={clsx('text-[10px] font-bold uppercase px-3 py-1.5 rounded-full', r.statusCls)}>
+                                        <span className={clsx('text-[9px] font-bold uppercase px-2.5 py-1 rounded-full whitespace-nowrap shrink-0', r.statusCls)}>
                                             {r.statusLabel}
                                         </span>
                                     </div>
