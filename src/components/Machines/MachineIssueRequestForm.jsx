@@ -138,7 +138,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
                     orangeNumber: data.order_code?.replace('DNXM-', '') || '',
                     requesterName: data.ordered_by || '',
                     machineManager: parseField('Phụ trách máy:'),
-                    customerId: data.customer_id || '',
+                    customerId: '', // orders table has no customer_id column; identity is via customer_name
                     customerName: data.customer_name || '',
                     phone: data.recipient_phone || '',
                     facilityName: data.recipient_name || '',
@@ -198,8 +198,14 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
         fetchStaff();
     }, []);
 
-    // Auto-fill logic when phone changes
+    // Auto-fill logic when phone changes — ONLY for NEW orders.
+    // When editing an existing order (editOrderId is set), the customer data
+    // is already loaded from the orders table and must NOT be overwritten
+    // by a phone lookup, which could return a different customer entirely.
     useEffect(() => {
+        // Skip auto-fill entirely when editing an existing order
+        if (editOrderId) return;
+
         const fetchCustomerData = async () => {
             if (!formData.phone || formData.phone.length < 8) return;
 
@@ -232,7 +238,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
 
         const timeoutId = setTimeout(fetchCustomerData, 600);
         return () => clearTimeout(timeoutId);
-    }, [formData.phone]);
+    }, [formData.phone, editOrderId]);
 
     const handleInputChange = (field, value) => {
         setFormData(prev => {
@@ -305,7 +311,6 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
             // Map ĐNXM fields to orders table
             const orderData = {
                 order_code: formData.orangeNumber || `DNXM-${Date.now().toString().slice(-6)}`,
-                customer_id: formData.customerId || null,
                 customer_name: formData.customerName,
                 recipient_name: formData.facilityName || formData.customerName, // Required NOT NULL
                 recipient_address: formData.placementAddress || 'N/A', // Required NOT NULL

@@ -701,7 +701,6 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 order_code: formData.orderCode,
                 customer_category: formData.customerCategory,
                 warehouse: formData.warehouse,
-                customer_id: formData.customerId, // CRITICAL: Store customer_id to prevent mapping errors
                 customer_name: customerName,
                 recipient_name: formData.recipientName,
                 recipient_address: formData.recipientAddress,

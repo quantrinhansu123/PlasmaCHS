@@ -24,6 +24,7 @@ import {
     Filter,
     X,
     Edit,
+    Edit3,
     SlidersHorizontal,
     Ticket,
     Wrench,
@@ -581,7 +582,7 @@ export default function RepairTickets() {
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col flex-1 min-h-0 w-full relative">
                 
                 {/* TOOLBAR */}
-                <div className="flex flex-col gap-2 p-2 sm:p-2 border-b border-slate-100 bg-slate-50/50 rounded-t-2xl z-20">
+                <div className="flex flex-col gap-0 md:gap-2 p-0 md:p-2 border-b-0 md:border-b border-slate-100 bg-transparent md:bg-slate-50/50 rounded-t-2xl z-20">
                     <div className="hidden md:flex items-center gap-2">
                         <button onClick={() => navigate(-1)} className="p-2 sm:px-3 sm:py-2 rounded-xl text-[13px] font-bold text-slate-600 hover:text-slate-900 border border-slate-200 bg-white hover:bg-slate-50 transition-all flex items-center gap-2 shrink-0 h-[38px]">
                             <ChevronLeft size={16} /> <span className="hidden sm:inline">Quay lại</span>
@@ -903,10 +904,10 @@ export default function RepairTickets() {
 
                                             <td className="py-2 px-4 whitespace-nowrap sticky right-0 bg-white group-hover:bg-amber-50/50 shadow-[-5px_0_10px_-5px_rgba(0,0,0,0.05)] border-l border-slate-50 flex items-center justify-center h-full">
                                                 <div className="flex items-center gap-1.5 justify-center h-full">
-                                                    <button onClick={() => handleEdit(ticket)} className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded-lg transition-colors" title="Chỉnh sửa">
+                                                    <button onClick={() => handleEdit(ticket)} className="w-8 h-8 flex items-center justify-center !p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded-lg transition-colors" title="Chỉnh sửa">
                                                         <Edit className="w-4 h-4" />
                                                     </button>
-                                                    <button onClick={() => handleDeleteTicket(ticket.id)} className="p-1.5 text-rose-600 hover:text-rose-800 hover:bg-rose-100 rounded-lg transition-colors" title="Xóa">
+                                                    <button onClick={() => handleDeleteTicket(ticket.id)} className="w-8 h-8 flex items-center justify-center !p-0 text-rose-600 hover:text-rose-800 hover:bg-rose-100 rounded-lg transition-colors" title="Xóa">
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>
                                                 </div>
@@ -919,102 +920,123 @@ export default function RepairTickets() {
                             </div>
                             
                             {/* Mobile Card List */}
-                            <div className="md:hidden flex-1 overflow-y-auto p-3 flex flex-col gap-3 relative custom-scrollbar">
+                            <div className="md:hidden flex-1 overflow-y-auto p-2 flex flex-col gap-2.5 relative custom-scrollbar bg-slate-50/40">
                                 {paginatedTickets.map((ticket, index) => (
                                     <div key={ticket.id} className={clsx(
-                                        "rounded-2xl border shadow-sm p-4 transition-all duration-200",
+                                        "rounded-2xl border shadow-sm p-3 transition-all duration-200",
                                         selectedIds.includes(ticket.id)
                                             ? "border-amber-500 bg-amber-50/20 ring-1 ring-amber-500/20"
                                             : "border-slate-200 bg-white"
                                     )}>
-                                        <div className="flex items-start justify-between gap-2 mb-3">
-                                            <div className="flex gap-3 min-w-0">
-                                                <div className="pt-1 shrink-0">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={selectedIds.includes(ticket.id)}
-                                                        onChange={() => toggleSelect(ticket.id)}
-                                                        className="w-5 h-5 rounded border-slate-300 text-amber-500 focus:ring-amber-500/20 transition-all cursor-pointer"
-                                                    />
-                                                </div>
-                                                <div className="flex flex-col pt-0.5 min-w-0">
-                                                    <div className="flex items-center gap-2">
-                                                        <p className="text-[12px] font-bold text-slate-400 uppercase tracking-wider">#{ticket.stt}</p>
+                                        {/* Header: checkbox + tên máy + serial + status */}
+                                        <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                                            <div className="flex items-center gap-1.5 min-w-0">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedIds.includes(ticket.id)}
+                                                    onChange={() => toggleSelect(ticket.id)}
+                                                    className="w-3.5 h-3.5 shrink-0 rounded border-slate-300 text-amber-500 focus:ring-amber-500/20 transition-all cursor-pointer"
+                                                />
+                                                <div className="flex flex-col min-w-0">
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider shrink-0">#{ticket.stt}</p>
+                                                        {ticket.machine_serial && (
+                                                            <span className="px-1.5 py-0 bg-slate-100 text-slate-600 font-mono text-[9px] font-bold rounded">
+                                                                {ticket.machine_serial}
+                                                            </span>
+                                                        )}
                                                     </div>
-                                                    <h3 className="text-[15px] font-black text-slate-800 leading-tight mt-0.5 break-words line-clamp-2">
+                                                    <h3 className="text-[12px] font-black text-slate-800 leading-tight truncate">
                                                         {ticket.machine_name || 'Thiết bị không tên'}
                                                     </h3>
-                                                    {ticket.machine_serial && (
-                                                        <span className="inline-block px-2 py-0.5 mt-1.5 bg-slate-100 text-slate-600 font-mono text-[11px] font-bold rounded-md w-fit">
-                                                            {ticket.machine_serial}
-                                                        </span>
-                                                    )}
                                                 </div>
                                             </div>
-                                            <div className="shrink-0 flex flex-col items-end gap-1.5">
+                                            <div className="shrink-0 flex flex-col items-end gap-1">
                                                 {getStatusBadge(ticket.status)}
                                                 {ticket.expected_completion_date && (
-                                                    <div className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 flex items-center gap-1 shadow-sm whitespace-nowrap">
-                                                        <Clock size={10} />
+                                                    <div className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 flex items-center gap-1 whitespace-nowrap">
+                                                        <Clock size={9} />
                                                         {new Date(ticket.expected_completion_date).toLocaleDateString('vi-VN')}
                                                     </div>
                                                 )}
                                             </div>
                                         </div>
 
-                                        <div className="grid grid-cols-2 gap-2 mb-3 rounded-xl bg-slate-50/50 border border-slate-100 p-3">
-                                            <div className="col-span-2 flex flex-col pb-2 mb-1 border-b border-slate-100">
-                                                <span className="text-[10px] font-bold text-slate-400 uppercase mb-0.5 text-left">Khách hàng</span>
-                                                <span className="text-[14px] font-bold text-slate-800 whitespace-normal text-left break-words">{getCustomerName(ticket.customer_id)}</span>
+                                        {/* Info card: khách hàng + lỗi */}
+                                        <div className="rounded-xl border border-slate-200 bg-white mb-1 overflow-hidden divide-y divide-slate-100">
+                                            {/* Khách hàng */}
+                                            <div className="flex items-center justify-between px-2 py-1 gap-2">
+                                                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide shrink-0">Khách hàng</span>
+                                                <span className="text-[11px] font-bold text-slate-800 text-right truncate">{getCustomerName(ticket.customer_id)}</span>
                                             </div>
-                                            <div className="col-span-2 mt-1 pb-2 border-b border-slate-100">
-                                                <div className="flex items-start gap-1.5 mb-1.5 min-w-0">
+                                            {/* Tên lỗi */}
+                                            <div className="flex items-center justify-between px-2 py-1 gap-2">
+                                                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide shrink-0">Tên lỗi</span>
+                                                <div className="flex items-center gap-1.5 justify-end flex-wrap">
                                                     <span className={clsx(
-                                                        "px-2 py-0.5 rounded text-[10px] font-bold border shrink-0",
+                                                        "px-1.5 py-0.5 rounded text-[9px] font-bold border shrink-0",
                                                         getLoaiLoiBadgeClass(ticket.loai_loi)
                                                     )}>{ticket.loai_loi || '---'}</span>
-                                                    <span className="text-[13px] font-bold text-rose-600 break-words">{getErrorTypeName(ticket.error_type_id)}</span>
+                                                    <span className="text-[11px] font-bold text-rose-600 text-right">{getErrorTypeName(ticket.error_type_id)}</span>
                                                 </div>
-                                                <div className="flex items-center justify-between">
-                                                    <span className={clsx("px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 text-center", getErrorLevelColor(ticket.error_level))}>
-                                                        {ticket.error_level || 'Trung bình'}
-                                                    </span>
-                                                </div>
-                                                {ticket.error_details && (
-                                                    <p className="text-[12px] text-slate-600 mt-2 bg-white p-2 text-left rounded-lg border border-slate-100 italic line-clamp-3">Mô tả: {ticket.error_details}</p>
-                                                )}
                                             </div>
-                                            <div className="flex flex-col mt-1">
+                                            {/* Cấp độ lỗi */}
+                                            <div className="flex items-center justify-between px-2 py-1 gap-2">
+                                                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide shrink-0">Cấp độ lỗi</span>
+                                                <span className={clsx("px-1.5 py-0.5 rounded-full text-[9px] font-bold border", getErrorLevelColor(ticket.error_level))}>
+                                                    {ticket.error_level || 'Trung bình'}
+                                                </span>
+                                            </div>
+                                            {/* Mô tả (chỉ hiện nếu có) */}
+                                            {ticket.error_details && (
+                                                <div className="px-2 py-1.5 bg-slate-50/60">
+                                                    <p className="text-[10px] text-slate-500 italic line-clamp-2 leading-snug">{ticket.error_details}</p>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Người báo + Phụ trách — KHÔNG CHỈNH */}
+                                        <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-50/50 border border-slate-100 px-2.5 py-2 mb-2">
+                                            <div className="flex flex-col">
                                                 <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Người báo</span>
                                                 <span className="text-[12px] text-slate-800 font-semibold truncate">{ticket.created_by ? getUserName(ticket.created_by) : 'Hệ thống'}</span>
                                                 <span className="text-[10px] text-slate-500 mt-0.5">{new Date(ticket.created_at).toLocaleDateString('vi-VN')}</span>
                                             </div>
-                                            <div className="flex flex-col mt-1 items-end text-right">
+                                            <div className="flex flex-col items-end text-right">
                                                 <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Phụ trách</span>
                                                 <span className="text-[12px] text-slate-800 font-semibold truncate">{getUserName(ticket.technician_id)} (KT)</span>
                                                 <span className="text-[10px] text-slate-500 mt-0.5">{getUserName(ticket.sales_id)} (KD)</span>
                                             </div>
                                         </div>
 
-                                        <div className="flex items-center justify-between pt-3 border-t border-slate-100/80">
-                                            <div className="flex items-center gap-2">
+                                        {/* Bottom row: badges + actions — ultra compact */}
+                                        <div className="flex items-center justify-between border-t border-slate-100 pt-1.5 mt-1.5">
+                                            <div className="flex items-center gap-1">
                                                 {ticket.error_images?.length > 0 && (
-                                                    <span className="flex items-center gap-1 text-[11px] text-rose-600 font-semibold bg-rose-50 px-2 py-1 rounded-lg border border-rose-100">
-                                                        <ImageIcon size={12} /> {ticket.error_images.length}
+                                                    <span className="flex items-center gap-0.5 text-[10px] text-rose-500 font-bold bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100">
+                                                        <ImageIcon size={9} /> {ticket.error_images.length}
                                                     </span>
                                                 )}
                                                 {ticket.technical_images?.length > 0 && (
-                                                    <span className="flex items-center gap-1 text-[11px] text-blue-600 font-semibold bg-blue-50 px-2 py-1 rounded-lg border border-blue-100">
-                                                        <ImageIcon size={12} /> {ticket.technical_images.length}
+                                                    <span className="flex items-center gap-0.5 text-[10px] text-blue-500 font-bold bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
+                                                        <ImageIcon size={9} /> {ticket.technical_images.length}
                                                     </span>
                                                 )}
                                             </div>
                                             <div className="flex items-center gap-2">
-                                                <button onClick={() => handleDeleteTicket(ticket.id)} className="w-8 h-8 flex items-center justify-center text-slate-400 bg-white border border-slate-200 rounded-lg hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors">
-                                                    <Trash2 size={16} />
+                                                <button
+                                                    onClick={() => handleEdit(ticket)}
+                                                    className="p-1.5 btn-compact text-blue-700 bg-blue-50 border border-blue-100 rounded-lg active:scale-90 transition-all"
+                                                    title="Chỉnh sửa"
+                                                >
+                                                    <Edit3 size={16} />
                                                 </button>
-                                                <button onClick={() => handleEdit(ticket)} className="h-8 px-3 text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-colors flex items-center justify-center gap-1.5 shadow-sm">
-                                                    <Edit size={14} /> <span className="text-[12px] font-bold">Chi tiết</span>
+                                                <button
+                                                    onClick={() => handleDeleteTicket(ticket.id)}
+                                                    className="p-1.5 btn-compact text-rose-700 bg-rose-50 border border-rose-100 rounded-lg active:scale-90 transition-all"
+                                                    title="Xóa phiếu"
+                                                >
+                                                    <Trash2 size={16} />
                                                 </button>
                                             </div>
                                         </div>
@@ -1044,11 +1066,11 @@ export default function RepairTickets() {
                         Hiển thị <span className="font-bold text-slate-800">{totalRecords > 0 ? `${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, totalRecords)}` : '0'}</span> / Tổng <span className="font-bold text-slate-800">{totalRecords}</span> phiếu
                     </span>
                     <div className="flex items-center gap-1">
-                        <button onClick={() => setCurrentPage(1)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-200 transition-colors disabled:opacity-30" disabled={currentPage === 1} title="Trang đầu"><ChevronLeft size={16} /><ChevronLeft size={16} className="-ml-2.5" /></button>
-                        <button onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-200 transition-colors disabled:opacity-30" disabled={currentPage === 1} title="Trang trước"><ChevronLeft size={16} /></button>
+                        <button onClick={() => setCurrentPage(1)} className="w-8 h-8 flex items-center justify-center !p-0 rounded-lg text-slate-400 hover:bg-slate-200 transition-colors disabled:opacity-30" disabled={currentPage === 1} title="Trang đầu"><ChevronLeft size={16} /><ChevronLeft size={16} className="-ml-2.5" /></button>
+                        <button onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} className="w-8 h-8 flex items-center justify-center !p-0 rounded-lg text-slate-400 hover:bg-slate-200 transition-colors disabled:opacity-30" disabled={currentPage === 1} title="Trang trước"><ChevronLeft size={16} /></button>
                         <div className="w-8 h-8 rounded-lg bg-blue-500 text-white flex items-center justify-center text-[12px] font-bold shadow-md shadow-blue-500/20">{currentPage}</div>
-                        <button onClick={() => setCurrentPage(prev => Math.min(Math.ceil(totalRecords / pageSize), prev + 1))} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-200 transition-colors disabled:opacity-30" disabled={currentPage >= Math.ceil(totalRecords / pageSize)} title="Trang sau"><ChevronRight size={16} /></button>
-                        <button onClick={() => setCurrentPage(Math.ceil(totalRecords / pageSize))} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-200 transition-colors disabled:opacity-30" disabled={currentPage >= Math.ceil(totalRecords / pageSize)} title="Trang cuối"><ChevronRight size={16} /><ChevronRight size={16} className="-ml-2.5" /></button>
+                        <button onClick={() => setCurrentPage(prev => Math.min(Math.ceil(totalRecords / pageSize), prev + 1))} className="w-8 h-8 flex items-center justify-center !p-0 rounded-lg text-slate-400 hover:bg-slate-200 transition-colors disabled:opacity-30" disabled={currentPage >= Math.ceil(totalRecords / pageSize)} title="Trang sau"><ChevronRight size={16} /></button>
+                        <button onClick={() => setCurrentPage(Math.ceil(totalRecords / pageSize))} className="w-8 h-8 flex items-center justify-center !p-0 rounded-lg text-slate-400 hover:bg-slate-200 transition-colors disabled:opacity-30" disabled={currentPage >= Math.ceil(totalRecords / pageSize)} title="Trang cuối"><ChevronRight size={16} /><ChevronRight size={16} className="-ml-2.5" /></button>
                     </div>
                 </div>
             </div>

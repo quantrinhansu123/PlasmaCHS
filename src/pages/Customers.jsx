@@ -637,6 +637,38 @@ const Customers = () => {
         setIsDetailsModalOpen(true);
     };
 
+    // Deep-link: auto-open CustomerDetailsModal when URL has ?viewCustomerId=XXX
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const viewCustomerId = params.get('viewCustomerId');
+        if (!viewCustomerId) return;
+
+        const openCustomerById = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('customers')
+                    .select('*')
+                    .eq('id', viewCustomerId)
+                    .single();
+                if (data && !error) {
+                    setSelectedCustomer(data);
+                    setIsDetailsModalOpen(true);
+                }
+            } catch (err) {
+                console.error('Auto-open customer detail failed:', err);
+            }
+            // Remove the query param so reloads don't re-trigger
+            const cleaned = new URLSearchParams(location.search);
+            cleaned.delete('viewCustomerId');
+            const newSearch = cleaned.toString();
+            navigate(
+                { pathname: location.pathname, search: newSearch ? `?${newSearch}` : '' },
+                { replace: true }
+            );
+        };
+        openCustomerById();
+    }, [location.search]);
+
     const handleDeleteCustomer = async (id, name) => {
         if (!window.confirm(`Bạn có chắc chắn muốn xóa hệ thống khách hàng "${name}" không? Toàn bộ dữ liệu liên quan sẽ bị xóa và không thể khôi phục.`)) {
             return;
@@ -724,7 +756,7 @@ const Customers = () => {
                         title: `🎉 Khách hàng chốt Thành công: ${updatedCustomer.name}`,
                         description: `NV Kinh doanh (${currentUser}) vừa chuyển trạng thái khách hàng này sang Thành công.`,
                         type: 'success',
-                        link: '/khach-hang'
+                        link: `/khach-hang?viewCustomerId=${id}`
                     });
                 }
             }

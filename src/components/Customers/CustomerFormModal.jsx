@@ -266,7 +266,8 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                         notificationService.add({
                             title: `🎯 Đã nhận khách quá hạn: ${existingCustomer.name}`,
                             description: `Bạn đã tiếp nhận chăm sóc khách hàng này từ hôm nay.`,
-                            type: 'success'
+                            type: 'success',
+                            link: `/khach-hang?viewCustomerId=${existingCustomer.id}`
                         });
 
                         onSuccess();
@@ -310,7 +311,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                         title: `🎉 Khách hàng chốt Thành công: ${formData.name}`,
                         description: `NV Kinh doanh (${formData.care_by || 'Không rõ'}) vừa chuyển trạng thái khách hàng này sang Thành công.`,
                         type: 'success',
-                        link: '/khach-hang'
+                        link: `/khach-hang?viewCustomerId=${customer.id}`
                     });
                 }
             } else {
@@ -342,7 +343,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                     title: `👤 Khách hàng mới: ${formData.name}`,
                     description: `Phụ trách: ${formData.care_by || 'Chưa gán'} - Mã: ${formData.code}`,
                     type: 'info',
-                    link: '/khach-hang'
+                    link: `/khach-hang?viewCustomerId=${newCustomer.id}`
                 });
             }
             onSuccess();
