@@ -69,25 +69,27 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                 status: customer.status || 'Thành công'
             });
         } else {
-            // Auto generate CODE
+            // Auto generate CODE — find the true MAX code number, not just the latest created
             const generateCode = async () => {
                 try {
-                    const { data: lastCustomer } = await supabase
+                    const { data: allCodes } = await supabase
                         .from('customers')
                         .select('code')
-                        .order('created_at', { ascending: false })
-                        .limit(1);
+                        .like('code', 'KH%');
 
-                    if (lastCustomer && lastCustomer.length > 0 && lastCustomer[0].code.startsWith('KH')) {
-                        const lastCode = lastCustomer[0].code;
-                        const numStr = lastCode.replace(/[^0-9]/g, '');
-                        const nextNum = numStr ? parseInt(numStr, 10) + 1 : 1;
-                        setFormData(prev => ({ ...prev, code: `KH${nextNum.toString().padStart(5, '0')}` }));
-                    } else {
-                        setFormData(prev => ({ ...prev, code: 'KH00001' }));
+                    let maxNum = 0;
+                    if (allCodes && allCodes.length > 0) {
+                        for (const row of allCodes) {
+                            const numStr = (row.code || '').replace(/[^0-9]/g, '');
+                            const num = numStr ? parseInt(numStr, 10) : 0;
+                            if (num > maxNum) maxNum = num;
+                        }
                     }
+                    const nextCode = `KH${(maxNum + 1).toString().padStart(5, '0')}`;
+                    setFormData(prev => ({ ...prev, code: nextCode }));
                 } catch (err) {
                     console.error('Error generating code:', err);
+                    setFormData(prev => ({ ...prev, code: `KH${Date.now().toString().slice(-5)}` }));
                 }
             };
             generateCode();
