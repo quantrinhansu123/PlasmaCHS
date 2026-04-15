@@ -807,6 +807,28 @@ const Cylinders = () => {
         !status && 'border-l-transparent'
     );
 
+    const getLocationDisplay = (cylinder) => {
+        const status = cylinder.status;
+        
+        // 1. Customer Holding Logic: 'thuộc khách hàng', 'đang sử dụng', 'đã sử dụng'
+        if (['thuộc khách hàng', 'đang sử dụng', 'đã sử dụng'].includes(status)) {
+            return cylinder.customers?.name || cylinder.customer_name?.split(' / ')[0] || '—';
+        }
+        
+        // 2. Shipping Logic: 'đang vận chuyển' should be hidden/cleared
+        if (status === 'đang vận chuyển') {
+            return '—';
+        }
+        
+        // 3. Warehouse / Ready / Empty / Repair Logic: Show Warehouse Name
+        if (['sẵn sàng', 'bình rỗng', 'chờ nạp', 'hỏng'].includes(status) || !status) {
+            return cylinder.warehouses?.name || '—';
+        }
+
+        // Fallback
+        return cylinder.customer_name?.split(' / ')[1] || cylinder.warehouses?.name || '—';
+    };
+
     return (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5">
             <PageViewSwitcher
@@ -961,13 +983,24 @@ const Cylinders = () => {
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-2">
-                                                    <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
+                                                    <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0">
                                                         <Warehouse size={14} />
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Kho quản lý</p>
+                                                        <p className="text-[12px] text-foreground font-bold truncate">
+                                                            {cylinder.warehouses?.name || '—'}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
+                                                        <ActivitySquare size={14} />
                                                     </div>
                                                     <div className="min-w-0 flex-1">
                                                         <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Vị trí</p>
                                                         <p className="text-[12px] text-foreground font-bold truncate">
-                                                            {cylinder.customer_name?.split(' / ')[1] || '—'}
+                                                            {getLocationDisplay(cylinder)}
                                                         </p>
                                                     </div>
                                                 </div>
@@ -978,7 +1011,7 @@ const Cylinders = () => {
                                     <div className="flex items-center justify-between pt-2 border-t border-border/70">
                                         <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                                             <Warehouse size={12} />
-                                            <span>{cylinder.status === 'sẵn sàng' ? (cylinder.warehouses?.name || '—') : '—'}</span>
+                                            <span>{cylinder.warehouses?.name || '—'}</span>
                                         </div>
                                         <div className="flex items-center gap-3">
                                             <button onClick={() => handleViewCylinder(cylinder)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg"><Eye size={16} /></button>
@@ -1331,15 +1364,15 @@ const Cylinders = () => {
                                             }
                                             if (col.key === 'department') {
                                                 return (
-                                                    <td key={col.key} className="px-4 py-4 text-sm font-medium text-muted-foreground">
-                                                        {cylinder.customer_name?.split(' / ')[1] || '—'}
+                                                    <td key={col.key} className="px-4 py-4 text-sm font-medium text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis max-w-[200px]">
+                                                        {getLocationDisplay(cylinder)}
                                                     </td>
                                                 );
                                             }
                                             if (col.key === 'warehouse') {
                                                 return (
-                                                    <td key={col.key} className="px-4 py-4 text-sm text-muted-foreground">
-                                                        {cylinder.status === 'sẵn sàng' ? (cylinder.warehouses?.name || '—') : '—'}
+                                                    <td key={col.key} className="px-4 py-4 text-sm text-muted-foreground font-bold">
+                                                        {cylinder.warehouses?.name || '—'}
                                                     </td>
                                                 );
                                             }

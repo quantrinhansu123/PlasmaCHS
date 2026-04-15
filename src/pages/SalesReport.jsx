@@ -217,7 +217,7 @@ const SalesReport = () => {
   const totalActiveFilters = (selectedMonth !== '' ? 1 : 0) + selectedWarehouses.length + selectedSalespersons.length + selectedCategories.length;
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col p-2 md:p-4 bg-muted/20 pb-20 md:pb-4">
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col p-2 md:p-4 bg-muted/20 pb-24 md:pb-4">
       <PageViewSwitcher
           activeView={activeView}
           setActiveView={setActiveView}

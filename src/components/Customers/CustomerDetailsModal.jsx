@@ -150,13 +150,40 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
     const fetchCustomerData = async () => {
         setLoading(true);
         try {
-            const { data: ordersData, error: err1 } = await supabase
-                .from('orders')
-                .select('*')
-                .eq('customer_name', customer.name)
-                .order('created_at', { ascending: false });
+            // Query orders: prefer customer_id, fallback to customer_name for legacy orders
+            let ordersData = [];
+            if (customer.id) {
+                const { data: byId, error: errId } = await supabase
+                    .from('orders')
+                    .select('*')
+                    .eq('customer_id', customer.id)
+                    .order('created_at', { ascending: false });
+                if (errId) throw errId;
+                ordersData = byId || [];
 
-            if (err1) throw err1;
+                // Also fetch legacy orders that only have customer_name (no customer_id)
+                if (customer.name) {
+                    const { data: byName } = await supabase
+                        .from('orders')
+                        .select('*')
+                        .eq('customer_name', customer.name)
+                        .is('customer_id', null)
+                        .order('created_at', { ascending: false });
+                    if (byName && byName.length > 0) {
+                        const existingIds = new Set(ordersData.map(o => o.id));
+                        const uniqueLegacy = byName.filter(o => !existingIds.has(o.id));
+                        ordersData = [...ordersData, ...uniqueLegacy];
+                    }
+                }
+            } else if (customer.name) {
+                const { data, error } = await supabase
+                    .from('orders')
+                    .select('*')
+                    .eq('customer_name', customer.name)
+                    .order('created_at', { ascending: false });
+                if (error) throw error;
+                ordersData = data || [];
+            }
 
             const { data: txData, error: err2 } = await supabase
                 .from('customer_transactions')

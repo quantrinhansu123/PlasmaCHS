@@ -261,7 +261,28 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                                 <span className="flex items-center gap-1.5"><Activity className="w-4 h-4 text-slate-400" /> {cylinder.volume || '—'}</span>
                                 {cylinder.category && <span className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 rounded-md text-slate-600">{cylinder.category}</span>}
                                 {cylinder.cylinder_code && <span className="flex items-center gap-1.5 px-2 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-md">Mã khắc: {cylinder.cylinder_code}</span>}
-                                <span className="flex items-center gap-1.5 text-primary"><MapPin className="w-4 h-4 text-primary/60" /> {cylinder.status || '—'}</span>
+                                <span className="flex items-center gap-1.5 text-primary">
+                                    <Activity className="w-4 h-4 text-primary/60" /> 
+                                    {cylinder.status ? (cylinder.status.charAt(0).toUpperCase() + cylinder.status.slice(1)) : '—'}
+                                </span>
+                                <span className="flex items-center gap-1.5 text-indigo-600">
+                                    <MapPin className="w-4 h-4 text-indigo-400" />
+                                    {(() => {
+                                        const status = cylinder.status;
+                                        if (['thuộc khách hàng', 'đang sử dụng', 'đã sử dụng'].includes(status)) {
+                                            return cylinder.customers?.name || cylinder.customer_name?.split(' / ')[0] || '—';
+                                        }
+                                        if (status === 'đang vận chuyển') return '—';
+                                        if (['sẵn sàng', 'bình rỗng', 'chờ nạp', 'hỏng'].includes(status)) {
+                                            return cylinder.warehouses?.name || '—';
+                                        }
+                                        return cylinder.customer_name?.split(' / ')[1] || '—';
+                                    })()}
+                                </span>
+                                <span className="flex items-center gap-1.5 text-slate-500">
+                                    <Warehouse className="w-4 h-4 text-slate-400" />
+                                    {cylinder.warehouses?.name || '—'}
+                                </span>
                                 {cylinder.expiry_date && <span className="flex items-center gap-1.5 text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-100 italic">Hạn: {formatDate(cylinder.expiry_date)}</span>}
                             </div>
                         </div>

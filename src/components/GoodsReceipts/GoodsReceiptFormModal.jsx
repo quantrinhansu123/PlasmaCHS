@@ -42,6 +42,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
     const [scannerIndex, setScannerIndex] = useState(null);
     const [cylindersList, setCylindersList] = useState([]);
     const [machinesList, setMachinesList] = useState([]);
+    const [deliverers, setDeliverers] = useState([]);
 
     const handleClose = useCallback(() => {
         setIsClosing(true);
@@ -149,6 +150,18 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                 }
                 if (cylindersRes.data) setCylindersList(cylindersRes.data.map(c => c.serial_number));
                 if (machinesRes.data) setMachinesList(machinesRes.data.map(m => m.serial_number));
+
+                // Fetch deliverers (shippers + app_users with shipper role)
+                const [{ data: shippersData }, { data: usersData }] = await Promise.all([
+                    supabase.from('shippers').select('id, name').order('name'),
+                    supabase.from('app_users').select('id, full_name').eq('role', 'shipper').order('full_name')
+                ]);
+                
+                const combinedDeliverers = [
+                    ...(shippersData || []).map(s => ({ id: `s_${s.id}`, name: s.name, type: 'SHIPPER_CO_DINH' })),
+                    ...(usersData || []).map(u => ({ id: `u_${u.id}`, name: u.full_name, type: 'USER_SHIPPER' }))
+                ];
+                setDeliverers(combinedDeliverers);
             } catch (err) {
                 console.error('Error fetching initial data:', err);
             }
@@ -240,11 +253,24 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                 item_status: item.item_status,
                 quantity: parseFloat(item.quantity) || 0,
                 unit: item.unit,
-                unit_price: item.unit_price,
-                total_price: item.total_price,
+                unit_price: parseFloat(item.unit_price) || 0,
+                total_price: parseFloat(item.total_price) || 0,
                 note: item.note,
                 receipt_id: receiptId
             }));
+
+            // Validate serial existence if it's a cylinder or machine
+            if (formData.receipt_type === 'BINH') {
+                const invalidSerials = items.filter(i => i.serial_number && !cylindersList.includes(i.serial_number));
+                if (invalidSerials.length > 0) {
+                    throw new Error(`Các mã bình sau không tồn tại trong hệ thống: ${invalidSerials.map(i => i.serial_number).join(', ')}. Vui lòng tạo bình trong Danh mục Bình trước.`);
+                }
+            } else if (formData.receipt_type === 'MAY') {
+                const invalidSerials = items.filter(i => i.serial_number && !machinesList.includes(i.serial_number));
+                if (invalidSerials.length > 0) {
+                    throw new Error(`Các mã máy sau không tồn tại trong hệ thống: ${invalidSerials.map(i => i.serial_number).join(', ')}. Vui lòng tạo máy trong Danh mục Máy trước.`);
+                }
+            }
 
             const { error: itemsError } = await supabase
                 .from('goods_receipt_items')
@@ -431,18 +457,35 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                     <div className="space-y-1.5">
                                         <label className="flex items-center gap-2 text-sm font-bold !text-slate-700 ml-1">
                                             <User className="w-4 h-4 text-primary" />
-                                            Họ tên người giao
+                                            Người giao hàng *
                                         </label>
-                                        <input
-                                            disabled={isReadOnly}
-                                            value={formData.deliverer_name || ''}
-                                            onChange={(e) => setFormData(prev => ({ ...prev, deliverer_name: e.target.value }))}
-                                            placeholder="Tên người giao hàng"
-                                            className={clsx(
-                                                "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] transition-all outline-none",
-                                                isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
-                                            )}
-                                        />
+                                        <div className="relative">
+                                            <select
+                                                disabled={isReadOnly}
+                                                value={formData.deliverer_name || ''}
+                                                onChange={(e) => setFormData(prev => ({ ...prev, deliverer_name: e.target.value }))}
+                                                className={clsx(
+                                                    "w-full h-12 pl-4 pr-10 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] appearance-none transition-all outline-none",
+                                                    isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                                )}
+                                                required
+                                            >
+                                                <option value="">-- Chọn hoặc nhập tên --</option>
+                                                {deliverers.map(d => (
+                                                    <option key={d.id} value={d.name}>{d.name} {d.type === 'USER_SHIPPER' ? '(NV)' : '(ĐVVC)'}</option>
+                                                ))}
+                                                <option value="KHAC">Tên khác (Nhập tay)...</option>
+                                            </select>
+                                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary pointer-events-none opacity-50" />
+                                        </div>
+                                        {formData.deliverer_name === 'KHAC' && (
+                                            <input
+                                                disabled={isReadOnly}
+                                                onChange={(e) => setFormData(prev => ({ ...prev, deliverer_name_manual: e.target.value }))}
+                                                placeholder="Nhập tên người giao hàng..."
+                                                className="w-full h-11 px-4 mt-2 bg-white border border-slate-200 rounded-xl text-sm font-bold outline-none border-primary/30"
+                                            />
+                                        )}
                                     </div>
 
                                     <div className="md:col-span-2 space-y-1.5">
@@ -627,8 +670,27 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                                                 }
                                                                 const q = parseFloat(val);
                                                                 if (!isNaN(q)) {
-                                                                    updateItem(idx, 'quantity', val); // Keep as string to allow typing decimals
+                                                                    updateItem(idx, 'quantity', val);
                                                                     updateItem(idx, 'total_price', q * (item.unit_price || 0));
+
+                                                                    // Dynamic Row Generation: If BINH or MAY, and quantity > 1, expand rows
+                                                                    if (q > 1 && (formData.receipt_type === 'BINH' || formData.receipt_type === 'MAY') && !isEdit) {
+                                                                        const newRows = Array(Math.floor(q) - 1).fill(null).map(() => ({
+                                                                            ...item,
+                                                                            _id: crypto.randomUUID(),
+                                                                            quantity: 1,
+                                                                            serial_number: '',
+                                                                            total_price: item.unit_price
+                                                                        }));
+                                                                        
+                                                                        setItems(prev => {
+                                                                            const updated = [...prev];
+                                                                            updated[idx] = { ...item, quantity: 1, total_price: item.unit_price };
+                                                                            updated.splice(idx + 1, 0, ...newRows);
+                                                                            return updated;
+                                                                        });
+                                                                        toast.info(`Đã tự động tạo ${Math.floor(q)} dòng nhập liệu cho ${item.item_name}`);
+                                                                    }
                                                                 }
                                                             }}
                                                             className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-center font-black text-primary outline-none"

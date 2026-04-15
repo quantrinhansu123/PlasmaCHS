@@ -6,6 +6,8 @@ import { supabase } from '../../supabase/config';
 import { toast } from 'react-toastify';
 import usePermissions from '../../hooks/usePermissions';
 import { notificationService } from '../../utils/notificationService';
+import MachineHandoverPrintTemplate from '../MachineHandoverPrintTemplate';
+import GoodsIssuePrintTemplate from '../GoodsIssues/GoodsIssuePrintTemplate';
 
 const dmyToYmd = (dmy) => {
     if (!dmy || typeof dmy !== 'string') return "";
@@ -58,10 +60,13 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
             'Tím (600-VT20, RGB17)': false
         },
         quantity: '',
+        quantityApproved: '',
+        warehouse: '',
         machineCode: '',
         dateNeeded: '',
         dateDelivery: '',
         dateRecall: '',
+        dateRecallActual: '',
         shippingMethod: {
             'KD tự vận chuyển': false,
             'Xe Công ty': false
@@ -270,15 +275,30 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
 
     const [showPreview, setShowPreview] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [printType, setPrintType] = useState('DNXM'); // 'DNXM' | 'BBBG' | 'XK'
 
-    const handlePrint = () => {
-        window.print();
+    const handlePrint = (type = 'DNXM') => {
+        setPrintType(type);
+        setTimeout(() => {
+            window.print();
+        }, 100);
     };
 
     const handleSave = async () => {
         if (!formData.customerName) {
             toast.error('Vui lòng điền tên khách hàng');
             return;
+        }
+
+        const orderCode = formData.orangeNumber ? `DNXM-${formData.orangeNumber}` : `DNXM-${Date.now().toString().slice(-6)}`;
+        
+        // Checking for duplicate order_code only for NEW orders
+        if (!editOrderId) {
+            const { data: existing } = await supabase.from('orders').select('id').eq('order_code', orderCode).maybeSingle();
+            if (existing) {
+                toast.error(`Mã phiếu ${orderCode} đã tồn tại trong hệ thống!`);
+                return;
+            }
         }
 
         setIsSaving(true);
@@ -320,18 +340,26 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
                 unit_price: 0, // Required NOT NULL
                 total_amount: 0, // Required NOT NULL
                 order_type: 'DNXM',
+                warehouse: formData.warehouse || null,
                 note: `Loại máy: ${selectedMachineTypes.join(', ')}. 
 Hình thức: ${issueTypesList || 'Chưa chọn'}.
 Màu máy: ${selectedColors}. 
 Ngày cần: ${ymdToDmy(formData.dateNeeded)}. 
 Giao: ${ymdToDmy(formData.dateDelivery)}. 
 Thu hồi dự kiến: ${ymdToDmy(formData.dateRecall)}. 
+Thu hồi thực tế: ${ymdToDmy(formData.dateRecallActual)}.
 Phụ trách máy: ${formData.machineManager}. 
 PT Vận chuyển: ${shippingList}. 
 Mã máy: ${formData.machineCode}. 
+SL phê duyệt: ${formData.quantityApproved || ''}.
 Ghi chú: ${formData.notes}`,
                 ordered_by: formData.requesterName || currentActorName,
-                customer_category: 'TM' 
+                customer_category: 'TM',
+                history: editOrderId ? undefined : JSON.stringify([{
+                    time: new Date().toISOString(),
+                    user: currentActorName,
+                    action: 'Tạo mới'
+                }])
             };
 
             if (editOrderId) {
@@ -348,10 +376,18 @@ Ghi chú: ${formData.notes}`,
                     link: `/de-nghi-xuat-may/tao?orderId=${editOrderId}&viewOnly=true`
                 });
 
-                // Nếu phiếu đã duyệt xong, cập nhật lại gán máy trong kho nếu có thay đổi mã máy
                 if (formData.status === 'DA_DUYET') {
                     await assignMachinesToCustomer(formData.machineCode, formData.customerName);
                 }
+
+                // Append history record
+                await supabase.from('order_history').insert([{
+                    order_id: editOrderId,
+                    action: 'EDITED',
+                    created_by: currentActorName,
+                    reason: 'Cập nhật thông tin phiếu'
+                }]);
+
                 toast.success('Đã cập nhật Phiếu Đề Nghị Xuất Máy thành công!');
                 setTimeout(() => navigate('/de-nghi-xuat-may'), 1000);
             } else {
@@ -365,6 +401,16 @@ Ghi chú: ${formData.notes}`,
                 if (error) throw error;
                 
                 const newOrderId = insertedData?.id;
+
+                // Add initial history record
+                if (newOrderId) {
+                    await supabase.from('order_history').insert([{
+                        order_id: newOrderId,
+                        action: 'CREATED',
+                        created_by: currentActorName,
+                        new_status: 'CHO_DUYET'
+                    }]);
+                }
                 notificationService.add({
                     title: `💡 ĐNXM mới: ${orderData.customer_name}`,
                     description: `${currentActorName} vừa lập phiếu đề nghị xuất máy mới.`,
@@ -438,10 +484,40 @@ Ghi chú: ${formData.notes}`,
 
         if (!window.confirm(confirmMsg)) return;
 
+        // Specially Handle level 2 -> 3: Assign Warehouse
+        let assignedWarehouse = formData.warehouse;
+        if (formData.status === 'CHO_CTY_DUYET') {
+            const { data: whs } = await supabase.from('warehouses').select('id, name');
+            if (whs && whs.length > 0) {
+                const whName = window.prompt(`CHỌN KHO XUẤT HÀNG:\n${whs.map((w, i) => `${i+1}. ${w.name}`).join('\n')}`, whs[0].name);
+                if (!whName) return; // Cancelled
+                
+                // Map full name to shorthand if needed for DB constraint
+                const foundWh = whs.find(w => w.name.toLowerCase().includes(whName.toLowerCase()) || whName === (whs.indexOf(w)+1).toString());
+                if (foundWh) {
+                    assignedWarehouse = foundWh.name;
+                    // Note: If DB constraint is strict (HN, TP.HCM), we might need mapping. 
+                    // But schema says 'HN', 'TP.HCM', 'TH', 'DN'. 
+                    // We'll try to use the name first as it might have been relaxed.
+                }
+            }
+        }
+
         setIsSaving(true);
         try {
+            // Track in order_history table
+            await supabase.from('order_history').insert([{
+                order_id: editOrderId,
+                action: 'STATUS_CHANGED',
+                old_status: formData.status,
+                new_status: nextStatus,
+                created_by: currentActorName,
+                reason: `Duyệt nâng cấp trạng thái. Kho: ${assignedWarehouse || 'N/A'}`
+            }]);
+
             const { error } = await supabase.from('orders').update({
                 status: nextStatus,
+                warehouse: assignedWarehouse,
                 updated_at: new Date().toISOString()
             }).eq('id', editOrderId);
 
@@ -680,7 +756,7 @@ Ghi chú: ${formData.notes}`,
 
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block text-sm font-medium text-foreground mb-1.5">Số lượng</label>
+                                        <label className="block text-sm font-medium text-foreground mb-1.5">Số lượng yêu cầu</label>
                                         <input
                                             type="text"
                                             value={formData.quantity}
@@ -689,6 +765,15 @@ Ghi chú: ${formData.notes}`,
                                         />
                                     </div>
                                     <div>
+                                        <label className="block text-sm font-medium text-foreground mb-1.5">Số lượng phê duyệt</label>
+                                        <input
+                                            type="text"
+                                            value={formData.quantityApproved}
+                                            onChange={(e) => handleInputChange('quantityApproved', e.target.value)}
+                                            className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                        />
+                                    </div>
+                                    <div className="md:col-span-2">
                                         <label className={clsx(
                                             "block text-sm font-medium mb-1.5",
                                             canEditMachineCode ? "text-foreground" : "text-muted-foreground"
@@ -714,7 +799,7 @@ Ghi chú: ${formData.notes}`,
                         </div>
 
                         {/* Ngày tháng */}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-foreground mb-1.5">Ngày cần máy</label>
                                 <input
@@ -733,17 +818,24 @@ Ghi chú: ${formData.notes}`,
                                     className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
                                 />
                             </div>
-                            {!formData.issueType['Bán'] && (
-                                <div>
-                                    <label className="block text-sm font-medium text-foreground mb-1.5">Thu hồi dự kiến</label>
-                                    <input
-                                        type="date"
-                                        value={formData.dateRecall}
-                                        onChange={(e) => handleInputChange('dateRecall', e.target.value)}
-                                        className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                                    />
-                                </div>
-                            )}
+                            <div>
+                                <label className="block text-sm font-medium text-foreground mb-1.5">Ngày thu hồi dự kiến</label>
+                                <input
+                                    type="date"
+                                    value={formData.dateRecall}
+                                    onChange={(e) => handleInputChange('dateRecall', e.target.value)}
+                                    className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-foreground mb-1.5">Ngày thu hồi thực tế</label>
+                                <input
+                                    type="date"
+                                    value={formData.dateRecallActual}
+                                    onChange={(e) => handleInputChange('dateRecallActual', e.target.value)}
+                                    className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                />
+                            </div>
                         </div>
 
                         {/* Ghi chú */}
@@ -844,25 +936,41 @@ Ghi chú: ${formData.notes}`,
                             </div>
                         );
                     })()}
-                    <button
-                        onClick={handlePrint}
-                        className="flex items-center justify-center gap-2 bg-slate-700 text-white px-8 py-3 rounded-xl shadow-lg shadow-slate-600/30 hover:bg-slate-800 transition-all font-bold text-sm transform active:scale-[0.98]"
-                    >
-                        <Printer size={20} />
-                        IN PHIẾU PDF
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                        <button
+                            onClick={() => handlePrint('DNXM')}
+                            className="flex items-center justify-center gap-2 bg-slate-700 text-white px-6 py-3 rounded-xl shadow-lg shadow-slate-600/30 hover:bg-slate-800 transition-all font-bold text-sm transform active:scale-[0.98]"
+                        >
+                            <Printer size={18} />
+                            IN PHIẾU DNXM
+                        </button>
+                        <button
+                            onClick={() => handlePrint('BBBG')}
+                            className="flex items-center justify-center gap-2 bg-emerald-700 text-white px-6 py-3 rounded-xl shadow-lg shadow-emerald-600/30 hover:bg-emerald-800 transition-all font-bold text-sm transform active:scale-[0.98]"
+                        >
+                            <Printer size={18} />
+                            IN BIÊN BẢN BÀN GIAO
+                        </button>
+                        <button
+                            onClick={() => handlePrint('XK')}
+                            className="flex items-center justify-center gap-2 bg-indigo-700 text-white px-6 py-3 rounded-xl shadow-lg shadow-indigo-600/30 hover:bg-indigo-800 transition-all font-bold text-sm transform active:scale-[0.98]"
+                        >
+                            <Printer size={18} />
+                            IN PHIẾU XUẤT KHO
+                        </button>
+                    </div>
 
                     {onClosePopup ? (
                         <button
                             onClick={onClosePopup}
-                            className="flex items-center justify-center gap-2 bg-slate-200 text-slate-700 px-8 py-3 rounded-xl shadow-lg hover:bg-slate-300 transition-all font-bold text-sm"
+                            className="flex items-center justify-center gap-2 bg-slate-200 text-slate-700 px-6 py-3 rounded-xl shadow-lg hover:bg-slate-300 transition-all font-bold text-sm"
                         >
                             ĐÓNG PHIẾU
                         </button>
                     ) : (
                         <button
                             onClick={() => navigate('/machines')}
-                            className="flex items-center justify-center gap-2 bg-slate-200 text-slate-700 px-8 py-3 rounded-xl shadow-lg hover:bg-slate-300 transition-all font-bold text-sm"
+                            className="flex items-center justify-center gap-2 bg-slate-200 text-slate-700 px-6 py-3 rounded-xl shadow-lg hover:bg-slate-300 transition-all font-bold text-sm"
                         >
                             THOÁT
                         </button>
@@ -871,265 +979,314 @@ Ghi chú: ${formData.notes}`,
             )}
 
             {/* PRINT VIEW (HIỆN KHI ẤN IN HOẶC KHI BẬT PREVIEW) */}
-            <div id="print-area" className={clsx(
-                "print:block text-black p-8 bg-white max-w-[210mm] mx-auto min-h-[297mm] shadow-2xl my-10",
-                showPreview ? "block scale-90 origin-top" : "hidden"
-            )} style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}>
-                {/* Header section */}
-                <div className="flex justify-between items-start mb-6">
-                    <div className="text-sm text-center">
-                        <h2 className="font-bold text-blue-800 uppercase print:text-black">CÔNG TY TNHH DỊCH VỤ Y TẾ CỘNG ĐỒNG CHS</h2>
-                        <p>ADD: Hải Âu 02-57 Vinhomes Ocean Park,</p>
-                        <p>Xã Đa Tốn, Huyện Gia Lâm, Hà Nội</p>
-                    </div>
-                    <div className="flex items-start gap-3">
-                        <div className="flex flex-col items-center">
-                            <span className="text-sm">Mẫu số: 02/XM-CHS</span>
-                            <span className="italic text-sm">Đề nghị xuất máy</span>
-                        </div>
-                        <input
-                            type="text"
-                            value={formData.orangeNumber}
-                            readOnly
-                            className="bg-orange-400 font-bold px-2 py-1 border border-black w-20 text-center focus:outline-none focus:bg-orange-300 print:bg-transparent print:border-black"
-                        />
-                    </div>
-                </div>
-
-                {/* Title */}
-                <div className="text-center mb-6">
-                    <h1 className="text-xl font-bold uppercase mb-2">GIẤY ĐỀ NGHỊ XUẤT MÁY</h1>
-                    <div className="text-center">
-                        <span>Số: ĐNXM{formData.orangeNumber || ''}</span>
-                    </div>
-                </div>
-
-                {/* Form Fields */}
-                <div className="space-y-4 text-[15px] leading-relaxed">
-                    <div className="flex items-center">
-                        <span className="min-w-[200px]">1. Họ và tên người đề nghị:</span>
-                        <input
-                            type="text"
-                            value={formData.requesterName}
-                            readOnly
-                            className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 print:text-black"
-                            placeholder=""
-                        />
-                    </div>
-
-                    <div className="flex items-center">
-                        <span className="min-w-[200px]">2. Nhân viên phụ trách máy:</span>
-                        <input
-                            type="text"
-                            value={formData.machineManager}
-                            readOnly
-                            className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 print:text-black"
-                            placeholder=""
-                        />
-                    </div>
-
-                    <div className="flex items-start md:items-center print:items-center flex-col md:flex-row print:flex-row gap-6 md:gap-0">
-                        <div className="flex items-center flex-1 w-full">
-                            <span className="min-w-[200px]">3. Tên khách hàng / Tên cơ sở:</span>
-                            <input
-                                type="text"
-                                value={formData.customerName}
-                                readOnly
-                                className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 print:text-black"
-                                placeholder=""
-                            />
-                        </div>
-                        <div className="flex items-center w-full md:w-auto print:w-auto md:ml-4 print:ml-4">
-                            <span className="whitespace-nowrap mr-2">Điện Thoại:</span>
-                            <div className="relative">
+            <div className={clsx(
+                "print:block bg-white mx-auto",
+                showPreview ? "block" : "hidden"
+            )}>
+                {/* Switch between different print templates based on printType */}
+                {printType === 'DNXM' && (
+                    <div id="print-area" className="text-black p-8 bg-white max-w-[210mm] mx-auto min-h-[297mm] shadow-2xl my-10" style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}>
+                        {/* Header section */}
+                        <div className="flex justify-between items-start mb-6">
+                            <div className="text-sm text-center">
+                                <h2 className="font-bold text-blue-800 uppercase print:text-black">CÔNG TY TNHH DỊCH VỤ Y TẾ CỘNG ĐỒNG CHS</h2>
+                                <p>ADD: Hải Âu 02-57 Vinhomes Ocean Park,</p>
+                                <p>Xã Đa Tốn, Huyện Gia Lâm, Hà Nội</p>
+                            </div>
+                            <div className="flex items-start gap-3">
+                                <div className="flex flex-col items-center">
+                                    <span className="text-sm">Mẫu số: 02/XM-CHS</span>
+                                    <span className="italic text-sm">Đề nghị xuất máy</span>
+                                </div>
                                 <input
                                     type="text"
-                                    value={formData.phone}
+                                    value={formData.orangeNumber}
                                     readOnly
-                                    className="focus:outline-none px-2 py-1 w-40 bg-transparent print:border-none print:p-0 print:-ml-2"
+                                    className="bg-orange-400 font-bold px-2 py-1 border border-black w-20 text-center focus:outline-none focus:bg-orange-300 print:bg-transparent print:border-black"
                                 />
                             </div>
                         </div>
-                    </div>
 
-                    <div className="flex items-center">
-                        <span className="min-w-[200px]">4. Tên Cơ Sở:</span>
-                        <input
-                            type="text"
-                            value={formData.facilityName}
-                            readOnly
-                            className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 print:text-black"
-                            placeholder=""
-                        />
-                    </div>
-
-                    <div className="flex items-center">
-                        <span className="min-w-[200px]">5. Địa chỉ đặt máy:</span>
-                        <input
-                            type="text"
-                            value={formData.placementAddress}
-                            readOnly
-                            className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 print:text-black"
-                            placeholder=""
-                        />
-                    </div>
-
-                    {/* Machine Type */}
-                    <div className="flex flex-col md:flex-row print:flex-row md:items-center print:items-center mt-6">
-                        <span className="min-w-[200px] mb-4 md:mb-0 print:mb-0">6. Loại máy đề xuất:</span>
-                        <div className="flex flex-wrap gap-6 flex-1 items-center">
-                            {Object.keys(formData.machineType).map(type => (
-                                <label key={type} className="flex items-center gap-6 cursor-default">
-                                    <div className={`w-4 h-4 border border-gray-500 flex items-center justify-center bg-white ${formData.machineType[type] ? 'bg-gray-100' : ''}`}>
-                                        {formData.machineType[type] && <span className="text-gray-800 text-xs font-bold font-sans">v</span>}
-                                    </div>
-                                    <span className="font-medium">{type === 'Khac' ? 'Khác (NK, IoT)' : type}</span>
-                                </label>
-                            ))}
+                        {/* Title */}
+                        <div className="text-center mb-6">
+                            <h1 className="text-xl font-bold uppercase mb-2">GIẤY ĐỀ NGHỊ XUẤT MÁY</h1>
+                            <div className="text-center">
+                                <span>Số: ĐNXM{formData.orangeNumber || ''}</span>
+                            </div>
                         </div>
-                    </div>
 
-                    {/* Machine Color */}
-                    <div className="mt-6 mb-2">
-                        <span className="block mb-2 font-bold">7. Màu máy yêu cầu dành cho TM</span>
-                        <div className="grid grid-cols-1 md:grid-cols-3 print:grid-cols-3 gap-y-1 gap-x-4 pl-8 md:pl-24 print:pl-24">
-                            {Object.keys(formData.machineColor).map(color => (
-                                <label key={color} className="flex items-center gap-6 cursor-default">
-                                    <div className={`w-4 h-4 border border-gray-500 flex items-center justify-center shrink-0 bg-white ${formData.machineColor[color] ? 'bg-gray-100' : ''}`}>
-                                        {formData.machineColor[color] && <span className="text-gray-800 text-xs font-bold font-sans">v</span>}
-                                    </div>
-                                    <span>{color}</span>
-                                </label>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Quantity and Code */}
-                    <div className="flex flex-col md:flex-row print:flex-row md:items-center print:items-center gap-6 mt-4">
-                        <div className="flex items-center">
-                            <span className="mr-2">8. Số lượng máy:</span>
-                            <input
-                                type="text"
-                                value={formData.quantity}
-                                readOnly
-                                className="focus:outline-none w-16 px-1 bg-transparent print:border-none print:p-0"
-                            />
-                        </div>
-                        <div className="flex items-center flex-1">
-                            <span className="mr-2">Mã máy:</span>
-                            <input
-                                type="text"
-                                value={formData.machineCode}
-                                readOnly
-                                className="flex-1 focus:outline-none px-2 bg-transparent print:border-none print:p-0"
-                            />
-                        </div>
-                    </div>
-
-                    {/* Dates */}
-                    <div className="flex items-center mt-4">
-                        <span className="min-w-[200px]">9. Ngày CHS cần máy:</span>
-                        <input
-                            type="text"
-                            value={ymdToDmy(formData.dateNeeded)}
-                            readOnly
-                            className="focus:outline-none w-32 px-2 bg-transparent print:border-none print:p-0"
-                            placeholder="dd/MM/yyyy"
-                        />
-                    </div>
-
-                    <div className="flex flex-col md:flex-row print:flex-row md:items-center print:items-center gap-6 mt-4">
-                        <div className="flex items-center">
-                            <span className="min-w-[200px]">10. Ngày giao cho Khách hàng:</span>
-                            <input
-                                type="text"
-                                value={ymdToDmy(formData.dateDelivery)}
-                                readOnly
-                                className="focus:outline-none w-32 px-2 bg-transparent print:border-none print:p-0"
-                                placeholder="dd/MM/yyyy"
-                            />
-                        </div>
-                        {!formData.issueType['Bán'] && (
+                        {/* Form Fields */}
+                        <div className="space-y-4 text-[15px] leading-relaxed">
                             <div className="flex items-center">
-                                <span className="mr-2">11. Thời gian thu hồi:</span>
+                                <span className="min-w-[200px]">1. Họ và tên người đề nghị:</span>
                                 <input
                                     type="text"
-                                    value={ymdToDmy(formData.dateRecall)}
+                                    value={formData.requesterName}
+                                    readOnly
+                                    className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 print:text-black"
+                                    placeholder=""
+                                />
+                            </div>
+
+                            <div className="flex items-center">
+                                <span className="min-w-[200px]">2. Nhân viên phụ trách máy:</span>
+                                <input
+                                    type="text"
+                                    value={formData.machineManager}
+                                    readOnly
+                                    className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 print:text-black"
+                                    placeholder=""
+                                />
+                            </div>
+
+                            <div className="flex items-start md:items-center print:items-center flex-col md:flex-row print:flex-row gap-6 md:gap-0">
+                                <div className="flex items-center flex-1 w-full">
+                                    <span className="min-w-[200px]">3. Tên khách hàng / Tên cơ sở:</span>
+                                    <input
+                                        type="text"
+                                        value={formData.customerName}
+                                        readOnly
+                                        className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 print:text-black"
+                                        placeholder=""
+                                    />
+                                </div>
+                                <div className="flex items-center w-full md:w-auto print:w-auto md:ml-4 print:ml-4">
+                                    <span className="whitespace-nowrap mr-2">Điện Thoại:</span>
+                                    <div className="relative">
+                                        <input
+                                            type="text"
+                                            value={formData.phone}
+                                            readOnly
+                                            className="focus:outline-none px-2 py-1 w-40 bg-transparent print:border-none print:p-0 print:-ml-2"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center">
+                                <span className="min-w-[200px]">4. Tên Cơ Sở:</span>
+                                <input
+                                    type="text"
+                                    value={formData.facilityName}
+                                    readOnly
+                                    className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 print:text-black"
+                                    placeholder=""
+                                />
+                            </div>
+
+                            <div className="flex items-center">
+                                <span className="min-w-[200px]">5. Địa chỉ đặt máy:</span>
+                                <input
+                                    type="text"
+                                    value={formData.placementAddress}
+                                    readOnly
+                                    className="flex-1 focus:outline-none px-2 bg-transparent print:border-none text-red-700 print:text-black"
+                                    placeholder=""
+                                />
+                            </div>
+
+                            {/* Machine Type */}
+                            <div className="flex flex-col md:flex-row print:flex-row md:items-center print:items-center mt-6">
+                                <span className="min-w-[200px] mb-4 md:mb-0 print:mb-0">6. Loại máy đề xuất:</span>
+                                <div className="flex flex-wrap gap-6 flex-1 items-center">
+                                    {Object.keys(formData.machineType).map(type => (
+                                        <label key={type} className="flex items-center gap-6 cursor-default">
+                                            <div className={`w-4 h-4 border border-gray-500 flex items-center justify-center bg-white ${formData.machineType[type] ? 'bg-gray-100' : ''}`}>
+                                                {formData.machineType[type] && <span className="text-gray-800 text-xs font-bold font-sans">v</span>}
+                                            </div>
+                                            <span className="font-medium">{type === 'Khac' ? 'Khác (NK, IoT)' : type}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Machine Color */}
+                            <div className="mt-6 mb-2">
+                                <span className="block mb-2 font-bold">7. Màu máy yêu cầu dành cho TM</span>
+                                <div className="grid grid-cols-1 md:grid-cols-3 print:grid-cols-3 gap-y-1 gap-x-4 pl-8 md:pl-24 print:pl-24">
+                                    {Object.keys(formData.machineColor).map(color => (
+                                        <label key={color} className="flex items-center gap-6 cursor-default">
+                                            <div className={`w-4 h-4 border border-gray-500 flex items-center justify-center shrink-0 bg-white ${formData.machineColor[color] ? 'bg-gray-100' : ''}`}>
+                                                {formData.machineColor[color] && <span className="text-gray-800 text-xs font-bold font-sans">v</span>}
+                                            </div>
+                                            <span>{color}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Quantity and Code */}
+                            <div className="flex flex-col md:flex-row print:flex-row md:items-center print:items-center gap-6 mt-4">
+                                <div className="flex items-center">
+                                    <span className="mr-2">8. Số lượng máy:</span>
+                                    <div className="flex gap-4">
+                                        <div className="flex items-center">
+                                            <span className="text-xs mr-1 italic text-slate-400">Y/c cầu:</span>
+                                            <span className="font-bold">{formData.quantity || 0}</span>
+                                        </div>
+                                        {formData.quantityApproved && (
+                                            <div className="flex items-center bg-blue-50 px-2 rounded">
+                                                <span className="text-xs mr-1 italic text-blue-500">Duyệt:</span>
+                                                <span className="font-bold text-blue-700">{formData.quantityApproved}</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="flex items-center flex-1">
+                                    <span className="mr-2">Mã máy:</span>
+                                    <input
+                                        type="text"
+                                        value={formData.machineCode}
+                                        readOnly
+                                        className="flex-1 focus:outline-none px-2 bg-transparent print:border-none print:p-0 font-bold"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Dates */}
+                            <div className="flex items-center mt-4">
+                                <span className="min-w-[200px]">9. Ngày CHS cần máy:</span>
+                                <input
+                                    type="text"
+                                    value={ymdToDmy(formData.dateNeeded)}
                                     readOnly
                                     className="focus:outline-none w-32 px-2 bg-transparent print:border-none print:p-0"
                                     placeholder="dd/MM/yyyy"
                                 />
                             </div>
-                        )}
-                    </div>
 
-                    {/* Shipping Method */}
-                    <div className="flex flex-col md:flex-row print:flex-row md:items-center print:items-center mt-4">
-                        <span className="min-w-[200px] mb-4 md:mb-0 print:mb-0">12. Phương thức vận chuyển:</span>
-                        <div className="flex gap-10">
-                            {Object.keys(formData.shippingMethod).map(method => (
-                                <label key={method} className="flex items-center gap-6 cursor-default">
-                                    <div className={`w-4 h-4 border border-gray-500 flex items-center justify-center bg-white ${formData.shippingMethod[method] ? 'bg-gray-100' : ''}`}>
-                                        {formData.shippingMethod[method] && <span className="text-gray-800 text-xs font-bold font-sans">v</span>}
-                                    </div>
-                                    <span>{method}</span>
-                                </label>
-                            ))}
+                            <div className="flex flex-col md:flex-row print:flex-row md:items-center print:items-center gap-6 mt-4">
+                                <div className="flex items-center">
+                                    <span className="min-w-[200px]">10. Ngày giao cho Khách hàng:</span>
+                                    <input
+                                        type="text"
+                                        value={ymdToDmy(formData.dateDelivery)}
+                                        readOnly
+                                        className="focus:outline-none w-32 px-2 bg-transparent print:border-none print:p-0"
+                                        placeholder="dd/MM/yyyy"
+                                    />
+                                </div>
+                                <div className="flex items-center">
+                                    <span className="mr-2">11. Thời gian thu hồi dự kiến:</span>
+                                    <input
+                                        type="text"
+                                        value={ymdToDmy(formData.dateRecall)}
+                                        readOnly
+                                        className="focus:outline-none w-32 px-2 bg-transparent print:border-none print:p-0 font-bold"
+                                        placeholder="dd/MM/yyyy"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Shipping Method */}
+                            <div className="flex flex-col md:flex-row print:flex-row md:items-center print:items-center mt-4">
+                                <span className="min-w-[200px] mb-4 md:mb-0 print:mb-0">12. Phương thức vận chuyển:</span>
+                                <div className="flex gap-10">
+                                    {Object.keys(formData.shippingMethod).map(method => (
+                                        <label key={method} className="flex items-center gap-6 cursor-default">
+                                            <div className={`w-4 h-4 border border-gray-500 flex items-center justify-center bg-white ${formData.shippingMethod[method] ? 'bg-gray-100' : ''}`}>
+                                                {formData.shippingMethod[method] && <span className="text-gray-800 text-xs font-bold font-sans">v</span>}
+                                            </div>
+                                            <span>{method}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Issue Type */}
+                            <div className="flex flex-col md:flex-row print:flex-row md:items-center print:items-center mt-4">
+                                <span className="min-w-[200px] mb-4 md:mb-0 print:mb-0">13. Dạng xuất:</span>
+                                <div className="flex flex-wrap gap-10">
+                                    {Object.keys(formData.issueType).map(type => (
+                                        <label key={type} className="flex items-center gap-6 cursor-default">
+                                            <div className={`w-4 h-4 border border-gray-500 flex items-center justify-center bg-white ${formData.issueType[type] ? 'bg-gray-100' : ''}`}>
+                                                {formData.issueType[type] && <span className="text-gray-800 text-xs font-bold font-sans">v</span>}
+                                            </div>
+                                            <span>{type}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Notes */}
+                            <div className="mt-6 flex flex-col">
+                                <span className="mb-2">14. Ghi chú khác (nếu có):</span>
+                                <textarea
+                                    value={formData.notes}
+                                    readOnly
+                                    className="w-full border-b border-gray-400 focus:outline-none min-h-[60px] resize-none bg-transparent print:border-none print:min-h-0"
+                                    placeholder=""
+                                />
+                            </div>
+                        </div>
+
+                        {/* Signatures */}
+                        <div className="flex justify-between mt-8">
+                            <div className="text-center w-[25%]">
+                                <p className="mb-16 font-bold">Người đề nghị</p>
+                                <p className="italic text-red-700 print:text-black">{formData.requesterName || ''}</p>
+                            </div>
+                            <div className="text-center w-[25%]">
+                                <p className="mb-16 font-bold">Thủ kho</p>
+                            </div>
+                            <div className="text-center w-[50%]">
+                                <p className="italic mb-1 whitespace-nowrap">Hà Nội, ngày {currentDay} tháng {currentMonth} năm {currentYear}</p>
+                                <p className="mb-16 font-bold">Giám đốc</p>
+                                <p className="italic">Bùi Xuân Đức</p>
+                            </div>
+                        </div>
+
+                        {/* Footer Notes */}
+                        <div className="mt-10 text-[12px] italic leading-tight border-t border-gray-200 pt-4 opacity-70">
+                            <p>Ghi chú :</p>
+                            <p>• Thời gian bàn giao máy đối với màu mặc định là 10 ngày làm việc sau khi nhận được giấy ĐNXM</p>
+                            <p>• Thời gian bàn giao máy đối với màu cá nhân hóa là 15 ngày làm việc sau khi nhận được giấy ĐNXM</p>
+                            <p>• Đối với các trường hợp máy Demo/Thuê/Ngoại giao bắt buộc điền ngày thu hồi máy</p>
                         </div>
                     </div>
+                )}
 
-                    {/* Issue Type */}
-                    <div className="flex flex-col md:flex-row print:flex-row md:items-center print:items-center mt-4">
-                        <span className="min-w-[200px] mb-4 md:mb-0 print:mb-0">13. Dạng xuất:</span>
-                        <div className="flex flex-wrap gap-10">
-                            {Object.keys(formData.issueType).map(type => (
-                                <label key={type} className="flex items-center gap-6 cursor-default">
-                                    <div className={`w-4 h-4 border border-gray-500 flex items-center justify-center bg-white ${formData.issueType[type] ? 'bg-gray-100' : ''}`}>
-                                        {formData.issueType[type] && <span className="text-gray-800 text-xs font-bold font-sans">v</span>}
-                                    </div>
-                                    <span>{type}</span>
-                                </label>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Notes */}
-                    <div className="mt-6 flex flex-col">
-                        <span className="mb-2">14. Ghi chú khác (nếu có):</span>
-                        <textarea
-                            value={formData.notes}
-                            readOnly
-                            className="w-full border-b border-gray-400 focus:outline-none min-h-[60px] resize-none bg-transparent print:border-none print:min-h-0"
-                            placeholder=""
+                {printType === 'BBBG' && (
+                    <div className="max-w-[210mm] mx-auto min-h-[297mm] shadow-2xl my-10 print:m-0 print:shadow-none bg-white">
+                        <MachineHandoverPrintTemplate 
+                            orders={{
+                                ...formData,
+                                customer_name: formData.customerName,
+                                recipient_name: formData.facilityName,
+                                recipient_address: formData.placementAddress,
+                                recipient_phone: formData.phone,
+                                product_type: Object.keys(formData.machineType).find(k => formData.machineType[k]) || 'MAY',
+                                quantity: formData.quantity,
+                                quantityApproved: formData.quantityApproved,
+                                department: formData.machineCode,
+                                created_at: new Date().toISOString()
+                            }} 
                         />
                     </div>
-                </div>
+                )}
 
-                {/* Separator */}
-
-                {/* Signatures */}
-                <div className="flex justify-between mt-4">
-                    <div className="text-center w-[25%]">
-                        <p className="mb-16">Người đề nghị</p>
-                        <p className="italic text-red-700 print:text-black">{formData.requesterName || ''}</p>
+                {printType === 'XK' && (
+                    <div className="max-w-[210mm] mx-auto min-h-[297mm] shadow-2xl my-10 print:m-0 print:shadow-none bg-white">
+                        <GoodsIssuePrintTemplate 
+                            issue={{
+                                issue_code: `XK-${formData.orangeNumber || Date.now().toString().slice(-6)}`,
+                                issue_date: new Date().toISOString(),
+                                issue_type: 'TRA_MAY',
+                                warehouse_id: formData.warehouse || 'Kho tổng',
+                                notes: formData.notes,
+                                created_by: currentActorName
+                            }}
+                            supplierName={formData.customerName}
+                            warehouseName={formData.warehouse}
+                            items={[{
+                                id: 1,
+                                item_code: formData.machineCode || 'Chưa gán serial',
+                                item_type: Object.keys(formData.machineType).find(k => formData.machineType[k]) || 'MÁY',
+                                quantity: formData.quantityApproved || formData.quantity
+                            }]}
+                        />
                     </div>
-                    <div className="text-center w-[25%]">
-                        <p className="mb-16">Thủ kho</p>
-                    </div>
-                    <div className="text-center w-[50%]">
-                        <p className="italic mb-1 whitespace-nowrap">Hà Nội, ngày {currentDay} tháng {currentMonth} năm {currentYear}</p>
-                        <p className="mb-16">Giám đốc</p>
-                        <p className="italic">Bùi Xuân Đức</p>
-                    </div>
-                </div>
-
-                {/* Footer Notes */}
-                <div className="mt-10 text-[13px] italic leading-tight border-t border-transparent print:border-transparent pt-4">
-                    <p>Note :</p>
-                    <p>Thời gian bàn giao máy đối với màu mặc định theo nhà sản xuất (Hồng nhạt, Ghi xám, Xanh Dương) là 10 ngày làm việc sau khi nhận được giấy ĐNXM</p>
-                    <p>Thời gian bàn giao máy đối với màu cá nhân hóa theo thương hiệu là 15 ngày làm việc sau khi nhận được giấy ĐNXM</p>
-                    <p>Đối với các trường hợp máy Demo/Thuê/Ngoại giao cần điền thông tin ngày thu hồi máy</p>
-                </div>
+                )}
             </div>
 
             <style dangerouslySetInnerHTML={{

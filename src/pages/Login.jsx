@@ -87,7 +87,7 @@ const Login = () => {
             const { data: user, error: fetchError } = await supabase
                 .from('app_users')
                 .select('*')
-                .eq('username', username.trim())
+                .ilike('username', username.trim())
                 .single();
 
             if (fetchError || !user) {

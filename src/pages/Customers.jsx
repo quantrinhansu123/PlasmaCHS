@@ -330,7 +330,57 @@ const Customers = () => {
             const { data, count, error } = await query.range(from, to);
 
             if (error) throw error;
-            setCustomers(data || []);
+
+            // Enrich with actual cylinder/machine counts from real tables
+            const customerList = data || [];
+            if (customerList.length > 0 && filterType !== 'lead') {
+                try {
+                    const customerIds = customerList.map(c => c.id).filter(Boolean);
+                    const customerNames = customerList.map(c => c.name).filter(Boolean);
+
+                    // Fetch actual cylinder counts by customer_id
+                    const { data: cylData } = await supabase
+                        .from('cylinders')
+                        .select('customer_id')
+                        .in('customer_id', customerIds);
+
+                    // Fetch actual machine counts by customer_name (machines table uses customer_name)
+                    const { data: machData } = await supabase
+                        .from('machines')
+                        .select('customer_name')
+                        .in('customer_name', customerNames)
+                        .eq('status', 'thuộc khách hàng');
+
+                    // Build count maps
+                    const cylMap = {};
+                    (cylData || []).forEach(c => {
+                        cylMap[c.customer_id] = (cylMap[c.customer_id] || 0) + 1;
+                    });
+
+                    const machMap = {};
+                    (machData || []).forEach(m => {
+                        machMap[m.customer_name] = (machMap[m.customer_name] || 0) + 1;
+                    });
+
+                    // Merge actual counts into customer data
+                    customerList.forEach(customer => {
+                        const actualCyl = cylMap[customer.id] || 0;
+                        const actualMach = machMap[customer.name] || 0;
+                        // Use actual count if available, fallback to static column
+                        if (actualCyl > 0 || customer.current_cylinders) {
+                            customer.current_cylinders = actualCyl;
+                        }
+                        if (actualMach > 0 || customer.current_machines) {
+                            customer.current_machines = actualMach;
+                        }
+                    });
+                } catch (enrichError) {
+                    console.warn('Could not enrich customer asset counts:', enrichError);
+                    // Continue with static data if enrichment fails
+                }
+            }
+
+            setCustomers(customerList);
             setTotalRecords(count ?? 0);
             setSelectedIds([]);
         } catch (error) {
@@ -1401,7 +1451,7 @@ const Customers = () => {
                     />
 
 
-                    <div className="md:hidden flex-1 overflow-y-auto p-2.5 flex flex-col gap-2.5">
+                    <div className="md:hidden flex-1 overflow-y-auto p-2.5 pb-24 flex flex-col gap-2.5">
                         {isLoading ? (
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
                         ) : filteredCustomers.length === 0 ? (
@@ -1411,10 +1461,10 @@ const Customers = () => {
                                 const leadStt = filterType === 'lead' ? getLeadCreationStt(c.id) : null;
                                 return (
                                 <div key={c.id} className={clsx(
-                                    "rounded-xl border shadow-sm p-3 transition-all duration-200 relative",
+                                    "rounded-xl border shadow-sm p-3 transition-all duration-200 relative active:scale-[0.99]",
                                     selectedIds.includes(c.id)
                                         ? "border-primary bg-primary/[0.05] ring-1 ring-primary/20"
-                                        : "border-primary/15 bg-white",
+                                        : "border-slate-200 bg-white hover:border-primary/30 hover:shadow-md",
                                     filterType === 'lead' && c.status === 'Thành công' && "!bg-slate-50/80 !border-emerald-200 opacity-70"
                                 )}>
                                     <div className="space-y-2.5">

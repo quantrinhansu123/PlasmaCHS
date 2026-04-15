@@ -30,7 +30,6 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
         phone: '',
         address: '',
         legal_rep: '',
-        warehouse_id: warehouses && warehouses.length > 0 ? warehouses[0].id : '',
         care_by: '',
         agency_name: '',
         managed_by: '',
@@ -54,7 +53,6 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                 phone: customer.phone || '',
                 address: customer.address || '',
                 legal_rep: customer.legal_rep || '',
-                warehouse_id: customer.warehouse_id || (warehouses && warehouses.length > 0 ? warehouses[0].id : ''),
                 care_by: customer.care_by || '',
                 agency_name: customer.agency_name || '',
                 managed_by: customer.managed_by || '',
@@ -144,14 +142,6 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
             setFormData(prev => ({
                 ...prev,
                 care_assigned_at: value ? new Date(`${value}T12:00:00`).toISOString() : '',
-            }));
-        } else if (name === 'warehouse_id') {
-            const selectedWarehouse = warehouses?.find(w => w.id === value);
-            setFormData(prev => ({
-                ...prev,
-                warehouse_id: value,
-                legal_rep: selectedWarehouse?.manager_name || prev.legal_rep,
-                agency_name: selectedWarehouse?.branch_office || prev.agency_name
             }));
         } else if (name === 'managed_by') {
             const selectedStaff = staffList?.find(u => u.name === value);
@@ -486,18 +476,8 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                         className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white outline-none transition-all font-semibold text-slate-900"
                                     />
                                 </div>
-                                <div className="space-y-2">
-                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5 ml-1 text-slate-600"><Building className="w-4 h-4" /> Kho cung cấp</label>
-                                    <select
-                                        name="warehouse_id"
-                                        value={formData.warehouse_id}
-                                        onChange={handleChange}
-                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white outline-none transition-all font-semibold text-slate-900 cursor-pointer"
-                                    >
-                                        <option value="">-- Chọn Kho --</option>
-                                        {warehouses && warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                                    </select>
                                 </div>
+                                <div className="space-y-2">
                                 <div className="space-y-2">
                                     <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5 ml-1 text-slate-600"><Building className="w-4 h-4" /> Trạng thái *</label>
                                     <select

@@ -13,6 +13,7 @@ export const MODULE_PERMISSIONS = [
     { id: 'cylinder_recoveries', label: 'Thu hồi vỏ bình' },
     { id: 'machine_recoveries', label: 'Thu hồi máy' },
     { id: 'shipping_tasks', label: 'Nhiệm vụ giao hàng' },
+    { id: 'dnxm', label: 'Đề nghị xuất máy' },
     { id: 'users', label: 'Quản lý người dùng' },
     { id: 'permissions', label: 'Phân quyền chi tiết' },
     { id: 'reports', label: 'Báo cáo thống kê' },

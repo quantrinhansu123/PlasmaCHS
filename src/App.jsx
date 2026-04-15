@@ -52,10 +52,12 @@ import InventoryTransfer from './pages/InventoryTransfer';
 import ReturnOrders from './pages/ReturnOrders';
 import TransferList from './pages/TransferList';
 
-const moduleRoutes = ['/don-hang-kinh-doanh', '/quan-ly-thiet-bi', '/van-chuyen', '/thu-hoi', '/mua-hang-nha-cung-cap', '/kho', '/he-thong', '/vat-tu', '/thong-ke'];
+const moduleRoutes = ['/quan-ly-thiet-bi', '/van-chuyen', '/thu-hoi', '/mua-hang-nha-cung-cap', '/kho', '/he-thong', '/vat-tu', '/thong-ke'];
 
 const legacyRedirects = [
+  ['/don-hang-kinh-doanh', '/don-hang'],
   ['/hanh-chinh', '/don-hang-kinh-doanh'],
+
   ['/nhan-su', '/quan-ly-thiet-bi'],
   ['/marketing', '/van-chuyen'],
   ['/tai-chinh', '/thu-hoi'],

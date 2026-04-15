@@ -26,6 +26,7 @@ import OrderStatusUpdater from '../components/Orders/OrderStatusUpdater';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import OrderHistoryTimeline from '../components/Orders/OrderHistoryTimeline';
+import MobilePagination from '../components/layout/MobilePagination';
 
 // Delivery type constants
 const DELIVERY_TYPES = [
@@ -362,7 +363,7 @@ export default function DeliveryHistory() {
                     />
 
                 {/* Mobile Card List */}
-                <div className="md:hidden flex-1 overflow-y-auto p-3 flex flex-col gap-3">
+                <div className="md:hidden flex-1 overflow-y-auto p-3 pb-24 flex flex-col gap-3">
                     <div className="space-y-3">
                         {loading ? (
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
@@ -373,7 +374,7 @@ export default function DeliveryHistory() {
                                 const typeInfo = getTypeInfo(r.type);
                                 const TypeIcon = typeInfo.icon;
                                 return (
-                                <div key={`${r.type}-${r.id}`} className="rounded-xl border border-primary/15 bg-white shadow-sm p-3 transition-all duration-200">
+                                <div key={`${r.type}-${r.id}`} className="rounded-xl border border-slate-200 bg-white shadow-sm p-3 transition-all duration-200 active:scale-[0.99] hover:shadow-md hover:border-primary/30">
                                     <div className="flex items-start justify-between gap-2 mb-2">
                                         <div className="flex gap-2.5 min-w-0">
                                             <div>
@@ -452,6 +453,17 @@ export default function DeliveryHistory() {
                             })
                         )}
                     </div>
+
+                    {/* Mobile Pagination */}
+                    {!loading && (
+                        <MobilePagination
+                            currentPage={currentPage}
+                            setCurrentPage={setCurrentPage}
+                            pageSize={pageSize}
+                            setPageSize={setPageSize}
+                            totalRecords={filteredRecords.length}
+                        />
+                    )}
                 </div>
 
                 {/* Desktop View */}

@@ -925,7 +925,7 @@ const Orders = () => {
     };
 
     return (
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5">
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5 pb-20 md:pb-0">
             <PageViewSwitcher
                 activeView={activeView}
                 setActiveView={setActiveView}

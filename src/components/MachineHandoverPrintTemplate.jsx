@@ -7,12 +7,12 @@ const getProductLabel = (id) => PRODUCT_TYPES.find(p => p.id === id)?.label || i
 const S = {
     page: {
         fontFamily: '"Times New Roman", Times, serif',
-        fontSize: '11pt',
-        lineHeight: '1.3',
+        fontSize: '12pt',
+        lineHeight: '1.5',
         color: '#000',
         background: '#fff',
         width: '100%',
-        padding: '20mm',
+        padding: '15mm 20mm',
         boxSizing: 'border-box',
     },
     headerCompany: {
@@ -63,11 +63,13 @@ const S = {
         paddingLeft: '8mm',
     },
     partyLabel: {
-        whiteSpace: 'nowrap',
+        display: 'inline-block',
+        minWidth: '35mm',
         fontWeight: 'normal',
     },
     partyValue: {
         flex: '1',
+        borderBottom: '1px dotted #000',
         padding: '0 4px',
         minHeight: '20px',
         fontWeight: 'normal',
@@ -281,9 +283,9 @@ const HandoverItem = ({ order }) => {
                     <tr>
                         <th style={{ ...S.th, width: '6%' }}>TT</th>
                         <th style={{ ...S.th, width: '34%' }}>Nội dung</th>
-                        <th style={{ ...S.th, width: '12%' }}>Số lượng</th>
-                        <th style={{ ...S.th, width: '24%' }}>Tình trạng</th>
-                        <th style={{ ...S.th, width: '24%' }}>Hình ảnh mã máy</th>
+                        <th style={{ ...S.th, width: '15%' }}>SL Yêu cầu</th>
+                        <th style={{ ...S.th, width: '15%' }}>SL Phê duyệt</th>
+                        <th style={{ ...S.th, width: '30%' }}>Mã máy (Serial)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -292,7 +294,7 @@ const HandoverItem = ({ order }) => {
                             <td style={S.td}>{row.tt}</td>
                             <td style={S.tdLeft}>{row.content}</td>
                             <td style={S.td}>{row.qty !== '' ? String(row.qty).padStart(2, '0') : ''}</td>
-                            <td style={S.tdLeft}>{row.status}</td>
+                            <td style={S.td}>{order.quantityApproved ? String(order.quantityApproved).padStart(2, '0') : ''}</td>
                             <td style={S.td}>{row.machineCode}</td>
                         </tr>
                     ))}

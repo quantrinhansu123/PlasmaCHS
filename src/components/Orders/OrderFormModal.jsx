@@ -79,7 +79,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
 
     const defaultState = {
         orderCode: getNewOrderCode(),
-        customerCategory: 'TM',
+        customerCategory: 'ALL',
         warehouse: '',
         customerId: '',
         orderedBy: '',
@@ -260,8 +260,9 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         try {
             const { data, error } = await supabase
                 .from('customers')
-                .select('*')
-                .order('name', { ascending: true });
+                .select('id, name, representative, phone, address, category')
+                .order('name', { ascending: true })
+                .limit(10000);
 
             if (error && error.code !== '42P01') throw error;
 
@@ -442,7 +443,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         setFormData(prev => ({
             ...prev,
             customerId: customer.id,
-            recipientName: customer.recipient || '',
+            recipientName: customer.recipient || customer.legal_rep || '',
             recipientAddress: customer.address || '',
             recipientPhone: customer.phone || '',
             customerCategory: customer.category || 'TM'
@@ -452,12 +453,13 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
     };
 
     const filteredCustomers = customers.filter(c => {
-        const categoryMatch = !formData.customerCategory || formData.customerCategory === 'ALL' || c.category === formData.customerCategory;
+        const searchLow = customerSearchTerm.toLowerCase();
         const searchMatch = !customerSearchTerm ||
-            c.name?.toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
+            c.name?.toLowerCase().includes(searchLow) ||
             (c.phone && c.phone.includes(customerSearchTerm)) ||
-            (c.recipient && c.recipient.toLowerCase().includes(customerSearchTerm.toLowerCase()));
-        return categoryMatch && searchMatch;
+            (c.representative && c.representative.toLowerCase().includes(searchLow)) ||
+            (c.recipient && c.recipient.toLowerCase().includes(searchLow));
+        return searchMatch;
     });
 
     const addItem = () => {
@@ -614,8 +616,9 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
     
     // Total calculation for dynamic items
     const calculatedTotalAmount = formData.items.reduce((sum, item, idx) => {
-        const qty = item.quantity || 0;
-        const price = item.unitPrice || 0;
+        // Ensure strictly numbers to avoid calculation bugs
+        const qty = Number(item.quantity) || 0;
+        const price = Number(item.unitPrice) || 0;
         // Apply promo discount to first item if it's a cylinder (legacy compatibility)
         if (idx === 0 && freeCylinders > 0 && item.productType?.startsWith('BINH')) {
             return sum + (Math.max(0, qty - freeCylinders) * price);
@@ -641,6 +644,14 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
 
         if (!phoneRegex.test(formData.recipientPhone.replace(/\s/g, ''))) {
             setErrorMsg('Số điện thoại không đúng định dạng (VD: 0987xxxxxx, 10 chữ số).');
+            return;
+        }
+
+        // Block if any item has unitPrice = 0
+        const zeroPrice = validItems.filter(it => !it.unitPrice || Number(it.unitPrice) === 0);
+        if (zeroPrice.length > 0) {
+            const names = zeroPrice.map(it => it.productType || 'Sản phẩm').join(', ');
+            setErrorMsg(`⚠️ Vui lòng nhập đơn giá cho: ${names}. Đơn giá không được để trống hoặc bằng 0đ.`);
             return;
         }
 
@@ -702,6 +713,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 customer_category: formData.customerCategory,
                 warehouse: formData.warehouse,
                 customer_name: customerName,
+                customer_id: formData.customerId || null,
                 recipient_name: formData.recipientName,
                 recipient_address: formData.recipientAddress,
                 recipient_phone: formData.recipientPhone,
@@ -1211,9 +1223,26 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                 </div>
 
                                 <div className="space-y-1.5 pt-4 border-t border-slate-100">
-                                    <label className="text-[14px] font-bold text-primary flex items-center justify-between">
-                                        <span>Tổng giá trị đơn hàng (VNĐ)</span>
-                                        <span className="text-[20px] font-black tracking-tight text-primary shadow-sm px-2 bg-primary/5 rounded-lg">{formatNumber(calculatedTotalAmount)}</span>
+                                    <label className="text-[14px] font-bold text-primary flex flex-col gap-1">
+                                        <div className="flex items-center justify-between">
+                                            <span>Tổng giá trị đơn hàng (VNĐ)</span>
+                                            <span className="text-[20px] font-black tracking-tight text-primary shadow-sm px-2 bg-primary/5 rounded-lg">{formatNumber(calculatedTotalAmount)}</span>
+                                        </div>
+                                        {formData.items.filter(it => it.quantity > 0).length > 0 && (
+                                            <div className="text-[11px] font-semibold text-slate-400 text-right">
+                                                {formData.items.filter(it => it.quantity > 0).map((it, i) => (
+                                                    <span key={i}>
+                                                        {i > 0 && ' + '}
+                                                        {formatNumber(it.quantity)} × {formatNumber(it.unitPrice)}đ
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
+                                        {calculatedTotalAmount === 0 && formData.items.some(it => it.quantity > 0) && (
+                                            <div className="text-[11px] font-bold text-amber-500 text-right flex items-center justify-end gap-1">
+                                                ⚠️ Tổng tiền = 0đ. Kiểm tra lại đơn giá!
+                                            </div>
+                                        )}
                                     </label>
                                     <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
                                         <div className="h-full bg-primary w-full opacity-30"></div>

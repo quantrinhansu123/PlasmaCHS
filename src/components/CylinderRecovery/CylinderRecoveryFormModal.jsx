@@ -45,6 +45,9 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
     const [uploadingPhoto, setUploadingPhoto] = useState(false);
     const photoInputRef = useRef(null);
 
+    const [masterBarcode, setMasterBarcode] = useState('');
+    const masterInputRef = useRef(null);
+
     const [formData, setFormData] = useState({
         recovery_code: '',
         recovery_date: new Date().toISOString().split('T')[0],
@@ -213,39 +216,104 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
         }
     };
 
-    const handleScanSuccess = useCallback(async (decodedText, time, specificItemId) => {
-        if (scannerType === 'order') {
-            await handleOrderScanSuccess(decodedText);
-            return;
-        }
-
-        const safeTime = time || new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-
-        // If specificItemId is provided, update that row
-        if (specificItemId) {
-            updateItem(specificItemId, 'serial_number', decodedText);
-            setIsScannerOpen(false);
-            return;
-        }
-
-        const currentItems = itemsRef.current;
-        if (currentItems.some(i => i.serial_number === decodedText)) {
-            toast.info(`Mã ${decodedText} đã được quét!`);
-            return;
-        }
-
-        // Add item first with loading state
+    const addNewRecoveredItem = useCallback(async (serial, scanTime) => {
         const newItemId = crypto.randomUUID();
         setItems(prev => [...prev, {
             _id: newItemId,
-            serial_number: decodedText,
+            serial_number: serial,
             condition: 'tot',
             note: '',
-            scan_time: safeTime,
+            scan_time: scanTime,
             isValidating: true,
             isValid: null,
             error: null
         }]);
+
+        try {
+            const currentFormData = formDataRef.current;
+            const currentCustomers = customersRef.current;
+
+            const { data: cylData } = await supabase
+                .from('cylinders')
+                .select('customer_name')
+                .eq('serial_number', serial)
+                .maybeSingle();
+
+            if (!cylData) {
+                setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: 'Không tồn tại' } : i));
+                toast.error(`Mã bình ${serial} không tồn tại!`);
+                return;
+            }
+
+            if (!cylData.customer_name) {
+                setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: 'Đang ở kho' } : i));
+                toast.warn(`Bình ${serial} đang lưu tại kho, không cần thu hồi.`);
+                return;
+            }
+
+            const matchedCustomer = currentCustomers.find(c => c.name === cylData.customer_name);
+            if (!matchedCustomer) {
+                setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: `Của: ${cylData.customer_name}` } : i));
+                return;
+            }
+
+            // Successfully validated
+            setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: true, error: null } : i));
+
+            // Auto-detect customer if not set
+            if (!currentFormData.customer_id) {
+                setFormData(prev => ({ ...prev, customer_id: matchedCustomer.id }));
+            }
+        } catch (err) {
+            console.error('Validation failed:', err);
+            setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: 'Lỗi' } : i));
+        }
+    }, [setItems, setFormData]);
+
+    const handleScanSuccess = useCallback(async (decodedText, time, specificItemId) => {
+        const safeTime = time || new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+        const normalizedText = decodedText.trim().toUpperCase();
+
+        // Check if it's a known cylinder serial first (PRIORITY Fix)
+        const { data: cylinderData } = await supabase
+            .from('cylinders')
+            .select('serial_number')
+            .eq('serial_number', normalizedText)
+            .maybeSingle();
+
+        if (cylinderData) {
+            if (specificItemId) {
+                updateItem(specificItemId, 'serial_number', normalizedText);
+            } else {
+                const currentItems = itemsRef.current;
+                if (currentItems.some(i => i.serial_number === normalizedText)) {
+                    toast.info(`Mã bình ${normalizedText} đã được quét!`);
+                } else {
+                    addNewRecoveredItem(normalizedText, safeTime);
+                }
+            }
+            setIsScannerOpen(false);
+            return;
+        }
+
+        // Second priority: Check if it's an order code pattern
+        const isOrderCode = /^(DN|HD|PL|TH|DNXM)-/.test(normalizedText);
+        if (isOrderCode) {
+            await handleOrderScanSuccess(normalizedText);
+            setIsScannerOpen(false);
+            return;
+        }
+
+        // Final fallback: just add as Serial Number if no order code match
+        if (specificItemId) {
+            updateItem(specificItemId, 'serial_number', normalizedText);
+        } else {
+            addNewRecoveredItem(normalizedText, safeTime);
+        }
+        setIsScannerOpen(false);
+    }, [addNewRecoveredItem, handleOrderScanSuccess, updateItem]);
+
+
 
         const validateCylinder = async () => {
             const currentFormData = formDataRef.current;
@@ -264,58 +332,7 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                     return;
                 }
 
-                if (!cylData.customer_name) {
-                    setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: 'Đang ở kho' } : i));
-                    toast.warning(`Bình ${decodedText} đang ở kho (chưa giao cho khách).`);
-                    return;
-                }
 
-                const matchedCustomer = currentCustomers.find(c => c.name === cylData.customer_name);
-                if (!matchedCustomer) {
-                    setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: `Của KH: ${cylData.customer_name}` } : i));
-                    return;
-                }
-
-                // Scenario A: No customer selected
-                if (!currentFormData.customer_id) {
-                    setFormData(prev => ({ ...prev, customer_id: matchedCustomer.id }));
-                    setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: true, error: null } : i));
-                    toast.success(`Đã tự động chọn KH: ${matchedCustomer.name}`);
-                }
-                // Scenario B: Customer already selected
-                else if (currentFormData.customer_id === matchedCustomer.id) {
-                    setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: true, error: null } : i));
-                }
-                // Scenario C: Mismatch
-                else {
-                    setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: `Của: ${matchedCustomer.name}` } : i));
-                    toast.error(`Bình ${decodedText} thuộc về KH "${matchedCustomer.name}", không khớp với KH đang chọn!`);
-                }
-
-                // Auto-link order if valid
-                if (matchedCustomer && (!currentFormData.order_id || currentFormData.customer_id !== matchedCustomer.id)) {
-                    const { data: orderData } = await supabase
-                        .from('orders')
-                        .select('id, order_code')
-                        .eq('customer_name', cylData.customer_name)
-                        .contains('assigned_cylinders', [decodedText])
-                        .order('created_at', { ascending: false })
-                        .limit(1)
-                        .maybeSingle();
-
-                    if (orderData) {
-                        setFormData(prev => ({ ...prev, order_id: orderData.id }));
-                        toast.success(`Đã tự động quét mã QR đơn hàng: ĐH ${orderData.order_code}`);
-                    }
-                }
-            } catch (err) {
-                console.error('Validation failed:', err);
-                setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: 'Lỗi kiểm tra' } : i));
-            }
-        };
-
-        validateCylinder();
-    }, [scannerType]);
 
     const handleOrderScanSuccess = async (orderCode) => {
         setIsScannerOpen(false);
@@ -701,6 +718,63 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                         )}
 
                         <form id="recoveryForm" onSubmit={handleSubmit} className="space-y-6">
+                            {/* Master Scanner / Barcode Input */}
+                            {!isReadOnly && (
+                                <div className="rounded-3xl border-2 border-primary/30 bg-primary/5 p-4 sm:p-5 space-y-3 shadow-sm animate-in zoom-in-95 duration-300">
+                                    <label className="flex items-center gap-2 text-[15px] font-black text-primary uppercase tracking-tight">
+                                        <ScanBarcode className="w-5 h-5" />
+                                        Quét hoặc Nhập Barcode (Bình hoặc Đơn)
+                                    </label>
+                                    <div className="flex gap-2">
+                                        <div className="relative flex-1">
+                                            <input
+                                                ref={masterInputRef}
+                                                autoFocus
+                                                value={masterBarcode}
+                                                onChange={(e) => setMasterBarcode(e.target.value)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        e.preventDefault();
+                                                        if (masterBarcode.trim()) {
+                                                            handleScanSuccess(masterBarcode.trim());
+                                                            setMasterBarcode('');
+                                                        }
+                                                    }
+                                                }}
+                                                placeholder="Quét mã vỏ bình hoặc mã đơn hàng..."
+                                                className="w-full h-14 pl-5 pr-12 bg-white border-2 border-primary/20 rounded-2xl text-[18px] font-black text-slate-800 placeholder:text-slate-300 focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all outline-none"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (masterBarcode.trim()) {
+                                                        handleScanSuccess(masterBarcode.trim());
+                                                        setMasterBarcode('');
+                                                    }
+                                                }}
+                                                className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-primary bg-primary/5 rounded-lg hover:bg-primary/10 transition-colors"
+                                            >
+                                                <Plus size={20} strokeWidth={3} />
+                                            </button>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setScannerType('master');
+                                                setIsScannerOpen(true);
+                                            }}
+                                            className="h-14 w-14 sm:w-auto sm:px-5 flex items-center justify-center gap-2 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 active:scale-95 transition-all"
+                                        >
+                                            <Camera size={24} />
+                                            <span className="hidden sm:inline uppercase">Mở Camera</span>
+                                        </button>
+                                    </div>
+                                    <p className="text-[11px] text-slate-500 font-bold italic">
+                                        * Hệ thống sẽ tự động phân loại: nếu là mã bình (Serial) sẽ thêm vào danh sách, nếu là mã đơn sẽ tự chọn KH/Đơn.
+                                    </p>
+                                </div>
+                            )}
+
                             {/* Section 1: Info */}
                             <div className="rounded-3xl border border-primary/20 bg-white p-5 sm:p-6 space-y-5 shadow-sm">
                                 <div className="flex items-center gap-2.5 pb-3 border-b border-primary/10">
