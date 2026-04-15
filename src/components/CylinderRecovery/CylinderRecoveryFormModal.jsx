@@ -270,6 +270,43 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
         }
     }, [setItems, setFormData]);
 
+    const handleOrderScanSuccess = useCallback(async (orderCode) => {
+        setIsScannerOpen(false);
+
+        try {
+            const { data: orderData, error } = await supabase
+                .from('orders')
+                .select('id, order_code, customer_name')
+                .eq('order_code', orderCode)
+                .maybeSingle();
+
+            if (error) throw error;
+            if (!orderData) {
+                toast.error(`Không tìm thấy đơn hàng "${orderCode}"`);
+                return;
+            }
+
+            // Find customer by name
+            const currentCustomers = customersRef.current;
+            const matchedCustomer = currentCustomers.find(c => c.name === orderData.customer_name);
+
+            if (matchedCustomer) {
+                setFormData(prev => ({
+                    ...prev,
+                    customer_id: matchedCustomer.id,
+                    order_id: orderData.id
+                }));
+                toast.success(`Đã quét được đơn hàng ${orderCode} của KH ${orderData.customer_name}`);
+            } else {
+                setFormData(prev => ({ ...prev, order_id: orderData.id }));
+                toast.success(`Đã quét được đơn hàng ${orderCode}`);
+            }
+        } catch (err) {
+            console.error(err);
+            toast.error('Lỗi khi quét đơn hàng: ' + err.message);
+        }
+    }, [setFormData, setIsScannerOpen]);
+
     const handleScanSuccess = useCallback(async (decodedText, time, specificItemId) => {
         const safeTime = time || new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
         const normalizedText = decodedText.trim().toUpperCase();
@@ -312,64 +349,6 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
         }
         setIsScannerOpen(false);
     }, [addNewRecoveredItem, handleOrderScanSuccess, updateItem]);
-
-
-
-        const validateCylinder = async () => {
-            const currentFormData = formDataRef.current;
-            const currentCustomers = customersRef.current;
-
-            try {
-                const { data: cylData } = await supabase
-                    .from('cylinders')
-                    .select('customer_name')
-                    .eq('serial_number', decodedText)
-                    .maybeSingle();
-
-                if (!cylData) {
-                    setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: 'Không tồn tại' } : i));
-                    toast.error(`Mã bình ${decodedText} không tồn tại!`);
-                    return;
-                }
-
-
-
-    const handleOrderScanSuccess = async (orderCode) => {
-        setIsScannerOpen(false);
-
-        try {
-            const { data: orderData, error } = await supabase
-                .from('orders')
-                .select('id, order_code, customer_name')
-                .eq('order_code', orderCode)
-                .maybeSingle();
-
-            if (error) throw error;
-            if (!orderData) {
-                toast.error(`Không tìm thấy đơn hàng "${orderCode}"`);
-                return;
-            }
-
-            // Find customer by name
-            const currentCustomers = customersRef.current;
-            const matchedCustomer = currentCustomers.find(c => c.name === orderData.customer_name);
-
-            if (matchedCustomer) {
-                setFormData(prev => ({
-                    ...prev,
-                    customer_id: matchedCustomer.id,
-                    order_id: orderData.id
-                }));
-                toast.success(`Đã quét được đơn hàng ${orderCode} của KH ${orderData.customer_name}`);
-            } else {
-                setFormData(prev => ({ ...prev, order_id: orderData.id }));
-                toast.success(`Đã quét được đơn hàng ${orderCode}`);
-            }
-        } catch (err) {
-            console.error(err);
-            toast.error('Lỗi khi quét đơn hàng: ' + err.message);
-        }
-    };
 
     const handlePhotoCapture = async (e) => {
         const file = e.target.files[0];
