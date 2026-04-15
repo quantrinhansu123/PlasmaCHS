@@ -338,41 +338,36 @@ const Customers = () => {
                     const customerIds = customerList.map(c => c.id).filter(Boolean);
                     const customerNames = customerList.map(c => c.name).filter(Boolean);
 
-                    // Fetch actual cylinder counts by customer_id
-                    const { data: cylData } = await supabase
-                        .from('cylinders')
-                        .select('customer_id')
-                        .in('customer_id', customerIds);
+                    // Fetch actual cylinder counts by customer_id AND customer_name (fallback for legacy data)
+                    const [cylByIdRes, cylByNameRes, machRes] = await Promise.all([
+                        supabase.from('cylinders').select('customer_id').in('customer_id', customerIds),
+                        supabase.from('cylinders').select('customer_name').in('customer_name', customerNames).is('customer_id', null),
+                        supabase.from('machines').select('customer_name').in('customer_name', customerNames).eq('status', 'thuộc khách hàng'),
+                    ]);
 
-                    // Fetch actual machine counts by customer_name (machines table uses customer_name)
-                    const { data: machData } = await supabase
-                        .from('machines')
-                        .select('customer_name')
-                        .in('customer_name', customerNames)
-                        .eq('status', 'thuộc khách hàng');
+                    // Build cylinder count map by id (authoritative)
+                    const cylMapById = {};
+                    (cylByIdRes.data || []).forEach(c => {
+                        cylMapById[c.customer_id] = (cylMapById[c.customer_id] || 0) + 1;
+                    });
 
-                    // Build count maps
-                    const cylMap = {};
-                    (cylData || []).forEach(c => {
-                        cylMap[c.customer_id] = (cylMap[c.customer_id] || 0) + 1;
+                    // Fallback: cylinders counted by name (no customer_id)
+                    const cylMapByName = {};
+                    (cylByNameRes.data || []).forEach(c => {
+                        if (c.customer_name) cylMapByName[c.customer_name] = (cylMapByName[c.customer_name] || 0) + 1;
                     });
 
                     const machMap = {};
-                    (machData || []).forEach(m => {
+                    (machRes.data || []).forEach(m => {
                         machMap[m.customer_name] = (machMap[m.customer_name] || 0) + 1;
                     });
 
-                    // Merge actual counts into customer data
+                    // Merge actual counts into customer data — always use live count
                     customerList.forEach(customer => {
-                        const actualCyl = cylMap[customer.id] || 0;
-                        const actualMach = machMap[customer.name] || 0;
-                        // Use actual count if available, fallback to static column
-                        if (actualCyl > 0 || customer.current_cylinders) {
-                            customer.current_cylinders = actualCyl;
-                        }
-                        if (actualMach > 0 || customer.current_machines) {
-                            customer.current_machines = actualMach;
-                        }
+                        const cylById = cylMapById[customer.id] || 0;
+                        const cylByName = cylMapByName[customer.name] || 0;
+                        customer.current_cylinders = cylById + cylByName;
+                        customer.current_machines = machMap[customer.name] || 0;
                     });
                 } catch (enrichError) {
                     console.warn('Could not enrich customer asset counts:', enrichError);
@@ -1339,7 +1334,7 @@ const Customers = () => {
             />
 
             {activeView === 'list' && (
-                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full">
+                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full mb-2 md:mb-0">
                     <MobilePageHeader
                         searchTerm={searchTerm}
                         setSearchTerm={setSearchTerm}
@@ -1461,171 +1456,180 @@ const Customers = () => {
                                 const leadStt = filterType === 'lead' ? getLeadCreationStt(c.id) : null;
                                 return (
                                 <div key={c.id} className={clsx(
-                                    "rounded-xl border shadow-sm p-3 transition-all duration-200 relative active:scale-[0.99]",
+                                    "rounded-2xl border-2 shadow-sm transition-all duration-300 relative active:scale-[0.98] overflow-hidden group shrink-0",
                                     selectedIds.includes(c.id)
-                                        ? "border-primary bg-primary/[0.05] ring-1 ring-primary/20"
-                                        : "border-slate-200 bg-white hover:border-primary/30 hover:shadow-md",
-                                    filterType === 'lead' && c.status === 'Thành công' && "!bg-slate-50/80 !border-emerald-200 opacity-70"
+                                        ? "border-primary bg-primary/[0.03] ring-4 ring-primary/5"
+                                        : "border-slate-100 bg-white hover:border-primary/20 hover:shadow-lg",
+                                    filterType === 'lead' && c.status === 'Thành công' && "!bg-slate-50/90 !border-emerald-100 opacity-80"
                                 )}>
-                                    <div className="space-y-2.5">
-                                    {filterType === 'lead' && c.status === 'Thành công' && (
-                                        <div className="absolute top-0 right-0 px-2.5 py-0.5 bg-emerald-500 text-white text-[9px] font-bold rounded-bl-xl shadow-sm z-10 flex items-center gap-1">
-                                            <ClipboardCheck size={10} /> ĐÃ THÀNH CÔNG
-                                        </div>
-                                    )}
-                                    <div className="flex items-start justify-between gap-2">
-                                        <div className="flex gap-3">
-                                            <div className="pt-1">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selectedIds.includes(c.id)}
-                                                    onChange={(e) => {
-                                                        e.stopPropagation();
-                                                        toggleSelectOne(c.id);
-                                                    }}
-                                                    className="w-5 h-5 rounded-md border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
-                                                />
-                                            </div>
-                                            <div>
-                                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider tabular-nums">
-                                                    {filterType === 'lead'
-                                                        ? (leadStt != null ? `#${leadStt}` : '—')
-                                                        : c.code}
-                                                </p>
-                                                <h3 className="text-[14px] font-bold text-foreground leading-tight mt-0.5">{c.name}</h3>
-                                            </div>
-                                        </div>
-                                        <span className={clsx(getCategoryBadgeClass(c.category), 'whitespace-nowrap shrink-0 text-[10px] px-2.5 py-1')}>
-                                            {getLabel(CUSTOMER_CATEGORIES, c.category)}
-                                        </span>
-                                    </div>
+                                    {/* Category Accent Stripe */}
+                                    <div className={clsx(
+                                        "absolute top-0 left-0 w-1.5 h-full",
+                                        c.category === 'BV' && 'bg-blue-500',
+                                        c.category === 'TM' && 'bg-pink-500',
+                                        c.category === 'PK' && 'bg-emerald-500',
+                                        c.category === 'NG' && 'bg-violet-500',
+                                        c.category === 'GD' && 'bg-indigo-500',
+                                        c.category === 'SP' && 'bg-amber-500',
+                                        !c.category && 'bg-slate-400'
+                                    )} />
 
-                                    <div className="grid grid-cols-2 gap-2 rounded-xl bg-muted/10 border border-border/60 p-2">
-                                        <div className="min-w-0">
-                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                                                <Phone className="w-3 h-3 text-blue-600" /> Điện thoại
-                                            </p>
-                                            <p className="text-[11px] font-bold text-foreground truncate mt-0.5">{c.phone || '—'}</p>
+                                    <div className="pt-4 pb-4 pr-4 pl-6 space-y-4">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="flex gap-3">
+                                                <div className="pt-0.5">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedIds.includes(c.id)}
+                                                        onChange={(e) => {
+                                                            e.stopPropagation();
+                                                            toggleSelectOne(c.id);
+                                                        }}
+                                                        className="w-5 h-5 rounded-lg border-slate-300 text-primary focus:ring-primary/20 transition-all cursor-pointer shadow-sm"
+                                                    />
+                                                </div>
+                                                <div className="min-w-0 pr-10">
+                                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest tabular-nums mb-0.5">
+                                                        {filterType === 'lead'
+                                                            ? (leadStt != null ? `#${String(leadStt).padStart(3, '0')}` : '—')
+                                                            : c.code}
+                                                    </p>
+                                                    <h3 className="text-[16px] font-extrabold text-slate-900 leading-tight group-hover:text-primary transition-colors">{c.name}</h3>
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="absolute top-4 right-4 flex flex-col items-end gap-2">
+                                                <span className={clsx(getCategoryBadgeClass(c.category), 'whitespace-nowrap px-3 py-1 ring-2 ring-white shadow-sm')}>
+                                                    {getLabel(CUSTOMER_CATEGORIES, c.category)}
+                                                </span>
+                                                {filterType === 'lead' && c.status === 'Thành công' && (
+                                                    <div className="px-2 py-0.5 bg-emerald-500 text-white text-[9px] font-bold rounded-lg shadow-sm flex items-center gap-1 animate-in zoom-in-95">
+                                                        <ClipboardCheck size={10} /> THÀNH CÔNG
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
-                                        <div className="min-w-0">
-                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                                                <User className="w-3 h-3 text-emerald-600" /> NV phụ trách
-                                            </p>
-                                            <p className="text-[11px] font-bold text-foreground truncate mt-0.5">{c.managed_by || '—'}</p>
-                                        </div>
-                                        <div className="col-span-2 min-w-0">
-                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                                                <MapPin className="w-3 h-3 text-amber-600" /> Địa chỉ
-                                            </p>
-                                            <p className="text-[11px] font-bold text-foreground truncate mt-0.5">{c.address || '—'}</p>
-                                        </div>
-                                        {c.invoice_email && (
-                                            <div className="col-span-2 min-w-0">
-                                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                                                    <Mail className="w-3 h-3 text-indigo-600" /> Email hóa đơn
+
+                                        <div className="grid grid-cols-2 gap-y-3 gap-x-4">
+                                            <div className="min-w-0">
+                                                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider flex items-center gap-1.5 mb-1">
+                                                    <Phone className="w-3.5 h-3.5 text-blue-500" /> Điện thoại
                                                 </p>
-                                                <p className="text-[11px] font-medium text-primary/80 truncate mt-0.5">{c.invoice_email}</p>
+                                                <a href={`tel:${c.phone}`} className="text-[14px] font-bold text-blue-700 active:text-blue-900 underline decoration-blue-200 underline-offset-2">{c.phone || '—'}</a>
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider flex items-center gap-1.5 mb-1">
+                                                    <User className="w-3.5 h-3.5 text-emerald-500" /> Nhân viên
+                                                </p>
+                                                <p className="text-[13px] font-black text-slate-700 truncate">{c.managed_by || '—'}</p>
+                                            </div>
+                                            <div className="col-span-2">
+                                                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider flex items-center gap-1.5 mb-1">
+                                                    <MapPin className="w-3.5 h-3.5 text-rose-500" /> Địa chỉ giao nhận
+                                                </p>
+                                                <p className="text-[13px] font-semibold text-slate-600 leading-snug line-clamp-2">{c.address || '—'}</p>
+                                            </div>
+                                        </div>
+
+                                        {filterType !== 'lead' && (
+                                            <div className="grid grid-cols-3 gap-3 bg-slate-50/80 rounded-2xl p-3 border border-slate-100">
+                                                <div className="text-center border-r border-slate-200">
+                                                    <p className="text-[9px] uppercase font-black text-slate-500 tracking-tighter mb-0.5">Vỏ bình</p>
+                                                    <p className="text-[18px] font-black text-primary leading-none tabular-nums">{formatNumber(c.current_cylinders || 0)}</p>
+                                                </div>
+                                                <div className="text-center border-r border-slate-200">
+                                                    <p className="text-[9px] uppercase font-black text-slate-500 tracking-tighter mb-0.5">Máy móc</p>
+                                                    <p className="text-[18px] font-black text-indigo-600 leading-none tabular-nums">{formatNumber(c.current_machines || 0)}</p>
+                                                </div>
+                                                <div className="text-center">
+                                                    <p className="text-[9px] uppercase font-black text-slate-500 tracking-tighter mb-0.5">Kinh doanh</p>
+                                                    <p className="text-[13px] font-bold text-slate-700 truncate px-1">{c.care_by || '—'}</p>
+                                                </div>
                                             </div>
                                         )}
-                                    </div>
 
-                                    {filterType !== 'lead' && (
-                                        <div className="grid grid-cols-3 gap-2">
-                                            <div className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5">
-                                                <p className="text-[9px] uppercase tracking-wider text-amber-700 font-bold">Bình</p>
-                                                <p className="text-[12px] font-black text-amber-800 tabular-nums">{formatNumber(c.current_cylinders || 0)}</p>
-                                            </div>
-                                            <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1.5">
-                                                <p className="text-[9px] uppercase tracking-wider text-indigo-700 font-bold">Máy</p>
-                                                <p className="text-[12px] font-black text-indigo-800 tabular-nums">{formatNumber(c.current_machines || 0)}</p>
-                                            </div>
-                                            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5">
-                                                <p className="text-[9px] uppercase tracking-wider text-emerald-700 font-bold">Chăm sóc</p>
-                                                <p className="text-[11px] font-black text-emerald-800 truncate">{c.care_by || '—'}</p>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    <div className="flex items-center justify-end pt-2 border-t border-border/70">
-                                        <div className="flex items-center gap-1.5">
-                                            {c.status === 'Thành công' && (
+                                        <div className="flex items-center justify-between pt-3 border-t border-slate-100 gap-2">
+                                            <div className="flex items-center gap-2">
                                                 <button
                                                     type="button"
-                                                    onClick={() => navigate(`/de-nghi-xuat-may/tao?phone=${c.phone || ''}`)}
-                                                    className="p-2 text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg shrink-0 active:scale-90 transition-all"
-                                                    title="Mẫu đề nghị máy"
+                                                    onClick={() => handleViewCustomer(c)}
+                                                    className="h-10 px-4 rounded-xl bg-slate-100 text-slate-600 font-bold text-[13px] active:scale-95 transition-all flex items-center gap-2"
                                                 >
-                                                    <FilePlus size={16} />
+                                                    <Eye size={16} /> Chi tiết
                                                 </button>
-                                            )}
-                                            <button
-                                                type="button"
-                                                onClick={() =>
-                                                    handleStatusChange(
-                                                        c.id,
-                                                        c.status === 'Thành công' ? 'Chưa thành công' : 'Thành công'
-                                                    )
-                                                }
-                                                className={clsx(
-                                                    'p-2 rounded-lg transition-all border',
-                                                    c.status === 'Thành công'
-                                                        ? 'bg-emerald-50 border-emerald-100 text-emerald-600'
-                                                        : 'bg-slate-50 border-slate-200 text-slate-400'
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleEditCustomer(c)}
+                                                    className="h-10 px-3 rounded-xl bg-amber-50 text-amber-600 border border-amber-100 flex items-center gap-1.5 active:scale-95 transition-all shadow-sm text-[13px] font-bold"
+                                                >
+                                                    <Edit size={14} /> Sửa
+                                                </button>
+                                            </div>
+                                            
+                                            <div className="flex items-center gap-2">
+                                                {filterType === 'lead' && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleStatusChange(c.id, c.status === 'Thành công' ? 'Chưa thành công' : 'Thành công')}
+                                                        className={clsx(
+                                                            "h-10 px-4 rounded-xl font-bold text-[13px] active:scale-95 transition-all border flex items-center gap-2 shadow-sm",
+                                                            c.status === 'Thành công'
+                                                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                                                : "bg-primary text-white border-primary shadow-primary/20"
+                                                        )}
+                                                    >
+                                                        {c.status === 'Thành công' ? <ClipboardCheck size={16} /> : <Plus size={16} />}
+                                                        {c.status === 'Thành công' ? 'Hủy KQ' : 'Chốt đơn'}
+                                                    </button>
                                                 )}
-                                                title={
-                                                    c.status === 'Thành công'
-                                                        ? 'Đánh dấu là chưa thành công'
-                                                        : 'Đánh dấu là thành công'
-                                                }
-                                            >
-                                                {c.status === 'Thành công' ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
-                                            </button>
-                                            {filterType === 'lead' && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() =>
-                                                        handleStatusChange(
-                                                            c.id,
-                                                            c.status === 'Thành công' ? 'Chưa thành công' : 'Thành công'
-                                                        )
-                                                    }
-                                                    className={clsx(
-                                                        'p-2 rounded-lg transition-all border',
-                                                        c.status === 'Thành công'
-                                                            ? 'bg-emerald-50 border-emerald-100 text-emerald-700'
-                                                            : 'bg-teal-50 border-teal-100 text-teal-700'
+                                                
+                                                {c.status === 'Thành công' && filterType !== 'lead' && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => navigate(`/de-nghi-xuat-may/tao?phone=${c.phone || ''}`)}
+                                                        className="h-10 px-4 rounded-xl bg-indigo-600 text-white font-bold text-[13px] active:scale-95 transition-all shadow-md shadow-indigo-200 flex items-center gap-2"
+                                                    >
+                                                        <FilePlus size={16} /> Lên đơn
+                                                    </button>
+                                                )}
+
+                                                <div className="relative">
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setActiveDropdown(activeDropdown === `more-mobile-${c.id}` ? null : `more-mobile-${c.id}`);
+                                                        }}
+                                                        className="h-10 px-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-500 flex items-center gap-1 active:scale-95 transition-all text-[13px] font-bold"
+                                                    >
+                                                        <MoreVertical size={15} />
+                                                    </button>
+                                                    
+                                                    {activeDropdown === `more-mobile-${c.id}` && (
+                                                        <div className="absolute right-0 bottom-full mb-2 w-52 bg-white rounded-2xl shadow-xl border border-slate-200 z-[100] overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+                                                            <button
+                                                                onClick={() => {
+                                                                    handleStatusChange(c.id, c.status === 'Thành công' ? 'Chưa thành công' : 'Thành công');
+                                                                    setActiveDropdown(null);
+                                                                }}
+                                                                className="w-full flex items-center gap-3 px-4 py-3 text-[13px] font-bold text-slate-600 hover:bg-slate-50 border-b border-slate-100 transition-colors"
+                                                            >
+                                                                {c.status === 'Thành công' ? <ToggleRight size={18} className="text-emerald-500" /> : <ToggleLeft size={18} className="text-slate-400" />}
+                                                                Trạng thái: {c.status || 'Chưa xác định'}
+                                                            </button>
+                                                            <button
+                                                                onClick={() => {
+                                                                    handleDeleteCustomer(c.id, c.name);
+                                                                    setActiveDropdown(null);
+                                                                }}
+                                                                className="w-full flex items-center gap-3 px-4 py-3 text-[13px] font-bold text-rose-600 hover:bg-rose-50 transition-colors"
+                                                            >
+                                                                <Trash2 size={18} /> Xóa khách hàng
+                                                            </button>
+                                                        </div>
                                                     )}
-                                                    title="Check trạng thái — chuyển Thành công / Chưa thành công"
-                                                >
-                                                    <ClipboardCheck size={16} />
-                                                </button>
-                                            )}
-                                            <button
-                                                type="button"
-                                                onClick={() => handleViewCustomer(c)}
-                                                    className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg shrink-0 active:scale-90 transition-all"
-                                                title="Xem chi tiết"
-                                            >
-                                                <Eye size={16} />
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleEditCustomer(c)}
-                                                    className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg shrink-0 active:scale-90 transition-all"
-                                                title="Chỉnh sửa"
-                                            >
-                                                <Edit size={16} />
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleDeleteCustomer(c.id, c.name)}
-                                                    className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg shrink-0 active:scale-90 transition-all"
-                                                title="Xóa"
-                                            >
-                                                <Trash2 size={16} />
-                                            </button>
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
                                     </div>
                                 </div>
                                 );

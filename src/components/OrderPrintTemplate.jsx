@@ -286,7 +286,6 @@ const OrderItem = ({ order, warehousesList }) => {
     const year = today.getFullYear();
 
     // Build table rows from order_items if available, else use legacy fields
-    const rows = [];
     const itemsToProcess = order.order_items && order.order_items.length > 0 
         ? order.order_items 
         : [
@@ -294,40 +293,21 @@ const OrderItem = ({ order, warehousesList }) => {
             { product_type: order.product_type_2, quantity: order.quantity_2, unit_price: order.unit_price_2, isLegacy: true }
           ].filter(p => p.product_type && p.quantity > 0);
 
-    let serialCursor = 0;
-    itemsToProcess.forEach((p, pIdx) => {
+    const rows = itemsToProcess.map((p, idx) => {
         const pLabel = getProductLabel(p.product_type);
         const pIsBinh = p.product_type?.startsWith('BINH');
         const pUnit = pIsBinh ? 'Bình' : 'Máy';
-
-        if (pIsBinh && serials.length > serialCursor) {
-            // Expand serials for this product type
-            const subSerials = serials.slice(serialCursor, serialCursor + p.quantity);
-            subSerials.forEach((serial) => {
-                rows.push({
-                    stt: rows.length + 1,
-                    name: pLabel,
-                    code: serial,
-                    unit: pUnit,
-                    qtyReq: 1,
-                    qtyAct: 1,
-                    price: p.unit_price || 0,
-                    total: p.unit_price || 0,
-                });
-            });
-            serialCursor += subSerials.length;
-        } else {
-            rows.push({
-                stt: rows.length + 1,
-                name: pLabel,
-                code: (p.isLegacy && pIdx === 0 && order.department) ? order.department : (p.serial_number || ''),
-                unit: pUnit,
-                qtyReq: p.quantity,
-                qtyAct: p.quantity,
-                price: p.unit_price || 0,
-                total: (p.quantity || 0) * (p.unit_price || 0),
-            });
-        }
+        
+        return {
+            stt: idx + 1,
+            name: pLabel,
+            code: (p.isLegacy && idx === 0 && order.department) ? order.department : (p.serial_number || ''),
+            unit: pUnit,
+            qtyReq: p.quantity,
+            qtyAct: p.quantity,
+            price: p.unit_price || 0,
+            total: (p.quantity || 0) * (p.unit_price || 0),
+        };
     });
 
     const totalQty = itemsToProcess.reduce((sum, p) => sum + (p.quantity || 0), 0);
@@ -445,6 +425,20 @@ const OrderItem = ({ order, warehousesList }) => {
                     </tr>
                 </tbody>
             </table>
+
+            {/* ===== ASSIGNED SERIALS LIST ===== */}
+            {serials.length > 0 && (
+                <div style={{ marginTop: '2mm', marginBottom: '2mm', fontSize: '9pt', border: '1px solid #000', padding: '4px 8px' }}>
+                    <div style={{ fontWeight: 'bold', textDecoration: 'underline', marginBottom: '2px' }}>CHI TIẾT MÃ BÌNH/MÁY XUẤT KHO:</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 15px', lineHeight: '1.4' }}>
+                        {serials.map((s, idx) => (
+                            <div key={idx} style={{ minWidth: '80px' }}>
+                                <span style={{ color: '#666' }}>{idx + 1}.</span> <span style={{ fontWeight: 'bold' }}>{s}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* ===== CYLINDER DEBT SECTION (For Recovery) ===== */}
             {order.customer_debt && order.customer_debt.length > 0 && (

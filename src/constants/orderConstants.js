@@ -113,7 +113,7 @@ export const ORDER_STATE_TRANSITIONS = {
         { nextStatus: 'HUY_DON', allowedRoles: [ORDER_ROLES.ADMIN], label: 'Hủy đơn' }
     ],
     'KHO_XU_LY': [
-        { nextStatus: 'CHO_CTY_DUYET', allowedRoles: [ORDER_ROLES.ADMIN, ORDER_ROLES.THU_KHO], label: 'Yêu cầu điều chỉnh' },
+        { nextStatus: 'CHO_CTY_DUYET', allowedRoles: [ORDER_ROLES.ADMIN], label: 'Yêu cầu điều chỉnh' },
         { nextStatus: 'CHO_GIAO_HANG', allowedRoles: [ORDER_ROLES.ADMIN, ORDER_ROLES.THU_KHO], label: 'Kho Báo Đã Xuất' }
     ],
     'DIEU_CHINH': [

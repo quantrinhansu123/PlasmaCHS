@@ -23,7 +23,7 @@ function MainLayout() {
       >
         <Topbar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
 
-        <main className="flex-1 overflow-y-auto pt-1 pl-1 pr-2 pb-20 lg:pt-1 lg:pl-1.5 lg:pr-2.5 lg:pb-3 custom-scrollbar">
+        <main className="flex-1 overflow-y-auto pt-1 pl-1 pr-2 pb-32 lg:pt-1 lg:pl-1.5 lg:pr-2.5 lg:pb-3 custom-scrollbar">
           <div className="w-full h-full flex flex-col">
             <Outlet />
           </div>

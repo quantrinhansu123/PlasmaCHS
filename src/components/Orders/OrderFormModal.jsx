@@ -32,6 +32,14 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
     const [shippersList, setShippersList] = useState([]);
     const [promotionsList, setPromotionsList] = useState([]);
     const [isClosing, setIsClosing] = useState(false);
+    // Cylinder autocomplete
+    const [availableCylinders, setAvailableCylinders] = useState([]); // cache từ DB
+    const [isFetchingCyls, setIsFetchingCyls] = useState(false);
+    const [activeCylDropdown, setActiveCylDropdown] = useState(null); // dropKey đang mở
+    const [isFacilityDropdownOpen, setIsFacilityDropdownOpen] = useState(false);
+    const [facilities, setFacilities] = useState([]);
+    const facilityDropdownRef = useRef(null);
+    const cylDropdownRef = useRef({});
 
     const handleClose = useCallback(() => {
         setIsClosing(true);
@@ -67,6 +75,9 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         const handleClickOutside = (event) => {
             if (customerDropdownRef.current && !customerDropdownRef.current.contains(event.target)) {
                 setIsCustomerDropdownOpen(false);
+            }
+            if (facilityDropdownRef.current && !facilityDropdownRef.current.contains(event.target)) {
+                setIsFacilityDropdownOpen(false);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
@@ -255,32 +266,68 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         }
     };
 
+    const fetchAvailableCylinders = async () => {
+        if (availableCylinders.length > 0 || isFetchingCyls) return; // cache hit
+        setIsFetchingCyls(true);
+        try {
+            const { data } = await supabase
+                .from('cylinders')
+                .select('serial_number, volume, status, warehouse_id')
+                .eq('status', 's\u1eb5n s\u00e0ng')
+                .order('serial_number', { ascending: true })
+                .limit(5000);
+            setAvailableCylinders(data || []);
+        } catch (e) {
+            console.error('fetch cylinders error', e);
+        } finally {
+            setIsFetchingCyls(false);
+        }
+    };
+
+    const getCylSuggestions = (itemIdx, cylIdx, searchVal) => {
+        const item = formData.items[itemIdx];
+        // Already assigned in other slots
+        const taken = new Set(
+            formData.items.flatMap((it, ii) =>
+                (it.assignedCylinders || []).map((c, ci) => {
+                    if (ii === itemIdx && ci === cylIdx) return null;
+                    return typeof c === 'string' ? c : c?.serial;
+                }).filter(Boolean)
+            )
+        );
+        const search = (searchVal || '').toUpperCase().trim();
+        return availableCylinders
+            .filter(c => {
+                if (taken.has(c.serial_number)) return false;
+                if (!search) return true;
+                return c.serial_number?.toUpperCase().includes(search);
+            })
+            .slice(0, 30);
+    };
+
     const fetchRealCustomers = async () => {
         setIsFetchingCustomers(true);
         try {
             const { data, error } = await supabase
                 .from('customers')
-                .select('id, name, representative, phone, address, category')
+                .select('id, name, legal_rep, phone, address, category')
                 .order('name', { ascending: true })
                 .limit(10000);
 
             if (error && error.code !== '42P01') throw error;
 
-            if (data && data.length > 0) {
-                // Map the DB structure to what the form expects
-                const dbCustomers = data.map(c => ({
-                    id: c.id,
-                    name: c.name,
-                    address: c.address,
-                    recipient: c.legal_rep || c.name,
-                    phone: c.phone,
-                    category: c.category
-                }));
-                // Combine with mock if desired or just use DB
-                setCustomers(dbCustomers);
-            }
+            const dbCustomers = (data || []).map(c => ({
+                id: c.id,
+                name: c.name,
+                address: c.address,
+                recipient: c.legal_rep || c.representative || c.name,
+                phone: c.phone,
+                category: c.category
+            }));
+            setCustomers(dbCustomers);
         } catch (error) {
             console.error('Error fetching customers:', error);
+            setCustomers([]);
         } finally {
             setIsFetchingCustomers(false);
         }
@@ -301,8 +348,11 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
 
     useEffect(() => {
         const loadOrderData = async () => {
+            // Guard: Only load if in edit mode, order exists, and we haven't successfully loaded items yet.
+            // This prevents the data from being overwritten if the user already started editing
+            // when the customer list or other dependencies finish loading asynchronously.
             if (isEdit && order && !hasLoadedItemsRef.current) {
-                // Fetch items from order_items table
+                hasLoadedItemsRef.current = true; // Set early to prevent parallel executions
                 const { data: itemsData, error: itemsErr } = await supabase
                     .from('order_items')
                     .select('*')
@@ -439,17 +489,52 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         }
     };
 
-    const handleCustomerSelect = (customer) => {
+    const handleCustomerSelect = async (customer) => {
         setFormData(prev => ({
             ...prev,
             customerId: customer.id,
-            recipientName: customer.recipient || customer.legal_rep || '',
+            recipientName: customer.recipient || customer.legal_rep || customer.name || '',
             recipientAddress: customer.address || '',
             recipientPhone: customer.phone || '',
             customerCategory: customer.category || 'TM'
         }));
         setIsCustomerDropdownOpen(false);
         setCustomerSearchTerm('');
+
+        // Fetch related facilities (locations with same phone)
+        if (customer.phone) {
+            try {
+                const { data } = await supabase
+                    .from('customers')
+                    .select('id, name, legal_rep, phone, address, category, agency_name')
+                    .eq('phone', customer.phone);
+                
+                if (data && data.length > 1) {
+                    const mappedFacilities = data.map(f => ({
+                        id: f.id,
+                        name: f.name,
+                        address: f.address,
+                        recipient: f.legal_rep || f.name,
+                        agency_name: f.agency_name
+                    }));
+                    setFacilities(mappedFacilities);
+                    setIsFacilityDropdownOpen(true);
+                } else {
+                    setFacilities([]);
+                }
+            } catch (err) {
+                console.error('Error fetching facilities:', err);
+            }
+        }
+    };
+
+    const handleFacilitySelect = (facility) => {
+        setFormData(prev => ({
+            ...prev,
+            recipientName: facility.recipient || facility.name,
+            recipientAddress: facility.address || prev.recipientAddress
+        }));
+        setIsFacilityDropdownOpen(false);
     };
 
     const filteredCustomers = customers.filter(c => {
@@ -457,7 +542,6 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         const searchMatch = !customerSearchTerm ||
             c.name?.toLowerCase().includes(searchLow) ||
             (c.phone && c.phone.includes(customerSearchTerm)) ||
-            (c.representative && c.representative.toLowerCase().includes(searchLow)) ||
             (c.recipient && c.recipient.toLowerCase().includes(searchLow));
         return searchMatch;
     });
@@ -494,21 +578,55 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
             // Sync RFID list if quantity or type changes for cylinders
             if (field === 'quantity' || field === 'productType') {
                 const isCyl = updatedItem.productType?.startsWith('BINH');
-                const qty = parseInt(updatedItem.quantity || 0, 10);
+                const targetQty = parseInt(updatedItem.quantity, 10);
+                
                 if (isCyl) {
                     const currentCyls = [...(updatedItem.assignedCylinders || [])];
-                    if (qty > currentCyls.length) {
-                        for (let i = currentCyls.length; i < qty; i++) currentCyls.push({ serial: '', scan_time: null });
-                    } else {
-                        currentCyls.length = qty;
+                    
+                    // ON CHANGE: We only allow GROWING the list. 
+                    // This ensures that while a user is typing (and might temporarily have a small or empty number),
+                    // the already filled boxes don't disappear.
+                    if (!isNaN(targetQty) && targetQty > currentCyls.length) {
+                        for (let i = currentCyls.length; i < targetQty; i++) {
+                            currentCyls.push({ serial: '', scan_time: null });
+                        }
+                        updatedItem.assignedCylinders = currentCyls;
                     }
-                    updatedItem.assignedCylinders = currentCyls;
                 } else {
+                    // Changing to non-cylinder clears instantly
                     updatedItem.assignedCylinders = [];
                 }
             }
             
             newItems[index] = updatedItem;
+            return { ...prev, items: newItems };
+        });
+    };
+
+    const handleQuantityBlur = (index) => {
+        setFormData(prev => {
+            const newItems = [...prev.items];
+            const item = { ...newItems[index] };
+            const isCyl = item.productType?.startsWith('BINH');
+            
+            if (isCyl) {
+                const currentQty = parseInt(item.quantity, 10) || 0;
+                const currentCyls = [...(item.assignedCylinders || [])];
+                
+                // ON BLUR: We force the list to match the final quantity exactly (SHRINK or GROW)
+                if (currentCyls.length !== currentQty) {
+                    if (currentQty > currentCyls.length) {
+                        for (let i = currentCyls.length; i < currentQty; i++) {
+                            currentCyls.push({ serial: '', scan_time: null });
+                        }
+                    } else {
+                        currentCyls.length = currentQty;
+                    }
+                    item.assignedCylinders = currentCyls;
+                }
+            }
+            
+            newItems[index] = item;
             return { ...prev, items: newItems };
         });
     };
@@ -536,9 +654,12 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 toast.warn(`Mã ${normalizedVal} đang bị trùng!`, { toastId: `dup-${normalizedVal}` });
             }
 
+            // Update specific slot while preserving other metadata if exists
+            const existing = newCyls[serialIndex] || {};
             newCyls[serialIndex] = {
+                ...(typeof existing === 'string' ? { serial: existing } : existing),
                 serial: normalizedVal,
-                scan_time: normalizedVal ? (newCyls[serialIndex]?.scan_time || timeStr) : null
+                scan_time: normalizedVal ? (existing.scan_time || timeStr) : null
             };
             item.assignedCylinders = newCyls;
             newItems[itemIndex] = item;
@@ -949,20 +1070,52 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                     )}
                                 </div>
 
-                                <div className="space-y-1.5">
+                                <div className="space-y-1.5 overflow-visible relative" ref={facilityDropdownRef}>
                                     <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800"><User className="w-4 h-4 text-primary/70" />Tên người nhận <span className="text-red-500">*</span></label>
-                                    <input
-                                        name="recipientName"
-                                        value={formData.recipientName}
-                                        onChange={handleChange}
-                                        readOnly={isReadOnly}
-                                        placeholder="Nhập tên người nhận"
-                                        className={clsx(
-                                            "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold transition-all",
-                                            isReadOnly ? "text-slate-500 cursor-default" : "text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                    <div className="relative">
+                                        <input
+                                            name="recipientName"
+                                            value={formData.recipientName}
+                                            onChange={handleChange}
+                                            onFocus={() => facilities.length > 0 && setIsFacilityDropdownOpen(true)}
+                                            readOnly={isReadOnly}
+                                            placeholder="Nhập tên người nhận"
+                                            className={clsx(
+                                                "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold transition-all",
+                                                isReadOnly ? "text-slate-500 cursor-default" : "text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                            )}
+                                            required
+                                        />
+                                        {!isReadOnly && facilities.length > 0 && (
+                                            <button 
+                                                type="button"
+                                                onClick={() => setIsFacilityDropdownOpen(!isFacilityDropdownOpen)}
+                                                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-primary/50 hover:text-primary"
+                                            >
+                                                <ChevronDown size={18} className={isFacilityDropdownOpen ? 'rotate-180' : ''} />
+                                            </button>
                                         )}
-                                        required
-                                    />
+                                    </div>
+
+                                    {isFacilityDropdownOpen && facilities.length > 0 && (
+                                        <div className="absolute z-[60] w-full mt-1 bg-white border border-slate-300 shadow-2xl rounded-2xl overflow-hidden animate-in fade-in slide-in-from-top-1">
+                                            <div className="p-2 border-b border-primary/10 bg-primary/5 text-[11px] font-bold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                                                <MapPin size={12} /> Chọn cơ sở / phòng tương ứng
+                                            </div>
+                                            <div className="max-h-48 overflow-y-auto custom-scrollbar whitespace-normal">
+                                                {facilities.map(f => (
+                                                    <div
+                                                        key={f.id}
+                                                        className="px-4 py-3 cursor-pointer hover:bg-slate-50 border-b border-slate-100 last:border-0 transition-colors"
+                                                        onClick={() => handleFacilitySelect(f)}
+                                                    >
+                                                        <div className="font-bold text-slate-800 text-[13px]">{f.name}</div>
+                                                        <div className="text-[11px] text-slate-500 mt-0.5 line-clamp-1 italic">{f.address}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="space-y-1.5">
@@ -1126,6 +1279,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                                                 type="text"
                                                                 value={formatNumber(item.quantity)}
                                                                 onChange={(e) => handleQuantityChange(idx, e.target.value)}
+                                                                onBlur={() => handleQuantityBlur(idx)}
                                                                 readOnly={isReadOnly}
                                                                 placeholder="0"
                                                                 className={clsx(
@@ -1179,30 +1333,72 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                                                     </button>
                                                                 )}
                                                             </div>
-                                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-48 overflow-y-auto p-1 custom-scrollbar">
-                                                                {item.assignedCylinders?.map((cyl, cIdx) => (
-                                                                    <div key={cIdx} className="relative group/scan">
-                                                                        <input
-                                                                            value={typeof cyl === 'string' ? cyl : (cyl?.serial || '')}
-                                                                            onChange={(e) => handleCylinderSerialChange(idx, cIdx, e.target.value)}
-                                                                            readOnly={isReadOnly}
-                                                                            placeholder={`Mã bình ${cIdx + 1}...`}
-                                                                            className={clsx(
-                                                                                "w-full h-10 pl-4 pr-10 bg-white border border-slate-200 rounded-xl text-[13px] font-mono font-bold transition-all",
-                                                                                isReadOnly ? "text-slate-500" : "text-primary focus:border-primary/50 focus:ring-2 focus:ring-primary/5"
+                                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-1 custom-scrollbar">
+                                                                {item.assignedCylinders?.map((cyl, cIdx) => {
+                                                                    const dropKey = `it-${idx}-cyl-${cIdx}`;
+                                                                    const currentVal = typeof cyl === 'string' ? cyl : (cyl?.serial || '');
+                                                                    const isOpen = activeCylDropdown === dropKey;
+                                                                    // Only calculate suggestions for the active dropdown to save performance
+                                                                    const suggestions = isOpen ? getCylSuggestions(idx, cIdx, currentVal) : [];
+                                                                    const isReadOnly = mode === 'view' || item.isLocked;
+
+                                                                    return (
+                                                                        <div key={dropKey} className="relative" ref={el => cylDropdownRef.current[dropKey] = el}>
+                                                                            <input
+                                                                                value={currentVal}
+                                                                                onChange={(e) => handleCylinderSerialChange(idx, cIdx, e.target.value)}
+                                                                                onFocus={() => { 
+                                                                                    if (availableCylinders.length === 0) fetchAvailableCylinders(); 
+                                                                                    setActiveCylDropdown(dropKey); 
+                                                                                }}
+                                                                                onBlur={() => {
+                                                                                    // Use a slight delay so onMouseDown on suggestions can trigger first
+                                                                                    setTimeout(() => {
+                                                                                        if (activeCylDropdown === dropKey) setActiveCylDropdown(null);
+                                                                                    }, 200);
+                                                                                }}
+                                                                                readOnly={isReadOnly}
+                                                                                placeholder={`Mã bình ${cIdx + 1}...`}
+                                                                                autoComplete="off"
+                                                                                className={clsx(
+                                                                                    "w-full h-10 pl-4 pr-10 bg-white border border-slate-200 rounded-xl text-[13px] font-mono font-bold transition-all",
+                                                                                    isReadOnly ? "text-slate-500" : "text-primary focus:border-primary/50 focus:ring-2 focus:ring-primary/5"
+                                                                                )}
+                                                                            />
+                                                                            {!isReadOnly && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => startScanner(idx, cIdx)}
+                                                                                    className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center text-primary/40 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
+                                                                                >
+                                                                                    <ScanLine className="w-4 h-4" />
+                                                                                </button>
                                                                             )}
-                                                                        />
-                                                                        {!isReadOnly && (
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => startScanner(idx, cIdx)}
-                                                                                className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center text-primary/40 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
-                                                                            >
-                                                                                <ScanLine className="w-4 h-4" />
-                                                                            </button>
-                                                                        )}
-                                                                    </div>
-                                                                ))}
+                                                                            {/* Autocomplete Dropdown — rendered outside clipping containers */}
+                                                                            {isOpen && !isReadOnly && (
+                                                                                <div className="absolute z-[99999] left-0 right-0 top-11 bg-white border border-primary/20 rounded-xl shadow-2xl max-h-52 overflow-y-auto">
+                                                                                    {isFetchingCyls ? (
+                                                                                        <div className="px-4 py-3 text-xs text-slate-400 italic">Đang tải danh sách bình...</div>
+                                                                                    ) : suggestions.length === 0 ? (
+                                                                                        <div className="px-4 py-3 text-xs text-slate-400 italic">{currentVal ? 'Không tìm thấy bình phù hợp' : 'Gõ mã để tìm kiếm...'}</div>
+                                                                                    ) : (
+                                                                                        suggestions.map(c => (
+                                                                                            <button
+                                                                                                key={c.serial_number}
+                                                                                                type="button"
+                                                                                                onMouseDown={(e) => { e.preventDefault(); handleCylinderSerialChange(idx, cIdx, c.serial_number); setActiveCylDropdown(null); }}
+                                                                                                className="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-primary/5 transition-colors border-b border-slate-50 last:border-0"
+                                                                                            >
+                                                                                                <span className="text-[13px] font-mono font-bold text-primary">{c.serial_number}</span>
+                                                                                                <span className="text-[10px] text-slate-400 ml-2">{c.volume || ''}</span>
+                                                                                            </button>
+                                                                                        ))
+                                                                                    )}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    );
+                                                                })}
                                                             </div>
                                                         </div>
                                                     )}

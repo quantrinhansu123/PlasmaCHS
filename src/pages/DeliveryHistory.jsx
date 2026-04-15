@@ -363,7 +363,8 @@ export default function DeliveryHistory() {
                     />
 
                 {/* Mobile Card List */}
-                <div className="md:hidden flex-1 overflow-y-auto p-3 pb-24 flex flex-col gap-3">
+                <div className="md:hidden flex-1 flex flex-col min-h-0">
+                    <div className="flex-1 overflow-y-auto p-3 pb-3 flex flex-col gap-3">
                     <div className="space-y-3">
                         {loading ? (
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
@@ -374,7 +375,7 @@ export default function DeliveryHistory() {
                                 const typeInfo = getTypeInfo(r.type);
                                 const TypeIcon = typeInfo.icon;
                                 return (
-                                <div key={`${r.type}-${r.id}`} className="rounded-xl border border-slate-200 bg-white shadow-sm p-3 transition-all duration-200 active:scale-[0.99] hover:shadow-md hover:border-primary/30">
+                                <div key={`${r.type}-${r.id}`} className="rounded-xl border border-slate-200 bg-white shadow-sm p-3 transition-all duration-200 active:scale-[0.99] hover:shadow-md hover:border-primary/30 flex flex-col">
                                     <div className="flex items-start justify-between gap-2 mb-2">
                                         <div className="flex gap-2.5 min-w-0">
                                             <div>
@@ -392,7 +393,7 @@ export default function DeliveryHistory() {
                                         </span>
                                     </div>
 
-                                    <div className="mb-3">
+                                    <div className="mb-3 flex-1">
                                         <h3 className="text-[14px] font-black text-foreground leading-snug">{r.customerName}</h3>
                                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
                                             <span className="text-[11px] font-medium text-muted-foreground">{new Date(r.date).toLocaleDateString('vi-VN')}</span>
@@ -453,8 +454,9 @@ export default function DeliveryHistory() {
                             })
                         )}
                     </div>
+                    </div>
 
-                    {/* Mobile Pagination */}
+                    {/* Mobile Pagination — outside overflow-y-auto so sticky works */}
                     {!loading && (
                         <MobilePagination
                             currentPage={currentPage}

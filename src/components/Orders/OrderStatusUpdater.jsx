@@ -1,6 +1,6 @@
 import { AlertCircle, AlertTriangle, ArrowRightCircle, Camera, Check, CheckCircle, CheckCircle2, Clock, CloudUpload, Package, Plus, ScanBarcode, Truck, X, XCircle, ZoomIn, FileText } from 'lucide-react';
 import clsx from 'clsx';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ORDER_STATE_TRANSITIONS, PRODUCT_TYPES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
@@ -24,6 +24,10 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     const [isClosing, setIsClosing] = useState(false);
     const [adjustmentNote, setAdjustmentNote] = useState('');
     const [showAdjustmentInput, setShowAdjustmentInput] = useState(false);
+    // Cylinder autocomplete for warehouse serials
+    const [availableCylsWH, setAvailableCylsWH] = useState([]);
+    const [isFetchingCylsWH, setIsFetchingCylsWH] = useState(false);
+    const [activeCylDropdownWH, setActiveCylDropdownWH] = useState(null); // idx as string
     const [orderItems, setOrderItems] = useState([]);
     const [isFetchingItems, setIsFetchingItems] = useState(true);
     const [deliveryChecklist, setDeliveryChecklist] = useState({});
@@ -32,6 +36,9 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     const [showProofModal, setShowProofModal] = useState(false);
     const [showMachinePreviewPopup, setShowMachinePreviewPopup] = useState(false);
     const [realWarehouseName, setRealWarehouseName] = useState(warehouseName || order?.warehouse);
+    // Warehouse assignment when company approves DNXM
+    const [approvedWarehouseId, setApprovedWarehouseId] = useState(order?.warehouse || '');
+    const [warehouseList, setWarehouseList] = useState([]);
 
     const isDNXM = order?.order_code?.startsWith('DNXM-');
 
@@ -54,6 +61,15 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         }
     }, [order?.warehouse, warehouseName]);
 
+    // Fetch warehouse list when approving DNXM (CHO_CTY_DUYET)
+    useEffect(() => {
+        if (order?.status === 'CHO_CTY_DUYET' && isDNXM) {
+            supabase.from('warehouses').select('id, name').order('name').then(({ data }) => {
+                setWarehouseList(data || []);
+            });
+        }
+    }, [order?.status, isDNXM]);
+
     // Initialize delivery checklist from assigned items
     useEffect(() => {
         if (order?.status === 'DANG_GIAO_HANG') {
@@ -74,7 +90,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                         machineSerials = match[1].split(',').map(s => s.trim()).filter(Boolean);
                     }
                 }
-                
+
                 machineSerials.forEach(serial => {
                     checklist[`MAY:${serial}`] = false;
                 });
@@ -110,6 +126,46 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         { nextStatus: 'DOI_SOAT_THAT_BAI', icon: AlertCircle },
     ];
 
+    const fetchAvailableCylindersWH = async () => {
+        if (availableCylsWH.length > 0 || isFetchingCylsWH) return;
+        setIsFetchingCylsWH(true);
+        try {
+            const { data } = await supabase
+                .from('cylinders')
+                .select('serial_number, volume, status')
+                .eq('status', 's\u1eb5n s\u00e0ng')
+                .order('serial_number', { ascending: true })
+                .limit(5000);
+            setAvailableCylsWH(data || []);
+        } catch (e) {
+            console.error('fetch cylinders WH error', e);
+        } finally {
+            setIsFetchingCylsWH(false);
+        }
+    };
+
+    const getCylSuggestionsWH = (idx, searchVal) => {
+        if (!availableCylsWH || availableCylsWH.length === 0) return [];
+
+        const search = (searchVal || '').trim().toUpperCase();
+        const currentList = scannedSerials.split(/\r?\n/);
+        const taken = new Set(
+            currentList
+                .filter((s, i) => i !== idx && s.trim())
+                .map(s => s.trim().toUpperCase())
+        );
+
+        return availableCylsWH
+            .filter(c => {
+                const serial = c.serial_number?.toUpperCase();
+                if (!serial) return false;
+                if (taken.has(serial)) return false;
+                if (!search) return true;
+                return serial.includes(search);
+            })
+            .slice(0, 30);
+    };
+
     const handleClose = () => {
         setIsClosing(true);
         setTimeout(onClose, 300);
@@ -142,7 +198,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     .from('order_items')
                     .select('*')
                     .eq('order_id', order.id);
-                
+
                 if (error) throw error;
                 setOrderItems(data || []);
             } catch (err) {
@@ -157,56 +213,63 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         fetchOrderItems();
     }, [order.id]);
 
-    useEffect(() => {
-        const validateSerials = async () => {
-            const allSerials = scannedSerials.split(/[\n, ]+/).map(s => s.trim()).filter(Boolean);
-            if (allSerials.length === 0) return;
+    const validateSerials = async (currentList) => {
+        const allSerials = (currentList || scannedSerials).split(/[\n, ]+/).map(s => s.trim()).filter(Boolean);
+        if (allSerials.length === 0) return;
 
-            const uniqueSerials = [...new Set(allSerials)];
-            if (uniqueSerials.length < allSerials.length) {
-                setErrorMsg('Phát hiện mã trùng bị quét lại! Hệ thống đã tự động lọc.');
-                setScannedSerials(uniqueSerials.join('\n') + '\n');
-                return;
+        const uniqueSerials = [...new Set(allSerials)];
+        if (uniqueSerials.length < allSerials.length) {
+            setErrorMsg('Phát hiện mã trùng bị quét lại! Hệ thống đã tự động lọc.');
+            setScannedSerials(uniqueSerials.join('\n') + '\n');
+            return;
+        }
+
+        const { data, error } = await supabase.from('cylinders').select('serial_number, status').in('serial_number', uniqueSerials);
+        if (error) return;
+
+        const validCylinders = data || [];
+        const invalid = [];
+        const validSerialsList = [];
+
+        for (const serial of uniqueSerials) {
+            const match = validCylinders.find(c => c.serial_number === serial);
+            if (!match) {
+                invalid.push(`${serial} (Không tồn tại hệ thống)`);
+            } else if (match.status !== 'sẵn sàng') {
+                invalid.push(`${serial} (T/thái: ${match.status})`);
+            } else {
+                validSerialsList.push(serial);
             }
+        }
 
-            const { data, error } = await supabase.from('cylinders').select('serial_number, status').in('serial_number', uniqueSerials);
-            if (error) return; // skip if db error fails silently, or show error
+        if (invalid.length > 0) {
+            setErrorMsg(`Loại bỏ mã lỗi:\n` + invalid.join('\n'));
+            setScannedSerials(validSerialsList.join('\n') + (validSerialsList.length > 0 ? '\n' : ''));
+        } else {
+            setErrorMsg('');
+        }
+    };
 
-            const validCylinders = data || [];
-            const invalid = [];
-            const validSerialsList = [];
-
-            for (const serial of uniqueSerials) {
-                const match = validCylinders.find(c => c.serial_number === serial);
-                if (!match) {
-                    invalid.push(`${serial} (Không tồn tại hệ thống)`);
-                } else if (match.status !== 'sẵn sàng') {
-                    invalid.push(`${serial} (T/thái: ${match.status})`);
-                } else {
-                    validSerialsList.push(serial);
-                }
-            }
-
-            if (invalid.length > 0) {
-                setErrorMsg(`Loại bỏ mã lỗi:\n` + invalid.join('\n'));
-                setScannedSerials(validSerialsList.join('\n') + (validSerialsList.length > 0 ? '\n' : ''));
-            }
-        };
-
-        const timer = setTimeout(() => {
-            if (scannedSerials) validateSerials();
-        }, 800);
-
-        return () => clearTimeout(timer);
-    }, [scannedSerials]);
+    // Validation now happens only onBlur or specific actions, not while typing
 
     if (!order) return null;
 
     // Get transitions available for current status
     const transitions = ORDER_STATE_TRANSITIONS[order.status] || [];
 
-    // Filter by role (normalize to lowercase for consistent matching)
-    const normalizedRole = userRole?.toLowerCase() || '';
+    // Normalize Vietnamese role names from DB to match ORDER_ROLES constants
+    const normalizeRole = (role) => {
+        if (!role) return '';
+        const r = role.toLowerCase().trim();
+        if (r === 'admin' || r === 'quản trị' || r === 'quan tri') return 'admin';
+        if (r.includes('kho')) return 'thu_kho';           // 'thủ kho', 'thu_kho', 'kho'
+        if (r.includes('shipper') || r === 'giao hàng') return 'shipper';
+        if (r.includes('lead') || r.includes('trưởng') || r.includes('truong')) return 'lead_sale';
+        if (r.includes('kinh doanh') || r === 'sale') return 'sale';
+        return r;
+    };
+
+    const normalizedRole = normalizeRole(userRole);
     const availableActions = transitions.filter(t =>
         normalizedRole === 'admin' || t.allowedRoles.includes(normalizedRole)
     );
@@ -441,6 +504,14 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 note: transition.label === 'Yêu cầu điều chỉnh' ? adjustmentNote : order.note
             };
 
+            // Công ty duyệt DNXM → gán kho cấp
+            if (order.status === 'CHO_CTY_DUYET' && transition.nextStatus === 'KHO_XU_LY' && isDNXM) {
+                if (!approvedWarehouseId) {
+                    throw new Error('Bạn phải chỉ định Kho cấp trước khi duyệt chuyển sang Kho xử lý.');
+                }
+                updatePayload.warehouse = approvedWarehouseId;
+            }
+
             // Calculate total amount if quantity changed
             if (adjustedQuantity !== order.quantity || adjustedQuantity2 !== order.quantity_2) {
                 let freeCylinders = 0;
@@ -487,7 +558,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 localStorage.getItem('user_name') ||
                 sessionStorage.getItem('user_name') ||
                 'Hệ thống';
-            
+
             await supabase.from('order_history').insert([{
                 order_id: order.id,
                 action: 'STATUS_CHANGED',
@@ -512,7 +583,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             isClosing ? "opacity-0 pointer-events-none" : "opacity-100"
         )}>
             {/* Backdrop */}
-            <div 
+            <div
                 className={clsx(
                     "absolute inset-0 bg-black/45 backdrop-blur-sm animate-in fade-in duration-300",
                     isClosing && "animate-out fade-out duration-300"
@@ -521,7 +592,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             />
 
             {/* Panel */}
-            <div 
+            <div
                 className={clsx(
                     "relative bg-slate-50 shadow-2xl w-full max-w-md overflow-hidden flex flex-col h-full border-l border-slate-200 animate-in slide-in-from-right duration-500",
                     isClosing && "animate-out slide-out-to-right duration-300"
@@ -547,7 +618,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     {/* Order Summary */}
                     <div className="bg-white rounded-2xl p-4 border border-slate-200 space-y-2.5 text-sm shadow-sm">
                         <div className="flex justify-between gap-3"><span className="text-slate-500 font-bold uppercase text-[10px] tracking-wider">Khách hàng</span><span className="font-black text-slate-900 text-right">{order.customer_name || '—'}</span></div>
-                        
+
                         {isFetchingItems ? (
                             <div className="animate-pulse flex space-x-2 py-2">
                                 <div className="h-4 bg-slate-200 rounded w-full"></div>
@@ -607,13 +678,44 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
 
                     {activeTab === 'actions' && (
                         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+
+                            {/* ── KHO CẤP: Công ty chỉ định khi duyệt DNXM ── */}
+                            {order.status === 'CHO_CTY_DUYET' && isDNXM && (
+                                <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 space-y-3 shadow-sm">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
+                                            <Package className="w-4 h-4 text-white" />
+                                        </div>
+                                        <div>
+                                            <p className="text-[11px] font-black text-indigo-700 uppercase tracking-widest">Chỉ định Kho cấp</p>
+                                            <p className="text-[10px] text-indigo-500 font-medium">Kho sẽ nhận lệnh xuất máy</p>
+                                        </div>
+                                    </div>
+                                    <select
+                                        value={approvedWarehouseId}
+                                        onChange={e => setApprovedWarehouseId(e.target.value)}
+                                        className="w-full h-11 px-4 bg-white border-2 border-indigo-300 rounded-xl font-bold text-slate-800 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 transition-all text-sm cursor-pointer"
+                                    >
+                                        <option value="">-- Chọn kho cấp --</option>
+                                        {warehouseList.map(w => (
+                                            <option key={w.id} value={w.id}>{w.name}</option>
+                                        ))}
+                                    </select>
+                                    {!approvedWarehouseId && (
+                                        <p className="text-[11px] text-indigo-600 font-bold flex items-center gap-1">
+                                            <AlertTriangle className="w-3.5 h-3.5" /> Bắt buộc chọn kho trước khi duyệt
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
                             {/* Quantity Adjustment + RFID Scanner for Warehouse */}
                             {(order.status === 'CHO_DUYET' || order.status === 'CHO_CTY_DUYET' || order.status === 'KHO_XU_LY') && (
                                 <div className="space-y-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="space-y-1.5">
                                             <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest">
-                                                Số lượng 1
+                                                Số lượng yêu cầu
                                             </label>
                                             <input
                                                 type="number"
@@ -621,18 +723,37 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                                 className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-800 outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all text-sm"
                                                 value={adjustedQuantity}
                                                 onChange={e => setAdjustedQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                                                onBlur={() => {
+                                                    // Force sync
+                                                }}
                                             />
                                         </div>
-                                        <div className="space-y-1.5 text-right">
-                                            <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest">
-                                                Số lượng 2
+                                        <div className="space-y-1.5">
+                                            <label className="block text-[11px] font-black uppercase tracking-widest">
+                                                <span className={adjustedQuantity2 > 0 && adjustedQuantity2 < adjustedQuantity ? 'text-amber-600' : 'text-slate-500'}>
+                                                    Số lượng phê duyệt
+                                                </span>
+                                                {adjustedQuantity2 > 0 && adjustedQuantity2 < adjustedQuantity && (
+                                                    <span className="ml-1.5 text-[9px] font-bold text-amber-500 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 normal-case tracking-normal">
+                                                        ↓ ít hơn yêu cầu
+                                                    </span>
+                                                )}
                                             </label>
                                             <input
                                                 type="number"
                                                 min="0"
-                                                className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl font-black text-emerald-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50 transition-all text-sm"
+                                                max={adjustedQuantity}
+                                                className={`w-full h-11 px-4 bg-slate-50 border rounded-xl font-black outline-none focus:ring-4 transition-all text-sm ${
+                                                    adjustedQuantity2 > 0 && adjustedQuantity2 < adjustedQuantity
+                                                        ? 'border-amber-300 text-amber-700 focus:border-amber-400 focus:ring-amber-50'
+                                                        : 'border-slate-200 text-emerald-700 focus:border-emerald-400 focus:ring-emerald-50'
+                                                }`}
                                                 value={adjustedQuantity2}
                                                 onChange={e => setAdjustedQuantity2(Math.max(0, parseInt(e.target.value) || 0))}
+                                                onBlur={() => {
+                                                    // Force scannedSerials synchronization on blur
+                                                    const currentList = scannedSerials.split('\n');
+                                                }}
                                             />
                                         </div>
                                     </div>
@@ -640,76 +761,151 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                         <p className="text-[11px] text-orange-600 font-bold italic text-center">* Số lượng đã điều chỉnh so với đơn gốc.</p>
                                     )}
 
-                                    {(order.product_type?.startsWith('BINH') || order.product_type_2?.startsWith('BINH')) && (
-                                        <div className="space-y-3 pt-3 border-t border-slate-100">
-                                            <div className="flex items-center justify-between">
-                                                <label className="flex items-center gap-1.5 text-xs font-black text-slate-500 uppercase tracking-widest">
-                                                    <ScanBarcode className="w-4 h-4 text-primary" />
-                                                    <span>Mã vỏ bình RFID ({adjustedQuantity + (order.product_type_2?.startsWith('BINH') ? adjustedQuantity2 : 0)})</span>
-                                                </label>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setIsScannerOpen(true)}
-                                                    className="px-3 py-1.5 bg-primary/10 text-primary text-[10px] font-black rounded-lg hover:bg-primary/20 transition-all flex items-center gap-1.5 uppercase tracking-wider"
-                                                >
-                                                    <Camera className="w-3.5 h-3.5" /> Quét ảnh
-                                                </button>
-                                            </div>
-                                            <div className="space-y-2 mt-2">
-                                                {Array.from({ length: (order.product_type?.startsWith('BINH') ? adjustedQuantity : 0) + (order.product_type_2?.startsWith('BINH') ? adjustedQuantity2 : 0) }).map((_, idx) => {
-                                                    const serialsList = scannedSerials.split('\n');
-                                                    return (
-                                                        <div key={idx} className="flex items-center gap-2">
-                                                            <span className="w-7 h-7 rounded-lg bg-primary/10 text-primary font-bold text-[12px] flex items-center justify-center shrink-0">
-                                                                {idx + 1}
-                                                            </span>
-                                                            <div className="relative flex-1">
-                                                                <input 
-                                                                    id={`serial-input-wh-${idx}`}
-                                                                    type="text"
-                                                                    className="w-full pl-4 pr-12 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[14px] font-bold text-slate-800 outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all font-mono tracking-wider placeholder:tracking-normal"
-                                                                    placeholder={`Nhập hoặc quét mã số ${idx + 1}...`}
-                                                                    value={serialsList[idx] || ''}
-                                                                    onChange={(e) => {
-                                                                        const newList = [...serialsList];
-                                                                        while (newList.length < (adjustedQuantity + adjustedQuantity2)) newList.push('');
-                                                                        newList[idx] = e.target.value;
-                                                                        setScannedSerials(newList.join('\n'));
-                                                                    }}
-                                                                    onKeyDown={(e) => {
-                                                                        if (e.key === 'Enter') {
-                                                                            e.preventDefault();
-                                                                            const nextInput = document.getElementById(`serial-input-wh-${idx + 1}`);
-                                                                            if (nextInput) nextInput.focus();
-                                                                        }
-                                                                    }}
-                                                                />
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => setIsScannerOpen(true)}
-                                                                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-primary/60 hover:text-primary hover:bg-primary/10 rounded-lg transition-colors z-10"
-                                                                    title="Mở camera quét RFID"
-                                                                >
-                                                                    <ScanBarcode size={20} />
-                                                                </button>
+                                    {(() => {
+                                        // Tính tổng bình từ orderItems (multi-product), fallback legacy fields
+                                        const cylItems = orderItems.filter(it => it.product_type?.startsWith('BINH'));
+
+                                        // Priority: 
+                                        // 1. If user is in a status where they can adjust (CHO_DUYET...KHO_XU_LY), Use adjustedQuantity/2
+                                        // 2. Otherwise use baked orderItems
+                                        const useAdjusted = ['CHO_DUYET', 'CHO_CTY_DUYET', 'KHO_XU_LY'].includes(order.status);
+
+                                        const totalCylCount = useAdjusted
+                                            ? (order.product_type?.startsWith('BINH') ? adjustedQuantity : 0)
+                                            + (order.product_type_2?.startsWith('BINH') ? adjustedQuantity2 : 0)
+                                            : (cylItems.length > 0
+                                                ? cylItems.reduce((sum, it) => sum + (it.quantity || 0), 0)
+                                                : (order.product_type?.startsWith('BINH') ? adjustedQuantity : 0)
+                                                + (order.product_type_2?.startsWith('BINH') ? adjustedQuantity2 : 0));
+
+                                        // Nếu đang fetch → hiện skeleton placeholder
+                                        if (isFetchingItems) {
+                                            return (
+                                                <div className="pt-3 border-t border-slate-100 space-y-2 animate-pulse">
+                                                    <div className="h-4 bg-slate-200 rounded w-40" />
+                                                    <div className="h-10 bg-slate-100 rounded-xl" />
+                                                    <div className="h-10 bg-slate-100 rounded-xl" />
+                                                </div>
+                                            );
+                                        }
+                                        if (totalCylCount === 0) return null;
+                                        return (
+                                            <div className="space-y-3 pt-3 border-t border-slate-100">
+                                                <div className="flex items-center justify-between">
+                                                    <label className="flex items-center gap-1.5 text-xs font-black text-slate-500 uppercase tracking-widest">
+                                                        <ScanBarcode className="w-4 h-4 text-primary" />
+                                                        <span>Mã vỏ bình RFID ({totalCylCount})</span>
+                                                    </label>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setIsScannerOpen(true)}
+                                                        className="px-3 py-1.5 bg-primary/10 text-primary text-[10px] font-black rounded-lg hover:bg-primary/20 transition-all flex items-center gap-1.5 uppercase tracking-wider"
+                                                    >
+                                                        <Camera className="w-3.5 h-3.5" /> Quét ảnh
+                                                    </button>
+                                                </div>
+                                                <div className="space-y-2 mt-2">
+                                                    {Array.from({ length: totalCylCount }).map((_, idx) => {
+                                                        const serialsList = scannedSerials.split('\n');
+                                                        const currentVal = serialsList[idx] || '';
+                                                        const dropKey = String(idx);
+                                                        const isOpen = activeCylDropdownWH === dropKey;
+                                                        // Only calculate suggestions for the active dropdown to save performance and avoid race conditions
+                                                        const suggestions = isOpen ? getCylSuggestionsWH(idx, currentVal) : [];
+                                                        return (
+                                                            <div key={idx} className="flex items-center gap-2">
+                                                                <span className="w-7 h-7 rounded-lg bg-primary/10 text-primary font-bold text-[12px] flex items-center justify-center shrink-0">
+                                                                    {idx + 1}
+                                                                </span>
+                                                                <div className="relative flex-1">
+                                                                    <input
+                                                                        id={`serial-input-wh-${idx}`}
+                                                                        type="text"
+                                                                        autoComplete="off"
+                                                                        className="w-full pl-4 pr-12 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[14px] font-bold text-slate-800 outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all font-mono tracking-wider placeholder:tracking-normal"
+                                                                        placeholder={`Nhập hoặc quét mã số ${idx + 1}...`}
+                                                                        value={currentVal}
+                                                                        onFocus={() => { fetchAvailableCylindersWH(); setActiveCylDropdownWH(dropKey); }}
+                                                                        onBlur={() => {
+                                                                            setTimeout(() => {
+                                                                                // Only clear if we are still on the same dropdown (prevent flicker when focusing next)
+                                                                                setActiveCylDropdownWH(curr => curr === dropKey ? null : curr);
+                                                                                validateSerials();
+                                                                            }, 200);
+                                                                        }}
+                                                                        onChange={(e) => {
+                                                                            const newList = [...serialsList];
+                                                                            while (newList.length < totalCylCount) newList.push('');
+                                                                            newList[idx] = e.target.value;
+                                                                            setScannedSerials(newList.join('\n'));
+                                                                        }}
+                                                                        onKeyDown={(e) => {
+                                                                            if (e.key === 'Enter') {
+                                                                                e.preventDefault();
+                                                                                const nextInput = document.getElementById(`serial-input-wh-${idx + 1}`);
+                                                                                if (nextInput) nextInput.focus();
+                                                                            }
+                                                                        }}
+                                                                    />
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setIsScannerOpen(true)}
+                                                                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-primary/60 hover:text-primary hover:bg-primary/10 rounded-lg transition-colors z-10"
+                                                                        title="Mở camera quét RFID"
+                                                                    >
+                                                                        <ScanBarcode size={20} />
+                                                                    </button>
+                                                                    {isOpen && (
+                                                                        <div className="absolute z-[9999] left-0 right-0 top-[46px] bg-white border border-slate-200 rounded-xl shadow-xl max-h-48 overflow-y-auto">
+                                                                            {isFetchingCylsWH ? (
+                                                                                <div className="px-4 py-3 text-xs text-slate-400 italic">Đang tải danh sách bình...</div>
+                                                                            ) : suggestions.length === 0 ? (
+                                                                                <div className="px-4 py-3 text-xs text-slate-400 italic">{currentVal ? 'Không tìm thấy bình phù hợp' : 'Gõ mã để tìm kiếm...'}</div>
+                                                                            ) : (
+                                                                                suggestions.map(c => (
+                                                                                    <button
+                                                                                        key={c.serial_number}
+                                                                                        type="button"
+                                                                                        onMouseDown={(e) => {
+                                                                                            e.preventDefault();
+                                                                                            const newList = scannedSerials.split('\n');
+                                                                                            while (newList.length < totalCylCount) newList.push('');
+                                                                                            newList[idx] = c.serial_number;
+                                                                                            setScannedSerials(newList.join('\n'));
+                                                                                            setActiveCylDropdownWH(null);
+                                                                                            setTimeout(() => {
+                                                                                                const nextInput = document.getElementById(`serial-input-wh-${idx + 1}`);
+                                                                                                if (nextInput) nextInput.focus();
+                                                                                            }, 50);
+                                                                                        }}
+                                                                                        className="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-primary/5 transition-colors border-b border-slate-50 last:border-0"
+                                                                                    >
+                                                                                        <span className="text-[13px] font-mono font-bold text-primary">{c.serial_number}</span>
+                                                                                        <span className="text-[10px] text-slate-400 ml-2">{c.volume || ''}</span>
+                                                                                    </button>
+                                                                                ))
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
                                                             </div>
-                                                        </div>
-                                                    );
-                                                })}
+                                                        );
+                                                    })}
+                                                </div>
                                             </div>
-                                        </div>
-                                    )}
+                                        );
+                                    })()}
                                 </div>
                             )}
-
                             {/* RFID Scanner for Shipper */}
+
                             {((order.status === 'CHO_GIAO_HANG' || order.status === 'DANG_GIAO_HANG') &&
                                 order.product_type?.startsWith('BINH') &&
                                 (!order.assigned_cylinders || order.assigned_cylinders.length < order.quantity)) && (
                                     <div className="bg-orange-50/50 p-5 rounded-2xl border border-orange-100 space-y-4 shadow-sm">
                                         <div className="flex items-center justify-between">
                                             <label className="flex items-center gap-1.5 text-xs font-black text-orange-600 uppercase tracking-widest">
-                                                <AlertTriangle className="w-4 h-4" /> 
+                                                <AlertTriangle className="w-4 h-4" />
                                                 <span>Quét gán {order.quantity} bình:</span>
                                             </label>
                                             <button
@@ -729,25 +925,31 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                                             {idx + 1}
                                                         </span>
                                                         <div className="relative flex-1">
-                                                            <input 
-                                                                id={`serial-input-sp-${idx}`}
-                                                                type="text"
-                                                                className="w-full pl-4 pr-12 py-2.5 bg-white border border-orange-200 rounded-xl text-[14px] font-bold text-slate-800 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-50 transition-all font-mono tracking-wider placeholder:tracking-normal"
-                                                                placeholder={`Quét mã số ${idx + 1}...`}
-                                                                value={serialsList[idx] || ''}
-                                                                onChange={(e) => {
-                                                                    const newList = [...serialsList];
-                                                                    while (newList.length < order.quantity) newList.push('');
-                                                                    newList[idx] = e.target.value;
-                                                                    setScannedSerials(newList.join('\n'));
-                                                                }}
-                                                                onKeyDown={(e) => {
-                                                                    if (e.key === 'Enter') {
-                                                                        e.preventDefault();
-                                                                        const nextInput = document.getElementById(`serial-input-sp-${idx + 1}`);
-                                                                        if (nextInput) nextInput.focus();
-                                                                    }
-                                                                }}
+                                                            id={`serial-input-sp-${idx}`}
+                                                            type="text"
+                                                            className="w-full pl-4 pr-12 py-2.5 bg-white border border-orange-200 rounded-xl text-[14px] font-bold text-slate-800 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-50 transition-all font-mono tracking-wider placeholder:tracking-normal"
+                                                            placeholder={`Quét mã số ${idx + 1}...`}
+                                                            value={serialsList[idx] || ''}
+                                                            onFocus={() => { fetchAvailableCylindersWH(); setActiveCylDropdownWH(`sp-${idx}`); }}
+                                                            onBlur={() => {
+                                                                setTimeout(() => {
+                                                                    setActiveCylDropdownWH(curr => curr === `sp-${idx}` ? null : curr);
+                                                                    validateSerials();
+                                                                }, 200);
+                                                            }}
+                                                            onChange={(e) => {
+                                                                const newList = [...serialsList];
+                                                                while (newList.length < order.quantity) newList.push('');
+                                                                newList[idx] = e.target.value;
+                                                                setScannedSerials(newList.join('\n'));
+                                                            }}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    e.preventDefault();
+                                                                    const nextInput = document.getElementById(`serial-input-sp-${idx + 1}`);
+                                                                    if (nextInput) nextInput.focus();
+                                                                }
+                                                            }}
                                                             />
                                                             <button
                                                                 type="button"
@@ -757,6 +959,40 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                                             >
                                                                 <ScanBarcode size={20} />
                                                             </button>
+                                                            {activeCylDropdownWH === `sp-${idx}` && (
+                                                                <div className="absolute z-[9999] left-0 right-0 top-[46px] bg-white border border-orange-200 rounded-xl shadow-xl max-h-48 overflow-y-auto">
+                                                                    {isFetchingCylsWH ? (
+                                                                        <div className="px-4 py-3 text-xs text-slate-400 italic">Đang tải...</div>
+                                                                    ) : (() => {
+                                                                        const suggestions = getCylSuggestionsWH(idx, serialsList[idx] || '');
+                                                                        if (suggestions.length === 0) {
+                                                                            return <div className="px-4 py-3 text-xs text-slate-400 italic">Không tìm thấy bình phù hợp</div>;
+                                                                        }
+                                                                        return suggestions.map(c => (
+                                                                            <button
+                                                                                key={c.serial_number}
+                                                                                type="button"
+                                                                                onMouseDown={(e) => {
+                                                                                    e.preventDefault();
+                                                                                    const newList = [...serialsList];
+                                                                                    while (newList.length < order.quantity) newList.push('');
+                                                                                    newList[idx] = c.serial_number;
+                                                                                    setScannedSerials(newList.join('\n'));
+                                                                                    setActiveCylDropdownWH(null);
+                                                                                    setTimeout(() => {
+                                                                                        const nextInput = document.getElementById(`serial-input-sp-${idx + 1}`);
+                                                                                        if (nextInput) nextInput.focus();
+                                                                                    }, 50);
+                                                                                }}
+                                                                                className="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-orange-50 transition-colors border-b border-orange-50 last:border-0"
+                                                                            >
+                                                                                <span className="text-[13px] font-mono font-bold text-orange-700">{c.serial_number}</span>
+                                                                                <span className="text-[10px] text-slate-400 ml-2">{c.volume || ''}</span>
+                                                                            </button>
+                                                                        ));
+                                                                    })()}
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 );
@@ -1016,7 +1252,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                             {errorMsg && (
                                 <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl text-[13px] font-bold text-rose-600 flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
                                     <XCircle className="w-4 h-4 shrink-0" />
-                                            {errorMsg}
+                                    {errorMsg}
                                 </div>
                             )}
 
@@ -1046,7 +1282,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                         {availableActions.map(action => {
                                             const metadata = STATUS_TRANSITIONS_METADATA.find(t => t.nextStatus === action.nextStatus);
                                             const ActionIcon = metadata?.icon || ArrowRightCircle;
-                                            
+
                                             let actionStyle = "bg-white text-slate-700 hover:bg-slate-50 border-slate-200 hover:border-primary/30";
                                             if (action.nextStatus === 'HUY_DON' || action.nextStatus === 'DOI_SOAT_THAT_BAI') {
                                                 actionStyle = "bg-rose-50 text-rose-600 hover:bg-rose-100 border-rose-200 hover:border-rose-300";
@@ -1131,9 +1367,9 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                             </button>
                         </div>
                         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-                            <MachineIssueRequestForm 
-                                overrideOrderId={order.id} 
-                                overrideViewOnly={true} 
+                            <MachineIssueRequestForm
+                                overrideOrderId={order.id}
+                                overrideViewOnly={true}
                                 onClosePopup={() => setShowMachinePreviewPopup(false)}
                             />
                         </div>

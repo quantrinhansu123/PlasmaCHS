@@ -182,12 +182,20 @@ export default function MachineRequests() {
                 query = query.eq('delivery_unit', storageUserName);
             }
 
-            // Non-leader users only see orders from managed sales list (including self)
-            if (!isAdmin && !isLeader && !isThuKhoRole && !isShipperRole) {
-                if (visibleSalesNames.length > 0) {
-                    query = query.in('ordered_by', visibleSalesNames);
-                } else if (storageUserName) {
-                    query = query.eq('ordered_by', storageUserName);
+            // Role-based visibility filtering
+            if (!isAdmin && !isThuKhoRole && !isShipperRole) {
+                // Leaders see their own + managed staff's requests
+                if (isLeader) {
+                    if (visibleSalesNames.length > 0) {
+                        query = query.in('ordered_by', visibleSalesNames);
+                    }
+                } 
+                // Regular NVKD (Sales) only see their own requests
+                else {
+                    const myNames = [user?.name, user?.username, storageUserName].filter(Boolean);
+                    if (myNames.length > 0) {
+                        query = query.in('ordered_by', myNames);
+                    }
                 }
             }
 
@@ -342,7 +350,7 @@ export default function MachineRequests() {
                     />
 
                     {/* Mobile View */}
-                    <div className="md:hidden flex-1 overflow-y-auto p-3 flex flex-col gap-3">
+                    <div className="md:hidden flex-1 overflow-y-auto p-3 pb-24 flex flex-col gap-3">
                         {loading ? (
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
                         ) : paginatedRequests.length === 0 ? (

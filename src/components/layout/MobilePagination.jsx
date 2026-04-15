@@ -35,7 +35,7 @@ function MobilePagination({
   return (
     <div
       className={clsx(
-        'md:hidden sticky bottom-0 w-full bg-white border-t border-slate-100 px-2 py-1.5 animate-in fade-in duration-300 rounded-b-2xl',
+        'md:hidden sticky bottom-0 left-0 right-0 w-full bg-white border-t border-slate-200 px-3 py-1 animate-in fade-in duration-300 shadow-[0_-2px_8px_rgba(0,0,0,0.06)] shrink-0',
         className
       )}
     >

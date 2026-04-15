@@ -346,12 +346,20 @@ const Orders = () => {
                 query = query.eq('warehouse', warehouseCode);
             }
 
-            // Non-leader users only see orders from managed sales list (including self)
-            if (!isAdmin && !isLeader && !isThuKhoRole && !isShipperRole) {
-                if (visibleSalesNames.length > 0) {
-                    query = query.in('ordered_by', visibleSalesNames);
-                } else if (storageUserName) {
-                    query = query.eq('ordered_by', storageUserName);
+            // Role-based visibility filtering
+            if (!isAdmin && !isThuKhoRole && !isShipperRole) {
+                // Leaders see their own + managed staff's orders
+                if (isLeader) {
+                    if (visibleSalesNames.length > 0) {
+                        query = query.in('ordered_by', visibleSalesNames);
+                    }
+                } 
+                // Regular NVKD (Sales) only see their own orders
+                else {
+                    const myNames = [user?.name, user?.username, storageUserName].filter(Boolean);
+                    if (myNames.length > 0) {
+                        query = query.in('ordered_by', myNames);
+                    }
                 }
             }
 
@@ -1007,7 +1015,8 @@ const Orders = () => {
                     />
 
                     {/* ── MOBILE CARD LIST ── */}
-                    <div className="md:hidden flex-1 overflow-y-auto p-2.5 flex flex-col gap-2.5">
+                    <div className="md:hidden flex-1 flex flex-col min-h-0">
+                        <div className="flex-1 overflow-y-auto p-2.5 flex flex-col gap-2.5">
                         {isLoading ? (
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
                         ) : filteredOrders.length === 0 ? (
@@ -1195,28 +1204,29 @@ const Orders = () => {
                                 );
                             })
                         )}
+                        </div>
+
+                        {selectedIds.length > 0 && (
+                            <button
+                                onClick={handleBulkPrint}
+                                className="md:hidden fixed right-4 bottom-16 z-[95] flex items-center gap-2 rounded-xl bg-primary text-white shadow-lg shadow-primary/30 border border-primary/20"
+                            >
+                                <Printer size={16} />
+                                In {selectedIds.length} phiếu
+                            </button>
+                        )}
+
+                        {/* Mobile pagination — outside overflow-y-auto so sticky works */}
+                        {!isLoading && (
+                            <MobilePagination
+                                currentPage={1}
+                                setCurrentPage={() => { }}
+                                pageSize={50}
+                                setPageSize={() => { }}
+                                totalRecords={filteredOrders.length}
+                            />
+                        )}
                     </div>
-
-                    {selectedIds.length > 0 && (
-                        <button
-                            onClick={handleBulkPrint}
-                            className="md:hidden fixed right-4 bottom-4 z-[95] flex items-center gap-2 rounded-xl bg-primary text-white shadow-lg shadow-primary/30 border border-primary/20"
-                        >
-                            <Printer size={16} />
-                            In {selectedIds.length} phiếu
-                        </button>
-                    )}
-
-                    {/* Mobile pagination */}
-                    {!isLoading && (
-                        <MobilePagination
-                            currentPage={1}
-                            setCurrentPage={() => { }} // Placeholder if real pagination not yet active
-                            pageSize={50}
-                            setPageSize={() => { }}
-                            totalRecords={filteredOrders.length}
-                        />
-                    )}
 
                     {/* ── DESKTOP TOOLBAR ── */}
                     <div className="hidden md:block p-3 space-y-3">

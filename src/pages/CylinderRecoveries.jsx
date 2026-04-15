@@ -518,7 +518,7 @@ const CylinderRecoveries = () => {
                     />
 
                     {/* ── MOBILE CARD LIST ── */}
-                    <div className="md:hidden flex-1 overflow-y-auto p-3 pb-4 flex flex-col gap-3">
+                    <div className="md:hidden flex-1 overflow-y-auto p-3 pb-24 flex flex-col gap-3">
                         {loading ? (
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic font-medium">Đang tải dữ liệu...</div>
                         ) : paginatedRecoveries.length === 0 ? (

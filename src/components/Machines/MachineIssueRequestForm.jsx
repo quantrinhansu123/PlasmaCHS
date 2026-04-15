@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { Printer, Save, Eye, EyeOff, Edit } from 'lucide-react';
+import { Printer, Save, Eye, EyeOff, Edit, X, Warehouse } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase/config';
@@ -8,6 +8,7 @@ import usePermissions from '../../hooks/usePermissions';
 import { notificationService } from '../../utils/notificationService';
 import MachineHandoverPrintTemplate from '../MachineHandoverPrintTemplate';
 import GoodsIssuePrintTemplate from '../GoodsIssues/GoodsIssuePrintTemplate';
+import OrderHistoryTimeline from '../Orders/OrderHistoryTimeline';
 
 const dmyToYmd = (dmy) => {
     if (!dmy || typeof dmy !== 'string') return "";
@@ -82,6 +83,8 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
 
     const [editOrderId, setEditOrderId] = useState(null);
     const [isReadOnly, setIsReadOnly] = useState(false);
+    const [facilities, setFacilities] = useState([]);
+    const [isFacilityDropdownOpen, setIsFacilityDropdownOpen] = useState(false);
     const currentActorName =
         user?.name ||
         localStorage.getItem('user_name') ||
@@ -219,22 +222,36 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
                 const { data, error } = await supabase
                     .from('customers')
                     .select('*')
-                    .eq('phone', formData.phone)
-                    .limit(1);
+                    .eq('phone', formData.phone);
 
                 if (data && data.length > 0 && !error) {
-                    const customer = data[0];
-                    setFormData(prev => ({
-                        ...prev,
-                        customerId: customer.id || prev.customerId,
-                        customerName: customer.name || '',
-                        facilityName: customer.agency_name || customer.invoice_company_name || customer.name || '',
-                        placementAddress: customer.address || '',
-                        machineManager: customer.managed_by || prev.machineManager
-                    }));
+                    setFacilities(data);
+                    if (data.length === 1) {
+                        const customer = data[0];
+                        setFormData(prev => ({
+                            ...prev,
+                            customerId: customer.id || prev.customerId,
+                            customerName: customer.name || '',
+                            facilityName: customer.agency_name || customer.invoice_company_name || customer.name || '',
+                            placementAddress: customer.address || '',
+                            machineManager: customer.managed_by || prev.machineManager
+                        }));
+                    } else {
+                        // Multiple facilities found, let user pick
+                        setIsFacilityDropdownOpen(true);
+                        // Auto-fill common data from first one
+                        const first = data[0];
+                        setFormData(prev => ({
+                            ...prev,
+                            customerId: first.id || prev.customerId,
+                            customerName: first.name || '',
+                            machineManager: first.managed_by || prev.machineManager
+                        }));
+                    }
+                } else {
+                    setFacilities([]);
                 }
             } catch (error) {
-                // Ignore error if customer not found, just let user type manually
                 console.log("Customer not found for auto-fill");
             } finally {
                 setIsSearching(false);
@@ -244,6 +261,18 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
         const timeoutId = setTimeout(fetchCustomerData, 600);
         return () => clearTimeout(timeoutId);
     }, [formData.phone, editOrderId]);
+
+    const handleFacilitySelect = (facility) => {
+        setFormData(prev => ({
+            ...prev,
+            customerId: facility.id || prev.customerId,
+            customerName: facility.name || prev.customerName,
+            facilityName: facility.agency_name || facility.invoice_company_name || facility.name || '',
+            placementAddress: facility.address || '',
+            machineManager: facility.managed_by || prev.machineManager
+        }));
+        setIsFacilityDropdownOpen(false);
+    };
 
     const handleInputChange = (field, value) => {
         setFormData(prev => {
@@ -276,6 +305,10 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
     const [showPreview, setShowPreview] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [printType, setPrintType] = useState('DNXM'); // 'DNXM' | 'BBBG' | 'XK'
+    const [showWarehouseModal, setShowWarehouseModal] = useState(false);
+    const [warehouseList, setWarehouseList] = useState([]);
+    const [pendingNextStatus, setPendingNextStatus] = useState(null);
+    const [pendingApproveData, setPendingApproveData] = useState(null);
 
     const handlePrint = (type = 'DNXM') => {
         setPrintType(type);
@@ -484,25 +517,30 @@ Ghi chú: ${formData.notes}`,
 
         if (!window.confirm(confirmMsg)) return;
 
-        // Specially Handle level 2 -> 3: Assign Warehouse
-        let assignedWarehouse = formData.warehouse;
+        // Specially Handle level 2 -> 3: Assign Warehouse — Show a proper modal instead of window.prompt
         if (formData.status === 'CHO_CTY_DUYET') {
-            const { data: whs } = await supabase.from('warehouses').select('id, name');
+            const { data: whs } = await supabase.from('warehouses').select('id, name').order('name');
             if (whs && whs.length > 0) {
-                const whName = window.prompt(`CHỌN KHO XUẤT HÀNG:\n${whs.map((w, i) => `${i+1}. ${w.name}`).join('\n')}`, whs[0].name);
-                if (!whName) return; // Cancelled
-                
-                // Map full name to shorthand if needed for DB constraint
-                const foundWh = whs.find(w => w.name.toLowerCase().includes(whName.toLowerCase()) || whName === (whs.indexOf(w)+1).toString());
-                if (foundWh) {
-                    assignedWarehouse = foundWh.name;
-                    // Note: If DB constraint is strict (HN, TP.HCM), we might need mapping. 
-                    // But schema says 'HN', 'TP.HCM', 'TH', 'DN'. 
-                    // We'll try to use the name first as it might have been relaxed.
-                }
+                setWarehouseList(whs);
+                setPendingNextStatus(nextStatus);
+                setPendingApproveData({ nextStatus, successMsg, notifTitle, notifDesc });
+                setShowWarehouseModal(true);
+                return; // Will resume in handleWarehouseSelected
             }
         }
 
+        await executeApprove({ nextStatus, successMsg, notifTitle, notifDesc, assignedWarehouse: formData.warehouse });
+    };
+
+    const handleWarehouseSelected = async (whName) => {
+        setShowWarehouseModal(false);
+        if (!whName || !pendingApproveData) return;
+        await executeApprove({ ...pendingApproveData, assignedWarehouse: whName });
+        setPendingApproveData(null);
+        setPendingNextStatus(null);
+    };
+
+    const executeApprove = async ({ nextStatus, successMsg, notifTitle, notifDesc, assignedWarehouse }) => {
         setIsSaving(true);
         try {
             // Track in order_history table
@@ -528,7 +566,7 @@ Ghi chú: ${formData.notes}`,
                 await assignMachinesToCustomer(formData.machineCode, formData.customerName);
             }
             
-            setFormData(prev => ({ ...prev, status: nextStatus }));
+            setFormData(prev => ({ ...prev, status: nextStatus, warehouse: assignedWarehouse || prev.warehouse }));
             toast.success(successMsg);
             
             notificationService.add({
@@ -659,14 +697,37 @@ Ghi chú: ${formData.notes}`,
                                         className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
                                     />
                                 </div>
-                                <div>
+                                <div className="relative">
                                     <label className="block text-sm font-medium text-foreground mb-1.5">Tên cơ sở</label>
                                     <input
                                         type="text"
                                         value={formData.facilityName}
+                                        onFocus={() => facilities.length > 0 && setIsFacilityDropdownOpen(true)}
                                         onChange={(e) => handleInputChange('facilityName', e.target.value)}
                                         className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
                                     />
+                                    {isFacilityDropdownOpen && facilities.length > 0 && (
+                                        <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 shadow-2xl rounded-xl overflow-hidden animate-in fade-in slide-in-from-top-1">
+                                            <div className="p-2 border-b border-primary/10 bg-primary/5 text-[10px] font-bold text-primary uppercase tracking-wider flex items-center justify-between">
+                                                <div className="flex items-center gap-1.5">
+                                                    <Warehouse size={12} /> Chọn cơ sở tương ứng
+                                                </div>
+                                                <button onClick={() => setIsFacilityDropdownOpen(false)} className="text-slate-400 hover:text-rose-500"><X size={14}/></button>
+                                            </div>
+                                            <div className="max-h-48 overflow-y-auto custom-scrollbar">
+                                                {facilities.map(f => (
+                                                    <div
+                                                        key={f.id}
+                                                        className="px-4 py-2.5 cursor-pointer hover:bg-slate-50 border-b border-slate-100 last:border-0 transition-colors"
+                                                        onClick={() => handleFacilitySelect(f)}
+                                                    >
+                                                        <div className="font-bold text-slate-800 text-[13px]">{f.name}</div>
+                                                        <div className="text-[11px] text-slate-500 mt-0.5 line-clamp-1 italic">{f.address}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="md:col-span-2">
                                     <label className="block text-sm font-medium text-foreground mb-1.5">Địa chỉ đặt máy</label>
@@ -936,6 +997,32 @@ Ghi chú: ${formData.notes}`,
                             </div>
                         );
                     })()}
+
+                    {/* Kho xử lý panel - hiện khi thủ kho đang xử lý */}
+                    {formData.status === 'KHO_XU_LY' && (role?.toLowerCase().includes('kho') || role === 'Admin') && (
+                        <div className="w-full bg-amber-50 border border-amber-200 rounded-2xl p-4 mt-2 animate-in fade-in duration-300">
+                            <div className="flex items-center gap-2 mb-3">
+                                <Warehouse size={18} className="text-amber-700" />
+                                <h3 className="font-bold text-amber-800 text-sm uppercase tracking-wide">Kho Xử Lý — Gán Mã Máy Trước Khi Xuất</h3>
+                            </div>
+                            <p className="text-xs text-amber-700 mb-3">Nhập mã serial máy (cách nhau dấu phẩy), sau đó in Biên Bản Bàn Giao và Phiếu Xuất Kho trước khi nhấn Duyệt.</p>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => handlePrint('BBBG')}
+                                    className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-xl shadow hover:bg-emerald-700 transition-all font-bold text-xs"
+                                >
+                                    <Printer size={15} /> IN BBBG
+                                </button>
+                                <button
+                                    onClick={() => handlePrint('XK')}
+                                    className="flex items-center justify-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl shadow hover:bg-indigo-700 transition-all font-bold text-xs"
+                                >
+                                    <Printer size={15} /> IN PHIẾU XUẤT KHO
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="flex flex-wrap gap-2">
                         <button
                             onClick={() => handlePrint('DNXM')}
@@ -944,21 +1031,33 @@ Ghi chú: ${formData.notes}`,
                             <Printer size={18} />
                             IN PHIẾU DNXM
                         </button>
-                        <button
-                            onClick={() => handlePrint('BBBG')}
-                            className="flex items-center justify-center gap-2 bg-emerald-700 text-white px-6 py-3 rounded-xl shadow-lg shadow-emerald-600/30 hover:bg-emerald-800 transition-all font-bold text-sm transform active:scale-[0.98]"
-                        >
-                            <Printer size={18} />
-                            IN BIÊN BẢN BÀN GIAO
-                        </button>
-                        <button
-                            onClick={() => handlePrint('XK')}
-                            className="flex items-center justify-center gap-2 bg-indigo-700 text-white px-6 py-3 rounded-xl shadow-lg shadow-indigo-600/30 hover:bg-indigo-800 transition-all font-bold text-sm transform active:scale-[0.98]"
-                        >
-                            <Printer size={18} />
-                            IN PHIẾU XUẤT KHO
-                        </button>
+                        {formData.status === 'DA_DUYET' || !['KHO_XU_LY', 'CHO_DUYET', 'CHO_CTY_DUYET'].includes(formData.status) ? (
+                            <>
+                                <button
+                                    onClick={() => handlePrint('BBBG')}
+                                    className="flex items-center justify-center gap-2 bg-emerald-700 text-white px-6 py-3 rounded-xl shadow-lg shadow-emerald-600/30 hover:bg-emerald-800 transition-all font-bold text-sm transform active:scale-[0.98]"
+                                >
+                                    <Printer size={18} />
+                                    IN BIÊN BẢN BÀN GIAO
+                                </button>
+                                <button
+                                    onClick={() => handlePrint('XK')}
+                                    className="flex items-center justify-center gap-2 bg-indigo-700 text-white px-6 py-3 rounded-xl shadow-lg shadow-indigo-600/30 hover:bg-indigo-800 transition-all font-bold text-sm transform active:scale-[0.98]"
+                                >
+                                    <Printer size={18} />
+                                    IN PHIẾU XUẤT KHO
+                                </button>
+                            </>
+                        ) : null}
                     </div>
+
+                    {/* History Timeline */}
+                    {editOrderId && (
+                        <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 mt-2">
+                            <h3 className="font-bold text-slate-700 text-sm mb-3 uppercase tracking-wide">Lịch Sử Duyệt Phiếu</h3>
+                            <OrderHistoryTimeline orderId={editOrderId} />
+                        </div>
+                    )}
 
                     {onClosePopup ? (
                         <button
@@ -975,6 +1074,39 @@ Ghi chú: ${formData.notes}`,
                             THOÁT
                         </button>
                     )}
+                </div>
+            )}
+
+            {/* Warehouse Selection Modal */}
+            {showWarehouseModal && (
+                <div className="fixed inset-0 z-[200000] flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+                    <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl animate-in slide-in-from-bottom-4 md:zoom-in-95 duration-300">
+                        <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+                            <div>
+                                <h2 className="text-lg font-black text-slate-900">Chọn Kho Xuất Hàng</h2>
+                                <p className="text-xs text-slate-400 mt-0.5">Bước 2/3 — Công ty duyệt</p>
+                            </div>
+                            <button onClick={() => { setShowWarehouseModal(false); setPendingApproveData(null); }} className="p-2 bg-slate-50 hover:bg-slate-100 rounded-xl transition-colors">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="p-4 space-y-2">
+                            {warehouseList.map(wh => (
+                                <button
+                                    key={wh.id}
+                                    onClick={() => handleWarehouseSelected(wh.name)}
+                                    className="w-full flex items-center gap-3 px-5 py-4 rounded-2xl border border-slate-200 hover:border-primary hover:bg-primary/5 transition-all text-left group"
+                                >
+                                    <div className="w-10 h-10 bg-slate-100 group-hover:bg-primary/10 rounded-xl flex items-center justify-center shrink-0 transition-colors">
+                                        <Warehouse size={20} className="text-slate-500 group-hover:text-primary transition-colors" />
+                                    </div>
+                                    <div>
+                                        <p className="font-bold text-[14px] text-slate-800 group-hover:text-primary transition-colors">{wh.name}</p>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
                 </div>
             )}
 
@@ -1314,31 +1446,121 @@ Ghi chú: ${formData.notes}`,
                         background: white !important;
                         box-shadow: none !important;
                         display: block !important;
+                        font-family: Arial, Helvetica, sans-serif !important;
+                        font-size: 13px !important;
                     }
+                    
+                    /* Fix flex containers for print — must remain row */
+                    #print-area .flex {
+                        display: flex !important;
+                    }
+                    #print-area .flex-col {
+                        flex-direction: column !important;
+                    }
+                    #print-area .print\\:flex-row {
+                        flex-direction: row !important;
+                    }
+                    #print-area .print\\:items-center {
+                        align-items: center !important;
+                    }
+                    #print-area .print\\:grid-cols-3 {
+                        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+                    }
+                    
+                    /* Fix inputs: remove browser default styling that causes misalignment */
+                    #print-area input, #print-area textarea {
+                        -webkit-appearance: none !important;
+                        appearance: none !important;
+                        background: transparent !important;
+                        border: none !important;
+                        border-bottom: 1px solid #666 !important;
+                        outline: none !important;
+                        padding: 0 4px !important;
+                        margin: 0 !important;
+                        box-shadow: none !important;
+                        font-family: Arial, Helvetica, sans-serif !important;
+                        font-size: 13px !important;
+                        color: black !important;
+                        display: inline-block !important;
+                        vertical-align: baseline !important;
+                        line-height: 1.4 !important;
+                    }
+                    /* Flex-1 inputs take full remaining width */
+                    #print-area .flex-1 input,
+                    #print-area input.flex-1 {
+                        width: 100% !important;
+                        flex: 1 !important;
+                    }
+                    /* Fixed-width date inputs */
+                    #print-area input.w-32 {
+                        width: 110px !important;
+                        flex: none !important;
+                    }
+                    /* Orange number box */
+                    #print-area input.w-20 {
+                        width: 72px !important;
+                        border: 1px solid black !important;
+                        text-align: center !important;
+                        background: transparent !important;
+                    }
+                    /* Textarea notes */
+                    #print-area textarea {
+                        width: 100% !important;
+                        min-height: 0 !important;
+                        border: none !important;
+                        border-bottom: 1px solid #aaa !important;
+                        resize: none !important;
+                        overflow: visible !important;
+                    }
+                    
+                    /* Checkboxes */
+                    #print-area .w-4.h-4 {
+                        width: 14px !important;
+                        height: 14px !important;
+                        border: 1px solid #555 !important;
+                        display: inline-flex !important;
+                        align-items: center !important;
+                        justify-content: center !important;
+                        background: white !important;
+                        flex-shrink: 0 !important;
+                    }
+
                     /* Hide mobile bottom bars just in case */
                     .fixed.bottom-0, [class*="bottom-navigation"] { display: none !important; }
-                    input, textarea, span, p, div { color: black !important; }
                     
                     /* Tighter vertical spacing specifically for printing */
-                    #print-area .space-y-4 > :not([hidden]) ~ :not([hidden]) { margin-top: 6px !important; }
-                    #print-area .mt-4 { margin-top: 6px !important; }
-                    #print-area .mt-6 { margin-top: 8px !important; }
+                    #print-area .space-y-4 > :not([hidden]) ~ :not([hidden]) { margin-top: 5px !important; }
+                    #print-area .mt-4 { margin-top: 5px !important; }
+                    #print-area .mt-6 { margin-top: 7px !important; }
                     #print-area .mb-2 { margin-bottom: 2px !important; }
                     #print-area .mb-4 { margin-bottom: 4px !important; }
-                    #print-area .mb-6 { margin-bottom: 12px !important; }
-                    #print-area .pt-4 { padding-top: 8px !important; }
-                    #print-area .pb-4 { padding-bottom: 8px !important; }
-                    #print-area .gap-6, #print-area .gap-8, #print-area .gap-10 { gap: 10px !important; }
+                    #print-area .mb-6 { margin-bottom: 10px !important; }
+                    #print-area .pt-4 { padding-top: 6px !important; }
+                    #print-area .pb-4 { padding-bottom: 6px !important; }
+                    #print-area .gap-6, #print-area .gap-8, #print-area .gap-10 { gap: 8px !important; }
+                    #print-area .gap-4 { gap: 6px !important; }
                     
                     /* Shrink big margins for signatures and footers to fit on 1 page */
-                    #print-area .mb-16 { margin-bottom: 30px !important; }
-                    #print-area .mt-10 { margin-top: 15px !important; }
-                    #print-area .text-\\[15px\\] { font-size: 14px !important; }
-                    #print-area .mt-4 { margin-top: 8px !important; }
+                    #print-area .mb-16 { margin-bottom: 28px !important; }
+                    #print-area .mt-10 { margin-top: 12px !important; }
+                    #print-area .mt-8 { margin-top: 10px !important; }
+                    #print-area .text-\\[15px\\] { font-size: 13px !important; }
                     
                     /* Tighter line height for text wrapping */
                     #print-area, #print-area div, #print-area span, #print-area p {
                         line-height: 1.35 !important;
+                        color: black !important;
+                    }
+                    
+                    /* Title styling */
+                    #print-area h1 { font-size: 16px !important; }
+                    #print-area h2 { font-size: 13px !important; }
+                    
+                    /* min-w constraints for label spans */
+                    #print-area span.min-w-\\[200px\\] {
+                        min-width: 190px !important;
+                        display: inline-block !important;
+                        flex-shrink: 0 !important;
                     }
                 }
             `}} />

@@ -48,6 +48,11 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
     const [masterBarcode, setMasterBarcode] = useState('');
     const masterInputRef = useRef(null);
 
+    // Cylinder autocomplete for serial input
+    const [availableCyls, setAvailableCyls] = useState([]);
+    const [isFetchingCyls, setIsFetchingCyls] = useState(false);
+    const [activeSerialDropdown, setActiveSerialDropdown] = useState(null); // item._id
+
     const [formData, setFormData] = useState({
         recovery_code: '',
         recovery_date: new Date().toISOString().split('T')[0],
@@ -161,6 +166,46 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
         if (data) setItems(data.map(i => ({ ...i, _id: i.id || Date.now() + Math.random() })));
     };
 
+    // Fetch cylinders currently at customer sites for autocomplete suggestions
+    const fetchAvailableCyls = async () => {
+        if (availableCyls.length > 0 || isFetchingCyls) return;
+        setIsFetchingCyls(true);
+        try {
+            const { data } = await supabase
+                .from('cylinders')
+                .select('serial_number, volume, customer_name')
+                .not('customer_name', 'is', null)
+                .order('serial_number', { ascending: true })
+                .limit(5000);
+            setAvailableCyls(data || []);
+        } catch (e) {
+            console.error('fetchAvailableCyls error', e);
+        } finally {
+            setIsFetchingCyls(false);
+        }
+    };
+
+    // Get matching suggestions for a specific item row
+    const getCylSuggestions = (itemId, searchVal) => {
+        if (!availableCyls || availableCyls.length === 0) return [];
+        const search = (searchVal || '').trim().toUpperCase();
+        const takenSerials = new Set(
+            items.filter(i => i._id !== itemId && i.serial_number?.trim()).map(i => i.serial_number.trim().toUpperCase())
+        );
+        // If customer is selected, filter by that customer
+        const selectedCustomer = customers.find(c => c.id === formData.customer_id);
+        return availableCyls
+            .filter(c => {
+                const serial = c.serial_number?.toUpperCase();
+                if (!serial) return false;
+                if (takenSerials.has(serial)) return false;
+                if (selectedCustomer && c.customer_name && !c.customer_name.includes(selectedCustomer.name)) return false;
+                if (!search) return true;
+                return serial.includes(search);
+            })
+            .slice(0, 30);
+    };
+
     // Synchronize items list with requested_quantity in real-time
     useEffect(() => {
         if (isReadOnly) return;
@@ -269,6 +314,16 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
             setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: 'Lỗi' } : i));
         }
     }, [setItems, setFormData]);
+
+    // Must be declared before handleScanSuccess to avoid TDZ (Cannot access before initialization)
+    const updateItem = useCallback((id, field, value) => {
+        setItems(prev => prev.map(i => i._id === id ? { ...i, [field]: value } : i));
+
+        // If serial number changed, trigger re-validation
+        if (field === 'serial_number' && value.trim().length >= 3) {
+            triggerItemValidation(id, value.trim());
+        }
+    }, [setItems]);
 
     const handleOrderScanSuccess = useCallback(async (orderCode) => {
         setIsScannerOpen(false);
@@ -384,14 +439,6 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
         }]);
     };
 
-    const updateItem = (id, field, value) => {
-        setItems(prev => prev.map(i => i._id === id ? { ...i, [field]: value } : i));
-
-        // If serial number changed, trigger re-validation
-        if (field === 'serial_number' && value.trim().length >= 3) {
-            triggerItemValidation(id, value.trim());
-        }
-    };
 
     const handleSerialKeyDown = (e, idx) => {
         if (e.key === 'Enter') {
@@ -995,41 +1042,88 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                                         <span className="text-[11px] font-black text-slate-300 mt-2.5 w-4 shrink-0">{idx + 1}</span>
                                                         <div className="flex-1 space-y-2.5">
                                                             <div className="flex gap-2">
-                                                                <div className="flex-1 relative">
-                                                                    <input
-                                                                        id={`recovery-serial-${idx}`}
-                                                                        value={item.serial_number}
-                                                                        onChange={(e) => updateItem(item._id, 'serial_number', e.target.value)}
-                                                                        onKeyDown={(e) => handleSerialKeyDown(e, idx)}
-                                                                        placeholder="Nhập mã serial..."
-                                                                        disabled={isReadOnly}
-                                                                        className={clsx(
-                                                                            "w-full pl-3 pr-10 py-2.5 bg-white border rounded-xl font-black text-[14px] outline-none transition-all",
-                                                                            item.isValid === true ? "border-green-200 focus:ring-green-500 text-green-700 bg-green-50/30" :
-                                                                                item.isValid === false ? "border-red-200 focus:ring-red-500 text-red-700 bg-red-50/30" :
-                                                                                    "border-slate-200 focus:ring-primary text-slate-800"
-                                                                        )}
-                                                                    />
-                                                                    {!isReadOnly && (
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => {
-                                                                                setScannerType('item');
-                                                                                setIsScannerOpen(true);
-                                                                                // Store which row we are scanning for
-                                                                                window._currentScanItemId = item._id;
+                                                                    <div className="flex-1 relative">
+                                                                        <input
+                                                                            id={`recovery-serial-${idx}`}
+                                                                            value={item.serial_number}
+                                                                            onChange={(e) => updateItem(item._id, 'serial_number', e.target.value)}
+                                                                            onFocus={() => {
+                                                                                fetchAvailableCyls();
+                                                                                setActiveSerialDropdown(item._id);
                                                                             }}
-                                                                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-primary/60 hover:text-primary transition-colors hover:bg-primary/5 rounded-lg z-10"
-                                                                        >
-                                                                            <ScanBarcode className="w-5 h-5" />
-                                                                        </button>
-                                                                    )}
-                                                                    {item.isValidating && (
-                                                                        <div className="absolute right-10 top-1/2 -translate-y-1/2">
-                                                                            <div className="w-3.5 h-3.5 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
-                                                                        </div>
-                                                                    )}
-                                                                </div>
+                                                                            onBlur={() => {
+                                                                                setTimeout(() => {
+                                                                                    setActiveSerialDropdown(curr => curr === item._id ? null : curr);
+                                                                                }, 200);
+                                                                            }}
+                                                                            onKeyDown={(e) => handleSerialKeyDown(e, idx)}
+                                                                            placeholder="Nhập mã serial..."
+                                                                            disabled={isReadOnly}
+                                                                            autoComplete="off"
+                                                                            className={clsx(
+                                                                                "w-full pl-3 pr-10 py-2.5 bg-white border rounded-xl font-black text-[14px] outline-none transition-all",
+                                                                                item.isValid === true ? "border-green-200 focus:ring-2 focus:ring-green-500/20 text-green-700 bg-green-50/30" :
+                                                                                    item.isValid === false ? "border-red-200 focus:ring-2 focus:ring-red-500/20 text-red-700 bg-red-50/30" :
+                                                                                        "border-slate-200 focus:ring-2 focus:ring-primary/20 focus:border-primary/40 text-slate-800"
+                                                                            )}
+                                                                        />
+                                                                        {/* Autocomplete Dropdown */}
+                                                                        {activeSerialDropdown === item._id && !isReadOnly && (
+                                                                            <div className="absolute z-[9999] left-0 right-0 top-[42px] bg-white border border-primary/20 rounded-xl shadow-xl max-h-52 overflow-y-auto">
+                                                                                {isFetchingCyls ? (
+                                                                                    <div className="px-4 py-3 text-xs text-slate-400 italic">Đang tải danh sách bình...</div>
+                                                                                ) : (() => {
+                                                                                    const suggs = getCylSuggestions(item._id, item.serial_number);
+                                                                                    if (suggs.length === 0) return (
+                                                                                        <div className="px-4 py-3 text-xs text-slate-400 italic">
+                                                                                            {item.serial_number ? 'Không tìm thấy bình phù hợp' : 'Nhập để tìm kiếm...'}
+                                                                                        </div>
+                                                                                    );
+                                                                                    return suggs.map(c => (
+                                                                                        <button
+                                                                                            key={c.serial_number}
+                                                                                            type="button"
+                                                                                            onMouseDown={(e) => {
+                                                                                                e.preventDefault();
+                                                                                                updateItem(item._id, 'serial_number', c.serial_number);
+                                                                                                setActiveSerialDropdown(null);
+                                                                                                // Move focus to next row
+                                                                                                setTimeout(() => {
+                                                                                                    const nextInput = document.getElementById(`recovery-serial-${idx + 1}`);
+                                                                                                    if (nextInput) nextInput.focus();
+                                                                                                }, 50);
+                                                                                            }}
+                                                                                            className="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-primary/5 transition-colors border-b border-slate-50 last:border-0"
+                                                                                        >
+                                                                                            <span className="text-[13px] font-mono font-bold text-slate-800">{c.serial_number}</span>
+                                                                                            <div className="flex items-center gap-2 shrink-0">
+                                                                                                {c.volume && <span className="text-[10px] text-slate-400">{c.volume}</span>}
+                                                                                                {c.customer_name && <span className="text-[10px] text-primary/60 font-semibold max-w-[100px] truncate">{c.customer_name}</span>}
+                                                                                            </div>
+                                                                                        </button>
+                                                                                    ));
+                                                                                })()}
+                                                                            </div>
+                                                                        )}
+                                                                        {!isReadOnly && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => {
+                                                                                    setScannerType('item');
+                                                                                    setIsScannerOpen(true);
+                                                                                    window._currentScanItemId = item._id;
+                                                                                }}
+                                                                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-primary/60 hover:text-primary transition-colors hover:bg-primary/5 rounded-lg z-10"
+                                                                            >
+                                                                                <ScanBarcode className="w-5 h-5" />
+                                                                            </button>
+                                                                        )}
+                                                                        {item.isValidating && (
+                                                                            <div className="absolute right-10 top-1/2 -translate-y-1/2">
+                                                                                <div className="w-3.5 h-3.5 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
                                                                 <select
                                                                     value={item.condition}
                                                                     onChange={(e) => updateItem(item._id, 'condition', e.target.value)}
