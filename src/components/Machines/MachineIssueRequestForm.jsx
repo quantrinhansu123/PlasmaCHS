@@ -110,11 +110,18 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
         }
     }, [location.search]);
 
+    // Bug2 fix: watch user?.name specifically — fires even when user loads async after mount
     useEffect(() => {
-        if (!editOrderId && user?.name && !formData.requesterName) {
-            setFormData(prev => ({ ...prev, requesterName: user.name }));
+        if (!editOrderId && user?.name) {
+            setFormData(prev => {
+                // Only overwrite if still blank (don't clobber user edits)
+                if (!prev.requesterName) {
+                    return { ...prev, requesterName: user.name };
+                }
+                return prev;
+            });
         }
-    }, [user, editOrderId]);
+    }, [user?.name, editOrderId]);
 
     const fetchExistingOrder = async (id) => {
         try {
@@ -146,7 +153,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
                     orangeNumber: data.order_code?.replace('DNXM-', '') || '',
                     requesterName: data.ordered_by || '',
                     machineManager: parseField('Phụ trách máy:'),
-                    customerId: '', // orders table has no customer_id column; identity is via customer_name
+                    customerId: data.customer_id || '', // Bug3 fix: restore customer_id for correct mapping
                     customerName: data.customer_name || '',
                     phone: data.recipient_phone || '',
                     facilityName: data.recipient_name || '',

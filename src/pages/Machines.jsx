@@ -72,7 +72,16 @@ const TABLE_COLUMNS = [
 ];
 
 const Machines = () => {
-    const { role, department } = usePermissions();
+    const { role: rawRole, department } = usePermissions();
+    const normalizeRole = (r) => {
+        if (!r) return '';
+        return r.toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/\s+/g, '_');
+    };
+    const role = normalizeRole(rawRole);
+    const isAdminOrManager = role === 'admin' || role === 'manager' || role === 'quan_ly';
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
     const [selectedIds, setSelectedIds] = useState([]);
@@ -839,51 +848,55 @@ const Machines = () => {
                         }
                         actions={
                             <>
-                                <div className="relative">
-                                    <button
-                                        id="more-actions-btn-machines"
-                                        onClick={() => setShowMoreActions(!showMoreActions)}
-                                        className={clsx(
-                                            "p-2 rounded-xl border shrink-0 transition-all active:scale-95 shadow-sm",
-                                            showMoreActions ? "bg-slate-100 border-slate-300" : "bg-white border-slate-200 text-slate-600"
-                                        )}
-                                    >
-                                        <MoreVertical size={20} />
-                                    </button>
-                                    {showMoreActions && (
-                                        <div id="more-actions-menu-machines" className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl shadow-xl border border-slate-100 py-2 z-[100] animate-in fade-in slide-in-from-top-2 duration-200 origin-top-right">
-                                            <div
-                                                role="button"
-                                                onClick={() => { downloadTemplate(); setShowMoreActions(false); }}
-                                                className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-slate-700 hover:bg-slate-50 transition-colors text-left cursor-pointer"
-                                            >
-                                                <div className="w-5 flex justify-center flex-shrink-0">
-                                                    <Download size={18} className="text-slate-400" />
+                                {isAdminOrManager && (
+                                    <div className="relative">
+                                        <button
+                                            id="more-actions-btn-machines"
+                                            onClick={() => setShowMoreActions(!showMoreActions)}
+                                            className={clsx(
+                                                "p-2 rounded-xl border shrink-0 transition-all active:scale-95 shadow-sm",
+                                                showMoreActions ? "bg-slate-100 border-slate-300" : "bg-white border-slate-200 text-slate-600"
+                                            )}
+                                        >
+                                            <MoreVertical size={20} />
+                                        </button>
+                                        {showMoreActions && (
+                                            <div id="more-actions-menu-machines" className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl shadow-xl border border-slate-100 py-2 z-[100] animate-in fade-in slide-in-from-top-2 duration-200 origin-top-right">
+                                                <div
+                                                    role="button"
+                                                    onClick={() => { downloadTemplate(); setShowMoreActions(false); }}
+                                                    className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-slate-700 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                                                >
+                                                    <div className="w-5 flex justify-center flex-shrink-0">
+                                                        <Download size={18} className="text-slate-400" />
+                                                    </div>
+                                                    Tải mẫu Excel
                                                 </div>
-                                                Tải mẫu Excel
-                                            </div>
 
-                                            <label className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer text-left">
-                                                <div className="w-5 flex justify-center flex-shrink-0">
-                                                    <Upload size={18} className="text-slate-400" />
-                                                </div>
-                                                Import Excel
-                                                <input
-                                                    type="file"
-                                                    accept=".xlsx, .xls"
-                                                    onChange={(e) => { handleImportExcel(e); setShowMoreActions(false); }}
-                                                    className="hidden"
-                                                />
-                                            </label>
-                                        </div>
-                                    )}
-                                </div>
-                                <button
-                                    onClick={() => { setSelectedMachine(null); setIsFormModalOpen(true); }}
-                                    className="p-2 rounded-xl bg-primary text-white shadow-lg shadow-primary/30 active:scale-95 transition-all"
-                                >
-                                    <Plus size={20} />
-                                </button>
+                                                <label className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer text-left">
+                                                    <div className="w-5 flex justify-center flex-shrink-0">
+                                                        <Upload size={18} className="text-slate-400" />
+                                                    </div>
+                                                    Import Excel
+                                                    <input
+                                                        type="file"
+                                                        accept=".xlsx, .xls"
+                                                        onChange={(e) => { handleImportExcel(e); setShowMoreActions(false); }}
+                                                        className="hidden"
+                                                    />
+                                                </label>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                {isAdminOrManager && (
+                                    <button
+                                        onClick={() => { setSelectedMachine(null); setIsFormModalOpen(true); }}
+                                        className="p-2 rounded-xl bg-primary text-white shadow-lg shadow-primary/30 active:scale-95 transition-all"
+                                    >
+                                        <Plus size={20} />
+                                    </button>
+                                )}
                             </>
                         }
                         selectionBar={
@@ -899,12 +912,14 @@ const Machines = () => {
                                         >
                                             Bỏ chọn
                                         </button>
-                                        <button
-                                            onClick={handleBulkDelete}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-50 text-rose-600 text-[12px] font-bold border border-rose-100"
-                                        >
-                                            <Trash2 size={14} /> Xóa tất cả
-                                        </button>
+                                        {isAdminOrManager && (
+                                            <button
+                                                onClick={handleBulkDelete}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-50 text-rose-600 text-[12px] font-bold border border-rose-100"
+                                            >
+                                                <Trash2 size={14} /> Xóa tất cả
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             ) : null
@@ -975,8 +990,10 @@ const Machines = () => {
                                         </div>
                                         <div className="flex items-center gap-3">
                                             <button onClick={() => handleViewMachine(machine)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg"><Eye size={16} /></button>
-                                            <button onClick={() => handleEditMachine(machine)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
-                                            {(role === 'admin' || role === 'manager') && (
+                                            {isAdminOrManager && (
+                                                <button onClick={() => handleEditMachine(machine)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
+                                            )}
+                                            {isAdminOrManager && (
                                                 <button onClick={() => handleDeleteMachine(machine.id, machine.serial_number)} className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg"><Trash2 size={16} /></button>
                                             )}
                                         </div>
@@ -1049,18 +1066,20 @@ const Machines = () => {
                                     )}
                                 </div>
 
-                                <button
-                                    onClick={() => {
-                                        setSelectedMachine(null);
-                                        setIsFormModalOpen(true);
-                                    }}
-                                    className="flex items-center gap-2 px-6 h-10 rounded-lg bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all active:scale-95"
-                                >
-                                    <Plus size={18} />
-                                    Thêm
-                                </button>
+                                {isAdminOrManager && (
+                                    <button
+                                        onClick={() => {
+                                            setSelectedMachine(null);
+                                            setIsFormModalOpen(true);
+                                        }}
+                                        className="flex items-center gap-2 px-6 h-10 rounded-lg bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all active:scale-95"
+                                    >
+                                        <Plus size={18} />
+                                        Thêm
+                                    </button>
+                                )}
 
-                                {selectedIds.length > 0 && (
+                                {isAdminOrManager && selectedIds.length > 0 && (
                                     <button
                                         onClick={handleBulkDelete}
                                         className="flex items-center gap-2 px-4 h-10 rounded-lg border border-rose-200 bg-rose-50 text-rose-600 text-[13px] font-bold hover:bg-rose-100 shadow-sm transition-all active:scale-95 animate-in slide-in-from-right-4"
@@ -1070,32 +1089,36 @@ const Machines = () => {
                                     </button>
                                 )}
 
-                                <button
-                                    onClick={downloadTemplate}
-                                    className="flex items-center gap-2 px-4 h-10 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-[13px] font-bold hover:bg-indigo-100 shadow-sm transition-all active:scale-95"
-                                    title="Tải file Excel mẫu"
-                                >
-                                    <Download size={16} />
-                                    Tải mẫu
-                                </button>
-
-                                <div className="relative">
-                                    <input
-                                        type="file"
-                                        accept=".xlsx, .xls"
-                                        onChange={handleImportExcel}
-                                        className="hidden"
-                                        id="machine-excel-import"
-                                    />
-                                    <label
-                                        htmlFor="machine-excel-import"
-                                        className="flex items-center gap-2 px-4 h-10 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-[13px] font-bold hover:bg-emerald-100 shadow-sm transition-all cursor-pointer active:scale-95 select-none"
-                                        title="Nhập dữ liệu từ Excel"
+                                {isAdminOrManager && (
+                                    <button
+                                        onClick={downloadTemplate}
+                                        className="flex items-center gap-2 px-4 h-10 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-[13px] font-bold hover:bg-indigo-100 shadow-sm transition-all active:scale-95"
+                                        title="Tải file Excel mẫu"
                                     >
-                                        <Upload size={16} />
-                                        Import Excel
-                                    </label>
-                                </div>
+                                        <Download size={16} />
+                                        Tải mẫu
+                                    </button>
+                                )}
+
+                                {isAdminOrManager && (
+                                    <div className="relative">
+                                        <input
+                                            type="file"
+                                            accept=".xlsx, .xls"
+                                            onChange={handleImportExcel}
+                                            className="hidden"
+                                            id="machine-excel-import"
+                                        />
+                                        <label
+                                            htmlFor="machine-excel-import"
+                                            className="flex items-center gap-2 px-4 h-10 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-[13px] font-bold hover:bg-emerald-100 shadow-sm transition-all cursor-pointer active:scale-95 select-none"
+                                            title="Nhập dữ liệu từ Excel"
+                                        >
+                                            <Upload size={16} />
+                                            Import Excel
+                                        </label>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -1335,10 +1358,12 @@ const Machines = () => {
                                                 <button onClick={() => handleViewMachine(machine)} className="text-blue-600/80 hover:text-blue-700 transition-colors p-1 rounded hover:bg-blue-50" title="Xem chi tiết">
                                                     <Eye className="w-4 h-4" />
                                                 </button>
-                                                <button onClick={() => handleEditMachine(machine)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
-                                                    <Edit className="w-4 h-4" />
-                                                </button>
-                                                {(role === 'admin' || role === 'manager') && (
+                                                {isAdminOrManager && (
+                                                    <button onClick={() => handleEditMachine(machine)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
+                                                        <Edit className="w-4 h-4" />
+                                                    </button>
+                                                )}
+                                                {isAdminOrManager && (
                                                     <button onClick={() => handleDeleteMachine(machine.id, machine.serial_number)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>

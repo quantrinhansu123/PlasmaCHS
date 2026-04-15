@@ -71,7 +71,16 @@ const TABLE_COLUMNS_DEF = [
 ];
 
 const Warehouses = () => {
-    const { role } = usePermissions();
+    const { role: rawRole } = usePermissions();
+    const normalizeRole = (r) => {
+        if (!r) return '';
+        return r.toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/\s+/g, '_');
+    };
+    const role = normalizeRole(rawRole);
+    const isAdminOrManager = role === 'admin' || role === 'manager' || role === 'quan_ly';
     const navigate = useNavigate();
 
     const [activeView, setActiveView] = useState('list');
@@ -569,56 +578,60 @@ const Warehouses = () => {
                         totalActiveFilters={totalActiveFilters}
                         actions={
                             <>
-                                <div className="relative">
-                                    <button
-                                        id="more-actions-btn-warehouses"
-                                        onClick={() => setShowMoreActions(!showMoreActions)}
-                                        className={clsx(
-                                            "p-2 rounded-xl border shrink-0 transition-all active:scale-95 shadow-sm",
-                                            showMoreActions ? "bg-slate-100 border-slate-300" : "bg-white border-slate-200 text-slate-600"
-                                        )}
-                                    >
-                                        <MoreVertical size={20} />
-                                    </button>
+                                {isAdminOrManager && (
+                                    <div className="relative">
+                                        <button
+                                            id="more-actions-btn-warehouses"
+                                            onClick={() => setShowMoreActions(!showMoreActions)}
+                                            className={clsx(
+                                                "p-2 rounded-xl border shrink-0 transition-all active:scale-95 shadow-sm",
+                                                showMoreActions ? "bg-slate-100 border-slate-300" : "bg-white border-slate-200 text-slate-600"
+                                            )}
+                                        >
+                                            <MoreVertical size={20} />
+                                        </button>
 
-                                    {showMoreActions && (
-                                        <div id="more-actions-menu-warehouses" className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl shadow-xl border border-slate-100 py-2 z-[100] animate-in fade-in slide-in-from-top-2 duration-200 origin-top-right">
-                                            <div
-                                                role="button"
-                                                onClick={() => { downloadTemplate(); setShowMoreActions(false); }}
-                                                className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-slate-700 hover:bg-slate-50 transition-colors text-left cursor-pointer"
-                                            >
-                                                <div className="w-5 flex justify-center flex-shrink-0">
-                                                    <Download size={18} className="text-slate-400" />
+                                        {showMoreActions && (
+                                            <div id="more-actions-menu-warehouses" className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl shadow-xl border border-slate-100 py-2 z-[100] animate-in fade-in slide-in-from-top-2 duration-200 origin-top-right">
+                                                <div
+                                                    role="button"
+                                                    onClick={() => { downloadTemplate(); setShowMoreActions(false); }}
+                                                    className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-slate-700 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                                                >
+                                                    <div className="w-5 flex justify-center flex-shrink-0">
+                                                        <Download size={18} className="text-slate-400" />
+                                                    </div>
+                                                    Tải mẫu Excel
                                                 </div>
-                                                Tải mẫu Excel
+
+                                                <label className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer text-left">
+                                                    <div className="w-5 flex justify-center flex-shrink-0">
+                                                        <Upload size={18} className="text-slate-400" />
+                                                    </div>
+                                                    Import Excel
+                                                    <input
+                                                        type="file"
+                                                        accept=".xlsx, .xls"
+                                                        onChange={(e) => { handleImportExcel(e); setShowMoreActions(false); }}
+                                                        className="hidden"
+                                                    />
+                                                </label>
                                             </div>
+                                        )}
+                                    </div>
+                                )}
 
-                                            <label className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer text-left">
-                                                <div className="w-5 flex justify-center flex-shrink-0">
-                                                    <Upload size={18} className="text-slate-400" />
-                                                </div>
-                                                Import Excel
-                                                <input
-                                                    type="file"
-                                                    accept=".xlsx, .xls"
-                                                    onChange={(e) => { handleImportExcel(e); setShowMoreActions(false); }}
-                                                    className="hidden"
-                                                />
-                                            </label>
-                                        </div>
-                                    )}
-                                </div>
-
-                                <button
-                                    onClick={() => {
-                                        setSelectedWarehouse(null);
-                                        setIsFormModalOpen(true);
-                                    }}
-                                    className="p-2 rounded-xl bg-primary text-white shadow-md shadow-primary/25 active:scale-95 transition-all shrink-0"
-                                >
-                                    <Plus size={20} />
-                                </button>
+                                {isAdminOrManager && (
+                                    <button
+                                        onClick={() => {
+                                            setSelectedWarehouse(null);
+                                            setIsFormModalOpen(true);
+                                        }}
+                                        className="p-2 rounded-xl bg-primary text-white shadow-md shadow-primary/25 active:scale-95 transition-all shrink-0"
+                                    >
+                                        <Plus size={20} />
+                                    </button>
+                                )}
                             </>
                         }
                         selectionBar={
@@ -715,13 +728,15 @@ const Warehouses = () => {
                                             >
                                                 Chi tiết
                                             </button>
-                                            <button
-                                                onClick={() => handleEditWarehouse(w)}
-                                                className="flex-1 py-1.5 bg-primary text-white font-bold text-[11px] rounded-md shadow-sm hover:opacity-90 transition-opacity active:scale-[0.98]"
-                                            >
-                                                Sửa
-                                            </button>
-                                            {(role === 'admin' || role === 'manager') && (
+                                            {isAdminOrManager && (
+                                                <button
+                                                    onClick={() => handleEditWarehouse(w)}
+                                                    className="flex-1 py-1.5 bg-primary text-white font-bold text-[11px] rounded-md shadow-sm hover:opacity-90 transition-opacity active:scale-[0.98]"
+                                                >
+                                                    Sửa
+                                                </button>
+                                            )}
+                                            {isAdminOrManager && (
                                                 <button
                                                     onClick={() => handleDeleteWarehouse(w.id, w.name)}
                                                     className="px-2.5 py-1.5 rounded-md border border-rose-100 text-rose-500 hover:bg-rose-50 transition-all active:scale-[0.98]"

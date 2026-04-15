@@ -113,7 +113,16 @@ function appendLeadCustomerFilters(query, {
 }
 
 const Customers = () => {
-    const { role } = usePermissions();
+    const { role: rawRole } = usePermissions();
+    const normalizeRole = (r) => {
+        if (!r) return '';
+        return r.toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/\s+/g, '_');
+    };
+    const role = normalizeRole(rawRole);
+    const isAdminOrManager = role === 'admin' || role === 'manager' || role === 'quan_ly';
     const location = useLocation();
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
@@ -1408,16 +1417,18 @@ const Customers = () => {
                                     )}
                                 </div>
 
-                                <button
-                                    onClick={() => {
-                                        setSelectedCustomer(null);
-                                        setIsFormModalOpen(true);
-                                    }}
-                                    className="p-2 rounded-xl bg-primary text-white shadow-lg shadow-primary/25 active:scale-95 transition-all shrink-0"
-                                    title="Thêm khách hàng"
-                                >
-                                    <Plus size={20} />
-                                </button>
+                                {isAdminOrManager && (
+                                    <button
+                                        onClick={() => {
+                                            setSelectedCustomer(null);
+                                            setIsFormModalOpen(true);
+                                        }}
+                                        className="p-2 rounded-xl bg-primary text-white shadow-lg shadow-primary/25 active:scale-95 transition-all shrink-0"
+                                        title="Thêm khách hàng"
+                                    >
+                                        <Plus size={20} />
+                                    </button>
+                                )}
                             </>
                         }
                         selectionBar={
@@ -1433,12 +1444,14 @@ const Customers = () => {
                                         >
                                             Bỏ chọn
                                         </button>
-                                        <button
-                                            onClick={handleBulkDelete}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-50 text-rose-600 text-[12px] font-bold border border-rose-100"
-                                        >
-                                            <Trash2 size={14} /> Xóa tất cả
-                                        </button>
+                                        {isAdminOrManager && (
+                                            <button
+                                                onClick={handleBulkDelete}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-50 text-rose-600 text-[12px] font-bold border border-rose-100"
+                                            >
+                                                <Trash2 size={14} /> Xóa tất cả
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             ) : null
@@ -1557,13 +1570,15 @@ const Customers = () => {
                                                 >
                                                     <Eye size={16} /> Chi tiết
                                                 </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleEditCustomer(c)}
-                                                    className="h-10 px-3 rounded-xl bg-amber-50 text-amber-600 border border-amber-100 flex items-center gap-1.5 active:scale-95 transition-all shadow-sm text-[13px] font-bold"
-                                                >
-                                                    <Edit size={14} /> Sửa
-                                                </button>
+                                                {isAdminOrManager && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleEditCustomer(c)}
+                                                        className="h-10 px-3 rounded-xl bg-amber-50 text-amber-600 border border-amber-100 flex items-center gap-1.5 active:scale-95 transition-all shadow-sm text-[13px] font-bold"
+                                                    >
+                                                        <Edit size={14} /> Sửa
+                                                    </button>
+                                                )}
                                             </div>
                                             
                                             <div className="flex items-center gap-2">
@@ -1616,15 +1631,17 @@ const Customers = () => {
                                                                 {c.status === 'Thành công' ? <ToggleRight size={18} className="text-emerald-500" /> : <ToggleLeft size={18} className="text-slate-400" />}
                                                                 Trạng thái: {c.status || 'Chưa xác định'}
                                                             </button>
-                                                            <button
-                                                                onClick={() => {
-                                                                    handleDeleteCustomer(c.id, c.name);
-                                                                    setActiveDropdown(null);
-                                                                }}
-                                                                className="w-full flex items-center gap-3 px-4 py-3 text-[13px] font-bold text-rose-600 hover:bg-rose-50 transition-colors"
-                                                            >
-                                                                <Trash2 size={18} /> Xóa khách hàng
-                                                            </button>
+                                                            {isAdminOrManager && (
+                                                                <button
+                                                                    onClick={() => {
+                                                                        handleDeleteCustomer(c.id, c.name);
+                                                                        setActiveDropdown(null);
+                                                                    }}
+                                                                    className="w-full flex items-center gap-3 px-4 py-3 text-[13px] font-bold text-rose-600 hover:bg-rose-50 transition-colors"
+                                                                >
+                                                                    <Trash2 size={18} /> Xóa khách hàng
+                                                                </button>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </div>

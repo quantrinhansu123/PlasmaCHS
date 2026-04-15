@@ -8,9 +8,10 @@ import BarcodeScanner from '../Common/BarcodeScanner';
 import OrderHistoryTimeline from './OrderHistoryTimeline';
 import { notificationService } from '../../utils/notificationService';
 import MachineIssueRequestForm from '../Machines/MachineIssueRequestForm';
-
+import usePermissions from '../../hooks/usePermissions';
 
 export default function OrderStatusUpdater({ order, warehouseName, userRole, onClose, onUpdateSuccess }) {
+    const { user } = usePermissions();
     const [isLoading, setIsLoading] = useState(false);
     const [deliveryUnit, setDeliveryUnit] = useState(order?.delivery_unit || '');
     const [selectedFile, setSelectedFile] = useState(null);
@@ -261,18 +262,24 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     const normalizeRole = (role) => {
         if (!role) return '';
         const r = role.toLowerCase().trim();
+        
+        // Exact matches first
         if (r === 'admin' || r === 'quản trị' || r === 'quan tri') return 'admin';
-        if (r.includes('kho')) return 'thu_kho';           // 'thủ kho', 'thu_kho', 'kho'
-        if (r.includes('shipper') || r === 'giao hàng') return 'shipper';
+        
+        // Pattern matches
+        if (r.includes('thủ kho') || r.includes('thu kho') || r.includes('kho')) return 'thu_kho';
+        if (r.includes('shipper') || r.includes('giao hàng') || r.includes('giao hang')) return 'shipper';
         if (r.includes('lead') || r.includes('trưởng') || r.includes('truong')) return 'lead_sale';
-        if (r.includes('kinh doanh') || r === 'sale') return 'sale';
+        if (r.includes('kinh doanh') || r.includes('sale')) return 'sale';
+        
         return r;
     };
 
     const normalizedRole = normalizeRole(userRole);
-    const availableActions = transitions.filter(t =>
-        normalizedRole === 'admin' || t.allowedRoles.includes(normalizedRole)
-    );
+    const availableActions = transitions.filter(t => {
+        if (!normalizedRole) return false;
+        return normalizedRole === 'admin' || t.allowedRoles.includes(normalizedRole);
+    });
 
     const handleUpdateStatus = async (transition) => {
         try {
@@ -280,6 +287,20 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             setErrorMsg('');
 
             let imageUrl = order.delivery_image_url;
+
+            // Validate adjusted quantities before proceeding
+            const reqQty = parseInt(adjustedQuantity);
+            const appQty = parseInt(adjustedQuantity2);
+
+            if (isNaN(reqQty) || reqQty <= 0) {
+                throw new Error('Số lượng yêu cầu phải lớn hơn 0.');
+            }
+            if (isNaN(appQty) || appQty < 0) {
+                throw new Error('Số lượng phê duyệt phải lớn hơn hoặc bằng 0.');
+            }
+            if (appQty > reqQty) {
+                throw new Error('Số lượng phê duyệt không được lớn hơn số lượng yêu cầu.');
+            }
 
             // 1. ADVANCED VALIDATION & INVENTORY DEDUCTION (Multi-product)
             if ((transition.nextStatus === 'CHO_GIAO_HANG' || transition.nextStatus === 'DA_DUYET') && order.status === 'KHO_XU_LY') {
@@ -301,7 +322,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                             customer_name: `${order.customer_name}${order.department ? ` / ${order.department}` : ''}`
                         })
                         .in('serial_number', serials)
-                        .select('id, serial_number, cylinder_type');
+                        .select('id, serial_number, category');
 
                     if (cylError) throw new Error('Cập nhật mã bình trên kho thất bại: ' + cylError.message);
 
@@ -349,7 +370,9 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                             note: `Xuất kho ${item.quantity} ${productLabel} - Đơn ${order.order_code}`
                         }]);
                     } else {
-                        throw new Error(`Hàng hoá "${productLabel}" không có trong kho báo cáo.`);
+                        // Nếu không tìm thấy trong bảng inventory, ta bỏ qua (không chặn đổi trạng thái) 
+                        // vì một số kho chưa khởi tạo dòng cho máy móc/hàng hóa mới.
+                        console.warn(`Hàng hoá "${productLabel}" không có trong bảng inventory của kho ${order.warehouse}. Bỏ qua khấu trừ kho.`);
                     }
                 }
             }
@@ -513,7 +536,10 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             }
 
             // Calculate total amount if quantity changed
-            if (adjustedQuantity !== order.quantity || adjustedQuantity2 !== order.quantity_2) {
+            const q1 = parseInt(adjustedQuantity) || 0;
+            const q2 = parseInt(adjustedQuantity2) || 0;
+
+            if (q1 !== order.quantity || q2 !== order.quantity_2) {
                 let freeCylinders = 0;
                 if (order.promotion_code) {
                     const { data: promoData } = await supabase
@@ -523,11 +549,11 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                         .maybeSingle();
                     if (promoData) freeCylinders = promoData.free_cylinders || 0;
                 }
-                const billedQuantity = Math.max(0, adjustedQuantity - freeCylinders);
-                updatePayload.quantity = adjustedQuantity;
-                updatePayload.quantity_2 = adjustedQuantity2;
-                updatePayload.total_amount = (billedQuantity * (order.unit_price || 0)) + (adjustedQuantity2 * (order.unit_price_2 || 0));
-                updatePayload.total_amount_2 = adjustedQuantity2 * (order.unit_price_2 || 0);
+                const billedQuantity = Math.max(0, q1 - freeCylinders);
+                updatePayload.quantity = q1;
+                updatePayload.quantity_2 = q2;
+                updatePayload.total_amount = (billedQuantity * (order.unit_price || 0)) + (q2 * (order.unit_price_2 || 0));
+                updatePayload.total_amount_2 = q2 * (order.unit_price_2 || 0);
             }
 
             // Nếu đây là lúc xuất kho (Gán mã bình) hoặc Shipper gán mã bổ sung
@@ -553,8 +579,9 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
 
             if (dbError) throw dbError;
 
-            // Log history with actual user
+            // Log history — ưu tiên user từ hook (chính xác nhất), fallback sang storage
             const currentUser =
+                user?.name ||
                 localStorage.getItem('user_name') ||
                 sessionStorage.getItem('user_name') ||
                 'Hệ thống';
@@ -719,40 +746,34 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                             </label>
                                             <input
                                                 type="number"
-                                                min="1"
                                                 className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-800 outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all text-sm"
                                                 value={adjustedQuantity}
-                                                onChange={e => setAdjustedQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-                                                onBlur={() => {
-                                                    // Force sync
+                                                onChange={e => {
+                                                    const val = e.target.value;
+                                                    setAdjustedQuantity(val === '' ? '' : Math.max(0, parseInt(val) || 0));
+                                                    
+                                                    // Cap quantity2 if it exceeds new quantity1
+                                                    const q1 = parseInt(val) || 0;
+                                                    const q2 = parseInt(adjustedQuantity2) || 0;
+                                                    if (q2 > q1) {
+                                                        setAdjustedQuantity2(q1);
+                                                    }
                                                 }}
                                             />
                                         </div>
                                         <div className="space-y-1.5">
-                                            <label className="block text-[11px] font-black uppercase tracking-widest">
-                                                <span className={adjustedQuantity2 > 0 && adjustedQuantity2 < adjustedQuantity ? 'text-amber-600' : 'text-slate-500'}>
-                                                    Số lượng phê duyệt
-                                                </span>
-                                                {adjustedQuantity2 > 0 && adjustedQuantity2 < adjustedQuantity && (
-                                                    <span className="ml-1.5 text-[9px] font-bold text-amber-500 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 normal-case tracking-normal">
-                                                        ↓ ít hơn yêu cầu
-                                                    </span>
-                                                )}
+                                            <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest">
+                                                Số lượng phê duyệt
                                             </label>
                                             <input
                                                 type="number"
-                                                min="0"
-                                                max={adjustedQuantity}
-                                                className={`w-full h-11 px-4 bg-slate-50 border rounded-xl font-black outline-none focus:ring-4 transition-all text-sm ${
-                                                    adjustedQuantity2 > 0 && adjustedQuantity2 < adjustedQuantity
-                                                        ? 'border-amber-300 text-amber-700 focus:border-amber-400 focus:ring-amber-50'
-                                                        : 'border-slate-200 text-emerald-700 focus:border-emerald-400 focus:ring-emerald-50'
-                                                }`}
+                                                className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl font-black text-emerald-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50 transition-all text-sm"
                                                 value={adjustedQuantity2}
-                                                onChange={e => setAdjustedQuantity2(Math.max(0, parseInt(e.target.value) || 0))}
-                                                onBlur={() => {
-                                                    // Force scannedSerials synchronization on blur
-                                                    const currentList = scannedSerials.split('\n');
+                                                onChange={e => {
+                                                    const val = e.target.value;
+                                                    const q1 = parseInt(adjustedQuantity) || 0;
+                                                    const inputVal = val === '' ? 0 : (parseInt(val) || 0);
+                                                    setAdjustedQuantity2(val === '' ? '' : Math.min(inputVal, q1));
                                                 }}
                                             />
                                         </div>
@@ -770,13 +791,16 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                         // 2. Otherwise use baked orderItems
                                         const useAdjusted = ['CHO_DUYET', 'CHO_CTY_DUYET', 'KHO_XU_LY'].includes(order.status);
 
+                                        const q1 = parseInt(adjustedQuantity) || 0;
+                                        const q2 = parseInt(adjustedQuantity2) || 0;
+
                                         const totalCylCount = useAdjusted
-                                            ? (order.product_type?.startsWith('BINH') ? adjustedQuantity : 0)
-                                            + (order.product_type_2?.startsWith('BINH') ? adjustedQuantity2 : 0)
+                                            ? (order.product_type?.startsWith('BINH') ? q1 : 0)
+                                            + (order.product_type_2?.startsWith('BINH') ? q2 : 0)
                                             : (cylItems.length > 0
                                                 ? cylItems.reduce((sum, it) => sum + (it.quantity || 0), 0)
-                                                : (order.product_type?.startsWith('BINH') ? adjustedQuantity : 0)
-                                                + (order.product_type_2?.startsWith('BINH') ? adjustedQuantity2 : 0));
+                                                : (order.product_type?.startsWith('BINH') ? q1 : 0)
+                                                + (order.product_type_2?.startsWith('BINH') ? q2 : 0));
 
                                         // Nếu đang fetch → hiện skeleton placeholder
                                         if (isFetchingItems) {
