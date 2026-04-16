@@ -163,7 +163,23 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                     .select('*')
                     .eq('receipt_id', receipt.id);
                 if (data && data.length > 0) {
-                    setItems(data);
+                    setItems(data.map((item) => {
+                        const quantity = parseInt(item.quantity, 10) || 0;
+                        const normalizedSerial = normalizeSerial(item.serial_number);
+                        const assignedSerials = normalizedSerial
+                            ? [{ serial: normalizedSerial, scan_time: null }]
+                            : Array.from(
+                                { length: Math.max(quantity, 1) },
+                                () => ({ serial: '', scan_time: null })
+                            );
+
+                        return {
+                            ...item,
+                            quantity: quantity || 1,
+                            serial_number: normalizedSerial,
+                            assigned_serials: assignedSerials
+                        };
+                    }));
                     setFormData(prev => ({ ...prev, receipt_type: data[0].item_type }));
                 }
             };

@@ -36,6 +36,8 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedType, setSelectedType] = useState('ALL');
     const [selectedStatus, setSelectedStatus] = useState('ALL');
+    const [selectedLogDetail, setSelectedLogDetail] = useState(null);
+    const [detailLoading, setDetailLoading] = useState(false);
 
     useEffect(() => {
         if (!warehouse) return;
@@ -68,6 +70,132 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                 return 'bg-blue-50 text-blue-600 border-blue-200';
             default:
                 return 'bg-slate-50 text-slate-600 border-slate-200';
+        }
+    };
+
+    const parseTransferDestination = (note = '') => {
+        const match = note.match(/đến\s+(.+?)(?:\.|$)/i);
+        return match?.[1]?.trim() || '—';
+    };
+
+    const handleOpenLogDetail = async (log) => {
+        if (!log?.rawId) return;
+        setDetailLoading(true);
+        try {
+            if (log.type === 'IN') {
+                const [{ data: receipt }, { data: items }] = await Promise.all([
+                    supabase
+                        .from('goods_receipts')
+                        .select('*')
+                        .eq('id', log.rawId)
+                        .single(),
+                    supabase
+                        .from('goods_receipt_items')
+                        .select('*')
+                        .eq('receipt_id', log.rawId)
+                ]);
+                setSelectedLogDetail({
+                    type: 'IN',
+                    title: 'Chi tiết phiếu nhập kho',
+                    code: receipt?.receipt_code || log.code,
+                    date: receipt?.receipt_date || receipt?.created_at || log.created_at,
+                    fields: [
+                        { label: 'Nhà cung cấp', value: receipt?.supplier_name || '—' },
+                        { label: 'Kho nhận', value: warehouse?.name || '—' },
+                        { label: 'Người giao', value: receipt?.deliverer_name || '—' },
+                        { label: 'Người nhận', value: receipt?.received_by || '—' },
+                        { label: 'Trạng thái', value: receipt?.status || '—' },
+                    ],
+                    note: receipt?.note || '',
+                    items: (items || []).map(item => ({
+                        name: item.item_name,
+                        type: item.item_type,
+                        quantity: item.quantity,
+                        code: item.serial_number,
+                        status: item.item_status
+                    }))
+                });
+            } else if (log.type === 'OUT') {
+                const [{ data: issue }, { data: items }, { data: suppliers }] = await Promise.all([
+                    supabase
+                        .from('goods_issues')
+                        .select('*')
+                        .eq('id', log.rawId)
+                        .single(),
+                    supabase
+                        .from('goods_issue_items')
+                        .select('*')
+                        .eq('issue_id', log.rawId),
+                    supabase.from('suppliers').select('id, name')
+                ]);
+                const supplierName = suppliers?.find(s => s.id === issue?.supplier_id)?.name || '—';
+                setSelectedLogDetail({
+                    type: 'OUT',
+                    title: 'Chi tiết phiếu xuất kho',
+                    code: issue?.issue_code || log.code,
+                    date: issue?.issue_date || issue?.created_at || log.created_at,
+                    fields: [
+                        { label: 'Loại phiếu', value: issue?.issue_type || '—' },
+                        { label: 'Kho xuất', value: warehouse?.name || '—' },
+                        { label: 'Nhà cung cấp', value: supplierName },
+                        { label: 'Trạng thái', value: issue?.status || '—' },
+                    ],
+                    note: issue?.notes || '',
+                    items: (items || []).map(item => ({
+                        name: item.item_name || item.item_type,
+                        type: item.item_type,
+                        quantity: item.quantity,
+                        code: item.item_code,
+                        status: ''
+                    }))
+                });
+            } else if (log.type === 'TRANSFER') {
+                const [{ data: txRows }, { data: warehouseRows }] = await Promise.all([
+                    supabase
+                        .from('inventory_transactions')
+                        .select('id, inventory_id, reference_code, quantity_changed, note, created_at, transaction_type')
+                        .eq('reference_code', log.code)
+                        .order('created_at', { ascending: true }),
+                    supabase.from('warehouses').select('id, name')
+                ]);
+                const inventoryIds = [...new Set((txRows || []).map(row => row.inventory_id).filter(Boolean))];
+                const { data: inventoryRows } = await supabase
+                    .from('inventory')
+                    .select('id, item_name, item_type, warehouse_id')
+                    .in('id', inventoryIds.length > 0 ? inventoryIds : ['00000000-0000-0000-0000-000000000000']);
+                const invMap = Object.fromEntries((inventoryRows || []).map(row => [row.id, row]));
+                const whMap = Object.fromEntries((warehouseRows || []).map(row => [row.id, row.name]));
+                const items = (txRows || [])
+                    .filter(row => row.transaction_type === 'OUT')
+                    .map(row => {
+                        const inv = invMap[row.inventory_id] || {};
+                        return {
+                            name: inv.item_name || 'Hàng hóa',
+                            type: inv.item_type || '—',
+                            quantity: row.quantity_changed,
+                            code: '',
+                            status: whMap[inv.warehouse_id] || inv.warehouse_id || '—'
+                        };
+                    });
+                const firstNote = txRows?.[0]?.note || '';
+                setSelectedLogDetail({
+                    type: 'TRANSFER',
+                    title: 'Chi tiết phiếu luân chuyển',
+                    code: log.code,
+                    date: txRows?.[0]?.created_at || log.created_at,
+                    fields: [
+                        { label: 'Kho xuất', value: warehouse?.name || '—' },
+                        { label: 'Kho nhận', value: parseTransferDestination(firstNote) },
+                        { label: 'Số dòng', value: String(items.length) },
+                    ],
+                    note: firstNote,
+                    items
+                });
+            }
+        } catch (error) {
+            console.error('Error loading warehouse activity detail:', error);
+        } finally {
+            setDetailLoading(false);
         }
     };
 
@@ -141,6 +269,7 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
             const mergedLogs = [
                 ...((receiptsRes.data || []).map((receipt) => ({
                     id: `receipt-${receipt.id}`,
+                    rawId: receipt.id,
                     type: 'IN',
                     action: 'Nhập kho từ NCC',
                     code: receipt.receipt_code,
@@ -150,6 +279,7 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                 }))),
                 ...((issuesRes.data || []).map((issue) => ({
                     id: `issue-${issue.id}`,
+                    rawId: issue.id,
                     type: 'OUT',
                     action: 'Xuất kho',
                     code: issue.issue_code,
@@ -159,6 +289,7 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                 }))),
                 ...(transferLogs.map((log) => ({
                     id: `transfer-${log.id}`,
+                    rawId: log.id,
                     type: 'TRANSFER',
                     action: 'Luân chuyển kho',
                     code: log.reference_code,
@@ -411,53 +542,143 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                                 <History className="w-4 h-4 text-emerald-500" />
                                 Hoạt động gần đây
                             </h3>
-                            <div className="space-y-4">
+                            <div className="rounded-[1.75rem] border border-slate-200 bg-white shadow-sm overflow-hidden">
                                 {recentLogs.length === 0 ? (
-                                    <div className="p-10 text-center border border-dashed border-slate-200 rounded-2xl bg-white/50">
+                                    <div className="p-10 text-center bg-white/50">
                                         <Clock className="w-10 h-10 text-slate-200 mx-auto mb-3" />
                                         <p className="text-slate-400 font-bold text-xs uppercase">Chưa có hoạt động</p>
                                     </div>
                                 ) : (
-                                    recentLogs.map((log) => (
-                                        <div key={log.id} className="flex items-start gap-4 relative group">
-                                            <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center shrink-0 border border-slate-200 group-hover:bg-primary/10 group-hover:text-primary group-hover:border-primary/20 transition-all">
-                                                <Activity className="w-5 h-5" />
-                                            </div>
-                                            <div className="flex-1 min-w-0 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm group-hover:shadow-md group-hover:border-primary/20 transition-all">
-                                                <div className="flex items-center justify-between gap-2 mb-1">
-                                                    <div className="flex items-center gap-2 min-w-0">
-                                                        <p className="text-xs font-black text-slate-800 truncate">{log.action || 'Di chuyển bình'}</p>
-                                                        <span className={clsx("shrink-0 px-2 py-0.5 rounded-md border text-[9px] font-black uppercase tracking-wider", getLogColor(log.type))}>
-                                                            {log.code || log.type}
-                                                        </span>
-                                                    </div>
-                                                    <span className="text-[10px] font-bold text-slate-400 shrink-0">{formatDate(log.created_at)}</span>
-                                                </div>
-                                                <p className="text-xs font-bold text-slate-500">{log.description || `Bình ${log.serial_number} được xử lý tại kho`}</p>
-                                                
-                                                {log.image_url && (
-                                                    <div className="mt-2 pt-2 border-t border-slate-50">
-                                                        <a 
-                                                            href={log.image_url} 
-                                                            target="_blank" 
-                                                            rel="noopener noreferrer"
-                                                            className="inline-flex items-center gap-1.5 px-2 py-1 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition-all border border-emerald-100/50"
-                                                        >
-                                                            <ImageIcon size={12} />
-                                                            <span className="text-[10px] font-black uppercase">Ảnh bàn giao</span>
-                                                            <ExternalLink size={10} />
-                                                        </a>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))
+                                    <div className="overflow-x-auto custom-scrollbar">
+                                        <table className="w-full border-collapse">
+                                            <thead>
+                                                <tr className="bg-slate-50/80 border-b border-slate-200">
+                                                    <th className="px-5 py-4 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest">Loại</th>
+                                                    <th className="px-5 py-4 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest">Mã phiếu</th>
+                                                    <th className="px-5 py-4 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest">Nội dung</th>
+                                                    <th className="px-5 py-4 text-right text-[11px] font-black text-slate-400 uppercase tracking-widest">Thời gian</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {recentLogs.map((log) => (
+                                                    <tr
+                                                        key={log.id}
+                                                        onClick={() => handleOpenLogDetail(log)}
+                                                        className="group cursor-pointer hover:bg-slate-50/80 transition-colors"
+                                                    >
+                                                        <td className="px-5 py-4 align-top">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="w-10 h-10 rounded-xl bg-slate-50 text-slate-400 flex items-center justify-center border border-slate-200 group-hover:bg-primary/10 group-hover:text-primary group-hover:border-primary/20 transition-all shrink-0">
+                                                                    <Activity className="w-4 h-4" />
+                                                                </div>
+                                                                <span className="text-[13px] font-black text-slate-800 leading-tight">
+                                                                    {log.action || 'Di chuyển bình'}
+                                                                </span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-5 py-4 align-top whitespace-nowrap">
+                                                            <span className={clsx("inline-flex items-center px-2.5 py-1 rounded-full border text-[10px] font-black uppercase tracking-wider", getLogColor(log.type))}>
+                                                                {log.code || log.type}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-5 py-4 align-top">
+                                                            <div className="space-y-2">
+                                                                <p className="text-[13px] font-semibold text-slate-600 leading-relaxed break-words">
+                                                                    {log.description || `Bình ${log.serial_number} được xử lý tại kho`}
+                                                                </p>
+                                                                {log.image_url && (
+                                                                    <a
+                                                                        href={log.image_url}
+                                                                        target="_blank"
+                                                                        rel="noopener noreferrer"
+                                                                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 text-emerald-600 rounded-xl hover:bg-emerald-100 transition-all border border-emerald-100/50 text-[11px] font-black"
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                    >
+                                                                        <ImageIcon size={12} />
+                                                                        <span>Ảnh bàn giao</span>
+                                                                        <ExternalLink size={10} />
+                                                                    </a>
+                                                                )}
+                                                                <p className="text-[11px] font-bold text-primary/80 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                    Bấm để xem chi tiết
+                                                                </p>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-5 py-4 align-top text-right whitespace-nowrap">
+                                                            <span className="text-[12px] font-black text-slate-400">
+                                                                {formatDate(log.created_at)}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 )}
                             </div>
                         </section>
                     </div>
                 )}
             </div>
+            {selectedLogDetail && (
+                <div className="absolute inset-0 z-30 bg-white flex flex-col">
+                    <div className="px-4 md:px-8 py-4 border-b border-slate-200 bg-white flex items-center justify-between">
+                        <div>
+                            <h3 className="text-lg font-black text-slate-900">{selectedLogDetail.title}</h3>
+                            <p className="text-xs font-bold text-slate-500 mt-1">Mã phiếu: {selectedLogDetail.code}</p>
+                        </div>
+                        <button onClick={() => setSelectedLogDetail(null)} className="p-2 bg-slate-100 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all">
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 bg-slate-50">
+                        {detailLoading ? (
+                            <div className="py-16 text-center text-slate-400 font-bold">Đang tải chi tiết...</div>
+                        ) : (
+                            <>
+                                <div className="bg-white rounded-3xl border border-slate-200 p-5 md:p-6 shadow-sm">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="space-y-1">
+                                            <p className="text-[11px] font-black text-slate-400 uppercase">Ngày tạo</p>
+                                            <p className="text-sm font-bold text-slate-800">{formatDate(selectedLogDetail.date)}</p>
+                                        </div>
+                                        {selectedLogDetail.fields.map((field) => (
+                                            <div key={field.label} className="space-y-1">
+                                                <p className="text-[11px] font-black text-slate-400 uppercase">{field.label}</p>
+                                                <p className="text-sm font-bold text-slate-800">{field.value || '—'}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="bg-white rounded-3xl border border-slate-200 p-5 md:p-6 shadow-sm">
+                                    <h4 className="text-base font-black text-slate-900 mb-4">Danh sách hàng hóa</h4>
+                                    <div className="space-y-3">
+                                        {(selectedLogDetail.items || []).length === 0 ? (
+                                            <div className="text-sm font-bold text-slate-400">Không có dữ liệu hàng hóa.</div>
+                                        ) : selectedLogDetail.items.map((item, idx) => (
+                                            <div key={`${selectedLogDetail.code}-${idx}`} className="p-3 rounded-2xl border border-slate-200 bg-slate-50">
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div>
+                                                        <p className="text-sm font-black text-slate-800">{item.name || '—'}</p>
+                                                        <p className="text-xs font-bold text-slate-500 mt-1">
+                                                            {item.type || '—'}{item.code ? ` • ${item.code}` : ''}{item.status ? ` • ${item.status}` : ''}
+                                                        </p>
+                                                    </div>
+                                                    <span className="text-sm font-black text-primary">x {item.quantity || 0}</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="bg-white rounded-3xl border border-slate-200 p-5 md:p-6 shadow-sm">
+                                    <h4 className="text-base font-black text-slate-900 mb-3">Ghi chú</h4>
+                                    <p className="text-sm font-semibold text-slate-600 whitespace-pre-wrap">{selectedLogDetail.note || '—'}</p>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 

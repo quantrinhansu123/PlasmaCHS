@@ -1316,10 +1316,10 @@ const GoodsReceipts = () => {
 
                                 {/* Desktop View Table */}
                                 <div className="hidden md:block">
-                                    <table className="w-full border-collapse">
+                                    <table className="w-full border-collapse table-fixed">
                                         <thead className="bg-[#F1F5FF] sticky top-0 z-10">
                                             <tr>
-                                                <th className="px-4 py-3.5 w-10">
+                                                <th className="w-14 px-4 py-3.5">
                                                     <div className="flex items-center justify-center">
                                                         <input
                                                             type="checkbox"
@@ -1334,13 +1334,13 @@ const GoodsReceipts = () => {
                                                         {col.label}
                                                     </th>
                                                 ))}
-                                                <th className="sticky right-0 z-20 bg-[#F1F5FF] px-4 py-3.5 text-[12px] font-bold text-slate-500 text-center uppercase tracking-wider shadow-[-6px_0_10px_-8px_rgba(0,0,0,0.1)]">Thao tác</th>
+                                                <th className="sticky right-0 z-20 w-[220px] bg-[#F1F5FF] px-4 py-3.5 text-[12px] font-bold text-slate-500 text-center uppercase tracking-wider shadow-[-6px_0_10px_-8px_rgba(0,0,0,0.1)]">Thao tác</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100 bg-white">
                                             {paginatedReceipts.map((receipt) => (
                                                 <tr key={receipt.id} className="hover:bg-slate-50/80 transition-colors group">
-                                                    <td className="px-4 py-4">
+                                                    <td className="w-14 px-4 py-4">
                                                         <div className="flex items-center justify-center">
                                                             <input
                                                                 type="checkbox"
@@ -1361,10 +1361,12 @@ const GoodsReceipts = () => {
                                                             {renderCell(col.key, receipt)}
                                                         </td>
                                                     ))}
-                                                    <td className="sticky right-0 z-10 bg-white px-4 py-4 shadow-[-6px_0_10px_-8px_rgba(0,0,0,0.1)]">
-                                                        <div className="flex items-center justify-center gap-3">
-                                                            {receipt.status === 'CHO_DUYET' && (
+                                                    <td className="sticky right-0 z-10 w-[220px] bg-white px-4 py-4 shadow-[-6px_0_10px_-8px_rgba(0,0,0,0.1)]">
+                                                        <div className="grid grid-cols-5 place-items-center">
+                                                            {receipt.status === 'CHO_DUYET' ? (
                                                                 <button onClick={() => handleApproveReceipt(receipt)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Duyệt phiếu"><CheckSquare size={16} /></button>
+                                                            ) : (
+                                                                <span className="w-7 h-7" aria-hidden="true" />
                                                             )}
                                                             <button onClick={() => handlePrintReceipt(receipt)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="In phiếu"><Printer size={16} /></button>
                                                             <button
