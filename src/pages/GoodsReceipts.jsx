@@ -562,7 +562,40 @@ const GoodsReceipts = () => {
 
             // 2. Loop through items to update inventory
             for (const item of items) {
-                // Upsert inventory
+                // --- INDIVIDUAL STATUS SYNC ---
+                if (item.serial_number) {
+                    if (item.item_type === 'BINH' || item.item_type.startsWith('BINH_')) {
+                        // Update individual Cylinder
+                        const { error: cylSyncError } = await supabase
+                            .from('cylinders')
+                            .update({
+                                status: item.item_status || 'sẵn sàng',
+                                warehouse_id: receipt.warehouse_id,
+                                customer_id: null,
+                                customer_name: null,
+                                department: 'Tại kho'
+                            })
+                            .eq('serial_number', item.serial_number);
+                        
+                        if (cylSyncError) console.error(`Error syncing cylinder ${item.serial_number}:`, cylSyncError);
+                    } else if (item.item_type === 'MAY' || item.item_type.startsWith('MAY_')) {
+                        // Update individual Machine
+                        const { error: machSyncError } = await supabase
+                            .from('machines')
+                            .update({
+                                status: item.item_status || 'sẵn sàng',
+                                warehouse: receipt.warehouse_id,
+                                customer_id: null,
+                                customer_name: null
+                            })
+                            .eq('serial_number', item.serial_number);
+                        
+                        if (machSyncError) console.error(`Error syncing machine ${item.serial_number}:`, machSyncError);
+                    }
+                }
+                // --- END INDIVIDUAL STATUS SYNC ---
+
+                // Upsert aggregate inventory
                 const { data: invData, error: invQueryError } = await supabase
                     .from('inventory')
                     .select('id, quantity')
@@ -578,7 +611,7 @@ const GoodsReceipts = () => {
                     // Update
                     const { data: updatedInv, error: updateError } = await supabase
                         .from('inventory')
-                        .update({ quantity: invData.quantity + item.quantity })
+                        .update({ quantity: (invData.quantity || 0) + (item.quantity || 0) })
                         .eq('id', invData.id)
                         .select()
                         .single();

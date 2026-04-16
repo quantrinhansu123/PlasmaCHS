@@ -139,8 +139,8 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
         const loadInitialData = async () => {
             try {
                 const [suppliersRes, warehousesRes, cylindersRes, machinesRes] = await Promise.all([
-                    supabase.from('suppliers').select('id, name').order('name'),
-                    supabase.from('warehouses').select('id, name').eq('status', 'Đang hoạt động').order('name'),
+                    supabase.from('suppliers').select('id, name, address, phone').order('name'),
+                    supabase.from('warehouses').select('id, name, manager_name').eq('status', 'Đang hoạt động').order('name'),
                     supabase.from('cylinders').select('serial_number').order('serial_number'),
                     supabase.from('machines').select('serial_number').order('serial_number')
                 ]);
@@ -522,7 +522,15 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                             <select
                                                 disabled={isReadOnly}
                                                 value={formData.supplier_name || ''}
-                                                onChange={(e) => setFormData(prev => ({ ...prev, supplier_name: e.target.value }))}
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    const supplier = suppliers.find(s => s.name === val);
+                                                    setFormData(prev => ({ 
+                                                        ...prev, 
+                                                        supplier_name: val,
+                                                        deliverer_address: supplier ? `${supplier.address || ''}${supplier.phone ? (supplier.address ? ' - ' : '') + supplier.phone : ''}` : prev.deliverer_address
+                                                    }));
+                                                }}
                                                 className={clsx(
                                                     "w-full h-12 pl-4 pr-10 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] appearance-none transition-all outline-none",
                                                     isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
@@ -544,7 +552,15 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                             <select
                                                 disabled={isReadOnly}
                                                 value={formData.warehouse_id || ''}
-                                                onChange={(e) => setFormData(prev => ({ ...prev, warehouse_id: e.target.value }))}
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    const warehouse = warehousesList.find(w => w.id === val);
+                                                    setFormData(prev => ({ 
+                                                        ...prev, 
+                                                        warehouse_id: val,
+                                                        received_by: warehouse ? warehouse.manager_name : prev.received_by
+                                                    }));
+                                                }}
                                                 className={clsx(
                                                     "w-full h-12 pl-4 pr-10 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] appearance-none transition-all outline-none",
                                                     isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
