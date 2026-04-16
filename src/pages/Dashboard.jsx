@@ -41,15 +41,6 @@ const Dashboard = () => {
       {/* Tab: Chức năng */}
       {activeTab === 'chuc-nang' && (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 lg:gap-4 animate-in fade-in duration-500">
-          {role === 'Admin' && (
-            <ActionCard
-              icon={Users}
-              title="Quản lý khách hàng"
-              description="Quản lý danh sách, thông tin và tài sản khách hàng."
-              href="/khach-hang"
-              colorScheme="blue"
-            />
-          )}
           {moduleCards.map((module, index) => (
             <ActionCard key={`${module.href}-${index}`} {...module} />
           ))}

@@ -16,7 +16,9 @@ import {
     Calendar,
     Warehouse,
     FileText,
-    Package
+    Package,
+    ScanLine,
+    Search as SearchIcon
 } from 'lucide-react';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -43,6 +45,12 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
     const [cylindersList, setCylindersList] = useState([]);
     const [machinesList, setMachinesList] = useState([]);
     const [deliverers, setDeliverers] = useState([]);
+    const [activeSerialDropdown, setActiveSerialDropdown] = useState(null);
+    const [isFetchingCyls, setIsFetchingCyls] = useState(false);
+    const cylDropdownRef = useRef({});
+    const [scanTarget, setScanTarget] = useState({ itemIdx: -1, serialIdx: -1 });
+    const scanTargetRef = useRef({ itemIdx: -1, serialIdx: -1 });
+    useEffect(() => { scanTargetRef.current = scanTarget; }, [scanTarget]);
 
     const handleClose = useCallback(() => {
         setIsClosing(true);
@@ -55,6 +63,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
         item_type: 'MAY',
         item_name: '',
         serial_number: '',
+        assigned_serials: [{ serial: '', scan_time: null }],
         item_status: '',
         quantity: 1,
         unit: 'cái',
@@ -125,17 +134,17 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
             generateCode();
         }
     }, [receipt, isEdit]);
-
-    // Load suppliers and warehouses
+    // Load suppliers and warehouses
     useEffect(() => {
         const loadInitialData = async () => {
-            try {                const [suppliersRes, warehousesRes, cylindersRes, machinesRes] = await Promise.all([
+            try {
+                const [suppliersRes, warehousesRes, cylindersRes, machinesRes] = await Promise.all([
                     supabase.from('suppliers').select('id, name').order('name'),
                     supabase.from('warehouses').select('id, name').eq('status', 'Đang hoạt động').order('name'),
                     supabase.from('cylinders').select('serial_number').order('serial_number'),
                     supabase.from('machines').select('serial_number').order('serial_number')
                 ]);
- 
+
                 if (suppliersRes.data) {
                     setSuppliers(suppliersRes.data);
                     if (!isEdit && suppliersRes.data.length > 0) {
@@ -179,33 +188,126 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
     };
 
     const updateItem = (index, field, value) => {
-        setItems(prev => prev.map((item, i) => i === index ? { ...item, [field]: value } : item));
+        setItems(prev => {
+            const updated = [...prev];
+            const updatedItem = { ...updated[index], [field]: value };
+            
+            // Sync serials array if quantity changes
+            if (field === 'quantity') {
+                const isSerialized = formData.receipt_type === 'BINH' || formData.receipt_type === 'MAY';
+                const targetQty = parseInt(value, 10) || 0;
+                
+                if (isSerialized) {
+                    let currentSerials = [...(updatedItem.assigned_serials || [])];
+                    if (targetQty > currentSerials.length) {
+                        for (let i = currentSerials.length; i < targetQty; i++) {
+                            currentSerials.push({ serial: '', scan_time: null });
+                        }
+                    } else if (targetQty < currentSerials.length && targetQty >= 0) {
+                        currentSerials = currentSerials.slice(0, targetQty);
+                    }
+                    updatedItem.assigned_serials = currentSerials;
+                }
+            }
+            
+            updated[index] = updatedItem;
+            return updated;
+        });
+    };
+
+    const handleQuantityBlur = (index) => {
+        // No longer needed as updateItem handles sync immediately
+    };
+
+    const handleSerialChange = (itemIdx, serialIdx, value) => {
+        const normalizedVal = value ? value.trim().toUpperCase() : '';
+        setItems(prev => {
+            const updated = [...prev];
+            const item = { ...updated[itemIdx] };
+            const newSerials = [...(item.assigned_serials || [])];
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+            // Check for duplicates
+            let isDuplicate = false;
+            updated.forEach((it, i) => {
+                (it.assigned_serials || []).forEach((s, si) => {
+                    if (i === itemIdx && si === serialIdx) return;
+                    const val = (typeof s === 'string' ? s : s?.serial)?.trim().toUpperCase();
+                    if (val === normalizedVal && normalizedVal !== '') isDuplicate = true;
+                });
+            });
+
+            if (isDuplicate) {
+                toast.warn(`Mã ${normalizedVal} đang bị trùng!`, { toastId: `dup-${normalizedVal}` });
+            }
+
+            const existing = newSerials[serialIdx] || {};
+            newSerials[serialIdx] = {
+                ...(typeof existing === 'string' ? { serial: existing } : existing),
+                serial: normalizedVal,
+                scan_time: normalizedVal ? (existing.scan_time || timeStr) : null
+            };
+            
+            // Sync first serial to the legacy serial_number field for compatibility
+            if (serialIdx === 0) item.serial_number = normalizedVal;
+
+            item.assigned_serials = newSerials;
+            updated[itemIdx] = item;
+            return updated;
+        });
     };
 
     const handleScanSuccess = useCallback((decodedText) => {
-        if (scannerIndex !== null) {
-            updateItem(scannerIndex, 'serial_number', decodedText);
-            setScannerIndex(null);
+        const { itemIdx, serialIdx } = scanTargetRef.current;
+        if (itemIdx === -1 || serialIdx === -1) {
+            // Legacy single scan behavior
+            if (scannerIndex !== null) {
+                updateItem(scannerIndex, 'serial_number', decodedText);
+                setScannerIndex(null);
+            }
+            return;
         }
+
+        const normalizedText = decodedText.trim().toUpperCase();
+        handleSerialChange(itemIdx, serialIdx, normalizedText);
+
+        // Auto move to next empty
+        setItems(prev => {
+            const item = prev[itemIdx];
+            const nextIdx = item.assigned_serials.findIndex((s, i) => i > serialIdx && !(typeof s === 'string' ? s : s?.serial));
+            if (nextIdx !== -1) {
+                setScanTarget({ itemIdx, serialIdx: nextIdx });
+            } else {
+                setScanTarget({ itemIdx: -1, serialIdx: -1 });
+            }
+            return prev;
+        });
     }, [scannerIndex]);
+
+    const startScanner = (itemIdx, serialIdx) => {
+        setScanTarget({ itemIdx, serialIdx });
+    };
+
+    const startScanAll = (itemIdx) => {
+        const item = items[itemIdx];
+        if (!item) return;
+        const firstEmpty = item.assigned_serials.findIndex(s => !(typeof s === 'string' ? s : s?.serial));
+        if (firstEmpty === -1) {
+            toast.info('Đã nhập đủ mã cho sản phẩm này!');
+            return;
+        }
+        startScanner(itemIdx, firstEmpty);
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         
-        // Manual validation to avoid confusing browser tooltips
-        if (!formData.supplier_name) {
-            toast.error('Vui lòng chọn nhà cung cấp');
+        // Manual validation
+        if (!formData.supplier_name || !formData.warehouse_id || !formData.receipt_date) {
+            toast.error('Vui lòng điền đủ thông tin phiếu nhập kho');
             return;
         }
-        if (!formData.warehouse_id) {
-            toast.error('Vui lòng chọn kho nhận hàng');
-            return;
-        }
-        if (!formData.receipt_date) {
-            toast.error('Vui lòng chọn ngày nhập kho');
-            return;
-        }
-
         if (items.some(item => !item.item_name)) {
             toast.error('Vui lòng điền tên hàng hóa cho tất cả các dòng');
             return;
@@ -213,40 +315,62 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
 
         setIsSubmitting(true);
         try {
-            const totalAmount = items.reduce((sum, item) => sum + (item.total_price || 0), 0);
+            // Flatten items for DB storage
+            const flattenedItems = [];
+            items.forEach(item => {
+                const isSerialized = formData.receipt_type === 'BINH' || formData.receipt_type === 'MAY';
+                if (isSerialized) {
+                    const serials = (item.assigned_serials || []).map(s => (typeof s === 'string' ? s : s?.serial)?.trim().toUpperCase()).filter(Boolean);
+                    
+                    if (serials.length > 0) {
+                        serials.forEach(sn => {
+                            flattenedItems.push({
+                                ...item,
+                                quantity: 1,
+                                serial_number: sn,
+                                total_price: item.unit_price
+                            });
+                        });
+                        
+                        if (item.quantity > serials.length) {
+                            flattenedItems.push({
+                                ...item,
+                                quantity: item.quantity - serials.length,
+                                serial_number: '',
+                                total_price: (item.quantity - serials.length) * item.unit_price
+                            });
+                        }
+                    } else {
+                        flattenedItems.push(item);
+                    }
+                } else {
+                    flattenedItems.push(item);
+                }
+            });
 
+            const totalAmount = flattenedItems.reduce((sum, item) => sum + (item.total_price || 0), 0);
             const { receipt_type, ...dbFormData } = formData;
             const receiptPayload = {
                 ...dbFormData,
-                total_items: items.length,
+                total_items: flattenedItems.length,
                 total_amount: totalAmount,
-                status: isEdit ? receipt.status : 'CHO_DUYET'
+                status: isEdit ? receipt.status : 'CHO_DUYET',
+                deliverer_name: formData.deliverer_name === 'KHAC' ? formData.deliverer_name_manual : formData.deliverer_name
             };
 
             let receiptId;
-
             if (isEdit) {
-                const { error: receiptError } = await supabase
-                    .from('goods_receipts')
-                    .update(receiptPayload)
-                    .eq('id', receipt.id);
-
+                const { error: receiptError } = await supabase.from('goods_receipts').update(receiptPayload).eq('id', receipt.id);
                 if (receiptError) throw receiptError;
                 receiptId = receipt.id;
-
                 await supabase.from('goods_receipt_items').delete().eq('receipt_id', receiptId);
             } else {
-                const { data: newReceipt, error: receiptError } = await supabase
-                    .from('goods_receipts')
-                    .insert([receiptPayload])
-                    .select()
-                    .single();
-
+                const { data: newReceipt, error: receiptError } = await supabase.from('goods_receipts').insert([receiptPayload]).select().single();
                 if (receiptError) throw receiptError;
                 receiptId = newReceipt.id;
             }
 
-            const itemsPayload = items.map(item => ({
+            const itemsPayload = flattenedItems.map(item => ({
                 item_type: item.item_type,
                 item_name: item.item_name,
                 serial_number: item.serial_number,
@@ -259,31 +383,27 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                 receipt_id: receiptId
             }));
 
-            // Validate serial existence if it's a cylinder or machine
+            // Validate serial existence
             if (formData.receipt_type === 'BINH') {
-                const invalidSerials = items.filter(i => i.serial_number && !cylindersList.includes(i.serial_number));
+                const invalidSerials = flattenedItems.filter(i => i.serial_number && !cylindersList.includes(i.serial_number));
                 if (invalidSerials.length > 0) {
-                    throw new Error(`Các mã bình sau không tồn tại trong hệ thống: ${invalidSerials.map(i => i.serial_number).join(', ')}. Vui lòng tạo bình trong Danh mục Bình trước.`);
+                    throw new Error(`Mã bình không tồn tại: ${invalidSerials.map(i => i.serial_number).join(', ')}`);
                 }
             } else if (formData.receipt_type === 'MAY') {
-                const invalidSerials = items.filter(i => i.serial_number && !machinesList.includes(i.serial_number));
+                const invalidSerials = flattenedItems.filter(i => i.serial_number && !machinesList.includes(i.serial_number));
                 if (invalidSerials.length > 0) {
-                    throw new Error(`Các mã máy sau không tồn tại trong hệ thống: ${invalidSerials.map(i => i.serial_number).join(', ')}. Vui lòng tạo máy trong Danh mục Máy trước.`);
+                    throw new Error(`Mã máy không tồn tại: ${invalidSerials.map(i => i.serial_number).join(', ')}`);
                 }
             }
 
-            const { error: itemsError } = await supabase
-                .from('goods_receipt_items')
-                .insert(itemsPayload);
-
+            const { error: itemsError } = await supabase.from('goods_receipt_items').insert(itemsPayload);
             if (itemsError) throw itemsError;
 
-            // Global notification for new goods receipt
             if (!isEdit) {
-                const totalQty = items.reduce((sum, i) => sum + (parseFloat(i.quantity) || 0), 0);
+                const totalQty = flattenedItems.reduce((sum, i) => sum + (parseFloat(i.quantity) || 0), 0);
                 notificationService.add({
                     title: `📥 Nhập kho mới: #${formData.receipt_code}`,
-                    description: `${formData.supplier_name} - ${totalQty} ${formData.receipt_type === 'MAY' ? 'máy' : 'bình'} - ${formData.received_by || 'NV Kho'}`,
+                    description: `${formData.supplier_name} - ${totalQty} sản phẩm`,
                     type: 'success',
                     link: '/nhap-kho'
                 });
@@ -293,7 +413,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
             handleClose();
         } catch (error) {
             console.error('Error saving goods receipt:', error);
-            alert(error.code === '23505' ? `❌ Mã phiếu "${formData.receipt_code}" đã tồn tại.` : '❌ Có lỗi xảy ra: ' + error.message);
+            alert('❌ Có lỗi xảy ra: ' + error.message);
         } finally {
             setIsSubmitting(false);
         }
@@ -630,30 +750,6 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                                     </div>
                                                 </div>
 
-                                                <div className="space-y-1.5">
-                                                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">Serial / Barcode</label>
-                                                    <div className="flex gap-2">
-                                                        <div className="relative flex-1">
-                                                            <Combobox
-                                                                disabled={isReadOnly}
-                                                                value={item.serial_number}
-                                                                onChange={(val) => updateItem(idx, 'serial_number', val)}
-                                                                options={formData.receipt_type === 'MAY' ? machinesList : (['BINH', 'BINH_CO_KHI'].includes(formData.receipt_type) ? cylindersList : [])}
-                                                                placeholder={formData.receipt_type === 'VAT_TU' ? "Không bắt dắt cho vật tư" : "Mã gán cho bình/máy..."}
-                                                                className="h-11 font-bold text-sm"
-                                                            />
-                                                        </div>
-                                                        <button
-                                                            type="button"
-                                                            disabled={isReadOnly}
-                                                            onClick={() => setScannerIndex(idx)}
-                                                            className="w-11 h-11 bg-primary/5 text-primary border border-primary/20 rounded-xl flex items-center justify-center hover:bg-primary/10 transition-all shrink-0"
-                                                        >
-                                                            <Camera className="w-5 h-5 shrink-0" />
-                                                        </button>
-                                                    </div>
-                                                </div>
-
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div className="space-y-1.5">
                                                         <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">Số lượng</label>
@@ -661,6 +757,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                                             step="any"
                                                             value={item.quantity}
                                                             onFocus={(e) => e.target.select()}
+                                                            onBlur={() => handleQuantityBlur(idx)}
                                                             onChange={(e) => {
                                                                 const val = e.target.value;
                                                                 if (val === '') {
@@ -672,28 +769,9 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                                                 if (!isNaN(q)) {
                                                                     updateItem(idx, 'quantity', val);
                                                                     updateItem(idx, 'total_price', q * (item.unit_price || 0));
-
-                                                                    // Dynamic Row Generation: If BINH or MAY, and quantity > 1, expand rows
-                                                                    if (q > 1 && (formData.receipt_type === 'BINH' || formData.receipt_type === 'MAY') && !isEdit) {
-                                                                        const newRows = Array(Math.floor(q) - 1).fill(null).map(() => ({
-                                                                            ...item,
-                                                                            _id: crypto.randomUUID(),
-                                                                            quantity: 1,
-                                                                            serial_number: '',
-                                                                            total_price: item.unit_price
-                                                                        }));
-                                                                        
-                                                                        setItems(prev => {
-                                                                            const updated = [...prev];
-                                                                            updated[idx] = { ...item, quantity: 1, total_price: item.unit_price };
-                                                                            updated.splice(idx + 1, 0, ...newRows);
-                                                                            return updated;
-                                                                        });
-                                                                        toast.info(`Đã tự động tạo ${Math.floor(q)} dòng nhập liệu cho ${item.item_name}`);
-                                                                    }
                                                                 }
                                                             }}
-                                                            className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-center font-black text-primary outline-none"
+                                                            className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-center font-black text-primary outline-none focus:ring-4 focus:ring-primary/10"
                                                         />
                                                     </div>
                                                     <div className="space-y-1.5">
@@ -708,6 +786,84 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                                                         </select>
                                                     </div>
                                                 </div>
+
+                                                {/* Multi-Serial Input Grid */}
+                                                {(formData.receipt_type === 'BINH' || formData.receipt_type === 'MAY') && item.quantity > 0 && (
+                                                    <div className="pt-4 border-t border-slate-100 col-span-full">
+                                                        <div className="flex items-center justify-between mb-3 px-1">
+                                                            <label className="text-[12px] font-black text-primary flex items-center gap-2">
+                                                                <ScanLine className="w-4 h-4" /> Gán mã RFID cho {item.item_name} ({item.assigned_serials?.length || 0})
+                                                            </label>
+                                                            {!isReadOnly && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => startScanAll(idx)}
+                                                                    className="px-3 py-1.5 bg-primary/10 text-primary text-[11px] font-black rounded-xl hover:bg-primary/20 transition-all flex items-center gap-2 border border-primary/20"
+                                                                >
+                                                                    <ScanLine className="w-4 h-4" /> Quét hàng loạt
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                                            {(item.assigned_serials || []).map((ser, sIdx) => {
+                                                                const dropKey = `it-${idx}-ser-${sIdx}`;
+                                                                const currentVal = (typeof ser === 'string' ? ser : (ser?.serial || ''));
+                                                                const suggestions = formData.receipt_type === 'MAY' ? machinesList : cylindersList;
+                                                                const isOpen = activeSerialDropdown === dropKey;
+
+                                                                return (
+                                                                    <div key={dropKey} className={clsx("relative", isOpen ? "z-[50]" : "z-[10]")}>
+                                                                        <div className="relative">
+                                                                            <input
+                                                                                value={currentVal}
+                                                                                onChange={(e) => handleSerialChange(idx, sIdx, e.target.value)}
+                                                                                onFocus={() => setActiveSerialDropdown(dropKey)}
+                                                                                onBlur={() => setTimeout(() => { if (activeSerialDropdown === dropKey) setActiveSerialDropdown(null); }, 200)}
+                                                                                placeholder={`Mã thứ ${sIdx + 1}...`}
+                                                                                autoComplete="off"
+                                                                                className={clsx(
+                                                                                    "w-full h-10 pl-4 pr-10 bg-white border border-slate-200 rounded-xl text-[13px] font-mono font-black transition-all",
+                                                                                    isReadOnly ? "text-slate-500 bg-slate-50" : "text-primary focus:border-primary/50 focus:ring-4 focus:ring-primary/5"
+                                                                                )}
+                                                                                readOnly={isReadOnly}
+                                                                            />
+                                                                            {!isReadOnly && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => startScanner(idx, sIdx)}
+                                                                                    className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center text-primary/40 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
+                                                                                >
+                                                                                    <ScanLine className="w-4 h-4" />
+                                                                                </button>
+                                                                            )}
+                                                                        </div>
+                                                                        {isOpen && !isReadOnly && (
+                                                                            <div className="absolute z-[100] left-0 right-0 top-11 bg-white border border-primary/20 rounded-xl shadow-2xl max-h-48 overflow-y-auto">
+                                                                                {suggestions.filter(s => s.includes(currentVal.toUpperCase())).slice(0, 20).map(s => (
+                                                                                    <button
+                                                                                        key={s}
+                                                                                        type="button"
+                                                                                        onMouseDown={(e) => {
+                                                                                            e.preventDefault();
+                                                                                            handleSerialChange(idx, sIdx, s);
+                                                                                            setActiveSerialDropdown(null);
+                                                                                        }}
+                                                                                        className="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-primary/5 transition-colors border-b border-slate-50 last:border-0"
+                                                                                    >
+                                                                                        <span className="text-[13px] font-mono font-bold text-primary">{s}</span>
+                                                                                    </button>
+                                                                                ))}
+                                                                                {suggestions.filter(s => s.includes(currentVal.toUpperCase())).length === 0 && (
+                                                                                    <div className="px-4 py-3 text-xs text-slate-400 italic">Không có mã phù hợp</div>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                )}
 
                                                 <div className="space-y-1.5">
                                                     <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">Đơn giá nhập</label>
@@ -789,10 +945,13 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
 
  
             <BarcodeScanner
-                isOpen={scannerIndex !== null}
-                onClose={() => setScannerIndex(null)}
+                isOpen={scannerIndex !== null || scanTarget.itemIdx !== -1}
+                onClose={() => {
+                    setScannerIndex(null);
+                    setScanTarget({ itemIdx: -1, serialIdx: -1 });
+                }}
                 onScanSuccess={handleScanSuccess}
-                title="Quét mã hàng hóa"
+                title={scanTarget.itemIdx !== -1 ? `Đang quét mã cho dòng ${scanTarget.itemIdx + 1}` : "Quét mã hàng hóa"}
             />
         </>,
         document.body
