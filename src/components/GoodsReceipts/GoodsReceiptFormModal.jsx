@@ -117,12 +117,12 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                     const { data } = await supabase
                         .from('goods_receipts')
                         .select('receipt_code')
-                        .order('created_at', { ascending: false })
+                        .order('receipt_code', { ascending: false })
                         .limit(1);
 
                     if (data && data.length > 0 && data[0].receipt_code.startsWith('PN')) {
-                        const numStr = data[0].receipt_code.replace(/[^0-9]/g, '');
-                        const nextNum = numStr ? parseInt(numStr, 10) + 1 : 1;
+                        const numStr = data[0].receipt_code.match(/\d+/)?.[0] || '0';
+                        const nextNum = parseInt(numStr, 10) + 1;
                         setFormData(prev => ({ ...prev, receipt_code: `PN${nextNum.toString().padStart(5, '0')}` }));
                     } else {
                         setFormData(prev => ({ ...prev, receipt_code: 'PN00001' }));

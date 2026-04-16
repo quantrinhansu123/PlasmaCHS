@@ -185,8 +185,17 @@ const Cylinders = () => {
 
             // Apply warehouse filter for warehouse managers/staff (Non-Admin)
             if (role !== 'Admin' && department) {
-                const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-                query = query.eq('warehouse_id', userWhCode);
+                const userBranch = department.includes('-') ? department.split('-')[0].trim() : department.trim();
+                const { data: matchedWarehouses } = await supabase
+                    .from('warehouses')
+                    .select('id')
+                    .ilike('name', `%${userBranch}%`);
+                
+                if (matchedWarehouses && matchedWarehouses.length > 0) {
+                    query = query.in('warehouse_id', matchedWarehouses.map(w => w.id));
+                } else {
+                    query = query.eq('warehouse_id', '00000000-0000-0000-0000-000000000000');
+                }
             }
 
             const { data } = await query;
@@ -224,11 +233,17 @@ const Cylinders = () => {
             };
 
             // Apply same filters to stat queries
+            let matchedWhIds = [];
+            if (role !== 'Admin' && department) {
+                const userBranch = department.includes('-') ? department.split('-')[0].trim() : department.trim();
+                const { data: whs } = await supabase.from('warehouses').select('id').ilike('name', `%${userBranch}%`);
+                if (whs) matchedWhIds = whs.map(w => w.id);
+            }
+
             Object.keys(queries).forEach(key => {
                 if (searchTerm) {
                     queries[key] = queries[key].or(`serial_number.ilike.%${searchTerm}%,volume.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%`);
                 }
-                // Don't apply 'status' filter to individual status counts unless you want specific behavior
                 if (key === 'total') {
                     if (selectedStatuses.length > 0) queries[key] = queries[key].in('status', selectedStatuses);
                 }
@@ -236,10 +251,12 @@ const Cylinders = () => {
                 if (selectedCustomers.length > 0) queries[key] = queries[key].in('customer_name', selectedCustomers);
                 if (selectedCategories.length > 0) queries[key] = queries[key].in('category', selectedCategories);
                 
-                // Apply warehouse filter for warehouse managers/staff (Non-Admin)
                 if (role !== 'Admin' && department) {
-                    const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-                    queries[key] = queries[key].eq('warehouse_id', userWhCode);
+                    if (matchedWhIds.length > 0) {
+                        queries[key] = queries[key].in('warehouse_id', matchedWhIds);
+                    } else {
+                        queries[key] = queries[key].eq('warehouse_id', '00000000-0000-0000-0000-000000000000');
+                    }
                 }
             });
 
@@ -343,8 +360,20 @@ const Cylinders = () => {
 
             // Apply warehouse filter for warehouse managers/staff (Non-Admin)
             if (role !== 'Admin' && department) {
-                const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-                query = query.eq('warehouse_id', userWhCode);
+                const userBranch = department.includes('-') ? department.split('-')[0].trim() : department.trim();
+                
+                // Get matching warehouse IDs for this branch
+                const { data: matchedWarehouses } = await supabase
+                    .from('warehouses')
+                    .select('id')
+                    .ilike('name', `%${userBranch}%`);
+                
+                if (matchedWarehouses && matchedWarehouses.length > 0) {
+                    query = query.in('warehouse_id', matchedWarehouses.map(w => w.id));
+                } else {
+                    // Fallback to strict match if ilike fails or no results
+                    query = query.eq('warehouse_id', '00000000-0000-0000-0000-000000000000'); // No results
+                }
             }
 
             const from = (currentPage - 1) * pageSize;

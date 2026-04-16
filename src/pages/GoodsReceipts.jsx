@@ -584,7 +584,7 @@ const GoodsReceipts = () => {
                             .from('machines')
                             .update({
                                 status: item.item_status || 'sẵn sàng',
-                                warehouse: receipt.warehouse_id,
+                                warehouse: warehouseData.name, // Use name instead of UUID for consistency with Machines filter
                                 customer_id: null,
                                 customer_name: null
                             })

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
+import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
-import usePermissions from './usePermissions';
 
 export const useReports = () => {
   const { role, department } = usePermissions();
@@ -138,7 +138,7 @@ export const useReports = () => {
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
       if (role !== 'Admin' && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-        query = query.eq('kho', userWhCode);
+        query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse_id) {
         query = query.eq('kho', filters.warehouse_id);
       }
@@ -168,7 +168,7 @@ export const useReports = () => {
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
       if (role !== 'Admin' && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-        query = query.eq('kho', userWhCode);
+        query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse_id) {
         query = query.eq('kho', filters.warehouse_id);
       }
@@ -199,7 +199,7 @@ export const useReports = () => {
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
       if (role !== 'Admin' && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-        query = query.eq('kho', userWhCode);
+        query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse) {
         query = query.eq('kho', filters.warehouse);
       }
@@ -229,7 +229,7 @@ export const useReports = () => {
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
       if (role !== 'Admin' && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-        query = query.eq('kho', userWhCode);
+        query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.kho) {
         query = query.eq('kho', filters.kho);
       }
@@ -357,7 +357,7 @@ export const useReports = () => {
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
       if (role !== 'Admin' && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-        query = query.eq('kho', userWhCode);
+        query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse) {
         query = query.eq('kho', filters.warehouse);
       }
@@ -404,7 +404,7 @@ export const useReports = () => {
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
       if (role !== 'Admin' && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-        query = query.eq('kho', userWhCode);
+        query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse) {
         query = query.eq('kho', filters.warehouse);
       }
@@ -436,7 +436,7 @@ export const useReports = () => {
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
       if (role !== 'Admin' && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-        query = query.eq('kho', userWhCode);
+        query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse) {
         query = query.eq('kho', filters.warehouse);
       }
@@ -469,7 +469,7 @@ export const useReports = () => {
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
       if (role !== 'Admin' && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-        query = query.eq('kho', userWhCode);
+        query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse) {
         query = query.eq('kho', filters.warehouse);
       }
@@ -517,7 +517,7 @@ export const useReports = () => {
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
       if (role !== 'Admin' && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-        query = query.eq('kho', userWhCode);
+        query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse_id) {
         query = query.eq('kho', filters.warehouse_id);
       }
@@ -544,7 +544,7 @@ export const useReports = () => {
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
       if (role !== 'Admin' && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-        query = query.eq('kho', userWhCode);
+        query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse_id) {
         query = query.eq('kho', filters.warehouse_id);
       }

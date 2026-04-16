@@ -143,26 +143,54 @@ const InventoryReport = () => {
     const fetchInventory = async () => {
         setLoading(true);
         try {
+            const userBranch = (role !== 'Admin' && department) 
+                ? (department.includes('-') ? department.split('-')[0].trim() : department.trim())
+                : null;
+
             // 1. Fetch Materials (VAT_TU) from inventory table
-            const { data: invData, error: invError } = await supabase
+            let invQuery = supabase
                 .from('inventory')
                 .select('*')
                 .eq('item_type', 'VAT_TU')
                 .gt('quantity', 0);
+            
+            if (userBranch) {
+                // Determine warehouse IDs for this branch (for cylinders and materials if they use UUIDs)
+                const { data: whs } = await supabase.from('warehouses').select('id').ilike('name', `%${userBranch}%`);
+                const whIds = whs?.map(w => w.id) || [];
+                if (whIds.length > 0) {
+                    invQuery = invQuery.in('warehouse_id', whIds);
+                }
+            }
+            const { data: invData, error: invError } = await invQuery;
             if (invError) throw invError;
 
             // 2. Fetch Machines counts grouped by warehouse and type
-            const { data: machData, error: machError } = await supabase
+            let machQuery = supabase
                 .from('machines')
                 .select('warehouse, machine_type, status')
                 .eq('status', 'sẵn sàng');
+            
+            if (userBranch) {
+                machQuery = machQuery.ilike('warehouse', `%${userBranch}%`);
+            }
+            const { data: machData, error: machError } = await machQuery;
             if (machError) throw machError;
 
             // 3. Fetch Cylinders counts grouped by warehouse and volume
-            const { data: cylData, error: cylError } = await supabase
+            let cylQuery = supabase
                 .from('cylinders')
                 .select('warehouse_id, volume, status')
                 .eq('status', 'sẵn sàng');
+            
+            if (userBranch) {
+                const { data: whs } = await supabase.from('warehouses').select('id').ilike('name', `%${userBranch}%`);
+                const whIds = whs?.map(w => w.id) || [];
+                if (whIds.length > 0) {
+                    cylQuery = cylQuery.in('warehouse_id', whIds);
+                }
+            }
+            const { data: cylData, error: cylError } = await cylQuery;
             if (cylError) throw cylError;
 
             // Process Machine real-time records

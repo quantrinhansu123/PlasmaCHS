@@ -195,7 +195,7 @@ const Machines = () => {
             // Apply warehouse filter for warehouse managers/staff (Non-Admin)
             if (role !== 'Admin' && department) {
                 const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-                query = query.eq('warehouse', userWhCode);
+                query = query.ilike('warehouse', `%${userWhCode}%`);
             }
 
             const { data } = await query;
@@ -230,7 +230,7 @@ const Machines = () => {
                 // Apply warehouse filter for warehouse managers/staff (Non-Admin)
                 if (role !== 'Admin' && department) {
                     const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-                    queries[key] = queries[key].eq('warehouse', userWhCode);
+                    queries[key] = queries[key].ilike('warehouse', `%${userWhCode}%`);
                 }
             });
 
@@ -339,7 +339,7 @@ const Machines = () => {
             // Apply warehouse filter for warehouse managers/staff (Non-Admin)
             if (role !== 'Admin' && department) {
                 const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-                query = query.eq('warehouse', userWhCode);
+                query = query.ilike('warehouse', `%${userWhCode}%`);
             }
 
             const from = (currentPage - 1) * pageSize;
