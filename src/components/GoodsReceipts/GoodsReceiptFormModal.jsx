@@ -44,6 +44,8 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
     const [scannerIndex, setScannerIndex] = useState(null);
     const [cylindersList, setCylindersList] = useState([]);
     const [machinesList, setMachinesList] = useState([]);
+    const [cylinderOptions, setCylinderOptions] = useState([]);
+    const [machineOptions, setMachineOptions] = useState([]);
     const [deliverers, setDeliverers] = useState([]);
     const [activeSerialDropdown, setActiveSerialDropdown] = useState(null);
     const [isFetchingCyls, setIsFetchingCyls] = useState(false);
@@ -53,6 +55,53 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
     useEffect(() => { scanTargetRef.current = scanTarget; }, [scanTarget]);
 
     const normalizeSerial = (value) => value?.toString().trim().toUpperCase() || '';
+    const hasValue = (value) => value !== null && value !== undefined && value !== '';
+    const getProductDisplayName = (itemName) => {
+        const matchedProduct = PRODUCT_TYPES.find((product) => product.label === itemName);
+        return matchedProduct ? `${matchedProduct.label} (${matchedProduct.id})` : itemName;
+    };
+    const getItemCodes = (item) => {
+        const assignedCodes = (item.assigned_serials || [])
+            .map((serialEntry) => normalizeSerial(typeof serialEntry === 'string' ? serialEntry : serialEntry?.serial))
+            .filter(Boolean);
+
+        if (assignedCodes.length > 0) return assignedCodes;
+
+        const fallbackCode = normalizeSerial(item.serial_number);
+        return fallbackCode ? [fallbackCode] : [];
+    };
+
+    const isAvailableSerialOption = (option, type) => {
+        if (!option?.serial_number) return false;
+        const normalizedStatus = (option.status || '').toLowerCase();
+        const hasCustomer = Boolean(option.customer_name?.toString().trim());
+        const hasWarehouse = type === 'MAY'
+            ? hasValue(option.warehouse)
+            : hasValue(option.warehouse_id);
+
+        return normalizedStatus === 'sẵn sàng' && !hasCustomer && !hasWarehouse;
+    };
+
+    const getSerialSuggestions = (type, currentValue, itemIdx, serialIdx) => {
+        const normalizedCurrent = normalizeSerial(currentValue);
+        const sourceOptions = type === 'MAY' ? machineOptions : cylinderOptions;
+
+        const selectedInForm = new Set();
+        items.forEach((item, i) => {
+            (item.assigned_serials || []).forEach((serialEntry, si) => {
+                if (i === itemIdx && si === serialIdx) return;
+                const serial = normalizeSerial(typeof serialEntry === 'string' ? serialEntry : serialEntry?.serial);
+                if (serial) selectedInForm.add(serial);
+            });
+        });
+
+        return sourceOptions
+            .filter(option => isAvailableSerialOption(option, type))
+            .map(option => normalizeSerial(option.serial_number))
+            .filter(serial => !selectedInForm.has(serial))
+            .filter(serial => !normalizedCurrent || serial.includes(normalizedCurrent))
+            .slice(0, 20);
+    };
 
     const handleClose = useCallback(() => {
         setIsClosing(true);
@@ -87,6 +136,12 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
     });
 
     const [items, setItems] = useState([{ ...emptyItem, item_type: 'MAY' }]);
+    const receiptProductOptions = PRODUCT_TYPES.filter((product) => (
+        formData.receipt_type === 'BINH'
+            ? product.id.startsWith('BINH_')
+            : !product.id.startsWith('BINH_')
+    ));
+    const isKnownReceiptProduct = (itemName) => receiptProductOptions.some((product) => product.label === itemName);
 
     // Auto-generate receipt code or load edit data
     useEffect(() => {
@@ -144,8 +199,8 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                 const [suppliersRes, warehousesRes, cylindersRes, machinesRes] = await Promise.all([
                     supabase.from('suppliers').select('id, name, address, phone').order('name'),
                     supabase.from('warehouses').select('id, name, manager_name').eq('status', 'Đang hoạt động').order('name'),
-                    supabase.from('cylinders').select('serial_number').order('serial_number'),
-                    supabase.from('machines').select('serial_number').order('serial_number')
+                    supabase.from('cylinders').select('serial_number, status, warehouse_id, customer_name').order('serial_number'),
+                    supabase.from('machines').select('serial_number, status, warehouse, customer_name').order('serial_number')
                 ]);
 
                 if (suppliersRes.data) {
@@ -161,9 +216,11 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                     }
                 }
                 if (cylindersRes.data) {
+                    setCylinderOptions(cylindersRes.data);
                     setCylindersList([...new Set(cylindersRes.data.map(c => normalizeSerial(c.serial_number)).filter(Boolean))]);
                 }
                 if (machinesRes.data) {
+                    setMachineOptions(machinesRes.data);
                     setMachinesList([...new Set(machinesRes.data.map(m => normalizeSerial(m.serial_number)).filter(Boolean))]);
                 }
 
@@ -225,6 +282,18 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
     const handleQuantityBlur = (index) => {
         // No longer needed as updateItem handles sync immediately
     };
+
+    useEffect(() => {
+        setItems(prev => prev.map((item) => {
+            const nextItem = { ...item, item_type: formData.receipt_type };
+            if (!isKnownReceiptProduct(item.item_name)) {
+                nextItem.item_name = item.item_name && !PRODUCT_TYPES.some(product => product.label === item.item_name)
+                    ? item.item_name
+                    : '';
+            }
+            return nextItem;
+        }));
+    }, [formData.receipt_type]);
 
     const handleSerialChange = (itemIdx, serialIdx, value) => {
         const normalizedVal = normalizeSerial(value);
@@ -732,23 +801,42 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                                 <div className="space-y-1.5">
                                                     <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">Tên hàng hóa *</label>
                                                     <div className="flex flex-col gap-2">
-                                                        <select
-                                                            disabled={isReadOnly}
-                                                            value={PRODUCT_TYPES.some(p => p.label === item.item_name) ? item.item_name : (item.item_name === '' ? '' : 'KHAC')}
-                                                            onChange={(e) => {
-                                                                if (e.target.value === 'KHAC') {
-                                                                    updateItem(idx, 'item_name', 'Sản phẩm khác...');
-                                                                } else {
-                                                                    updateItem(idx, 'item_name', e.target.value);
-                                                                }
-                                                            }}
-                                                            className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-sm font-bold outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 transition-all"
-                                                        >
-                                                            <option value="">-- Chọn --</option>
-                                                            {PRODUCT_TYPES.map(p => <option key={p.id} value={p.label}>{p.label}</option>)}
-                                                            <option value="KHAC">Nhập tay</option>
-                                                        </select>
-                                                        {(!PRODUCT_TYPES.some(p => p.label === item.item_name) && item.item_name !== '') && (
+                                                        {isReadOnly ? (
+                                                            <>
+                                                                <input
+                                                                    readOnly
+                                                                    value={
+                                                                        getItemCodes(item).length > 0
+                                                                            ? `${getProductDisplayName(item.item_name)} - ${getItemCodes(item)[0]}`
+                                                                            : (getProductDisplayName(item.item_name) || '')
+                                                                    }
+                                                                    className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none"
+                                                                />
+                                                                {getItemCodes(item).length > 1 && (
+                                                                    <div className="px-1 text-xs font-semibold text-primary break-all">
+                                                                        Mã: {getItemCodes(item).join(', ')}
+                                                                    </div>
+                                                                )}
+                                                            </>
+                                                        ) : (
+                                                            <select
+                                                                disabled={isReadOnly}
+                                                                value={isKnownReceiptProduct(item.item_name) ? item.item_name : (item.item_name === '' ? '' : 'KHAC')}
+                                                                onChange={(e) => {
+                                                                    if (e.target.value === 'KHAC') {
+                                                                        updateItem(idx, 'item_name', 'Sản phẩm khác...');
+                                                                    } else {
+                                                                        updateItem(idx, 'item_name', e.target.value);
+                                                                    }
+                                                                }}
+                                                                className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-sm font-bold outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 transition-all"
+                                                            >
+                                                                <option value="">-- Chọn --</option>
+                                                                {receiptProductOptions.map(p => <option key={p.id} value={p.label}>{p.label}</option>)}
+                                                                <option value="KHAC">Nhập tay</option>
+                                                            </select>
+                                                        )}
+                                                        {(!isKnownReceiptProduct(item.item_name) && item.item_name !== '') && (
                                                             <input
                                                                 disabled={isReadOnly}
                                                                 value={item.item_name === 'Sản phẩm khác...' ? '' : item.item_name}
@@ -839,7 +927,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                                             {(item.assigned_serials || []).map((ser, sIdx) => {
                                                                 const dropKey = `it-${idx}-ser-${sIdx}`;
                                                                 const currentVal = (typeof ser === 'string' ? ser : (ser?.serial || ''));
-                                                                const suggestions = formData.receipt_type === 'MAY' ? machinesList : cylindersList;
+                                                                const suggestions = getSerialSuggestions(formData.receipt_type, currentVal, idx, sIdx);
                                                                 const isOpen = activeSerialDropdown === dropKey;
 
                                                                 return (
