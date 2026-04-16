@@ -14,6 +14,30 @@ import BarcodeScanner from '../Common/BarcodeScanner';
 import OrderFormReadOnlyView from './OrderFormReadOnlyView';
 import clsx from 'clsx';
 
+const READY_CYLINDER_STATUS = 'sẵn sàng';
+
+/** Bình trong kho phải khớp loại sản phẩm đơn (theo volume). */
+function cylinderVolumeMatchesProduct(volume, productType) {
+    const vol = (volume || '').toLowerCase();
+    if (productType === 'BINH_4L') return vol.includes('4l') || vol.includes('4 l');
+    if (productType === 'BINH_8L') return vol.includes('8l') || vol.includes('8 l');
+    if (productType === 'BINH_3LC') return vol.includes('3lc') || vol.includes('3 lc');
+    if (productType?.startsWith('BINH')) return true;
+    return false;
+}
+
+function getTakenCylinderSerialsExceptSlot(items, itemIdx, cylIdx) {
+    const taken = new Set();
+    items.forEach((it, ii) => {
+        (it.assignedCylinders || []).forEach((c, ci) => {
+            if (ii === itemIdx && ci === cylIdx) return;
+            const s = (typeof c === 'string' ? c : c?.serial)?.trim().toUpperCase();
+            if (s) taken.add(s);
+        });
+    });
+    return taken;
+}
+
 export default function OrderFormModal({ order, onClose, onSuccess, initialMode = 'edit' }) {
     const { role, user, department } = usePermissions();
     const { fetchCustomerCylinderDebt } = useReports();
@@ -32,14 +56,14 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
     const [shippersList, setShippersList] = useState([]);
     const [promotionsList, setPromotionsList] = useState([]);
     const [isClosing, setIsClosing] = useState(false);
-    // Cylinder autocomplete
-    const [availableCylinders, setAvailableCylinders] = useState([]); // cache từ DB
+    // Bình sẵn sàng trong kho xuất (theo warehouse đã chọn)
+    const [warehouseReadyCylinders, setWarehouseReadyCylinders] = useState([]);
     const [isFetchingCyls, setIsFetchingCyls] = useState(false);
-    const [activeCylDropdown, setActiveCylDropdown] = useState(null); // dropKey đang mở
+    const warehouseReadyCylindersRef = useRef([]);
+    useEffect(() => { warehouseReadyCylindersRef.current = warehouseReadyCylinders; }, [warehouseReadyCylinders]);
     const [isFacilityDropdownOpen, setIsFacilityDropdownOpen] = useState(false);
     const [facilities, setFacilities] = useState([]);
     const facilityDropdownRef = useRef(null);
-    const cylDropdownRef = useRef({});
 
     const handleClose = useCallback(() => {
         setIsClosing(true);
@@ -115,6 +139,8 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
     };
 
     const [formData, setFormData] = useState(defaultState);
+    const formDataRef = useRef(formData);
+    useEffect(() => { formDataRef.current = formData; }, [formData]);
     const [warehousesList, setWarehousesList] = useState([]);
     const [cylinderDebt, setCylinderDebt] = useState([]);
     const [availableProductTypes, setAvailableProductTypes] = useState(PRODUCT_TYPES);
@@ -266,44 +292,45 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         }
     };
 
-    const fetchAvailableCylinders = async () => {
-        if (availableCylinders.length > 0 || isFetchingCyls) return; // cache hit
-        setIsFetchingCyls(true);
-        try {
-            const { data } = await supabase
-                .from('cylinders')
-                .select('serial_number, volume, status, warehouse_id')
-                .eq('status', 's\u1eb5n s\u00e0ng')
-                .order('serial_number', { ascending: true })
-                .limit(5000);
-            setAvailableCylinders(data || []);
-        } catch (e) {
-            console.error('fetch cylinders error', e);
-        } finally {
-            setIsFetchingCyls(false);
-        }
-    };
+    useEffect(() => {
+        let cancelled = false;
+        const loadWarehouseCylinders = async () => {
+            if (!formData.warehouse) {
+                setWarehouseReadyCylinders([]);
+                return;
+            }
+            setIsFetchingCyls(true);
+            try {
+                const { data, error } = await supabase
+                    .from('cylinders')
+                    .select('serial_number, volume, status, warehouse_id')
+                    .eq('warehouse_id', formData.warehouse)
+                    .eq('status', 's\u1eb5n s\u00e0ng')
+                    .order('serial_number', { ascending: true })
+                    .limit(5000);
+                if (error) throw error;
+                if (!cancelled) setWarehouseReadyCylinders(data || []);
+            } catch (e) {
+                console.error('loadWarehouseCylinders', e);
+                if (!cancelled) setWarehouseReadyCylinders([]);
+            } finally {
+                if (!cancelled) setIsFetchingCyls(false);
+            }
+        };
+        loadWarehouseCylinders();
+        return () => { cancelled = true; };
+    }, [formData.warehouse]);
 
-    const getCylSuggestions = (itemIdx, cylIdx, searchVal) => {
+    const getCylinderSelectOptions = useCallback((itemIdx, cylIdx) => {
         const item = formData.items[itemIdx];
-        // Already assigned in other slots
-        const taken = new Set(
-            formData.items.flatMap((it, ii) =>
-                (it.assignedCylinders || []).map((c, ci) => {
-                    if (ii === itemIdx && ci === cylIdx) return null;
-                    return typeof c === 'string' ? c : c?.serial;
-                }).filter(Boolean)
-            )
-        );
-        const search = (searchVal || '').toUpperCase().trim();
-        return availableCylinders
-            .filter(c => {
-                if (taken.has(c.serial_number)) return false;
-                if (!search) return true;
-                return c.serial_number?.toUpperCase().includes(search);
-            })
-            .slice(0, 30);
-    };
+        if (!item?.productType?.startsWith('BINH')) return [];
+        const taken = getTakenCylinderSerialsExceptSlot(formData.items, itemIdx, cylIdx);
+        return (warehouseReadyCylinders || [])
+            .filter((c) => cylinderVolumeMatchesProduct(c.volume, item.productType))
+            .filter((c) => !taken.has((c.serial_number || '').trim().toUpperCase()))
+            .slice()
+            .sort((a, b) => (a.serial_number || '').localeCompare(b.serial_number || '', undefined, { sensitivity: 'base' }));
+    }, [formData.items, warehouseReadyCylinders]);
 
     const fetchRealCustomers = async () => {
         setIsFetchingCustomers(true);
@@ -676,15 +703,31 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         if (itemIdx === -1 || serialIdx === -1) return;
 
         const normalizedText = decodedText.trim().toUpperCase();
-        
-        // Duplicate check (OMITTED for brevity in tool call, but implement fully in code)
-        
+        const fd = formDataRef.current;
+        if (!fd.warehouse) {
+            toast.error('Vui lòng chọn kho xuất trước khi quét mã bình.');
+            return;
+        }
+        const item = fd.items[itemIdx];
+        if (!item?.productType?.startsWith('BINH')) return;
+
+        const cylinders = warehouseReadyCylindersRef.current || [];
+        const match = cylinders.find((c) => (c.serial_number || '').trim().toUpperCase() === normalizedText);
+        if (!match || !cylinderVolumeMatchesProduct(match.volume, item.productType)) {
+            toast.error(`Mã ${normalizedText} không có trong kho đã chọn (sẵn sàng) cho loại bình này.`);
+            return;
+        }
+        const taken = getTakenCylinderSerialsExceptSlot(fd.items, itemIdx, serialIdx);
+        if (taken.has(normalizedText)) {
+            toast.warn('Mã này đã được chọn ở ô khác.');
+            return;
+        }
+
         handleCylinderSerialChange(itemIdx, serialIdx, normalizedText);
 
-        // Auto move to next empty
-        setFormData(prev => {
-            const item = prev.items[itemIdx];
-            const nextIdx = item.assignedCylinders.findIndex((s, i) => i > serialIdx && !(typeof s === 'string' ? s : s?.serial));
+        setFormData((prev) => {
+            const row = prev.items[itemIdx];
+            const nextIdx = row.assignedCylinders.findIndex((s, i) => i > serialIdx && !(typeof s === 'string' ? s : s?.serial));
             if (nextIdx !== -1) {
                 setScanTarget({ itemIdx, serialIdx: nextIdx });
             } else {
@@ -756,6 +799,11 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         setErrorMsg('');
 
         const validItems = formData.items.filter(it => it.quantity > 0);
+        const needsCylinderWarehouse = validItems.some((it) => it.productType?.startsWith('BINH') && it.quantity > 0);
+        if (needsCylinderWarehouse && !formData.warehouse) {
+            setErrorMsg('Vui lòng chọn kho xuất hàng để gán mã bình.');
+            return;
+        }
 
         const phoneRegex = /^(0|84)(3|5|7|8|9)([0-9]{8})$/;
         if (!formData.customerId || !formData.recipientName || !formData.recipientAddress || !formData.recipientPhone || validItems.length === 0) {
@@ -815,7 +863,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
 
                     const { data: validCyls, error: checkErr } = await supabase
                         .from('cylinders')
-                        .select('serial_number, warehouse_id, status')
+                        .select('serial_number, warehouse_id, status, volume')
                         .in('serial_number', uniqueSerials);
                     
                     if (checkErr) throw checkErr;
@@ -823,6 +871,17 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                         const found = validCyls?.map(c => c.serial_number) || [];
                         const missing = uniqueSerials.filter(s => !found.includes(s));
                         throw new Error(`Sản phẩm ${item.productType}: Mã bình không tồn tại: ${missing.join(', ')}`);
+                    }
+                    for (const c of validCyls) {
+                        if (c.warehouse_id !== formData.warehouse) {
+                            throw new Error(`Sản phẩm ${item.productType}: Mã ${c.serial_number} không thuộc kho xuất đã chọn.`);
+                        }
+                        if ((c.status || '').trim() !== READY_CYLINDER_STATUS) {
+                            throw new Error(`Sản phẩm ${item.productType}: Mã ${c.serial_number} không ở trạng thái sẵn sàng (${c.status || '—'}).`);
+                        }
+                        if (!cylinderVolumeMatchesProduct(c.volume, item.productType)) {
+                            throw new Error(`Sản phẩm ${item.productType}: Mã ${c.serial_number} không khớp loại bình (volume: ${c.volume || '—'}).`);
+                        }
                     }
                 }
             }
@@ -1333,68 +1392,54 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                                                     </button>
                                                                 )}
                                                             </div>
+                                                            {!formData.warehouse && !isReadOnly && (
+                                                                <p className="text-[11px] font-bold text-amber-600 mb-2">Chọn kho xuất để hiện danh sách mã bình sẵn sàng.</p>
+                                                            )}
                                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-1 custom-scrollbar">
                                                                 {item.assignedCylinders?.map((cyl, cIdx) => {
                                                                     const dropKey = `it-${idx}-cyl-${cIdx}`;
-                                                                    const currentVal = typeof cyl === 'string' ? cyl : (cyl?.serial || '');
-                                                                    const isOpen = activeCylDropdown === dropKey;
-                                                                    // Only calculate suggestions for the active dropdown to save performance
-                                                                    const suggestions = isOpen ? getCylSuggestions(idx, cIdx, currentVal) : [];
-                                                                    const isReadOnly = mode === 'view' || item.isLocked;
+                                                                    const currentVal = (typeof cyl === 'string' ? cyl : (cyl?.serial || '')).trim().toUpperCase();
+                                                                    const rowReadOnly = mode === 'view' || item.isLocked;
+                                                                    const options = getCylinderSelectOptions(idx, cIdx);
+                                                                    const optionSerials = new Set(options.map((o) => (o.serial_number || '').trim().toUpperCase()));
+                                                                    const showLegacyValue = Boolean(currentVal && !optionSerials.has(currentVal));
 
                                                                     return (
-                                                                        <div key={dropKey} className="relative" ref={el => cylDropdownRef.current[dropKey] = el}>
-                                                                            <input
-                                                                                value={currentVal}
-                                                                                onChange={(e) => handleCylinderSerialChange(idx, cIdx, e.target.value)}
-                                                                                onFocus={() => { 
-                                                                                    if (availableCylinders.length === 0) fetchAvailableCylinders(); 
-                                                                                    setActiveCylDropdown(dropKey); 
-                                                                                }}
-                                                                                onBlur={() => {
-                                                                                    // Use a slight delay so onMouseDown on suggestions can trigger first
-                                                                                    setTimeout(() => {
-                                                                                        if (activeCylDropdown === dropKey) setActiveCylDropdown(null);
-                                                                                    }, 200);
-                                                                                }}
-                                                                                readOnly={isReadOnly}
-                                                                                placeholder={`Mã bình ${cIdx + 1}...`}
-                                                                                autoComplete="off"
-                                                                                className={clsx(
-                                                                                    "w-full h-10 pl-4 pr-10 bg-white border border-slate-200 rounded-xl text-[13px] font-mono font-bold transition-all",
-                                                                                    isReadOnly ? "text-slate-500" : "text-primary focus:border-primary/50 focus:ring-2 focus:ring-primary/5"
-                                                                                )}
-                                                                            />
-                                                                            {!isReadOnly && (
+                                                                        <div key={dropKey} className="relative flex items-center gap-2">
+                                                                            {rowReadOnly ? (
+                                                                                <input
+                                                                                    value={currentVal}
+                                                                                    readOnly
+                                                                                    className="w-full h-10 pl-4 pr-4 bg-white border border-slate-200 rounded-xl text-[13px] font-mono font-bold text-slate-600"
+                                                                                />
+                                                                            ) : (
+                                                                                <select
+                                                                                    value={currentVal}
+                                                                                    onChange={(e) => handleCylinderSerialChange(idx, cIdx, e.target.value)}
+                                                                                    disabled={isFetchingCyls}
+                                                                                    className="w-full h-10 pl-3 pr-10 bg-white border border-slate-200 rounded-xl text-[13px] font-mono font-bold text-primary focus:border-primary/50 focus:ring-2 focus:ring-primary/5 appearance-none cursor-pointer"
+                                                                                >
+                                                                                    <option value="">— Chọn mã bình #{cIdx + 1} —</option>
+                                                                                    {showLegacyValue && (
+                                                                                        <option value={currentVal}>{currentVal} (đang gán)</option>
+                                                                                    )}
+                                                                                    {options.map((c) => (
+                                                                                        <option key={c.serial_number} value={(c.serial_number || '').trim().toUpperCase()}>
+                                                                                            {(c.serial_number || '').trim().toUpperCase()}{c.volume ? ` — ${c.volume}` : ''}
+                                                                                        </option>
+                                                                                    ))}
+                                                                                </select>
+                                                                            )}
+                                                                            {!rowReadOnly && (
                                                                                 <button
                                                                                     type="button"
                                                                                     onClick={() => startScanner(idx, cIdx)}
-                                                                                    className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center text-primary/40 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
+                                                                                    className="shrink-0 w-9 h-9 flex items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-100 shadow-sm transition-all"
+                                                                                    title="Quét mã"
+                                                                                    aria-label="Quét mã RFID"
                                                                                 >
-                                                                                    <ScanLine className="w-4 h-4" />
+                                                                                    <ScanLine className="w-4 h-4 shrink-0" strokeWidth={2.25} />
                                                                                 </button>
-                                                                            )}
-                                                                            {/* Autocomplete Dropdown — rendered outside clipping containers */}
-                                                                            {isOpen && !isReadOnly && (
-                                                                                <div className="absolute z-[99999] left-0 right-0 top-11 bg-white border border-primary/20 rounded-xl shadow-2xl max-h-52 overflow-y-auto">
-                                                                                    {isFetchingCyls ? (
-                                                                                        <div className="px-4 py-3 text-xs text-slate-400 italic">Đang tải danh sách bình...</div>
-                                                                                    ) : suggestions.length === 0 ? (
-                                                                                        <div className="px-4 py-3 text-xs text-slate-400 italic">{currentVal ? 'Không tìm thấy bình phù hợp' : 'Gõ mã để tìm kiếm...'}</div>
-                                                                                    ) : (
-                                                                                        suggestions.map(c => (
-                                                                                            <button
-                                                                                                key={c.serial_number}
-                                                                                                type="button"
-                                                                                                onMouseDown={(e) => { e.preventDefault(); handleCylinderSerialChange(idx, cIdx, c.serial_number); setActiveCylDropdown(null); }}
-                                                                                                className="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-primary/5 transition-colors border-b border-slate-50 last:border-0"
-                                                                                            >
-                                                                                                <span className="text-[13px] font-mono font-bold text-primary">{c.serial_number}</span>
-                                                                                                <span className="text-[10px] text-slate-400 ml-2">{c.volume || ''}</span>
-                                                                                            </button>
-                                                                                        ))
-                                                                                    )}
-                                                                                </div>
                                                                             )}
                                                                         </div>
                                                                     );

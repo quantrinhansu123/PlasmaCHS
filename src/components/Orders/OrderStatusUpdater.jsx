@@ -1,4 +1,4 @@
-import { AlertCircle, AlertTriangle, ArrowRightCircle, Camera, Check, CheckCircle, CheckCircle2, Clock, CloudUpload, Package, Plus, ScanBarcode, Truck, X, XCircle, ZoomIn, FileText } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowRightCircle, Camera, Check, CheckCircle, CheckCircle2, Clock, CloudUpload, Package, Plus, ScanLine, Truck, X, XCircle, ZoomIn, FileText } from 'lucide-react';
 import clsx from 'clsx';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -285,6 +285,12 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         try {
             setIsLoading(true);
             setErrorMsg('');
+            const actorName =
+                user?.name ||
+                localStorage.getItem('user_name') ||
+                sessionStorage.getItem('user_name') ||
+                'Hệ thống';
+            const actionTime = new Date().toLocaleString('vi-VN');
 
             let imageUrl = order.delivery_image_url;
 
@@ -351,29 +357,27 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
 
                     if (invErr) throw new Error(`Lỗi kiểm tra tồn kho cho ${productLabel}: ` + invErr.message);
 
-                    if (invData) {
-                        if (invData.quantity < item.quantity) {
-                            throw new Error(`Tồn kho không đủ! ${productLabel} hiện tại chỉ còn ${invData.quantity}.`);
-                        }
-
-                        await supabase
-                            .from('inventory')
-                            .update({ quantity: Math.max(0, invData.quantity - item.quantity) })
-                            .eq('id', invData.id);
-
-                        await supabase.from('inventory_transactions').insert([{
-                            inventory_id: invData.id,
-                            transaction_type: 'OUT',
-                            reference_id: order.id,
-                            reference_code: order.order_code,
-                            quantity_changed: item.quantity,
-                            note: `Xuất kho ${item.quantity} ${productLabel} - Đơn ${order.order_code}`
-                        }]);
-                    } else {
-                        // Nếu không tìm thấy trong bảng inventory, ta bỏ qua (không chặn đổi trạng thái) 
-                        // vì một số kho chưa khởi tạo dòng cho máy móc/hàng hóa mới.
-                        console.warn(`Hàng hoá "${productLabel}" không có trong bảng inventory của kho ${order.warehouse}. Bỏ qua khấu trừ kho.`);
+                    if (!invData) {
+                        throw new Error(`Kho ${order.warehouse || '—'} chưa có dòng tồn cho ${productLabel}. Vui lòng khởi tạo tồn kho trước khi xuất bán.`);
                     }
+
+                    if (invData.quantity < item.quantity) {
+                        throw new Error(`Tồn kho không đủ! ${productLabel} hiện tại chỉ còn ${invData.quantity}.`);
+                    }
+
+                    await supabase
+                        .from('inventory')
+                        .update({ quantity: Math.max(0, invData.quantity - item.quantity) })
+                        .eq('id', invData.id);
+
+                    await supabase.from('inventory_transactions').insert([{
+                        inventory_id: invData.id,
+                        transaction_type: 'OUT',
+                        reference_id: order.id,
+                        reference_code: order.order_code,
+                        quantity_changed: item.quantity,
+                        note: `Bán cho ${order.customer_name || 'Khách lẻ'} | Đơn ${order.order_code} | Sản phẩm ${productLabel} x${item.quantity} | Đang ở: ${order.customer_name || 'Khách hàng'} | Kho xuất: ${order.warehouse || '—'} | Người giao: ${deliveryUnit || 'Chưa gán'} | Người duyệt: ${actorName} | Thời gian: ${actionTime}`
+                    }]);
                 }
             }
 
@@ -466,7 +470,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                             reference_id: order.id,
                             reference_code: order.order_code,
                             quantity_changed: item.quantity,
-                            note: `Hoàn trả kho ${item.quantity} ${productLabel} - Hủy đơn ${order.order_code}`
+                            note: `Hoàn về kho do hủy đơn | Đơn ${order.order_code} | ${productLabel} x${item.quantity} | Từ: ${order.customer_name || 'Khách hàng'} | Về kho: ${order.warehouse || '—'} | Người duyệt: ${actorName} | Thời gian: ${actionTime}`
                         }]);
                     }
                 }
@@ -580,18 +584,12 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             if (dbError) throw dbError;
 
             // Log history — ưu tiên user từ hook (chính xác nhất), fallback sang storage
-            const currentUser =
-                user?.name ||
-                localStorage.getItem('user_name') ||
-                sessionStorage.getItem('user_name') ||
-                'Hệ thống';
-
             await supabase.from('order_history').insert([{
                 order_id: order.id,
                 action: 'STATUS_CHANGED',
                 old_status: order.status,
                 new_status: transition.nextStatus,
-                created_by: currentUser
+                created_by: actorName
             }]);
 
             onUpdateSuccess();
@@ -794,12 +792,13 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                         const q1 = parseInt(adjustedQuantity) || 0;
                                         const q2 = parseInt(adjustedQuantity2) || 0;
 
+                                        const approvedPrimaryQty = useAdjusted ? q2 : (parseInt(order.quantity_2) || 0);
                                         const totalCylCount = useAdjusted
-                                            ? (order.product_type?.startsWith('BINH') ? q1 : 0)
+                                            ? (order.product_type?.startsWith('BINH') ? approvedPrimaryQty : 0)
                                             + (order.product_type_2?.startsWith('BINH') ? q2 : 0)
                                             : (cylItems.length > 0
                                                 ? cylItems.reduce((sum, it) => sum + (it.quantity || 0), 0)
-                                                : (order.product_type?.startsWith('BINH') ? q1 : 0)
+                                                : (order.product_type?.startsWith('BINH') ? approvedPrimaryQty : 0)
                                                 + (order.product_type_2?.startsWith('BINH') ? q2 : 0));
 
                                         // Nếu đang fetch → hiện skeleton placeholder
@@ -874,10 +873,11 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => setIsScannerOpen(true)}
-                                                                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-primary/60 hover:text-primary hover:bg-primary/10 rounded-lg transition-colors z-10"
+                                                                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-colors z-10 text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-transparent hover:border-slate-200"
                                                                         title="Mở camera quét RFID"
+                                                                        aria-label="Mở camera quét RFID"
                                                                     >
-                                                                        <ScanBarcode size={20} />
+                                                                        <ScanBarcode className="w-5 h-5 shrink-0" strokeWidth={2.25} />
                                                                     </button>
                                                                     {isOpen && (
                                                                         <div className="absolute z-[9999] left-0 right-0 top-[46px] bg-white border border-slate-200 rounded-xl shadow-xl max-h-48 overflow-y-auto">
@@ -923,14 +923,18 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                             )}
                             {/* RFID Scanner for Shipper */}
 
-                            {((order.status === 'CHO_GIAO_HANG' || order.status === 'DANG_GIAO_HANG') &&
+                            {(() => {
+                                const approvedCylShipperCount = parseInt(order.quantity_2) || parseInt(order.quantity) || 0;
+                                const shouldShowShipperRfid = (order.status === 'CHO_GIAO_HANG' || order.status === 'DANG_GIAO_HANG') &&
                                 order.product_type?.startsWith('BINH') &&
-                                (!order.assigned_cylinders || order.assigned_cylinders.length < order.quantity)) && (
+                                (!order.assigned_cylinders || order.assigned_cylinders.length < approvedCylShipperCount);
+                                if (!shouldShowShipperRfid) return null;
+                                return (
                                     <div className="bg-orange-50/50 p-5 rounded-2xl border border-orange-100 space-y-4 shadow-sm">
                                         <div className="flex items-center justify-between">
                                             <label className="flex items-center gap-1.5 text-xs font-black text-orange-600 uppercase tracking-widest">
                                                 <AlertTriangle className="w-4 h-4" />
-                                                <span>Quét gán {order.quantity} bình:</span>
+                                                <span>Quét gán {approvedCylShipperCount} bình:</span>
                                             </label>
                                             <button
                                                 type="button"
@@ -941,7 +945,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                             </button>
                                         </div>
                                         <div className="space-y-2 mt-2">
-                                            {Array.from({ length: order.quantity }).map((_, idx) => {
+                                            {Array.from({ length: approvedCylShipperCount }).map((_, idx) => {
                                                 const serialsList = scannedSerials.split('\n');
                                                 return (
                                                     <div key={idx} className="flex items-center gap-2">
@@ -964,7 +968,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                                             }}
                                                             onChange={(e) => {
                                                                 const newList = [...serialsList];
-                                                                while (newList.length < order.quantity) newList.push('');
+                                                                while (newList.length < approvedCylShipperCount) newList.push('');
                                                                 newList[idx] = e.target.value;
                                                                 setScannedSerials(newList.join('\n'));
                                                             }}
@@ -979,10 +983,11 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                                             <button
                                                                 type="button"
                                                                 onClick={() => setIsScannerOpen(true)}
-                                                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-orange-600/60 hover:text-orange-600 hover:bg-orange-100 rounded-lg transition-colors z-10"
+                                                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-colors z-10 text-orange-800 hover:text-orange-950 hover:bg-orange-50 border border-transparent hover:border-orange-200"
                                                                 title="Mở camera quét RFID"
+                                                                aria-label="Mở camera quét RFID"
                                                             >
-                                                                <ScanBarcode size={20} />
+                                                                <ScanBarcode className="w-5 h-5 shrink-0" strokeWidth={2.25} />
                                                             </button>
                                                             {activeCylDropdownWH === `sp-${idx}` && (
                                                                 <div className="absolute z-[9999] left-0 right-0 top-[46px] bg-white border border-orange-200 rounded-xl shadow-xl max-h-48 overflow-y-auto">
@@ -1000,7 +1005,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                                                                 onMouseDown={(e) => {
                                                                                     e.preventDefault();
                                                                                     const newList = [...serialsList];
-                                                                                    while (newList.length < order.quantity) newList.push('');
+                                                                                    while (newList.length < approvedCylShipperCount) newList.push('');
                                                                                     newList[idx] = c.serial_number;
                                                                                     setScannedSerials(newList.join('\n'));
                                                                                     setActiveCylDropdownWH(null);
@@ -1024,7 +1029,8 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                             })}
                                         </div>
                                     </div>
-                                )}
+                                );
+                            })()}
 
                             {/* Options */}
                             <div className="space-y-4">

@@ -45,6 +45,15 @@ import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import usePermissions from '../hooks/usePermissions';
 
+const getApprovedQuantityFromRequest = (request) => {
+    const directApproved = parseInt(request?.quantityApproved ?? request?.quantity_approved, 10);
+    if (!Number.isNaN(directApproved) && directApproved >= 0) return directApproved;
+    const note = request?.note || '';
+    const match = note.match(/SL phê duyệt:\s*([0-9]+)/i);
+    if (match?.[1]) return parseInt(match[1], 10) || 0;
+    return parseInt(request?.quantity, 10) || 0;
+};
+
 // Register Chart.js components
 ChartJS.register(
     CategoryScale,
@@ -273,7 +282,7 @@ export default function MachineRequests() {
         const customerData = {};
         requests.forEach(r => {
             const name = r.customer_name || 'Không rõ';
-            customerData[name] = (customerData[name] || 0) + (r.quantity || 0);
+            customerData[name] = (customerData[name] || 0) + getApprovedQuantityFromRequest(r);
         });
 
         const sortedCustomers = Object.entries(customerData)
@@ -391,7 +400,7 @@ export default function MachineRequests() {
                                             <div>
                                                 <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Số lượng</p>
                                                 <div className="text-[14px] text-foreground font-black mt-0.5">
-                                                    {r.quantity} máy
+                                                    {getApprovedQuantityFromRequest(r)} máy
                                                 </div>
                                             </div>
                                         </div>
@@ -534,7 +543,7 @@ export default function MachineRequests() {
                                                 <td className="px-5 py-3.5 text-[13px] font-semibold text-slate-600">{new Date(r.created_at).toLocaleDateString('vi-VN')}</td>
                                                 <td className="px-5 py-3.5"><div className="text-[14px] font-bold text-slate-900 line-clamp-1">{r.customer_name}</div></td>
                                                 <td className="px-5 py-3.5 text-[13px] font-medium text-slate-500">{r.ordered_by || '—'}</td>
-                                                <td className="px-5 py-3.5"><span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-md font-bold text-[12px]">{r.quantity} máy</span></td>
+                                                <td className="px-5 py-3.5"><span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-md font-bold text-[12px]">{getApprovedQuantityFromRequest(r)} máy</span></td>
                                                 <td className="px-5 py-3.5">
                                                     {(() => {
                                                         const sInfo = getStatusInfo(r.status);
@@ -656,7 +665,7 @@ export default function MachineRequests() {
                         <div className="w-full px-3 md:px-4 pt-4 md:pt-5 pb-5 md:pb-6 space-y-5 flex-1 overflow-y-auto bg-slate-50/30">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
                                 <StatCard icon={<FileText />} label="Tổng số phiếu" value={requests.length} color="blue" />
-                                <StatCard icon={<Monitor />} label="Máy đề nghị" value={requests.reduce((acc, r) => acc + (r.quantity || 0), 0)} color="emerald" />
+                                <StatCard icon={<Monitor />} label="Máy đề nghị" value={requests.reduce((acc, r) => acc + getApprovedQuantityFromRequest(r), 0)} color="emerald" />
                             </div>
 
                             <div className="mt-6 bg-white border border-border rounded-2xl p-5 md:p-6 shadow-sm">

@@ -63,6 +63,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
         quantity: '',
         quantityApproved: '',
         warehouse: '',
+        product: '',
         machineCode: '',
         dateNeeded: '',
         dateDelivery: '',
@@ -80,6 +81,9 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
         },
         notes: ''
     });
+    const [warehouseList, setWarehouseList] = useState([]);
+    const [availableProducts, setAvailableProducts] = useState([]);
+    const [availableMachineCodes, setAvailableMachineCodes] = useState([]);
 
     const [editOrderId, setEditOrderId] = useState(null);
     const [isReadOnly, setIsReadOnly] = useState(false);
@@ -140,6 +144,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
                 const issues = parseField('Hình thức:').split(',').map(s => s.trim()).filter(Boolean);
                 const colors = parseField('Màu máy:').split(',').map(s => s.trim()).filter(Boolean);
                 const pShipping = parseField('PT Vận chuyển:').split(',').map(s => s.trim()).filter(Boolean);
+                const selectedProduct = parseField('Sản phẩm:');
                 
                 let notesRemaining = '';
                 const ghichuIndex = lines.findIndex(l => l.startsWith('Ghi chú:'));
@@ -175,6 +180,9 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
                         'Tím (600-VT20, RGB17)': colors.includes('Tím (600-VT20, RGB17)')
                     },
                     quantity: data.quantity?.toString() || '',
+                    quantityApproved: parseField('SL phê duyệt:') || '',
+                    warehouse: data.warehouse || '',
+                    product: selectedProduct || '',
                     machineCode: parseField('Mã máy:'),
                     dateNeeded: dmyToYmd(parseField('Ngày cần:')),
                     dateDelivery: dmyToYmd(parseField('Giao:')),
@@ -213,6 +221,23 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
         fetchStaff();
     }, []);
 
+    useEffect(() => {
+        const fetchWarehouses = async () => {
+            const { data: whs, error } = await supabase.from('warehouses').select('id, name').order('name');
+            if (!error) setWarehouseList(whs || []);
+        };
+        fetchWarehouses();
+    }, []);
+
+    useEffect(() => {
+        loadReadyMachinesByWarehouse(formData.warehouse);
+    }, [formData.warehouse]);
+
+    useEffect(() => {
+        const selected = availableProducts.find((product) => product.value === formData.product);
+        setAvailableMachineCodes(selected?.serials || []);
+    }, [formData.product, availableProducts]);
+
     // Auto-fill logic when phone changes — ONLY for NEW orders.
     // When editing an existing order (editOrderId is set), the customer data
     // is already loaded from the orders table and must NOT be overwritten
@@ -241,7 +266,8 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
                             customerName: customer.name || '',
                             facilityName: customer.agency_name || customer.invoice_company_name || customer.name || '',
                             placementAddress: customer.address || '',
-                            machineManager: customer.managed_by || prev.machineManager
+                            machineManager: customer.managed_by || prev.machineManager,
+                            warehouse: customer.warehouse_id || prev.warehouse
                         }));
                     } else {
                         // Multiple facilities found, let user pick
@@ -252,7 +278,8 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
                             ...prev,
                             customerId: first.id || prev.customerId,
                             customerName: first.name || '',
-                            machineManager: first.managed_by || prev.machineManager
+                            machineManager: first.managed_by || prev.machineManager,
+                            warehouse: first.warehouse_id || prev.warehouse
                         }));
                     }
                 } else {
@@ -276,7 +303,8 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
             customerName: facility.name || prev.customerName,
             facilityName: facility.agency_name || facility.invoice_company_name || facility.name || '',
             placementAddress: facility.address || '',
-            machineManager: facility.managed_by || prev.machineManager
+            machineManager: facility.managed_by || prev.machineManager,
+            warehouse: facility.warehouse_id || prev.warehouse
         }));
         setIsFacilityDropdownOpen(false);
     };
@@ -289,6 +317,15 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
             if (field === 'machineCode') {
                 const codes = value.split(',').map(c => c.trim()).filter(c => c !== '');
                 newData.quantity = codes.length > 0 ? codes.length.toString() : '';
+            }
+
+            if (field === 'product') {
+                newData.machineType = {
+                    TM: value === 'TM',
+                    SD: value === 'SD',
+                    FM: value === 'FM',
+                    Khac: value === 'Khac' || (value && !['TM', 'SD', 'FM'].includes(value))
+                };
             }
             
             return newData;
@@ -313,9 +350,40 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
     const [isSaving, setIsSaving] = useState(false);
     const [printType, setPrintType] = useState('DNXM'); // 'DNXM' | 'BBBG' | 'XK'
     const [showWarehouseModal, setShowWarehouseModal] = useState(false);
-    const [warehouseList, setWarehouseList] = useState([]);
     const [pendingNextStatus, setPendingNextStatus] = useState(null);
     const [pendingApproveData, setPendingApproveData] = useState(null);
+
+    const loadReadyMachinesByWarehouse = async (warehouseId) => {
+        if (!warehouseId) {
+            setAvailableProducts([]);
+            setAvailableMachineCodes([]);
+            return;
+        }
+        const { data, error } = await supabase
+            .from('machines')
+            .select('serial_number, machine_type, warehouse, status')
+            .eq('warehouse', warehouseId)
+            .eq('status', 'sẵn sàng');
+        if (error) {
+            console.error('Error loading warehouse machines:', error);
+            setAvailableProducts([]);
+            setAvailableMachineCodes([]);
+            return;
+        }
+        const grouped = (data || []).reduce((acc, machine) => {
+            const key = machine.machine_type || 'MAY';
+            if (!acc[key]) acc[key] = [];
+            acc[key].push((machine.serial_number || '').trim());
+            return acc;
+        }, {});
+        const products = Object.entries(grouped).map(([productType, serials]) => ({
+            value: productType,
+            label: `${productType} (Sẵn sàng: ${serials.length})`,
+            serials: serials.filter(Boolean)
+        }));
+        setAvailableProducts(products);
+        setAvailableMachineCodes((products.find((p) => p.value === formData.product)?.serials || []).filter(Boolean));
+    };
 
     const handlePrint = (type = 'DNXM') => {
         setPrintType(type);
@@ -382,6 +450,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
                 order_type: 'DNXM',
                 warehouse: formData.warehouse || null,
                 note: `Loại máy: ${selectedMachineTypes.join(', ')}. 
+Sản phẩm: ${formData.product || ''}.
 Hình thức: ${issueTypesList || 'Chưa chọn'}.
 Màu máy: ${selectedColors}. 
 Ngày cần: ${ymdToDmy(formData.dateNeeded)}. 
@@ -390,6 +459,7 @@ Thu hồi dự kiến: ${ymdToDmy(formData.dateRecall)}.
 Thu hồi thực tế: ${ymdToDmy(formData.dateRecallActual)}.
 Phụ trách máy: ${formData.machineManager}. 
 PT Vận chuyển: ${shippingList}. 
+Kho: ${formData.warehouse || ''}.
 Mã máy: ${formData.machineCode}. 
 SL phê duyệt: ${formData.quantityApproved || ''}.
 Ghi chú: ${formData.notes}`,
@@ -823,6 +893,33 @@ Ghi chú: ${formData.notes}`,
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-4">
+                                    <div className="col-span-2">
+                                        <label className="block text-sm font-medium text-foreground mb-1.5">Kho</label>
+                                        <select
+                                            value={formData.warehouse}
+                                            onChange={(e) => handleInputChange('warehouse', e.target.value)}
+                                            className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                        >
+                                            <option value="">-- Chọn kho --</option>
+                                            {warehouseList.map((warehouse) => (
+                                                <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="col-span-2">
+                                        <label className="block text-sm font-medium text-foreground mb-1.5">Sản phẩm (sẵn sàng trong kho)</label>
+                                        <select
+                                            value={formData.product}
+                                            onChange={(e) => handleInputChange('product', e.target.value)}
+                                            disabled={!formData.warehouse}
+                                            className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+                                        >
+                                            <option value="">-- Chọn sản phẩm --</option>
+                                            {availableProducts.map((product) => (
+                                                <option key={product.value} value={product.value}>{product.label}</option>
+                                            ))}
+                                        </select>
+                                    </div>
                                     <div>
                                         <label className="block text-sm font-medium text-foreground mb-1.5">Số lượng yêu cầu</label>
                                         <input
@@ -851,6 +948,7 @@ Ghi chú: ${formData.notes}`,
                                         <input
                                             type="text"
                                             value={formData.machineCode}
+                                            list="machine-ready-serial-options"
                                             readOnly={!canEditMachineCode}
                                             onChange={(e) => handleInputChange('machineCode', e.target.value)}
                                             placeholder={canEditMachineCode ? "Nhập mã máy..." : "Chưa được gán mã"}
@@ -861,6 +959,11 @@ Ghi chú: ${formData.notes}`,
                                                     : "bg-muted/50 border-border/50 text-muted-foreground cursor-not-allowed italic font-normal"
                                             )}
                                         />
+                                        <datalist id="machine-ready-serial-options">
+                                            {availableMachineCodes.map((serial) => (
+                                                <option key={serial} value={serial} />
+                                            ))}
+                                        </datalist>
                                     </div>
                                 </div>
                             </div>
@@ -1101,7 +1204,7 @@ Ghi chú: ${formData.notes}`,
                             {warehouseList.map(wh => (
                                 <button
                                     key={wh.id}
-                                    onClick={() => handleWarehouseSelected(wh.name)}
+                                    onClick={() => handleWarehouseSelected(wh.id)}
                                     className="w-full flex items-center gap-3 px-5 py-4 rounded-2xl border border-slate-200 hover:border-primary hover:bg-primary/5 transition-all text-left group"
                                 >
                                     <div className="w-10 h-10 bg-slate-100 group-hover:bg-primary/10 rounded-xl flex items-center justify-center shrink-0 transition-colors">

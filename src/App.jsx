@@ -130,6 +130,7 @@ function App() {
               ))}
               <Route path="/don-hang" element={<Orders />} />
               <Route path="/danh-sach-hang-luan-chuyen" element={<TransferList />} />
+              <Route path="/danh-sach-dieu-chuyen" element={<TransferList />} />
               <Route path="/de-nghi-xuat-may" element={<MachineRequests />} />
               <Route path="/binh" element={<Cylinders />} />
               <Route path="/binh/tao" element={<Cylinders />} />

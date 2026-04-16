@@ -26,12 +26,14 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
 import MobilePageHeader from '../components/layout/MobilePageHeader';
 import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import PrintOptionsModal from '../components/Orders/PrintOptionsModal';
+import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 
 const PAGE_SIZE = 30;
@@ -114,7 +116,11 @@ const getFilterIconClass = (key, active) => {
     return active ? '' : tone.icon;
 };
 
-const statusBadgeClass = 'px-2 py-1 rounded-lg text-[10px] font-black bg-blue-50 text-blue-700 border border-blue-200 uppercase';
+const getTransferStatusClass = (status) => {
+    if (status === 'DA_DUYET') return 'px-2 py-1 rounded-lg text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase';
+    if (status === 'TU_CHOI') return 'px-2 py-1 rounded-lg text-[10px] font-black bg-rose-50 text-rose-700 border border-rose-200 uppercase';
+    return 'px-2 py-1 rounded-lg text-[10px] font-black bg-amber-50 text-amber-700 border border-amber-200 uppercase';
+};
 
 const itemTypeBadgeClass = (type) =>
     type === 'BINH'
@@ -132,6 +138,7 @@ const columnTonePillClass = {
 
 export default function TransferList() {
     const navigate = useNavigate();
+    const { role } = usePermissions();
     const [records, setRecords] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -172,6 +179,7 @@ export default function TransferList() {
     const isDrawingRef = useRef(false);
     const [transferFormModal, setTransferFormModal] = useState(null); // { mode: 'view' | 'edit', record }
     const [editingNote, setEditingNote] = useState('');
+    const [editingItems, setEditingItems] = useState([]);
     const [savingTransfer, setSavingTransfer] = useState(false);
     const [printRecord, setPrintRecord] = useState(null);
     const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
@@ -180,6 +188,21 @@ export default function TransferList() {
     const [deletingTransfer, setDeletingTransfer] = useState(false);
     const rowMenuRef = useRef(null);
     const columnPickerRef = useRef(null);
+    const ROW_MENU_WIDTH = 220;
+
+    const openRowMenuAtButton = (recordId, event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        const margin = 8;
+        const preferredLeft = rect.right - ROW_MENU_WIDTH;
+        const clampedLeft = Math.max(
+            margin,
+            Math.min(preferredLeft, window.innerWidth - ROW_MENU_WIDTH - margin)
+        );
+        const clampedTop = Math.min(rect.bottom + margin, window.innerHeight - margin);
+
+        setMenuPosition({ top: clampedTop, left: clampedLeft });
+        setActiveRowMenu(recordId);
+    };
 
     useEffect(() => {
         fetchTransfers();
@@ -202,93 +225,53 @@ export default function TransferList() {
     const fetchTransfers = async () => {
         setLoading(true);
         try {
-            const { data: txRows, error: txError } = await supabase
-                .from('inventory_transactions')
-                .select('id, inventory_id, reference_code, quantity_changed, note, created_at')
-                .eq('transaction_type', 'OUT')
-                .like('reference_code', 'TRF%')
+            const { data: transferRows, error: transferError } = await supabase
+                .from('inventory_transfer_requests')
+                .select('*')
                 .order('created_at', { ascending: false });
-
-            if (txError) throw txError;
-
-            const inventoryIds = [...new Set((txRows || []).map((r) => r.inventory_id).filter(Boolean))];
-            const { data: invRows, error: invError } = await supabase
-                .from('inventory')
-                .select('id, item_name, item_type, warehouse_id')
-                .in('id', inventoryIds.length > 0 ? inventoryIds : ['00000000-0000-0000-0000-000000000000']);
-            if (invError) throw invError;
+            if (transferError) throw transferError;
 
             const { data: warehouseRows, error: whError } = await supabase
                 .from('warehouses')
                 .select('id, name');
             if (whError) throw whError;
 
-            const invMap = Object.fromEntries((invRows || []).map((r) => [r.id, r]));
             const whMap = Object.fromEntries((warehouseRows || []).map((w) => [w.id, w.name]));
+            const normalized = (transferRows || []).map((row) => {
+                const items = Array.isArray(row.items_json) ? row.items_json : [];
+                const fromWarehouseName = whMap[row.from_warehouse_id] || row.from_warehouse_id || '—';
+                const toWarehouseName = whMap[row.to_warehouse_id] || row.to_warehouse_id || '—';
 
-            const grouped = new Map();
-            for (const row of txRows || []) {
-                const inv = invMap[row.inventory_id] || {};
-                const parsed = parseTransferNote(row.note || '');
-                const fromWarehouse = whMap[inv.warehouse_id] || inv.warehouse_id || '—';
-                const transferCode = row.reference_code || `TRF-${row.id}`;
+                return {
+                    id: row.id,
+                    transferCode: row.transfer_code,
+                    status: row.status || 'CHO_DUYET',
+                    transactionType: 'TRANSFER',
+                    createdAt: row.created_at,
+                    approvedAt: row.approved_at,
+                    approvedBy: row.approved_by || '',
+                    createdBy: row.created_by || '',
+                    fromWarehouseId: row.from_warehouse_id,
+                    toWarehouseId: row.to_warehouse_id,
+                    fromWarehouses: [fromWarehouseName],
+                    toWarehouses: [toWarehouseName],
+                    itemTypes: [...new Set(items.map((item) => item.item_type || 'KHAC'))],
+                    totalQuantity: row.total_quantity || items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0),
+                    notes: row.note ? [row.note] : [],
+                    rawNotes: row.note ? [row.note] : [],
+                    images: row.handover_image_url ? [row.handover_image_url] : [],
+                    referenceIds: [],
+                    inventoryIds: [],
+                    transactionIds: [],
+                    items: items.map((item) => ({
+                        itemName: item.item_name || '—',
+                        itemType: item.item_type || 'KHAC',
+                        quantity: Number(item.quantity) || 0,
+                        codes: (item.specific_codes || []).map((entry) => entry?.code).filter(Boolean),
+                    })),
+                };
+            });
 
-                if (!grouped.has(transferCode)) {
-                    grouped.set(transferCode, {
-                        id: transferCode,
-                        transferCode,
-                        status: 'Đã luân chuyển',
-                        transactionType: 'OUT',
-                        createdAt: row.created_at,
-                        fromWarehouses: new Set(),
-                        toWarehouses: new Set(),
-                        itemTypes: new Set(),
-                        totalQuantity: 0,
-                        notes: new Set(),
-                        rawNotes: new Set(),
-                        images: new Set(),
-                        referenceIds: new Set(),
-                        inventoryIds: new Set(),
-                        transactionIds: new Set(),
-                        items: [],
-                    });
-                }
-
-                const current = grouped.get(transferCode);
-                current.totalQuantity += Number(row.quantity_changed) || 0;
-                current.transactionType = row.transaction_type || current.transactionType;
-                if (row.reference_id) current.referenceIds.add(row.reference_id);
-                if (row.inventory_id) current.inventoryIds.add(row.inventory_id);
-                if (row.id) current.transactionIds.add(row.id);
-                current.fromWarehouses.add(fromWarehouse);
-                current.itemTypes.add(inv.item_type || 'KHAC');
-                if (parsed.toWarehouseFromNote) current.toWarehouses.add(parsed.toWarehouseFromNote);
-                if (parsed.cleanNote) current.notes.add(parsed.cleanNote);
-                if (row.note) current.rawNotes.add(row.note);
-                if (parsed.imageUrl) current.images.add(parsed.imageUrl);
-
-                current.items.push({
-                    itemName: inv.item_name || '—',
-                    itemType: inv.item_type || 'KHAC',
-                    quantity: Number(row.quantity_changed) || 0,
-                    codes: parsed.codes,
-                });
-            }
-
-            const normalized = [...grouped.values()].map((g) => ({
-                ...g,
-                fromWarehouses: [...g.fromWarehouses],
-                toWarehouses: [...g.toWarehouses],
-                itemTypes: [...g.itemTypes],
-                notes: [...g.notes],
-                rawNotes: [...g.rawNotes],
-                images: [...g.images],
-                referenceIds: [...g.referenceIds],
-                inventoryIds: [...g.inventoryIds],
-                transactionIds: [...g.transactionIds],
-            }));
-
-            normalized.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             setRecords(normalized);
         } catch (error) {
             console.error('Error loading transfer records:', error);
@@ -437,9 +420,9 @@ export default function TransferList() {
         if (!record) return;
         setDeletingTransfer(true);
         const { error } = await supabase
-            .from('inventory_transactions')
+            .from('inventory_transfer_requests')
             .delete()
-            .eq('reference_code', record.transferCode);
+            .eq('id', record.id);
         setDeletingTransfer(false);
         if (error) return;
         setActiveRowMenu(null);
@@ -553,23 +536,22 @@ export default function TransferList() {
                 `[Thoi Gian Xac Nhan]: ${new Date().toISOString()}`,
             ].join('\n');
 
-            const { data: txRows, error: loadErr } = await supabase
-                .from('inventory_transactions')
+            const { data: requestRow, error: loadErr } = await supabase
+                .from('inventory_transfer_requests')
                 .select('id, note')
-                .eq('reference_code', actionRecord.transferCode);
+                .eq('id', actionRecord.id)
+                .maybeSingle();
             if (loadErr) throw loadErr;
 
-            const updates = (txRows || []).map((r) => ({
-                id: r.id,
-                note: `${r.note || ''}\n${appendLines}`.trim(),
-            }));
-            for (const u of updates) {
-                const { error } = await supabase
-                    .from('inventory_transactions')
-                    .update({ note: u.note })
-                    .eq('id', u.id);
-                if (error) throw error;
-            }
+            const nextNote = `${requestRow?.note || ''}\n${appendLines}`.trim();
+            const { error: updateErr } = await supabase
+                .from('inventory_transfer_requests')
+                .update({
+                    note: nextNote,
+                    handover_image_url: proofUrl
+                })
+                .eq('id', actionRecord.id);
+            if (updateErr) throw updateErr;
 
             setActionRecord(null);
             fetchTransfers();
@@ -583,15 +565,45 @@ export default function TransferList() {
     const openTransferFormModal = (mode, record) => {
         setTransferFormModal({ mode, record });
         setEditingNote(record.notes?.[0] || '');
+        setEditingItems((record.items || []).map((item) => ({
+            itemName: item.itemName || '',
+            itemType: item.itemType || 'KHAC',
+            quantity: Number(item.quantity) || 0,
+            codesText: (item.codes || []).join(', ')
+        })));
     };
     const handleSaveTransferEdit = async () => {
         if (!transferFormModal?.record) return;
         setSavingTransfer(true);
         try {
+            const itemsPayload = editingItems.map((item) => {
+                const parsedCodes = (item.codesText || '')
+                    .split(',')
+                    .map((code) => code.trim().toUpperCase())
+                    .filter(Boolean);
+
+                return {
+                    item_type: item.itemType,
+                    item_name: item.itemName,
+                    quantity: Number(item.quantity) || 0,
+                    specific_codes: parsedCodes.map((code) => ({
+                        code,
+                        status: 'pending',
+                        message: '',
+                        dbId: null
+                    }))
+                };
+            });
+            const totalQuantity = itemsPayload.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+
             const { error } = await supabase
-                .from('inventory_transactions')
-                .update({ note: editingNote })
-                .eq('reference_code', transferFormModal.record.transferCode);
+                .from('inventory_transfer_requests')
+                .update({
+                    note: editingNote,
+                    items_json: itemsPayload,
+                    total_quantity: totalQuantity
+                })
+                .eq('id', transferFormModal.record.id);
             if (error) throw error;
             setTransferFormModal(null);
             fetchTransfers();
@@ -602,11 +614,176 @@ export default function TransferList() {
             setSavingTransfer(false);
         }
     };
+
+    const normalizedRole = (role || '').toString().toLowerCase();
+    const canApproveTransfer = normalizedRole === 'admin' || normalizedRole.includes('kho');
+
+    const handleApproveTransfer = async (record) => {
+        if (!record || record.status === 'DA_DUYET') return;
+        if (!canApproveTransfer) {
+            toast.error('Chỉ Admin hoặc Thủ kho được duyệt phiếu điều chuyển.');
+            return;
+        }
+
+        const approverName =
+            localStorage.getItem('user_name') ||
+            sessionStorage.getItem('user_name') ||
+            'Hệ thống';
+
+        try {
+            for (const item of record.items || []) {
+                const itemType = item.itemType;
+                const itemName = item.itemName;
+                const qty = Number(item.quantity) || 0;
+                if (!qty) continue;
+
+                const sourceWarehouseColumn = itemType.startsWith('BINH') ? 'warehouse_id' : 'warehouse';
+                const sourceTable = itemType.startsWith('BINH') ? 'cylinders' : 'machines';
+                const serializedCodes = (item.codes || []).filter(Boolean);
+
+                // For cylinders/machines, trust serialized stock by codes and warehouse before inventory aggregate.
+                if (itemType === 'MAY' || itemType.startsWith('BINH')) {
+                    if (serializedCodes.length !== qty) {
+                        throw new Error(`Mặt hàng "${itemName}" cần đúng ${qty} mã, hiện có ${serializedCodes.length} mã.`);
+                    }
+                    const { data: serialRows, error: serialCheckErr } = await supabase
+                        .from(sourceTable)
+                        .select(`id, serial_number, ${sourceWarehouseColumn}`)
+                        .in('serial_number', serializedCodes);
+                    if (serialCheckErr) throw serialCheckErr;
+
+                    const invalidCodes = serializedCodes.filter((code) => {
+                        const found = (serialRows || []).find((row) => row.serial_number === code);
+                        return !found || found[sourceWarehouseColumn] !== record.fromWarehouseId;
+                    });
+                    if (invalidCodes.length > 0) {
+                        throw new Error(`Mã không nằm ở kho xuất: ${invalidCodes.join(', ')}`);
+                    }
+                }
+
+                let { data: sourceInv, error: sourceInvErr } = await supabase
+                    .from('inventory')
+                    .select('id, quantity')
+                    .eq('warehouse_id', record.fromWarehouseId)
+                    .eq('item_type', itemType)
+                    .eq('item_name', itemName)
+                    .maybeSingle();
+                if (sourceInvErr) throw sourceInvErr;
+
+                // Aggregate row may be missing for serialized items; create fallback row to keep transaction history compatible.
+                if (!sourceInv && (itemType === 'MAY' || itemType.startsWith('BINH'))) {
+                    const { data: createdSourceInv, error: createSourceInvErr } = await supabase
+                        .from('inventory')
+                        .insert([{
+                            warehouse_id: record.fromWarehouseId,
+                            item_type: itemType,
+                            item_name: itemName,
+                            quantity: qty
+                        }])
+                        .select('id, quantity')
+                        .single();
+                    if (createSourceInvErr) throw createSourceInvErr;
+                    sourceInv = createdSourceInv;
+                }
+
+                if (!sourceInv || (sourceInv.quantity || 0) < qty) {
+                    throw new Error(`Không đủ tồn kho cho "${itemName}" tại kho xuất.`);
+                }
+
+                const { error: sourceUpdateErr } = await supabase
+                    .from('inventory')
+                    .update({ quantity: (sourceInv.quantity || 0) - qty })
+                    .eq('id', sourceInv.id);
+                if (sourceUpdateErr) throw sourceUpdateErr;
+
+                const { data: destInv, error: destInvErr } = await supabase
+                    .from('inventory')
+                    .select('id, quantity')
+                    .eq('warehouse_id', record.toWarehouseId)
+                    .eq('item_type', itemType)
+                    .eq('item_name', itemName)
+                    .maybeSingle();
+                if (destInvErr) throw destInvErr;
+
+                let destInventoryId = destInv?.id;
+                if (destInv) {
+                    const { error: destUpdateErr } = await supabase
+                        .from('inventory')
+                        .update({ quantity: (destInv.quantity || 0) + qty })
+                        .eq('id', destInv.id);
+                    if (destUpdateErr) throw destUpdateErr;
+                } else {
+                    const { data: newDest, error: destInsertErr } = await supabase
+                        .from('inventory')
+                        .insert([{
+                            warehouse_id: record.toWarehouseId,
+                            item_type: itemType,
+                            item_name: itemName,
+                            quantity: qty,
+                        }])
+                        .select('id')
+                        .single();
+                    if (destInsertErr) throw destInsertErr;
+                    destInventoryId = newDest.id;
+                }
+
+                if (itemType === 'MAY' || itemType.startsWith('BINH')) {
+                    const codes = serializedCodes;
+                    if (codes.length > 0) {
+                        const tableName = itemType.startsWith('BINH') ? 'cylinders' : 'machines';
+                        const warehouseColumn = itemType.startsWith('BINH') ? 'warehouse_id' : 'warehouse';
+
+                        const { error: serialUpdateErr } = await supabase
+                            .from(tableName)
+                            .update({ [warehouseColumn]: record.toWarehouseId })
+                            .in('serial_number', codes);
+                        if (serialUpdateErr) throw serialUpdateErr;
+                    }
+                }
+
+                const baseNote = `Duyệt điều chuyển ${record.transferCode}`;
+                const { error: txOutErr } = await supabase.from('inventory_transactions').insert([{
+                    inventory_id: sourceInv.id,
+                    transaction_type: 'OUT',
+                    reference_code: record.transferCode,
+                    quantity_changed: qty,
+                    note: `${baseNote} - xuất từ ${record.fromWarehouses.join(', ')} sang ${record.toWarehouses.join(', ')}`,
+                }]);
+                if (txOutErr) throw txOutErr;
+
+                const { error: txInErr } = await supabase.from('inventory_transactions').insert([{
+                    inventory_id: destInventoryId,
+                    transaction_type: 'IN',
+                    reference_code: record.transferCode,
+                    quantity_changed: qty,
+                    note: `${baseNote} - nhập về ${record.toWarehouses.join(', ')}`,
+                }]);
+                if (txInErr) throw txInErr;
+            }
+
+            const approvedAt = new Date().toISOString();
+            const { error: approveErr } = await supabase
+                .from('inventory_transfer_requests')
+                .update({
+                    status: 'DA_DUYET',
+                    approved_by: approverName,
+                    approved_at: approvedAt
+                })
+                .eq('id', record.id);
+            if (approveErr) throw approveErr;
+
+            toast.success(`Đã duyệt phiếu ${record.transferCode}`);
+            fetchTransfers();
+        } catch (error) {
+            console.error('Approve transfer failed:', error);
+            toast.error(error.message || 'Duyệt phiếu thất bại');
+        }
+    };
     const renderCell = (key, record) => {
         if (key === 'code') return <span className="font-black text-primary">{record.transferCode}</span>;
         if (key === 'status') {
             return (
-                <span className={statusBadgeClass}>
+                <span className={getTransferStatusClass(record.status)}>
                     {record.status}
                 </span>
             );
@@ -695,8 +872,8 @@ export default function TransferList() {
                                             <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">#{index + 1}</p>
                                             <h3 className="text-[14px] font-bold text-foreground leading-tight mt-0.5">{record.transferCode}</h3>
                                         </div>
-                                        <span className="px-2 py-1 rounded-lg text-[10px] font-black bg-blue-50 text-blue-700 border border-blue-200 uppercase">
-                                            Luân chuyển
+                                        <span className={getTransferStatusClass(record.status)}>
+                                            {record.status}
                                         </span>
                                     </div>
                                     <div className="grid grid-cols-2 gap-2 mb-3 rounded-xl bg-muted/10 border border-border/60 p-2.5">
@@ -724,6 +901,15 @@ export default function TransferList() {
                                         </div>
                                     </div>
                                     <div className="pt-3 border-t border-border/70 flex items-center justify-end gap-2">
+                                        {canApproveTransfer && record.status === 'CHO_DUYET' && (
+                                            <button
+                                                onClick={() => handleApproveTransfer(record)}
+                                                className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg active:scale-90 transition-all"
+                                                title="Duyệt phiếu"
+                                            >
+                                                <CheckCircle2 size={18} strokeWidth={2.2} />
+                                            </button>
+                                        )}
                                         <button
                                             onClick={() => {
                                                 openTransferFormModal('view', record);
@@ -991,9 +1177,7 @@ export default function TransferList() {
                                                                 setActiveRowMenu(null);
                                                                 return;
                                                             }
-                                                            const rect = e.currentTarget.getBoundingClientRect();
-                                                            setMenuPosition({ top: rect.bottom + window.scrollY + 8, left: rect.left + window.scrollX - 180 });
-                                                            setActiveRowMenu(record.id);
+                                                            openRowMenuAtButton(record.id, e);
                                                         }}
                                                         className={clsx(
                                                             "p-2 rounded-xl transition-all",
@@ -1005,9 +1189,23 @@ export default function TransferList() {
                                                     {activeRowMenu === record.id && createPortal(
                                                         <div
                                                             ref={rowMenuRef}
-                                                            style={{ position: 'absolute', top: `${menuPosition.top}px`, left: `${menuPosition.left}px`, width: '220px' }}
+                                                            style={{ position: 'fixed', top: `${menuPosition.top}px`, left: `${menuPosition.left}px`, width: `${ROW_MENU_WIDTH}px` }}
                                                             className="bg-white border border-slate-200 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.2)] z-[999999] py-2 overflow-hidden animate-in fade-in zoom-in-95 duration-200"
                                                         >
+                                                            {canApproveTransfer && record.status === 'CHO_DUYET' && (
+                                                                <button
+                                                                    onClick={() => {
+                                                                        handleApproveTransfer(record);
+                                                                        setActiveRowMenu(null);
+                                                                    }}
+                                                                    className="w-full grid grid-cols-[22px_minmax(0,1fr)] items-center gap-3 px-4 py-3 text-blue-600 hover:bg-blue-50 transition-colors text-[13px] font-bold leading-none"
+                                                                >
+                                                                    <span className="w-[22px] h-[22px] shrink-0 flex items-center justify-center">
+                                                                        <CheckCircle2 className="w-4 h-4" />
+                                                                    </span>
+                                                                    <span className="text-left leading-none">Duyệt phiếu điều chuyển</span>
+                                                                </button>
+                                                            )}
                                                             <button
                                                                 onClick={() => {
                                                                     openTransferFormModal('view', record);
@@ -1202,6 +1400,8 @@ export default function TransferList() {
                                 <div><p className="text-slate-400 font-bold text-xs">Tổng số lượng</p><p className="font-black text-primary">{detailRecord.totalQuantity}</p></div>
                                 <div><p className="text-slate-400 font-bold text-xs">Trạng thái</p><p className="font-bold text-blue-700">{detailRecord.status}</p></div>
                                 <div><p className="text-slate-400 font-bold text-xs">Loại giao dịch</p><p className="font-bold text-slate-700">{detailRecord.transactionType || 'OUT'}</p></div>
+                                <div><p className="text-slate-400 font-bold text-xs">Người duyệt</p><p className="font-bold text-slate-700">{detailRecord.approvedBy || '—'}</p></div>
+                                <div><p className="text-slate-400 font-bold text-xs">Thời gian duyệt</p><p className="font-bold text-slate-700">{detailRecord.approvedAt ? new Date(detailRecord.approvedAt).toLocaleString('vi-VN') : '—'}</p></div>
                             </div>
                             <div className="bg-slate-50 rounded-xl border border-slate-200 p-3">
                                 <p className="text-slate-500 font-bold text-xs uppercase mb-2">Thông tin DB</p>
@@ -1283,6 +1483,14 @@ export default function TransferList() {
                                         <label className="text-[14px] font-semibold text-slate-800">Ngày tạo</label>
                                         <input value={new Date(transferFormModal.record.createdAt).toLocaleString('vi-VN')} readOnly className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-700" />
                                     </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[14px] font-semibold text-slate-800">Người duyệt</label>
+                                        <input value={transferFormModal.record.approvedBy || '—'} readOnly className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-700" />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[14px] font-semibold text-slate-800">Thời gian duyệt</label>
+                                        <input value={transferFormModal.record.approvedAt ? new Date(transferFormModal.record.approvedAt).toLocaleString('vi-VN') : '—'} readOnly className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-700" />
+                                    </div>
                                 </div>
                             </div>
 
@@ -1292,13 +1500,31 @@ export default function TransferList() {
                                     <h4 className="text-[18px] !font-extrabold !text-primary">Danh sách hàng hóa</h4>
                                 </div>
                                 <div className="space-y-3">
-                                    {transferFormModal.record.items.map((item, idx) => (
-                                        <div key={`${transferFormModal.record.id}-item-${idx}`} className="p-3 border border-slate-200 rounded-2xl bg-slate-50/50 flex items-center justify-between gap-3">
-                                            <div className="font-semibold text-slate-800">{item.itemName}</div>
-                                            <div className="flex items-center gap-2">
-                                                <span className={itemTypeBadgeClass(item.itemType)}>{item.itemType}</span>
-                                                <span className="font-black text-primary">x {item.quantity}</span>
+                                    {(transferFormModal.mode === 'edit' ? editingItems : transferFormModal.record.items).map((item, idx) => (
+                                        <div key={`${transferFormModal.record.id}-item-${idx}`} className="p-3 border border-slate-200 rounded-2xl bg-slate-50/50 space-y-2">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div className="font-semibold text-slate-800">{item.itemName}</div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className={itemTypeBadgeClass(item.itemType)}>{item.itemType}</span>
+                                                    <span className="font-black text-primary">x {item.quantity}</span>
+                                                </div>
                                             </div>
+                                            {transferFormModal.mode === 'edit' && (
+                                                <div className="space-y-1.5">
+                                                    <label className="text-[12px] font-bold text-slate-500">Mã hàng hóa (phân tách bằng dấu phẩy)</label>
+                                                    <input
+                                                        value={item.codesText || ''}
+                                                        onChange={(e) => {
+                                                            const value = e.target.value;
+                                                            setEditingItems((prev) => prev.map((it, itIdx) => (
+                                                                itIdx === idx ? { ...it, codesText: value } : it
+                                                            )));
+                                                        }}
+                                                        className="w-full h-11 px-3 bg-white border border-slate-200 rounded-xl text-[13px] font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-primary/20"
+                                                        placeholder="Ví dụ: CGA870001, CGA870002"
+                                                    />
+                                                </div>
+                                            )}
                                         </div>
                                     ))}
                                 </div>

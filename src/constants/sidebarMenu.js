@@ -50,7 +50,7 @@ export const extraMenuItems = [
   { path: '/bao-cao/loi-thiet-bi', label: 'Báo cáo lỗi thiết bị', icon: BarChart3 },
   { path: '/bao-cao/doanh-so-san-luong', label: 'Doanh số/Sản lượng', icon: BarChart3 },
   { path: '/don-hang', label: 'Danh sách đơn hàng', icon: Package },
-  { path: '/danh-sach-hang-luan-chuyen', label: 'Danh sách hàng luân chuyển', icon: RefreshCw },
+  { path: '/danh-sach-dieu-chuyen', label: 'Danh sách điều chuyển', icon: RefreshCw },
   { path: '/de-nghi-xuat-may', label: 'Đề nghị xuất máy', icon: Monitor },
   { path: '/khach-hang', label: 'Danh sách khách hàng', icon: Building2 },
   { path: '/khach-hang-lead', label: 'Form đăng kí khách hàng mới', icon: Building2 },

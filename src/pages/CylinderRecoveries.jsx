@@ -216,8 +216,8 @@ const CylinderRecoveries = () => {
     };
 
     // Handlers
-    const handleEdit = (recovery) => {
-        setRecoveryToEdit(recovery);
+    const handleEdit = (recovery, forceStatus = null) => {
+        setRecoveryToEdit(forceStatus ? { ...recovery, status: forceStatus } : recovery);
         setIsFormModalOpen(true);
     };
 
@@ -604,7 +604,7 @@ const CylinderRecoveries = () => {
                                                 )}
                                                 {recovery.status === 'DANG_THU_HOI' && (
                                                     <button
-                                                        onClick={() => handleEdit(recovery)}
+                                                        onClick={() => handleEdit(recovery, 'HOAN_THANH')}
                                                         className="p-2 text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg flex items-center gap-1 font-bold text-[11px]"
                                                         title="Hoàn thành"
                                                     >
@@ -1014,7 +1014,7 @@ const CylinderRecoveries = () => {
                                                     )}
                                                     {recovery.status === 'DANG_THU_HOI' && (
                                                         <button
-                                                            onClick={() => handleEdit(recovery)}
+                                                            onClick={() => handleEdit(recovery, 'HOAN_THANH')}
                                                             className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-lg text-[11px] font-bold hover:bg-emerald-100 transition-all"
                                                         >
                                                             Hoàn thành

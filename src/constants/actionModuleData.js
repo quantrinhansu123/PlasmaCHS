@@ -20,7 +20,8 @@ import {
   AlertTriangle,
   TrendingUp,
   DollarSign,
-  Calendar
+  Calendar,
+  List
 } from 'lucide-react';
 
 export const actionModuleGroups = [
@@ -37,13 +38,6 @@ export const actionModuleGroups = [
         description: 'Theo dõi, quản lý và xử lý các đơn hàng của hệ thống.',
         href: '/don-hang',
         colorScheme: 'blue',
-      },
-      {
-        icon: RefreshCw,
-        title: 'Danh sách hàng luân chuyển',
-        description: 'Theo dõi danh sách hàng luân chuyển với giao diện xử lý đơn hàng đầy đủ.',
-        href: '/danh-sach-hang-luan-chuyen',
-        colorScheme: 'emerald',
       },
       {
         icon: Monitor,
@@ -216,6 +210,13 @@ export const actionModuleGroups = [
         description: 'Thực hiện chuyển hàng hóa giữa các kho nội bộ.',
         href: '/kho/dieu-chuyen',
         colorScheme: 'emerald',
+      },
+      {
+        icon: List,
+        title: 'Danh sách điều chuyển',
+        description: 'Theo dõi phiếu điều chuyển, duyệt phiếu và xem lịch sử điều chuyển.',
+        href: '/danh-sach-dieu-chuyen',
+        colorScheme: 'blue',
       },
     ],
   },

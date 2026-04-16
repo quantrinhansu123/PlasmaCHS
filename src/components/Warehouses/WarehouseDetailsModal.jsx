@@ -68,6 +68,10 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                 return 'bg-rose-50 text-rose-600 border-rose-200';
             case 'TRANSFER':
                 return 'bg-blue-50 text-blue-600 border-blue-200';
+            case 'ORDER_OUT':
+                return 'bg-rose-50 text-rose-600 border-rose-200';
+            case 'RECOVERY_IN':
+                return 'bg-emerald-50 text-emerald-600 border-emerald-200';
             default:
                 return 'bg-slate-50 text-slate-600 border-slate-200';
         }
@@ -148,6 +152,44 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                         code: item.item_code,
                         status: ''
                     }))
+                });
+            } else if (log.type === 'ORDER_OUT' || log.type === 'RECOVERY_IN') {
+                const { data: tx } = await supabase
+                    .from('inventory_transactions')
+                    .select('id, inventory_id, reference_code, quantity_changed, note, created_at, transaction_type')
+                    .eq('id', log.rawId)
+                    .maybeSingle();
+
+                if (!tx) return;
+
+                const { data: inv } = await supabase
+                    .from('inventory')
+                    .select('item_name, item_type, warehouse_id')
+                    .eq('id', tx.inventory_id)
+                    .maybeSingle();
+
+                const { data: allWh } = await supabase.from('warehouses').select('id, name');
+                const whMap = Object.fromEntries((allWh || []).map(row => [row.id, row.name]));
+                const logType = tx.transaction_type === 'OUT' ? 'ORDER_OUT' : 'RECOVERY_IN';
+
+                setSelectedLogDetail({
+                    type: logType,
+                    title: tx.transaction_type === 'OUT' ? 'Chi tiết xuất bán từ kho' : 'Chi tiết thu hồi về kho',
+                    code: tx.reference_code || log.code,
+                    date: tx.created_at || log.created_at,
+                    fields: [
+                        { label: tx.transaction_type === 'OUT' ? 'Kho xuất' : 'Kho nhận', value: whMap[inv?.warehouse_id] || inv?.warehouse_id || warehouse?.name || '—' },
+                        { label: 'Loại hàng', value: inv?.item_type || '—' },
+                        { label: 'Số lượng', value: String(tx.quantity_changed || 0) }
+                    ],
+                    note: tx.note || '',
+                    items: [{
+                        name: inv?.item_name || 'Hàng hóa',
+                        type: inv?.item_type || '—',
+                        quantity: tx.quantity_changed || 0,
+                        code: '',
+                        status: tx.transaction_type
+                    }]
                 });
             } else if (log.type === 'TRANSFER') {
                 const [{ data: txRows }, { data: warehouseRows }] = await Promise.all([
@@ -255,6 +297,7 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
             setInventory(combinedInventory);
             const inventoryIds = (inventoryRes.data || []).map(item => item.id).filter(Boolean);
             let transferLogs = [];
+            let movementLogs = [];
             if (inventoryIds.length > 0) {
                 const { data: txData } = await supabase
                     .from('inventory_transactions')
@@ -264,6 +307,15 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                     .order('created_at', { ascending: false })
                     .limit(10);
                 transferLogs = txData || [];
+
+                const { data: movementData } = await supabase
+                    .from('inventory_transactions')
+                    .select('id, reference_code, quantity_changed, note, created_at, transaction_type')
+                    .in('inventory_id', inventoryIds)
+                    .not('reference_code', 'like', 'TRF%')
+                    .order('created_at', { ascending: false })
+                    .limit(20);
+                movementLogs = movementData || [];
             }
 
             const mergedLogs = [
@@ -296,7 +348,21 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                     created_at: log.created_at,
                     description: log.note || `Điều chuyển ${log.quantity_changed || 0} đơn vị`,
                     status: log.transaction_type
-                })))
+                }))),
+                ...(movementLogs.map((log) => {
+                    const isRecovery = log.transaction_type === 'IN' && (log.note || '').toLowerCase().includes('thu hồi vỏ');
+                    const isOrderOut = log.transaction_type === 'OUT';
+                    return {
+                        id: `movement-${log.id}`,
+                        rawId: log.id,
+                        type: isRecovery ? 'RECOVERY_IN' : (isOrderOut ? 'ORDER_OUT' : log.transaction_type),
+                        action: isRecovery ? 'Thu hồi vỏ về kho' : (isOrderOut ? 'Xuất bán từ kho' : 'Biến động kho'),
+                        code: log.reference_code,
+                        created_at: log.created_at,
+                        description: log.note || `${log.transaction_type === 'IN' ? 'Nhập kho' : 'Xuất kho'} ${log.quantity_changed || 0} đơn vị`,
+                        status: log.transaction_type
+                    };
+                }))
             ]
                 .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
                 .slice(0, 12);

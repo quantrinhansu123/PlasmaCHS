@@ -12,7 +12,6 @@ import {
     Plus,
     Save,
     ScanLine,
-    ScanBarcode,
     Search,
     Trash2,
     Truck,
@@ -640,7 +639,7 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                             reference_id: recoveryId,
                             reference_code: formData.recovery_code,
                             quantity_changed: qty,
-                            note: `Thu hồi ${qty} ${itemName} từ KH`
+                            note: `Thu hồi vỏ thành công | ${itemName} x${qty} | Từ: ${customersRef.current.find(c => c.id === formData.customer_id)?.name || 'Khách hàng'} (${formData.customer_id || '—'}) | Về kho: ${formData.warehouse_id || '—'} | Trạng thái: đã về kho | Thời gian: ${new Date().toLocaleString('vi-VN')}`
                         }]);
                         await supabase
                             .from('inventory')
@@ -721,8 +720,14 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                 <h3 className="text-[20px] leading-tight font-bold text-slate-900 tracking-tight">
                                     {isReadOnly ? 'Chi tiết phiếu thu hồi' : isEdit ? 'Cập nhật phiếu thu hồi' : 'Tạo phiếu thu hồi vỏ'}
                                 </h3>
-                                <p className="text-slate-500 text-[12px] font-semibold mt-0.5 tracking-tight flex items-center gap-1.5">
+                                <p className="text-slate-500 text-[12px] font-semibold mt-0.5 tracking-tight flex items-center gap-2">
                                     Mã phiếu: #{formData.recovery_code}
+                                    {formData.status && (() => {
+                                        const s = ITEM_CONDITIONS.find(sc => sc.id === formData.status) || { label: formData.status, color: 'bg-slate-100 text-slate-600' };
+                                        // Wait, RECOVERY_STATUSES is in the parent. Modal might not have it.
+                                        // I'll check if RECOVERY_STATUSES is imported or defined.
+                                        return <span className="px-2 py-0.5 bg-primary/10 text-primary rounded-full text-[10px] uppercase font-bold">{formData.status}</span>
+                                    })()}
                                 </p>
                             </div>
                         </div>
@@ -1115,7 +1120,7 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                                                                                 }}
                                                                                 className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-primary/60 hover:text-primary transition-colors hover:bg-primary/5 rounded-lg z-10"
                                                                             >
-                                                                                <ScanBarcode className="w-5 h-5" />
+                                                                                <ScanLine className="w-5 h-5" />
                                                                             </button>
                                                                         )}
                                                                         {item.isValidating && (

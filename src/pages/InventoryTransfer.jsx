@@ -54,6 +54,7 @@ const InventoryTransfer = () => {
     const [loading, setLoading] = useState(false);
     const [warehouses, setWarehouses] = useState([]);
     const [inventory, setInventory] = useState([]);
+    const [serialOptionsByItemName, setSerialOptionsByItemName] = useState({});
 
     const [formData, setFormData] = useState({
         from_warehouse_id: '',
@@ -186,16 +187,16 @@ const InventoryTransfer = () => {
             // 2. Fetch Machines (MAY)
             const { data: machinesData } = await supabase
                 .from('machines')
-                .select('machine_type, status')
+                .select('machine_type, status, serial_number')
                 .eq('warehouse', warehouseId)
                 .eq('status', 'sẵn sàng');
 
             // 3. Fetch Cylinders (BINH)
             const { data: cylindersData } = await supabase
                 .from('cylinders')
-                .select('volume, status')
+                .select('volume, status, serial_number')
                 .eq('warehouse_id', warehouseId)
-                .eq('status', 'sẵn sàng');
+                .in('status', ['sẵn sàng', 'bình rỗng']);
 
             // Process counts
             const machCounts = (machinesData || []).reduce((acc, m) => {
@@ -207,6 +208,22 @@ const InventoryTransfer = () => {
             const cylCounts = (cylindersData || []).reduce((acc, c) => {
                 const name = `Bình ${c.volume || 'khác'}`;
                 acc[name] = (acc[name] || 0) + 1;
+                return acc;
+            }, {});
+            const machineSerials = (machinesData || []).reduce((acc, machine) => {
+                const name = `Máy ${machine.machine_type}`;
+                const serial = (machine.serial_number || '').trim().toUpperCase();
+                if (!serial) return acc;
+                if (!acc[name]) acc[name] = new Set();
+                acc[name].add(serial);
+                return acc;
+            }, {});
+            const cylinderSerials = (cylindersData || []).reduce((acc, cylinder) => {
+                const name = `Bình ${cylinder.volume || 'khác'}`;
+                const serial = (cylinder.serial_number || '').trim().toUpperCase();
+                if (!serial) return acc;
+                if (!acc[name]) acc[name] = new Set();
+                acc[name].add(serial);
                 return acc;
             }, {});
 
@@ -229,6 +246,14 @@ const InventoryTransfer = () => {
             ];
 
             setInventory(realInventory);
+            const serialMap = {};
+            Object.entries(machineSerials).forEach(([name, serialSet]) => {
+                serialMap[name] = Array.from(serialSet).sort();
+            });
+            Object.entries(cylinderSerials).forEach(([name, serialSet]) => {
+                serialMap[name] = Array.from(serialSet).sort();
+            });
+            setSerialOptionsByItemName(serialMap);
         } catch (error) {
             console.error('Error fetching real inventory:', error);
             toast.error('Lỗi khi tải dữ liệu tồn thực tế');
@@ -374,6 +399,23 @@ const InventoryTransfer = () => {
     };
 
     const duplicateIndicesSet = useMemo(() => getDuplicateIndicesGlobally(), [transferItems]);
+    const getSerialSuggestions = (item, itemIdx, codeIdx, currentValue) => {
+        const candidates = serialOptionsByItemName[item.item_name] || [];
+        const normalizedCurrent = (currentValue || '').trim().toUpperCase();
+        const usedCodes = new Set();
+
+        transferItems.forEach((row, rowIdx) => {
+            (row.specific_codes || []).forEach((entry, entryIdx) => {
+                if (rowIdx === itemIdx && entryIdx === codeIdx) return;
+                if (entry?.code) usedCodes.add(entry.code);
+            });
+        });
+
+        return candidates
+            .filter((code) => !usedCodes.has(code))
+            .filter((code) => !normalizedCurrent || code.includes(normalizedCurrent))
+            .slice(0, 20);
+    };
 
     // Validate specific codes against database
     const validateCodes = async () => {
@@ -423,7 +465,11 @@ const InventoryTransfer = () => {
                         allValid = false;
                         return { ...entry, status: 'invalid', message: 'Không thuộc kho xuất' };
                     }
-                    if (dbItem.status !== 'sẵn sàng') {
+                    const currentStatus = (dbItem.status || '').toLowerCase();
+                    const isCylinderAndAllowedStatus = item.item_type === 'BINH' && (currentStatus === 'sẵn sàng' || currentStatus === 'bình rỗng');
+                    const isMachineAndAllowedStatus = item.item_type === 'MAY' && currentStatus === 'sẵn sàng';
+
+                    if (!isCylinderAndAllowedStatus && !isMachineAndAllowedStatus) {
                         allValid = false;
                         return { ...entry, status: 'invalid', message: `Trạng thái: ${dbItem.status}` };
                     }
@@ -581,97 +627,50 @@ const InventoryTransfer = () => {
             const transferCode = `TRF${Date.now().toString().slice(-6)}`;
             const toName = warehouses.find(w => w.id === formData.to_warehouse_id)?.name;
             const fromName = warehouses.find(w => w.id === formData.from_warehouse_id)?.name;
+            const currentUserName =
+                localStorage.getItem('user_name') ||
+                sessionStorage.getItem('user_name') ||
+                'Hệ thống';
 
-            const transactions = [];
+            const requestItems = validItemsToSubmit.map((item) => ({
+                item_type: item.item_type,
+                item_name: item.item_name,
+                quantity: item.quantity,
+                maxQuantity: item.maxQuantity,
+                specific_codes: (item.specific_codes || []).map((entry) => ({
+                    code: entry.code || '',
+                    status: entry.status || 'pending',
+                    message: entry.message || '',
+                    dbId: entry.dbId || null
+                }))
+            }));
 
-            for (const item of validItemsToSubmit) {
-                // Find source item mapping
-                const sourceItem = inventory.find(i => i.item_name === item.item_name && (
-                    (item.item_type === 'MAY' && isMachine(i)) ||
-                    (item.item_type === 'BINH' && isCylinder(i)) ||
-                    (item.item_type === 'VAT_TU' && !isMachine(i) && !isCylinder(i))
-                ));
+            const totalQuantity = requestItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+            const { error: requestError } = await supabase
+                .from('inventory_transfer_requests')
+                .insert([{
+                    transfer_code: transferCode,
+                    from_warehouse_id: formData.from_warehouse_id,
+                    to_warehouse_id: formData.to_warehouse_id,
+                    status: 'CHO_DUYET',
+                    note: formData.note || '',
+                    handover_image_url: uploadedImage || null,
+                    items_json: requestItems,
+                    total_quantity: totalQuantity,
+                    created_by: currentUserName
+                }]);
 
-                if (!sourceItem) throw new Error(`Không tìm thấy tồn kho cho: ${item.item_name}`);
-
-                // 1. Source DB update
-                let sourceInventoryId;
-                if (item.item_type === 'VAT_TU') {
-                    sourceInventoryId = sourceItem.id;
-                    const { error: decError } = await supabase.from('inventory')
-                        .update({ quantity: sourceItem.quantity - item.quantity }).eq('id', sourceInventoryId);
-                    if (decError) throw decError;
-                } else {
-                    const { data: existingInv } = await supabase.from('inventory')
-                        .select('id, quantity').eq('warehouse_id', formData.from_warehouse_id)
-                        .eq('item_type', item.item_type).eq('item_name', item.item_name).maybeSingle();
-                    if (existingInv) {
-                        sourceInventoryId = existingInv.id;
-                        const { error: decError } = await supabase.from('inventory')
-                            .update({ quantity: sourceItem.quantity - item.quantity }).eq('id', sourceInventoryId);
-                        if (decError) throw decError;
-                    } else {
-                        const { data: newInv, error: insError } = await supabase.from('inventory')
-                            .insert([{ warehouse_id: formData.from_warehouse_id, item_type: item.item_type, item_name: item.item_name, quantity: sourceItem.quantity - item.quantity }]).select().single();
-                        if (insError) throw insError;
-                        sourceInventoryId = newInv.id;
-                    }
-                }
-
-                // 2. Dest DB update
-                const { data: destItemData } = await supabase.from('inventory')
-                    .select('id, quantity').eq('warehouse_id', formData.to_warehouse_id)
-                    .eq('item_type', item.item_type).eq('item_name', item.item_name).maybeSingle();
-
-                let destInventoryId;
-                if (destItemData) {
-                    const { data: updatedDest, error: incError } = await supabase.from('inventory')
-                        .update({ quantity: destItemData.quantity + item.quantity }).eq('id', destItemData.id).select().single();
-                    if (incError) throw incError;
-                    destInventoryId = updatedDest.id;
-                } else {
-                    const { data: newDest, error: insError } = await supabase.from('inventory')
-                        .insert([{ warehouse_id: formData.to_warehouse_id, item_type: item.item_type, item_name: item.item_name, quantity: item.quantity }]).select().single();
-                    if (insError) throw insError;
-                    destInventoryId = newDest.id;
-                }
-
-                // 3. Serialized locations Update
-                const needsSpecificCodes = item.item_type === 'MAY' || item.item_type === 'BINH';
-                if (needsSpecificCodes) {
-                    const validCodes = item.specific_codes.filter(c => c.code && c.dbId);
-                    const tableName = item.item_type === 'BINH' ? 'cylinders' : 'machines';
-                    const whColumn = item.item_type === 'BINH' ? 'warehouse_id' : 'warehouse';
-
-                    for (const entry of validCodes) {
-                        const { error: updateErr } = await supabase.from(tableName).update({ [whColumn]: formData.to_warehouse_id }).eq('id', entry.dbId);
-                        if (updateErr) console.error(`Failed to update ${tableName} ${entry.code}:`, updateErr);
-                    }
-                }
-
-                // 4. Record transactions
-                const codesList = item.specific_codes ? item.specific_codes.filter(c => c.code).map(c => c.code).join(', ') : '';
-                const codesNote = codesList ? `\nMã cụ thể: [${codesList}]` : '';
-
-                const commonNoteOut = uploadedImage ? `Điều chuyển tới ${toName}. ${formData.note}${codesNote}\n[Ảnh Bàn Giao]: ${uploadedImage}` : `Điều chuyển tới ${toName}. ${formData.note}${codesNote}`;
-                const commonNoteIn = uploadedImage ? `Nhận điều chuyển từ ${fromName}. ${formData.note}${codesNote}\n[Ảnh Bàn Giao]: ${uploadedImage}` : `Nhận điều chuyển từ ${fromName}. ${formData.note}${codesNote}`;
-
-                transactions.push({ inventory_id: sourceInventoryId, transaction_type: 'OUT', reference_code: transferCode, quantity_changed: item.quantity, note: commonNoteOut });
-                transactions.push({ inventory_id: destInventoryId, transaction_type: 'IN', reference_code: transferCode, quantity_changed: item.quantity, note: commonNoteIn });
-            }
-
-            const { error: txError } = await supabase.from('inventory_transactions').insert(transactions);
-            if (txError) throw txError;
+            if (requestError) throw requestError;
 
             await notificationService.add({
-                title: 'Điều chuyển kho nhiều thiết bị',
-                description: `Đã chuyển ${validItems.length} loại hàng từ ${fromName} tới ${toName} (Mã phiếu: ${transferCode})`,
-                type: 'success',
-                link: '/bao-cao/kho'
+                title: 'Tạo yêu cầu điều chuyển kho',
+                description: `Phiếu ${transferCode} từ ${fromName} tới ${toName} đang chờ duyệt.`,
+                type: 'info',
+                link: '/danh-sach-dieu-chuyen'
             });
 
-            toast.success('Điều chuyển kho thành công!');
-            navigate('/bao-cao/kho');
+            toast.success('Đã tạo phiếu điều chuyển, chờ thủ kho/Admin duyệt!');
+            navigate('/danh-sach-dieu-chuyen');
         } catch (error) {
             console.error('Transfer error:', error);
             toast.error('Lỗi khi điều chuyển: ' + error.message);
@@ -917,12 +916,18 @@ const InventoryTransfer = () => {
                                                                     <input
                                                                         value={entry.code}
                                                                         onChange={(e) => handleCodeChange(itemIdx, codeIdx, e.target.value)}
+                                                                        list={`transfer-serial-options-${itemIdx}-${codeIdx}`}
                                                                         placeholder={`Mã #${codeIdx + 1}`}
                                                                         className={clsx(
                                                                             "w-full h-9 pl-8 pr-16 border rounded-lg text-[12px] font-mono font-bold transition-all outline-none focus:ring-2 focus:ring-primary/10",
                                                                             getStatusBorder(isDup ? 'invalid' : entry.status, isDup)
                                                                         )}
                                                                     />
+                                                                    <datalist id={`transfer-serial-options-${itemIdx}-${codeIdx}`}>
+                                                                        {getSerialSuggestions(item, itemIdx, codeIdx, entry.code).map((code) => (
+                                                                            <option key={code} value={code} />
+                                                                        ))}
+                                                                    </datalist>
                                                                     <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center">
                                                                         <button
                                                                             type="button"

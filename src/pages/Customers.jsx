@@ -771,9 +771,31 @@ const Customers = () => {
             return;
         }
 
+        let selectedWarehouseId = null;
+        if (filterType === 'lead' && newStatus === 'Thành công') {
+            if (!warehousesList || warehousesList.length === 0) {
+                alert('⚠️ Chưa có danh sách kho hoạt động để gán khách hàng.');
+                return;
+            }
+            const optionsText = warehousesList
+                .map((warehouse, idx) => `${idx + 1}. ${warehouse.name}`)
+                .join('\n');
+            const picked = window.prompt(
+                `Chọn kho gán cho khách hàng (nhập số thứ tự):\n${optionsText}`
+            );
+            if (!picked) return;
+            const pickedIndex = parseInt(picked, 10) - 1;
+            if (pickedIndex < 0 || pickedIndex >= warehousesList.length) {
+                alert('❌ Lựa chọn kho không hợp lệ.');
+                return;
+            }
+            selectedWarehouseId = warehousesList[pickedIndex].id;
+        }
+
         const patch = {
             status: newStatus,
             success_at: newStatus === 'Thành công' ? new Date().toISOString() : null,
+            ...(selectedWarehouseId ? { warehouse_id: selectedWarehouseId } : {}),
         };
 
         const runUpdate = () => supabase.from('customers').update(patch).eq('id', id);
@@ -818,6 +840,13 @@ const Customers = () => {
             setCustomers((prev) =>
                 prev.map((c) => (c.id === id ? { ...c, ...patch } : c))
             );
+
+            if (newStatus === 'Thành công') {
+                const customer = customers.find(c => c.id === id);
+                if (customer && window.confirm('🎉 Chốt khách hàng THÀNH CÔNG!\nBạn có muốn lập Đề nghị xuất máy (DNXM) ngay cho khách hàng này không?')) {
+                    navigate(`/de-nghi-xuat-may/tao?phone=${customer.phone || ''}`);
+                }
+            }
         } catch (error) {
             console.error('Error updating status:', error);
             const raw = error?.message ?? String(error);
