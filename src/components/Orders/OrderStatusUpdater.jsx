@@ -949,6 +949,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                                             {idx + 1}
                                                         </span>
                                                         <div className="relative flex-1">
+                                                            <input
                                                             id={`serial-input-sp-${idx}`}
                                                             type="text"
                                                             className="w-full pl-4 pr-12 py-2.5 bg-white border border-orange-200 rounded-xl text-[14px] font-bold text-slate-800 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-50 transition-all font-mono tracking-wider placeholder:tracking-normal"

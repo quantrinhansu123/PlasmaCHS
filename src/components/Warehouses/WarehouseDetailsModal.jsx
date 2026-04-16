@@ -1,14 +1,14 @@
 import {
     Activity,
     Box,
-    Building2,
-    Calendar,
     ChevronDown,
     ChevronUp,
     Clock,
+    Filter,
     History,
     MapPin,
     Package,
+    Search,
     Shield,
     Truck,
     Warehouse,
@@ -33,6 +33,9 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
     const [recentLogs, setRecentLogs] = useState([]);
     const [showFullInventory, setShowFullInventory] = useState(false);
     const [isClosing, setIsClosing] = useState(false);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [selectedType, setSelectedType] = useState('ALL');
+    const [selectedStatus, setSelectedStatus] = useState('ALL');
 
     useEffect(() => {
         if (!warehouse) return;
@@ -44,25 +47,67 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
         setTimeout(() => onClose(), 300);
     }, [onClose]);
 
+    const warehouseKeys = [warehouse?.id, warehouse?.name].filter(Boolean);
+
+    const getStatusClass = (status) => {
+        const normalized = (status || '').toLowerCase();
+        if (normalized === 'sẵn sàng') return "bg-emerald-500 text-white";
+        if (normalized === 'đang vận chuyển') return "bg-blue-500 text-white";
+        if (normalized === 'thuộc khách hàng') return "bg-indigo-500 text-white";
+        if (normalized === 'bảo trì' || normalized === 'kiểm tra' || normalized === 'đang sửa') return "bg-amber-500 text-white";
+        return "bg-slate-100 text-slate-600";
+    };
+
+    const getLogColor = (type) => {
+        switch (type) {
+            case 'IN':
+                return 'bg-emerald-50 text-emerald-600 border-emerald-200';
+            case 'OUT':
+                return 'bg-rose-50 text-rose-600 border-rose-200';
+            case 'TRANSFER':
+                return 'bg-blue-50 text-blue-600 border-blue-200';
+            default:
+                return 'bg-slate-50 text-slate-600 border-slate-200';
+        }
+    };
+
     const fetchWarehouseData = async () => {
         setLoading(true);
         try {
-            // 1. Get Inventory
             const { data: invData } = await supabase
                 .from('cylinders')
                 .select('*')
                 .eq('warehouse_id', warehouse.id)
                 .order('serial_number', { ascending: true });
 
-            // 3. Get Machines
             const { data: machinesData } = await supabase
                 .from('machines')
-                .select('id, serial_number, machine_type, status')
-                .eq('warehouse', warehouse.id);
+                .select('id, serial_number, machine_type, status, warehouse')
+                .in('warehouse', warehouseKeys);
+
+            const [receiptsRes, issuesRes, inventoryRes] = await Promise.all([
+                supabase
+                    .from('goods_receipts')
+                    .select('id, receipt_code, supplier_name, total_items, status, receipt_date, created_at')
+                    .eq('warehouse_id', warehouse.id)
+                    .order('created_at', { ascending: false })
+                    .limit(10),
+                supabase
+                    .from('goods_issues')
+                    .select('id, issue_code, issue_type, total_items, status, issue_date, created_at')
+                    .eq('warehouse_id', warehouse.id)
+                    .order('created_at', { ascending: false })
+                    .limit(10),
+                supabase
+                    .from('inventory')
+                    .select('id')
+                    .eq('warehouse_id', warehouse.id)
+            ]);
 
             const unifiedCylinders = (invData || []).map(cyl => ({
                 ...cyl,
                 uid: `cyl_${cyl.id}`,
+                itemType: 'BINH',
                 category: cyl.category || 'Vỏ bình',
                 volume: cyl.volume || '—'
             }));
@@ -70,6 +115,7 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
             const unifiedMachines = (machinesData || []).map(mac => ({
                 ...mac,
                 uid: `mac_${mac.id}`,
+                itemType: 'MAY',
                 category: 'Máy móc',
                 volume: mac.machine_type || '—'
             }));
@@ -79,8 +125,52 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
             );
 
             setInventory(combinedInventory);
+            const inventoryIds = (inventoryRes.data || []).map(item => item.id).filter(Boolean);
+            let transferLogs = [];
+            if (inventoryIds.length > 0) {
+                const { data: txData } = await supabase
+                    .from('inventory_transactions')
+                    .select('id, reference_code, quantity_changed, note, created_at, transaction_type')
+                    .in('inventory_id', inventoryIds)
+                    .like('reference_code', 'TRF%')
+                    .order('created_at', { ascending: false })
+                    .limit(10);
+                transferLogs = txData || [];
+            }
 
-            setRecentLogs([]);
+            const mergedLogs = [
+                ...((receiptsRes.data || []).map((receipt) => ({
+                    id: `receipt-${receipt.id}`,
+                    type: 'IN',
+                    action: 'Nhập kho từ NCC',
+                    code: receipt.receipt_code,
+                    created_at: receipt.receipt_date || receipt.created_at,
+                    description: `${receipt.supplier_name || 'Nhà cung cấp'} • ${receipt.total_items || 0} dòng hàng`,
+                    status: receipt.status
+                }))),
+                ...((issuesRes.data || []).map((issue) => ({
+                    id: `issue-${issue.id}`,
+                    type: 'OUT',
+                    action: 'Xuất kho',
+                    code: issue.issue_code,
+                    created_at: issue.issue_date || issue.created_at,
+                    description: `${issue.issue_type || 'Phiếu xuất'} • ${issue.total_items || 0} dòng hàng`,
+                    status: issue.status
+                }))),
+                ...(transferLogs.map((log) => ({
+                    id: `transfer-${log.id}`,
+                    type: 'TRANSFER',
+                    action: 'Luân chuyển kho',
+                    code: log.reference_code,
+                    created_at: log.created_at,
+                    description: log.note || `Điều chuyển ${log.quantity_changed || 0} đơn vị`,
+                    status: log.transaction_type
+                })))
+            ]
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+                .slice(0, 12);
+
+            setRecentLogs(mergedLogs);
 
             // Calc Stats
             const cylinderCount = unifiedCylinders.length;
@@ -118,7 +208,18 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
         });
     };
 
-    const displayedInventory = showFullInventory ? inventory : inventory.slice(0, 5);
+    const filteredInventory = inventory.filter((item) => {
+        const normalizedSearch = searchTerm.trim().toLowerCase();
+        const matchesSearch = !normalizedSearch
+            || item.serial_number?.toLowerCase().includes(normalizedSearch)
+            || item.volume?.toLowerCase().includes(normalizedSearch)
+            || item.category?.toLowerCase().includes(normalizedSearch);
+        const matchesType = selectedType === 'ALL' || item.itemType === selectedType;
+        const matchesStatus = selectedStatus === 'ALL' || (item.status || '').toLowerCase() === selectedStatus.toLowerCase();
+        return matchesSearch && matchesType && matchesStatus;
+    });
+
+    const displayedInventory = showFullInventory ? filteredInventory : filteredInventory.slice(0, 5);
 
     const content = (
         <div className="flex flex-col h-full bg-[#f8fafc]">
@@ -182,9 +283,9 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                             <div className="flex items-center justify-between gap-3 mb-6">
                                 <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest flex items-center gap-2 min-w-0">
                                     <Box className="w-4 h-4 text-primary" />
-                                    Tồn kho hiện tại ({inventory.length})
+                                    Tồn kho hiện tại ({filteredInventory.length})
                                 </h3>
-                                {inventory.length > 5 && (
+                                {filteredInventory.length > 5 && (
                                     <button
                                         onClick={() => setShowFullInventory(!showFullInventory)}
                                         className="shrink-0 flex items-center gap-1.5 text-xs font-bold text-primary hover:text-white bg-primary/10 hover:bg-primary px-3 py-1.5 rounded-lg transition-all"
@@ -198,10 +299,63 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                                 )}
                             </div>
 
-                            {inventory.length === 0 ? (
+                            <div className="mb-5 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_180px_220px] gap-3">
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                    <input
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        placeholder="Tìm kiếm serial, loại bình, máy..."
+                                        className="w-full h-11 pl-10 pr-4 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40"
+                                    />
+                                </div>
+                                <div className="relative">
+                                    <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                                    <select
+                                        value={selectedType}
+                                        onChange={(e) => setSelectedType(e.target.value)}
+                                        className="w-full h-11 pl-10 pr-4 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 outline-none appearance-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40"
+                                    >
+                                        <option value="ALL">Tất cả loại</option>
+                                        <option value="BINH">Bình</option>
+                                        <option value="MAY">Máy</option>
+                                    </select>
+                                </div>
+                                <div className="flex gap-3">
+                                    <div className="relative flex-1">
+                                        <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                                        <select
+                                            value={selectedStatus}
+                                            onChange={(e) => setSelectedStatus(e.target.value)}
+                                            className="w-full h-11 pl-10 pr-4 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 outline-none appearance-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40"
+                                        >
+                                            <option value="ALL">Tất cả trạng thái</option>
+                                            <option value="sẵn sàng">Sẵn sàng</option>
+                                            <option value="đang vận chuyển">Đang vận chuyển</option>
+                                            <option value="thuộc khách hàng">Thuộc khách hàng</option>
+                                            <option value="bảo trì">Bảo trì</option>
+                                            <option value="kiểm tra">Kiểm tra</option>
+                                            <option value="đang sửa">Đang sửa</option>
+                                        </select>
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            setSearchTerm('');
+                                            setSelectedType('ALL');
+                                            setSelectedStatus('ALL');
+                                        }}
+                                        className="h-11 px-4 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50"
+                                        title="Xóa bộ lọc"
+                                    >
+                                        Reset
+                                    </button>
+                                </div>
+                            </div>
+
+                            {filteredInventory.length === 0 ? (
                                 <div className="p-12 text-center border-2 border-dashed border-slate-200 rounded-[2rem] bg-white">
                                     <Package className="w-12 h-12 text-slate-200 mx-auto mb-4" />
-                                    <p className="text-slate-400 font-bold">Kho hiện đang trống</p>
+                                    <p className="text-slate-400 font-bold">Không có dữ liệu phù hợp với bộ lọc</p>
                                 </div>
                             ) : (
                                 <div className="bg-white border border-slate-200 rounded-[1.5rem] overflow-hidden shadow-sm shadow-slate-100">
@@ -237,10 +391,7 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                                                         <td className="px-5 py-4 whitespace-nowrap text-right">
                                                             <span className={clsx(
                                                                 "inline-flex px-3 py-1 rounded-full text-[10px] font-black tracking-wide shadow-sm",
-                                                                item.status === 'sẵn sàng' ? "bg-emerald-500 text-white" :
-                                                                item.status === 'đang vận chuyển' ? "bg-blue-500 text-white" :
-                                                                item.status === 'thuộc khách hàng' ? "bg-indigo-500 text-white" :
-                                                                "bg-slate-100 text-slate-600"
+                                                                getStatusClass(item.status)
                                                             )}>
                                                                 {item.status?.toUpperCase()}
                                                             </span>
@@ -274,10 +425,15 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                                             </div>
                                             <div className="flex-1 min-w-0 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm group-hover:shadow-md group-hover:border-primary/20 transition-all">
                                                 <div className="flex items-center justify-between gap-2 mb-1">
-                                                    <p className="text-xs font-black text-slate-800">{log.action || 'Di chuyển bình'}</p>
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <p className="text-xs font-black text-slate-800 truncate">{log.action || 'Di chuyển bình'}</p>
+                                                        <span className={clsx("shrink-0 px-2 py-0.5 rounded-md border text-[9px] font-black uppercase tracking-wider", getLogColor(log.type))}>
+                                                            {log.code || log.type}
+                                                        </span>
+                                                    </div>
                                                     <span className="text-[10px] font-bold text-slate-400 shrink-0">{formatDate(log.created_at)}</span>
                                                 </div>
-                                                <p className="text-xs font-bold text-slate-500 truncate">{log.description || `Bình ${log.serial_number} được xử lý tại kho`}</p>
+                                                <p className="text-xs font-bold text-slate-500">{log.description || `Bình ${log.serial_number} được xử lý tại kho`}</p>
                                                 
                                                 {log.image_url && (
                                                     <div className="mt-2 pt-2 border-t border-slate-50">

@@ -26,10 +26,22 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
     const [showFullTimeline, setShowFullTimeline] = useState(false);
     const [qcData, setQcData] = useState(null);
     const [isClosing, setIsClosing] = useState(false);
+    const [warehouseName, setWarehouseName] = useState(cylinder?.warehouses?.name || null);
+
+    const resolveWarehouseName = useCallback((warehouseValue, warehouseMap = {}) => {
+        if (!warehouseValue) return '—';
+        return warehouseMap[warehouseValue] || warehouseValue;
+    }, []);
 
     useEffect(() => {
         if (!cylinder) return;
+        setWarehouseName(cylinder.warehouses?.name || null);
         fetchAllHistory();
+        // Resolve warehouse name if not available from join
+        if (!cylinder.warehouses?.name && cylinder.warehouse_id) {
+            supabase.from('warehouses').select('name').eq('id', cylinder.warehouse_id).maybeSingle()
+                .then(({ data }) => { if (data) setWarehouseName(data.name); });
+        }
     }, [cylinder]);
 
     const handleClose = useCallback(() => {
@@ -40,6 +52,11 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
     const fetchAllHistory = async () => {
         setLoading(true);
         try {
+            // 0. Fetch warehouse lookup for resolving UUIDs to names
+            const { data: warehouseList } = await supabase.from('warehouses').select('id, name');
+            const warehouseMap = {};
+            (warehouseList || []).forEach(w => { warehouseMap[w.id] = w.name; });
+
             // 1. Orders (giao cho khách / thu hồi / điều chuyển)
             const { data: orderData } = await supabase
                 .from('orders')
@@ -91,6 +108,7 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                 let eventIcon = 'incoming';
                 let eventColor = 'teal';
                 let eventType = 'THU_HOI';
+                const orderWarehouseName = resolveWarehouseName(o.warehouse, warehouseMap);
                 let location = o.customer_name || 'Khách hàng';
 
                 if (isOutgoing) {
@@ -98,19 +116,19 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                     eventIcon = 'outgoing';
                     eventColor = 'rose';
                     eventType = 'GIAO_KHACH';
-                    location = `${o.warehouse || 'Kho'} → ${o.customer_name || 'Khách hàng'}`;
+                    location = `${orderWarehouseName} → ${o.customer_name || 'Khách hàng'}`;
                 } else if (isInternal) {
                     eventLabel = 'Điều chuyển nội bộ';
                     eventIcon = 'warehouse';
                     eventColor = 'blue';
                     eventType = 'DIEU_CHUYEN';
-                    location = `${o.warehouse || 'Kho nguồn'} → Kho nhận`;
+                    location = `${orderWarehouseName} → Kho nhận`;
                 } else if (isReturn) {
                     eventLabel = typeLabel || 'Thu hồi về kho';
                     eventIcon = 'incoming';
                     eventColor = 'teal';
                     eventType = 'THU_HOI';
-                    location = `${o.customer_name || 'Khách'} → ${o.warehouse || 'Kho'}`;
+                    location = `${o.customer_name || 'Khách'} → ${orderWarehouseName}`;
                 }
 
                 events.push({
@@ -118,7 +136,7 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                     type: eventType,
                     label: eventLabel,
                     location: location,
-                    rawLocation: o.customer_name || o.warehouse || 'Không xác định',
+                    rawLocation: isOutgoing || isInternal ? orderWarehouseName : (o.customer_name || orderWarehouseName || 'Không xác định'),
                     code: o.order_code,
                     status: o.status,
                     icon: eventIcon,
@@ -130,12 +148,13 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
             // From goods receipts
             (receiptItems || []).forEach(ri => {
                 const r = ri.goods_receipts;
+                const whName = resolveWarehouseName(r.warehouse_id, warehouseMap);
                 events.push({
                     date: r.receipt_date || ri.created_at,
                     type: 'NHAP_KHO',
                     label: 'Nhập kho từ NCC',
-                    location: `NCC ${r.supplier_name} → Kho ${r.warehouse_id}`,
-                    rawLocation: `Kho ${r.warehouse_id}`,
+                    location: `NCC ${r.supplier_name} → Kho ${whName}`,
+                    rawLocation: `Kho ${whName}`,
                     code: r.receipt_code,
                     status: r.status,
                     icon: 'supplier',
@@ -147,11 +166,12 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
             // From goods issues
             (issueItems || []).forEach(ii => {
                 const gi = ii.goods_issues;
+                const whName = resolveWarehouseName(gi.warehouse_id, warehouseMap);
                 events.push({
                     date: gi.issue_date || ii.created_at,
                     type: 'TRA_NCC',
                     label: 'Trả về NCC',
-                    location: `Kho ${gi.warehouse_id} → NCC`,
+                    location: `Kho ${whName} → NCC`,
                     rawLocation: 'NCC',
                     code: gi.issue_code,
                     status: gi.status,
@@ -274,14 +294,14 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                                         }
                                         if (status === 'đang vận chuyển') return '—';
                                         if (['sẵn sàng', 'bình rỗng', 'chờ nạp', 'hỏng'].includes(status)) {
-                                            return cylinder.warehouses?.name || '—';
+                                            return warehouseName || cylinder.warehouses?.name || '—';
                                         }
                                         return cylinder.customer_name?.split(' / ')[1] || '—';
                                     })()}
                                 </span>
                                 <span className="flex items-center gap-1.5 text-slate-500">
                                     <Warehouse className="w-4 h-4 text-slate-400" />
-                                    {cylinder.warehouses?.name || '—'}
+                                    {warehouseName || cylinder.warehouses?.name || '—'}
                                 </span>
                                 {cylinder.expiry_date && <span className="flex items-center gap-1.5 text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-100 italic">Hạn: {formatDate(cylinder.expiry_date)}</span>}
                             </div>
@@ -484,6 +504,7 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                                             const t = o.order_type?.toLowerCase() || '';
                                             return t.includes('thu hồi') || t.includes('trả') || t.includes('nhập') || t.includes('điều chuyển') || t.includes('kho') || o.customer_name === 'Vỏ bình';
                                         }).map(o => {
+                                            const t = o.order_type?.toLowerCase() || '';
                                             const isInternal = o.customer_name === 'Vỏ bình' || t.includes('kho') || t.includes('điều chuyển');
                                             return (
                                                 <div key={o.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all relative group overflow-hidden hover:border-teal-200">

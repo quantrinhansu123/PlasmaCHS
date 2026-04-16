@@ -34,9 +34,9 @@ import { PRODUCT_TYPES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
 import { notificationService } from '../../utils/notificationService';
 
-export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
+export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, viewOnly = false }) {
     const isEdit = !!receipt;
-    const isReadOnly = receipt && receipt.status !== 'CHO_DUYET';
+    const isReadOnly = viewOnly || (receipt && receipt.status !== 'CHO_DUYET');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isClosing, setIsClosing] = useState(false);
     const [suppliers, setSuppliers] = useState([]);
@@ -51,6 +51,8 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
     const [scanTarget, setScanTarget] = useState({ itemIdx: -1, serialIdx: -1 });
     const scanTargetRef = useRef({ itemIdx: -1, serialIdx: -1 });
     useEffect(() => { scanTargetRef.current = scanTarget; }, [scanTarget]);
+
+    const normalizeSerial = (value) => value?.toString().trim().toUpperCase() || '';
 
     const handleClose = useCallback(() => {
         setIsClosing(true);
@@ -134,7 +136,8 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
             generateCode();
         }
     }, [receipt, isEdit]);
-    // Load suppliers and warehouses
+
+    // Load suppliers and warehouses
     useEffect(() => {
         const loadInitialData = async () => {
             try {
@@ -157,8 +160,12 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                         setFormData(prev => !prev.warehouse_id ? { ...prev, warehouse_id: warehousesRes.data[0].id } : prev);
                     }
                 }
-                if (cylindersRes.data) setCylindersList(cylindersRes.data.map(c => c.serial_number));
-                if (machinesRes.data) setMachinesList(machinesRes.data.map(m => m.serial_number));
+                if (cylindersRes.data) {
+                    setCylindersList([...new Set(cylindersRes.data.map(c => normalizeSerial(c.serial_number)).filter(Boolean))]);
+                }
+                if (machinesRes.data) {
+                    setMachinesList([...new Set(machinesRes.data.map(m => normalizeSerial(m.serial_number)).filter(Boolean))]);
+                }
 
                 // Fetch deliverers (shippers + app_users with shipper role)
                 const [{ data: shippersData }, { data: usersData }] = await Promise.all([
@@ -220,7 +227,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
     };
 
     const handleSerialChange = (itemIdx, serialIdx, value) => {
-        const normalizedVal = value ? value.trim().toUpperCase() : '';
+        const normalizedVal = normalizeSerial(value);
         setItems(prev => {
             const updated = [...prev];
             const item = { ...updated[itemIdx] };
@@ -269,7 +276,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
             return;
         }
 
-        const normalizedText = decodedText.trim().toUpperCase();
+        const normalizedText = normalizeSerial(decodedText);
         handleSerialChange(itemIdx, serialIdx, normalizedText);
 
         // Auto move to next empty
@@ -320,7 +327,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
             items.forEach(item => {
                 const isSerialized = formData.receipt_type === 'BINH' || formData.receipt_type === 'MAY';
                 if (isSerialized) {
-                    const serials = (item.assigned_serials || []).map(s => (typeof s === 'string' ? s : s?.serial)?.trim().toUpperCase()).filter(Boolean);
+                    const serials = (item.assigned_serials || []).map(s => normalizeSerial(typeof s === 'string' ? s : s?.serial)).filter(Boolean);
                     
                     if (serials.length > 0) {
                         serials.forEach(sn => {
@@ -373,7 +380,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
             const itemsPayload = flattenedItems.map(item => ({
                 item_type: item.item_type,
                 item_name: item.item_name,
-                serial_number: item.serial_number,
+                serial_number: normalizeSerial(item.serial_number),
                 item_status: item.item_status,
                 quantity: parseFloat(item.quantity) || 0,
                 unit: item.unit,
@@ -385,14 +392,22 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
 
             // Validate serial existence
             if (formData.receipt_type === 'BINH') {
-                const invalidSerials = flattenedItems.filter(i => i.serial_number && !cylindersList.includes(i.serial_number));
+                const cylindersSet = new Set(cylindersList.map(normalizeSerial));
+                const invalidSerials = flattenedItems.filter(i => {
+                    const serial = normalizeSerial(i.serial_number);
+                    return serial && !cylindersSet.has(serial);
+                });
                 if (invalidSerials.length > 0) {
-                    throw new Error(`Mã bình không tồn tại: ${invalidSerials.map(i => i.serial_number).join(', ')}`);
+                    throw new Error(`Mã bình không tồn tại: ${invalidSerials.map(i => normalizeSerial(i.serial_number)).join(', ')}`);
                 }
             } else if (formData.receipt_type === 'MAY') {
-                const invalidSerials = flattenedItems.filter(i => i.serial_number && !machinesList.includes(i.serial_number));
+                const machinesSet = new Set(machinesList.map(normalizeSerial));
+                const invalidSerials = flattenedItems.filter(i => {
+                    const serial = normalizeSerial(i.serial_number);
+                    return serial && !machinesSet.has(serial);
+                });
                 if (invalidSerials.length > 0) {
-                    throw new Error(`Mã máy không tồn tại: ${invalidSerials.map(i => i.serial_number).join(', ')}`);
+                    throw new Error(`Mã máy không tồn tại: ${invalidSerials.map(i => normalizeSerial(i.serial_number)).join(', ')}`);
                 }
             }
 
@@ -455,7 +470,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                             </div>
                             <div>
                                 <h3 className="text-[17px] md:text-xl font-bold text-slate-900 tracking-tight leading-tight">
-                                    {isEdit ? 'Cập nhật phiếu nhập kho' : 'Tạo phiếu nhập kho'}
+                                    {viewOnly ? 'Xem phiếu nhập kho' : (isEdit ? 'Cập nhật phiếu nhập kho' : 'Tạo phiếu nhập kho')}
                                 </h3>
                                 <p className="text-slate-500 text-[11px] md:text-xs font-bold mt-0.5 md:mt-1">
                                     Mã phiếu: #{formData.receipt_code}
@@ -933,7 +948,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess }) {
                             onClick={handleClose}
                             className="flex-1 md:flex-none px-6 py-3 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-all text-sm flex items-center justify-center"
                         >
-                            Hủy bỏ
+                            {viewOnly ? 'Đóng' : 'Hủy bỏ'}
                         </button>
                         {!isReadOnly && (
                             <button

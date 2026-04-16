@@ -19,6 +19,7 @@ import {
     ChevronLeft,
     ChevronRight,
     Download,
+    Eye,
     Edit,
     Filter,
     List,
@@ -85,6 +86,7 @@ const GoodsReceipts = () => {
     // Modal states
     const [showFormModal, setShowFormModal] = useState(false);
     const [selectedReceipt, setSelectedReceipt] = useState(null);
+    const [isViewOnly, setIsViewOnly] = useState(false);
 
     // Column Picker State
     const defaultColOrder = TABLE_COLUMNS.map(col => col.key);
@@ -562,35 +564,77 @@ const GoodsReceipts = () => {
 
             // 2. Loop through items to update inventory
             for (const item of items) {
-                // --- INDIVIDUAL STATUS SYNC ---
+                // --- INDIVIDUAL STATUS SYNC (Upsert: Insert if new, Update if exists) ---
                 if (item.serial_number) {
+                    const normalizedSerial = item.serial_number.toString().trim().toUpperCase();
                     if (item.item_type === 'BINH' || item.item_type.startsWith('BINH_')) {
-                        // Update individual Cylinder
-                        const { error: cylSyncError } = await supabase
+                        // Check if cylinder exists
+                        const { data: existingCyl } = await supabase
                             .from('cylinders')
-                            .update({
-                                status: item.item_status || 'sẵn sàng',
-                                warehouse_id: receipt.warehouse_id,
-                                customer_id: null,
-                                customer_name: null,
-                                department: 'Tại kho'
-                            })
-                            .eq('serial_number', item.serial_number);
-                        
-                        if (cylSyncError) console.error(`Error syncing cylinder ${item.serial_number}:`, cylSyncError);
+                            .select('id, category')
+                            .ilike('serial_number', normalizedSerial)
+                            .maybeSingle();
+
+                        if (existingCyl) {
+                            // UPDATE existing cylinder
+                            const { error: cylSyncError } = await supabase
+                                .from('cylinders')
+                                .update({
+                                    status: item.item_status || 'sẵn sàng',
+                                    warehouse_id: receipt.warehouse_id,
+                                    customer_id: null,
+                                    customer_name: null,
+                                })
+                                .eq('id', existingCyl.id);
+                            if (cylSyncError) throw new Error(`Không thể cập nhật bình ${normalizedSerial}: ${cylSyncError.message}`);
+                        } else {
+                            // INSERT new cylinder
+                            const { error: cylInsertError } = await supabase
+                                .from('cylinders')
+                                .insert({
+                                    serial_number: normalizedSerial,
+                                    status: item.item_status || 'sẵn sàng',
+                                    warehouse_id: receipt.warehouse_id,
+                                    category: 'BV',
+                                    volume: item.item_name, // e.g. "Bình 4L", "Bình oxi"
+                                    customer_id: null,
+                                    customer_name: null,
+                                });
+                            if (cylInsertError) throw new Error(`Không thể tạo mới bình ${normalizedSerial}: ${cylInsertError.message}`);
+                        }
                     } else if (item.item_type === 'MAY' || item.item_type.startsWith('MAY_')) {
-                        // Update individual Machine
-                        const { error: machSyncError } = await supabase
+                        // Check if machine exists
+                        const { data: existingMach } = await supabase
                             .from('machines')
-                            .update({
-                                status: item.item_status || 'sẵn sàng',
-                                warehouse: warehouseData.name, // Use name instead of UUID for consistency with Machines filter
-                                customer_id: null,
-                                customer_name: null
-                            })
-                            .eq('serial_number', item.serial_number);
-                        
-                        if (machSyncError) console.error(`Error syncing machine ${item.serial_number}:`, machSyncError);
+                            .select('id')
+                            .ilike('serial_number', normalizedSerial)
+                            .maybeSingle();
+
+                        if (existingMach) {
+                            // UPDATE existing machine
+                            const { error: machSyncError } = await supabase
+                                .from('machines')
+                                .update({
+                                    status: item.item_status || 'sẵn sàng',
+                                    warehouse: receipt.warehouse_id,
+                                    customer_id: null,
+                                    customer_name: null
+                                })
+                                .eq('id', existingMach.id);
+                            if (machSyncError) throw new Error(`Không thể cập nhật máy ${normalizedSerial}: ${machSyncError.message}`);
+                        } else {
+                            // INSERT new machine
+                            const { error: machInsertError } = await supabase
+                                .from('machines')
+                                .insert({
+                                    serial_number: normalizedSerial,
+                                    status: item.item_status || 'sẵn sàng',
+                                    warehouse: receipt.warehouse_id,
+                                    machine_type: item.item_name, // e.g. "Máy PlasmaRosy"
+                                    customer_name: null,
+                                });
+                            if (machInsertError) throw new Error(`Không thể tạo mới máy ${normalizedSerial}: ${machInsertError.message}`);
+                        }
                     }
                 }
                 // --- END INDIVIDUAL STATUS SYNC ---
@@ -929,6 +973,7 @@ const GoodsReceipts = () => {
                                 <button
                                     onClick={() => {
                                         setSelectedReceipt(null);
+                                        setIsViewOnly(false);
                                         setShowFormModal(true);
                                     }}
                                     className="p-2 rounded-xl bg-primary text-white shadow-lg shadow-primary/25 active:scale-95 transition-all shrink-0"
@@ -1003,6 +1048,7 @@ const GoodsReceipts = () => {
                                 <button
                                     onClick={() => {
                                         setSelectedReceipt(null);
+                                        setIsViewOnly(false);
                                         setShowFormModal(true);
                                     }}
                                     className="flex items-center gap-2 px-6 py-2 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-white text-[13px] font-black tracking-wider hover:scale-[1.02] active:scale-95 shadow-lg shadow-primary/20 transition-all"
@@ -1235,10 +1281,22 @@ const GoodsReceipts = () => {
                                                     <button
                                                         onClick={() => {
                                                             setSelectedReceipt(receipt);
+                                                            setIsViewOnly(true);
+                                                            setShowFormModal(true);
+                                                        }}
+                                                        className="p-2 text-blue-600 bg-blue-50 rounded-lg"
+                                                        title="Xem phiếu"
+                                                    >
+                                                        <Eye className="w-5 h-5" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => {
+                                                            setSelectedReceipt(receipt);
+                                                            setIsViewOnly(false);
                                                             setShowFormModal(true);
                                                         }}
                                                         className="p-2 text-slate-400 bg-slate-50 rounded-lg"
-                                                        title="Chi tiết"
+                                                        title="Chỉnh sửa"
                                                     >
                                                         <Edit className="w-5 h-5" />
                                                     </button>
@@ -1312,6 +1370,18 @@ const GoodsReceipts = () => {
                                                             <button
                                                                 onClick={() => {
                                                                     setSelectedReceipt(receipt);
+                                                                    setIsViewOnly(true);
+                                                                    setShowFormModal(true);
+                                                                }}
+                                                                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                                                title="Xem phiếu"
+                                                            >
+                                                                <Eye size={16} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => {
+                                                                    setSelectedReceipt(receipt);
+                                                                    setIsViewOnly(false);
                                                                     setShowFormModal(true);
                                                                 }}
                                                                 className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
@@ -1641,6 +1711,7 @@ const GoodsReceipts = () => {
             {showFormModal && (
                 <GoodsReceiptFormModal
                     receipt={selectedReceipt}
+                    viewOnly={isViewOnly}
                     onClose={() => setShowFormModal(false)}
                     onSuccess={() => {
                         fetchReceipts();
