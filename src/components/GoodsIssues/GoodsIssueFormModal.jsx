@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import {
+    Camera,
     CheckCircle2,
     ChevronDown,
     Clock,
@@ -43,6 +44,8 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
     const [isInventoryLoading, setIsInventoryLoading] = useState(false);
     const [inventorySearchTerm, setInventorySearchTerm] = useState('');
     const [selectedInventoryIds, setSelectedInventoryIds] = useState([]);
+    const [manualReturnType, setManualReturnType] = useState('BINH_4L');
+    const [manualReturnQty, setManualReturnQty] = useState('1');
 
     const [formData, setFormData] = useState({
         issue_code: '',
@@ -176,11 +179,17 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                 if (error) throw error;
                 setInventoryItems(data || []);
             } else {
-                const { data, error } = await supabase
+                let query = supabase
                     .from('cylinders')
                     .select('*')
-                    .eq('warehouse_id', formData.warehouse_id)
-                    .not('status', 'in', '("đang sử dụng", "thuộc khách hàng")');
+                    .eq('warehouse_id', formData.warehouse_id);
+
+                // Return-empty cylinders should allow selecting all cylinders in the warehouse.
+                if (formData.issue_type !== 'TRA_VO') {
+                    query = query.not('status', 'in', '("đang sử dụng", "thuộc khách hàng")');
+                }
+
+                const { data, error } = await query;
                 if (error) throw error;
                 setInventoryItems(data || []);
             }
@@ -246,6 +255,28 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
             }
         }
     };
+
+    const addInventoryItemIfMissing = useCallback((inventoryItem) => {
+        const alreadySelected = items.some(it => it.item_id === inventoryItem.id);
+        if (alreadySelected) return false;
+
+        const productType = mapToProductType(inventoryItem);
+        const newItem = {
+            id: Date.now() + Math.random(),
+            item_type: productType,
+            item_id: inventoryItem.id,
+            item_code: inventoryItem.serial_number,
+            quantity: 1,
+            _search: ''
+        };
+
+        if (items.length === 1 && !items[0].item_code && !items[0].item_id) {
+            setItems([newItem]);
+        } else {
+            setItems(prev => [...prev, newItem]);
+        }
+        return true;
+    }, [items, mapToProductType]);
 
     const handleConfirmInventorySelection = (selectedIds) => {
         const selectedItems = inventoryItems.filter(item => selectedIds.includes(item.id));
@@ -316,10 +347,18 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
             // Batch scanning for "Chọn nhanh"
             const invItem = inventoryItems.find(i => i.serial_number === code);
             if (invItem) {
-                toggleInventoryItem(invItem);
-                toast.success(`Đã chọn: ${code}`);
+                const wasAdded = addInventoryItemIfMissing(invItem);
+                notificationService.add({
+                    title: wasAdded ? 'Đã thêm vỏ từ QR' : 'Mã đã được quét',
+                    description: wasAdded ? code : `${code} đã tồn tại trong danh sách`,
+                    type: wasAdded ? 'success' : 'warning'
+                });
             } else {
-                toast.error(`Không tìm thấy mã ${code} trong kho này`);
+                notificationService.add({
+                    title: 'Không tìm thấy mã trong kho',
+                    description: code,
+                    type: 'error'
+                });
             }
             // Keep scanner open for continuous scanning if desired, 
             // but usually users scan one by one. Let's close it to be safe or keep it?
@@ -327,6 +366,44 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
             // Let's keep it open if it's batch scan.
         }
     };
+
+    useEffect(() => {
+        if (formData.issue_type !== 'TRA_VO') return;
+
+        const targetQty = Number(manualReturnQty);
+        if (!Number.isInteger(targetQty) || targetQty < 1) return;
+
+        setItems(prev => {
+            const nonManualRows = prev.filter(it => {
+                if (it._manualQuick) return false;
+                // Avoid keeping placeholder rows without serial in auto-sync mode.
+                return Boolean(it.item_id || (it.item_code || '').trim());
+            });
+            const currentManualRows = prev.filter(it => it._manualQuick && it.item_type === manualReturnType);
+            const keptManualRows = currentManualRows.slice(0, targetQty);
+
+            if (keptManualRows.length < targetQty) {
+                const rowsToAdd = targetQty - keptManualRows.length;
+                for (let idx = 0; idx < rowsToAdd; idx += 1) {
+                    keptManualRows.push({
+                        id: Date.now() + Math.random() + idx,
+                        item_type: manualReturnType,
+                        item_id: null,
+                        item_code: '',
+                        quantity: 1,
+                        _search: '',
+                        _manualQuick: true
+                    });
+                }
+            }
+
+            const nextItems = [...nonManualRows, ...keptManualRows];
+            if (nextItems.length === prev.length && nextItems.every((row, idx) => row.id === prev[idx].id)) {
+                return prev;
+            }
+            return nextItems;
+        });
+    }, [formData.issue_type, manualReturnQty, manualReturnType]);
 
     useEffect(() => {
         const total = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
@@ -342,10 +419,39 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
             return;
         }
 
-        const validItems = items.filter(i => i.item_id || i.item_code);
+        if (formData.issue_type === 'TRA_VO') {
+            const targetQty = Number(manualReturnQty);
+            if (!Number.isInteger(targetQty) || targetQty < 1) {
+                alert('Số lượng vỏ phải lớn hơn 0.');
+                return;
+            }
+        }
+
+        if (formData.issue_type === 'TRA_VO') {
+            const manualRows = items.filter(i => i._manualQuick);
+            const missingCodes = manualRows.filter(i => !(i.item_id || (i.item_code || '').trim()));
+            if (missingCodes.length > 0) {
+                alert('Vui lòng nhập/quét đủ mã cho toàn bộ số lượng vỏ cần trả.');
+                return;
+            }
+        }
+
+        const validItems = items.filter(i => {
+            const qty = Number(i.quantity) || 0;
+            const hasCode = Boolean(i.item_id || (i.item_code || '').trim());
+            return hasCode && qty > 0;
+        });
         if (validItems.length === 0) {
             alert('Vui lòng điền ít nhất 1 sản phẩm cần xuất!');
             return;
+        }
+
+        if (formData.issue_type === 'TRA_VO') {
+            const invalidRows = items.filter(i => (Number(i.quantity) || 0) > 1);
+            if (invalidRows.length > 0) {
+                alert('Mỗi vỏ trả phải tương ứng 1 mã serial. Vui lòng để số lượng mỗi dòng bằng 1.');
+                return;
+            }
         }
 
         setIsLoading(true);
@@ -754,6 +860,46 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                                 </div>
                             )}
 
+                            {formData.issue_type === 'TRA_VO' && (
+                                <div className="rounded-3xl border border-primary/20 bg-white p-5 sm:p-6 space-y-4 shadow-sm">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <h4 className="text-[16px] font-black text-primary tracking-tight">Nhập nhanh số lượng vỏ trả</h4>
+                                        <span className="text-[11px] font-bold text-slate-500">Quét QR hoặc thêm nhiều dòng để nhập mã thủ công (1 vỏ = 1 mã)</span>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                                        <div className="sm:col-span-5">
+                                            <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Loại vỏ</label>
+                                            <select
+                                                value={manualReturnType}
+                                                onChange={(e) => setManualReturnType(e.target.value)}
+                                                className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-[13px] font-bold text-slate-800 appearance-none outline-none focus:border-primary/40"
+                                            >
+                                                {currentFilteredProducts.map(p => (
+                                                    <option key={p.id} value={p.id}>{p.label}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div className="sm:col-span-3">
+                                            <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Số lượng</label>
+                                            <input
+                                                type="number"
+                                                min="1"
+                                                value={manualReturnQty}
+                                                onChange={(e) => setManualReturnQty(e.target.value)}
+                                                onBlur={(e) => {
+                                                    const qty = Number(e.target.value);
+                                                    if (!Number.isInteger(qty) || qty < 1) {
+                                                        alert('Số lượng vỏ phải lớn hơn 0.');
+                                                    }
+                                                }}
+                                                className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-[13px] font-black text-slate-800 outline-none focus:border-primary/40"
+                                            />
+                                        </div>
+                                        <div className="sm:col-span-4" />
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Chi tiết sản phẩm */}
                             <div className="rounded-3xl border border-primary/20 bg-white p-5 sm:p-6 space-y-5 shadow-sm">
                                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-primary/10">
@@ -784,7 +930,7 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                                 <div className="space-y-4">
                                     {items.map((item, index) => (
                                         <div key={item.id} className="relative p-4 rounded-2xl bg-slate-50 border border-slate-200 group">
-                                            <div className="grid grid-cols-12 gap-3">
+                                            <div className="grid grid-cols-12 gap-3 sm:items-end">
                                                 <div className="col-span-12 sm:col-span-4">
                                                     <label className="text-[10px] font-bold uppercase text-slate-400 mb-1 block">Loại tài sản</label>
                                                     <div className="relative">
@@ -799,7 +945,9 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                                                     </div>
                                                 </div>
                                                 <div className="col-span-12 sm:col-span-5">
-                                                    <label className="text-[10px] font-bold uppercase text-slate-400 mb-1 block">Số Serial / RFID</label>
+                                                    <label className="text-[10px] font-bold uppercase text-slate-400 mb-1 block">
+                                                        Số Serial / RFID
+                                                    </label>
                                                     <div className="flex items-center gap-2">
                                                         <div className="flex-1 min-w-0">
                                                             <InventorySearchableSelect
@@ -809,15 +957,20 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                                                                 isMachine={formData.issue_type === 'TRA_MAY'}
                                                                 isLoading={isInventoryLoading}
                                                                 isEmpty={!formData.warehouse_id}
+                                                                excludedSerials={items
+                                                                    .filter(it => it.id !== item.id)
+                                                                    .map(it => (it.item_code || '').trim())
+                                                                    .filter(Boolean)}
                                                             />
                                                         </div>
                                                         <button
                                                             type="button"
                                                             onClick={() => openScanner(index)}
-                                                            className="p-2.5 text-primary bg-primary/5 hover:bg-primary/10 rounded-xl transition-all shadow-sm border border-primary/10"
+                                                            className="h-10 w-10 shrink-0 inline-flex items-center justify-center text-primary bg-primary/5 hover:bg-primary/10 rounded-xl transition-all shadow-sm border border-primary/20"
                                                             title="Quét mã"
+                                                            aria-label="Quét mã serial"
                                                         >
-                                                            <ScanLine size={18} />
+                                                            <Camera className="w-4 h-4" />
                                                         </button>
                                                     </div>
                                                 </div>
@@ -828,15 +981,19 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                                                         min="1"
                                                         value={item.quantity}
                                                         onChange={(e) => updateItem(item.id, 'quantity', e.target.value)}
-                                                        className="w-full h-10 px-2 bg-white border border-slate-200 rounded-xl text-[13px] font-black text-slate-800 text-center outline-none focus:border-primary/40"
+                                                        disabled={formData.issue_type === 'TRA_VO'}
+                                                        className={clsx(
+                                                            "w-full h-10 px-2 bg-white border border-slate-200 rounded-xl text-[13px] font-black text-slate-800 text-center outline-none focus:border-primary/40",
+                                                            formData.issue_type === 'TRA_VO' && "bg-slate-100 text-slate-500 cursor-not-allowed"
+                                                        )}
                                                     />
                                                 </div>
 
-                                                <div className="col-span-4 sm:col-span-1 flex items-end justify-center pb-0.5">
+                                                <div className="col-span-4 sm:col-span-1 flex items-end justify-end sm:justify-center pb-0.5">
                                                     <button
                                                         type="button"
                                                         onClick={() => removeItem(item.id)}
-                                                        className="p-2.5 text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
+                                                        className="h-10 w-10 inline-flex items-center justify-center text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
                                                         title="Xóa dòng"
                                                     >
                                                         <Trash2 size={18} />

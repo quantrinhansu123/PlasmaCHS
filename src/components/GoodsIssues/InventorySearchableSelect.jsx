@@ -31,15 +31,20 @@ const InventorySearchableSelect = ({
     placeholder = "Chọn mã Serial/RFID...",
     isMachine = false,
     isEmpty = false,
-    isLoading = false
+    isLoading = false,
+    excludedSerials = []
 }) => {
     const [open, setOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
 
     // Group items by asset type (volume or machine_type)
     const groupedItems = useMemo(() => {
+        const blocked = new Set(excludedSerials.filter(Boolean));
+        blocked.delete(value);
+
         const filtered = items.filter(item => 
-            item.serial_number?.toLowerCase().includes(searchTerm.toLowerCase())
+            item.serial_number?.toLowerCase().includes(searchTerm.toLowerCase()) &&
+            !blocked.has(item.serial_number)
         );
 
         return filtered.reduce((acc, item) => {
@@ -48,7 +53,7 @@ const InventorySearchableSelect = ({
             acc[key].push(item);
             return acc;
         }, {});
-    }, [items, searchTerm, isMachine]);
+    }, [items, searchTerm, isMachine, excludedSerials, value]);
 
     const selectedItem = useMemo(() => 
         items.find(i => i.serial_number === value), 
@@ -130,13 +135,13 @@ const InventorySearchableSelect = ({
                                             type="button"
                                             onClick={() => handleSelect(item.serial_number)}
                                             className={cn(
-                                                "w-full flex items-center justify-between px-4 py-3 rounded-2xl text-[14px] font-bold transition-all group relative overflow-hidden",
+                                                "w-full flex items-center justify-between gap-4 px-4 py-3 rounded-2xl text-[14px] font-bold transition-all group relative overflow-hidden",
                                                 value === item.serial_number 
                                                     ? "bg-primary text-white shadow-xl shadow-primary/25 ring-1 ring-white/20" 
                                                     : "text-slate-600 hover:bg-slate-50 hover:text-primary hover:translate-x-1"
                                             )}
                                         >
-                                            <div className="flex items-center gap-3">
+                                            <div className="flex min-w-0 flex-1 items-center gap-3">
                                                 <div className={cn(
                                                     "w-8 h-8 rounded-xl flex items-center justify-center transition-all",
                                                     value === item.serial_number 
@@ -145,17 +150,17 @@ const InventorySearchableSelect = ({
                                                 )}>
                                                     <Package size={16} />
                                                 </div>
-                                                <div className="flex flex-col items-start translate-y-[1px]">
-                                                    <span className="font-mono tracking-tight leading-none">{item.serial_number}</span>
+                                                <div className="flex min-w-0 flex-col items-start translate-y-[1px]">
+                                                    <span className="w-full truncate font-mono tracking-tight leading-none">{item.serial_number}</span>
                                                     <span className={cn(
-                                                        "text-[10px] mt-1 font-bold",
+                                                        "mt-1 w-full truncate text-[10px] font-bold",
                                                         value === item.serial_number ? "text-white/60" : "text-slate-400"
                                                     )}>
                                                         {isMachine ? item.machine_type : item.volume}
                                                     </span>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-3">
+                                            <div className="flex shrink-0 items-center justify-end gap-3">
                                                 <span className={cn(
                                                     "text-[10px] px-2 py-1 rounded-lg font-black uppercase tracking-tight shadow-sm",
                                                     value === item.serial_number 
@@ -181,7 +186,7 @@ const InventorySearchableSelect = ({
                 <div className="p-2 border-t border-slate-100 bg-slate-50/30">
                     <div className="flex items-center gap-2 text-[10px] text-slate-400 font-bold">
                         <Info size={10} strokeWidth={3} />
-                        <span>Chỉ hiển thị hàng có sẵn tại kho</span>
+                        <span>Hiển thị tài sản theo kho đã chọn</span>
                     </div>
                 </div>
             </PopoverContent>
