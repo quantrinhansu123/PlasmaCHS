@@ -6,7 +6,7 @@ import { supabase } from '../../supabase/config';
 import { notificationService } from '../../utils/notificationService';
 import { formatPhoneNumber, validateMST, validatePhone } from '../../utils/taxUtils';
 
-export default function CustomerFormModal({ customer, onClose, onSuccess, categories, warehouses }) {
+export default function CustomerFormModal({ customer, onClose, onSuccess, categories, warehouses, isLeadMode = false }) {
     const isEdit = !!customer;
     const [isLoading, setIsLoading] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
@@ -15,6 +15,13 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
     const [isClosing, setIsClosing] = useState(false);
     const [taxError, setTaxError] = useState(false);
     const [phoneError, setPhoneError] = useState(false);
+
+    const getStoredAuthUser = useCallback(() => {
+        const id = localStorage.getItem('user_id') || sessionStorage.getItem('user_id') || '';
+        const name = localStorage.getItem('user_name') || sessionStorage.getItem('user_name') || '';
+        const department = localStorage.getItem('user_department') || sessionStorage.getItem('user_department') || '';
+        return { id, name, department };
+    }, []);
 
     const handleClose = useCallback(() => {
         setIsClosing(true);
@@ -41,7 +48,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
         invoice_email: '',
         care_expiry_date: '',
         care_assigned_at: '',
-        status: 'Thành công'
+        status: isLeadMode ? 'Chưa thành công' : 'Thành công'
     });
 
     useEffect(() => {
@@ -64,7 +71,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                 invoice_email: customer.invoice_email || '',
                 care_expiry_date: customer.care_expiry_date || '',
                 care_assigned_at: customer.care_assigned_at || '',
-                status: customer.status || 'Thành công'
+                status: customer.status || (isLeadMode ? 'Chưa thành công' : 'Thành công')
             });
         } else {
             // Auto generate CODE — find the true MAX code number, not just the latest created
@@ -99,10 +106,11 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
             setFormData(prev => ({
                 ...prev,
                 care_assigned_at: now.toISOString(),
-                care_expiry_date: expiry.toISOString().split('T')[0]
+                care_expiry_date: expiry.toISOString().split('T')[0],
+                status: isLeadMode ? 'Chưa thành công' : prev.status
             }));
         }
-    }, [isEdit, customer, warehouses]);
+    }, [isEdit, customer, warehouses, isLeadMode]);
 
     useEffect(() => {
         const fetchStaff = async () => {
@@ -128,6 +136,30 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
         fetchAgencies();
     }, []);
 
+    useEffect(() => {
+        if (isEdit) return;
+
+        const storedUser = getStoredAuthUser();
+        if (!storedUser.name && !storedUser.id) return;
+
+        const matchedStaff = staffList.find(
+            (u) => (storedUser.id && String(u.id) === String(storedUser.id)) ||
+                (storedUser.name && u.name === storedUser.name)
+        );
+
+        const autoName = matchedStaff?.name || storedUser.name;
+        const autoDepartment = matchedStaff?.department || storedUser.department || '';
+
+        if (!autoName) return;
+
+        setFormData(prev => ({
+            ...prev,
+            care_by: prev.care_by || autoName,
+            managed_by: prev.managed_by || autoName,
+            agency_name: prev.agency_name || autoDepartment
+        }));
+    }, [staffList, isEdit, getStoredAuthUser]);
+
     const handleChange = (e) => {
         const { name, value } = e.target;
 
@@ -143,12 +175,14 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                 ...prev,
                 care_assigned_at: value ? new Date(`${value}T12:00:00`).toISOString() : '',
             }));
-        } else if (name === 'managed_by') {
+        } else if (name === 'managed_by' || name === 'care_by') {
             const selectedStaff = staffList?.find(u => u.name === value);
             setFormData(prev => ({
                 ...prev,
-                managed_by: value,
-                agency_name: selectedStaff?.department || prev.agency_name
+                [name]: value,
+                agency_name: selectedStaff?.department || prev.agency_name,
+                managed_by: name === 'care_by' ? value : prev.managed_by,
+                care_by: name === 'managed_by' ? value : prev.care_by
             }));
         } else {
             setFormData(prev => ({ ...prev, [name]: value }));
@@ -486,6 +520,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                         value={formData.status}
                                         onChange={handleChange}
                                         className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white outline-none transition-all font-semibold text-slate-900 cursor-pointer"
+                                            disabled={isLeadMode}
                                     >
                                         <option value="" disabled>-- Chọn trạng thái --</option>
                                         <option value="Thành công">Thành công</option>
@@ -536,7 +571,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                             >
                                 {!isEdit && (
                                     <div>
-                                        <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5 ml-1 text-slate-600"><User className="w-4 h-4" /> Kinh doanh (Chăm sóc)</label>
+                                        <label className="flex items-start gap-1.5 min-h-[52px] text-[14px] font-semibold mb-1.5 ml-1 text-slate-600 leading-6"><User className="w-4 h-4 mt-1" /> Kinh doanh (Chăm sóc)</label>
                                         <select
                                             name="care_by"
                                             value={formData.care_by}
@@ -549,8 +584,8 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                     </div>
                                 )}
                                 <div>
-                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5 ml-1 text-slate-600">
-                                        <Building className="w-4 h-4" />
+                                    <label className="flex items-start gap-1.5 min-h-[52px] text-[14px] font-semibold mb-1.5 ml-1 text-slate-600 leading-6">
+                                        <Building className="w-4 h-4 mt-1" />
                                         Chi nhánh / VPĐD (Đại lý)
                                     </label>
                                     <input
@@ -567,7 +602,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                     </datalist>
                                 </div>
                                 <div>
-                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold mb-1.5 ml-1 text-slate-600"><User className="w-4 h-4" /> Nhân viên phụ trách (Sale/Chốt đơn)</label>
+                                    <label className="flex items-start gap-1.5 min-h-[52px] text-[14px] font-semibold mb-1.5 ml-1 text-slate-600 leading-6"><User className="w-4 h-4 mt-1" /> Nhân viên phụ trách (Sale/Chốt đơn)</label>
                                     <select
                                         name="managed_by"
                                         value={formData.managed_by}

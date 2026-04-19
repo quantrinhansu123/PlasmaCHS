@@ -30,9 +30,28 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
     const location = useLocation();
     const navigate = useNavigate();
     const { role, user } = usePermissions();
+
+    const normalizeRoleKey = (value) =>
+        (value || '')
+            .toString()
+            .trim()
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9]/g, '');
+
+    const normalizedRole = normalizeRoleKey(role);
+    const isAdminRole = normalizedRole === 'admin';
+    const isWarehouseRole = normalizedRole.includes('kho') || normalizedRole.includes('thukho');
+    const isSalesRole =
+        normalizedRole.includes('nvkd') ||
+        normalizedRole.includes('nhanvienkinhdoanh') ||
+        normalizedRole.includes('kinhdoanh') ||
+        normalizedRole.includes('sale');
     
     // Authorization check for Machine Code
-    const canEditMachineCode = role === 'Admin' || role === 'Thủ kho';
+    const canEditMachineCode = isAdminRole || isWarehouseRole;
+    const canEditApprovedQuantity = !isSalesRole;
 
     const [formData, setFormData] = useState({
         orangeNumber: '',
@@ -458,6 +477,9 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
                 .join(', ');
 
             // Map ĐNXM fields to orders table
+            const safeMachineCode = canEditMachineCode ? formData.machineCode : '';
+            const safeQuantityApproved = canEditApprovedQuantity ? formData.quantityApproved : '';
+
             const orderData = {
                 order_code: formData.orangeNumber || `DNXM-${Date.now().toString().slice(-6)}`,
                 customer_name: formData.customerName,
@@ -481,16 +503,11 @@ Thu hồi thực tế: ${ymdToDmy(formData.dateRecallActual)}.
 Phụ trách máy: ${formData.machineManager}. 
 PT Vận chuyển: ${shippingList}. 
 Kho: ${formData.warehouse || ''}.
-Mã máy: ${formData.machineCode}. 
-SL phê duyệt: ${formData.quantityApproved || ''}.
+Mã máy: ${safeMachineCode}. 
+SL phê duyệt: ${safeQuantityApproved || ''}.
 Ghi chú: ${formData.notes}`,
                 ordered_by: formData.requesterName || currentActorName,
-                customer_category: 'TM',
-                history: editOrderId ? undefined : JSON.stringify([{
-                    time: new Date().toISOString(),
-                    user: currentActorName,
-                    action: 'Tạo mới'
-                }])
+                customer_category: 'TM'
             };
 
             if (editOrderId) {
@@ -953,42 +970,53 @@ Ghi chú: ${formData.notes}`,
                                             className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
                                         />
                                     </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-foreground mb-1.5">Số lượng phê duyệt</label>
-                                        <input
-                                            type="text"
-                                            value={formData.quantityApproved}
-                                            onChange={(e) => handleInputChange('quantityApproved', e.target.value)}
-                                            className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                                        />
-                                    </div>
-                                    <div className="md:col-span-2">
-                                        <label className={clsx(
-                                            "block text-sm font-medium mb-1.5",
-                                            canEditMachineCode ? "text-foreground" : "text-muted-foreground"
-                                        )}>
-                                            Mã máy {!canEditMachineCode && <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded ml-1 text-muted-foreground font-normal">(Chỉ Admin/Kho)</span>}
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={formData.machineCode}
-                                            list="machine-ready-serial-options"
-                                            readOnly={!canEditMachineCode}
-                                            onChange={(e) => handleInputChange('machineCode', e.target.value)}
-                                            placeholder={canEditMachineCode ? "Nhập mã máy..." : "Chưa được gán mã"}
-                                            className={clsx(
-                                                "w-full px-4 py-2 border rounded-lg focus:outline-none transition-all",
-                                                canEditMachineCode 
-                                                    ? "bg-background border-border focus:ring-2 focus:ring-primary/20" 
-                                                    : "bg-muted/50 border-border/50 text-muted-foreground cursor-not-allowed italic font-normal"
-                                            )}
-                                        />
-                                        <datalist id="machine-ready-serial-options">
-                                            {availableMachineCodes.map((serial) => (
-                                                <option key={serial} value={serial} />
-                                            ))}
-                                        </datalist>
-                                    </div>
+                                    {!isSalesRole && (
+                                        <div>
+                                            <label className="block text-sm font-medium text-foreground mb-1.5">Số lượng phê duyệt</label>
+                                            <input
+                                                type="text"
+                                                value={formData.quantityApproved}
+                                                readOnly={!canEditApprovedQuantity}
+                                                onChange={(e) => handleInputChange('quantityApproved', e.target.value)}
+                                                placeholder={canEditApprovedQuantity ? "Nhập số lượng phê duyệt" : "NVKD không có quyền nhập"}
+                                                className={clsx(
+                                                    "w-full px-4 py-2 border rounded-lg focus:outline-none transition-all",
+                                                    canEditApprovedQuantity
+                                                        ? "bg-background border-border focus:ring-2 focus:ring-primary/20"
+                                                        : "bg-muted/50 border-border/50 text-muted-foreground cursor-not-allowed italic font-normal"
+                                                )}
+                                            />
+                                        </div>
+                                    )}
+                                    {!isSalesRole && (
+                                        <div className="md:col-span-2">
+                                            <label className={clsx(
+                                                "block text-sm font-medium mb-1.5",
+                                                canEditMachineCode ? "text-foreground" : "text-muted-foreground"
+                                            )}>
+                                                Mã máy {!canEditMachineCode && <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded ml-1 text-muted-foreground font-normal">(Chỉ Admin/Kho)</span>}
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={formData.machineCode}
+                                                list="machine-ready-serial-options"
+                                                readOnly={!canEditMachineCode}
+                                                onChange={(e) => handleInputChange('machineCode', e.target.value)}
+                                                placeholder={canEditMachineCode ? "Nhập mã máy..." : "Chưa được gán mã"}
+                                                className={clsx(
+                                                    "w-full px-4 py-2 border rounded-lg focus:outline-none transition-all",
+                                                    canEditMachineCode
+                                                        ? "bg-background border-border focus:ring-2 focus:ring-primary/20"
+                                                        : "bg-muted/50 border-border/50 text-muted-foreground cursor-not-allowed italic font-normal"
+                                                )}
+                                            />
+                                            <datalist id="machine-ready-serial-options">
+                                                {availableMachineCodes.map((serial) => (
+                                                    <option key={serial} value={serial} />
+                                                ))}
+                                            </datalist>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>

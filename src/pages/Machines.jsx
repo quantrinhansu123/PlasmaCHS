@@ -192,8 +192,8 @@ const Machines = () => {
             if (selectedDepartments.length > 0) query = query.in('department_in_charge', selectedDepartments);
             if (selectedWarehouses.length > 0) query = query.in('warehouse', selectedWarehouses);
 
-            // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-            if (role !== 'Admin' && department) {
+            // Apply warehouse filter for warehouse managers/staff only.
+            if (!isAdminOrManager && department) {
                 const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
                 query = query.ilike('warehouse', `%${userWhCode}%`);
             }
@@ -227,8 +227,8 @@ const Machines = () => {
                 if (selectedDepartments.length > 0) queries[key] = queries[key].in('department_in_charge', selectedDepartments);
                 if (selectedWarehouses.length > 0) queries[key] = queries[key].in('warehouse', selectedWarehouses);
 
-                // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-                if (role !== 'Admin' && department) {
+                // Apply warehouse filter for warehouse managers/staff only.
+                if (!isAdminOrManager && department) {
                     const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
                     queries[key] = queries[key].ilike('warehouse', `%${userWhCode}%`);
                 }
@@ -336,8 +336,8 @@ const Machines = () => {
                 query = query.in('warehouse', selectedWarehouses);
             }
 
-            // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-            if (role !== 'Admin' && department) {
+            // Apply warehouse filter for warehouse managers/staff only.
+            if (!isAdminOrManager && department) {
                 const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
                 query = query.ilike('warehouse', `%${userWhCode}%`);
             }

@@ -212,12 +212,13 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     ];
 
     const fetchAvailableCylindersWH = async () => {
-        if (availableCylsWH.length > 0 || isFetchingCylsWH) return;
+        if (availableCylsWH.length > 0 || isFetchingCylsWH || !order?.warehouse) return;
         setIsFetchingCylsWH(true);
         try {
             const { data } = await supabase
                 .from('cylinders')
-                .select('serial_number, volume, status')
+                .select('serial_number, volume, status, warehouse_id')
+                .eq('warehouse_id', order.warehouse)
                 .eq('status', 's\u1eb5n s\u00e0ng')
                 .order('serial_number', { ascending: true })
                 .limit(5000);
@@ -342,7 +343,11 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             return;
         }
 
-        const { data, error } = await supabase.from('cylinders').select('serial_number, status').in('serial_number', uniqueSerials);
+        const { data, error } = await supabase
+            .from('cylinders')
+            .select('serial_number, status, warehouse_id')
+            .eq('warehouse_id', order?.warehouse)
+            .in('serial_number', uniqueSerials);
         if (error) return;
 
         const validCylinders = data || [];
@@ -352,7 +357,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         for (const serial of uniqueSerials) {
             const match = validCylinders.find(c => c.serial_number === serial);
             if (!match) {
-                invalid.push(`${serial} (Không tồn tại hệ thống)`);
+                invalid.push(`${serial} (Không có trong kho hiện tại)`);
             } else if (match.status !== 'sẵn sàng') {
                 invalid.push(`${serial} (T/thái: ${match.status})`);
             } else {

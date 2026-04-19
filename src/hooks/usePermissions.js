@@ -41,6 +41,28 @@ const fetchRolePermissions = async (roleName) => {
     return fallback?.permissions || {};
 };
 
+const applyRolePermissionOverrides = (permissions, roleName) => {
+    const normalized = normalizeRoleKey(roleName);
+    const merged = { ...(permissions || {}) };
+
+    const isSalesRole =
+        normalized.includes('nvkd') ||
+        normalized.includes('nhanvienkinhdoanh') ||
+        normalized.includes('kinhdoanh') ||
+        normalized.includes('sale');
+
+    // NVKD needs to be able to create DNXM but approval stays role-gated in workflow UI.
+    if (isSalesRole) {
+        merged.dnxm = {
+            ...(merged.dnxm || {}),
+            view: true,
+            create: true,
+        };
+    }
+
+    return merged;
+};
+
 export const usePermissions = () => {
     const [permissions, setPermissions] = useState({});
     const [role, setRole] = useState(null);
@@ -75,7 +97,8 @@ export const usePermissions = () => {
                     setUser(userData);
                     setRole(userData.role);
                     setDepartment(userData.department || '');
-                    setPermissions(await fetchRolePermissions(userData.role));
+                    const rolePermissions = await fetchRolePermissions(userData.role);
+                    setPermissions(applyRolePermissionOverrides(rolePermissions, userData.role));
                 } else {
                     const safeRole = userRoleFromStorage && userRoleFromStorage !== 'Admin' ? userRoleFromStorage : null;
 
@@ -88,7 +111,7 @@ export const usePermissions = () => {
                     });
                     setRole(safeRole);
                     setDepartment(userDeptFromStorage);
-                    setPermissions({});
+                    setPermissions(applyRolePermissionOverrides({}, safeRole));
 
                     if (userRoleFromStorage === 'Admin' && !userData) {
                         console.warn('Security Warning: User claimed Admin role from storage but was not found in database.');

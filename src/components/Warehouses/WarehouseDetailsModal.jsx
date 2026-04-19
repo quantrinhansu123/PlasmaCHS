@@ -449,7 +449,7 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                     <div className="mt-6 grid grid-cols-2 md:grid-cols-5 gap-4 relative z-10 w-full overflow-x-auto custom-scrollbar pb-2">
                         {[
                             { label: 'Tổng số bình', value: stats.total_cylinders, icon: Package, color: 'text-primary' },
-                            { label: 'Tổng số máy', value: stats.total_machines, icon: Activity, color: 'text-violet-500' },
+                            { label: 'Tổng máy (mọi trạng thái)', value: stats.total_machines, icon: Activity, color: 'text-violet-500' },
                             { label: 'Sức chứa còn', value: stats.available_capacity, icon: Box, color: 'text-emerald-500' },
                             { label: 'Yêu cầu chờ', value: stats.active_orders, icon: Clock, color: 'text-amber-500' },
                             { label: 'Đang vận chuyển', value: stats.in_transit, icon: Truck, color: 'text-blue-500' }
@@ -480,7 +480,7 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                             <div className="flex items-center justify-between gap-3 mb-6">
                                 <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest flex items-center gap-2 min-w-0">
                                     <Box className="w-4 h-4 text-primary" />
-                                    Tồn kho hiện tại ({filteredInventory.length})
+                                    Tồn kho theo bộ lọc ({filteredInventory.length}/{inventory.length})
                                 </h3>
                                 {filteredInventory.length > 5 && (
                                     <button
@@ -548,6 +548,10 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                                     </button>
                                 </div>
                             </div>
+
+                            <p className="mb-5 text-xs font-semibold text-slate-500">
+                                Hiển thị theo bộ lọc: loại <span className="text-slate-700">{selectedType === 'ALL' ? 'Tất cả' : selectedType === 'MAY' ? 'Máy' : 'Bình'}</span>, trạng thái <span className="text-slate-700">{selectedStatus === 'ALL' ? 'Tất cả' : selectedStatus}</span>.
+                            </p>
 
                             {filteredInventory.length === 0 ? (
                                 <div className="p-12 text-center border-2 border-dashed border-slate-200 rounded-[2rem] bg-white">

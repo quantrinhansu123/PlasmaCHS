@@ -338,25 +338,48 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
     };
 
     const handleScanSuccess = (code) => {
+        const normalizedCode = (code || '').toString().trim();
+        if (!normalizedCode) return;
+
         if (activeScanningIndex !== null) {
             const itemToUpdate = items[activeScanningIndex];
-            updateItem(itemToUpdate.id, 'item_code', code);
+
+            // For machine issue, only accept serials that exist in current warehouse suggestion list.
+            if (formData.issue_type === 'TRA_MAY') {
+                const matchedMachine = inventoryItems.find(
+                    (i) => (i.serial_number || '').trim().toUpperCase() === normalizedCode.toUpperCase()
+                );
+                if (!matchedMachine) {
+                    notificationService.add({
+                        title: 'Mã máy không hợp lệ',
+                        description: `Mã ${normalizedCode} không thuộc danh sách máy sẵn sàng của kho đã chọn.`,
+                        type: 'error'
+                    });
+                    return;
+                }
+                updateItemWithInventory(itemToUpdate.id, matchedMachine.serial_number);
+            } else {
+                updateItem(itemToUpdate.id, 'item_code', normalizedCode);
+            }
+
             setIsScannerOpen(false);
             setActiveScanningIndex(null);
         } else {
             // Batch scanning for "Chọn nhanh"
-            const invItem = inventoryItems.find(i => i.serial_number === code);
+            const invItem = inventoryItems.find(
+                (i) => (i.serial_number || '').trim().toUpperCase() === normalizedCode.toUpperCase()
+            );
             if (invItem) {
                 const wasAdded = addInventoryItemIfMissing(invItem);
                 notificationService.add({
                     title: wasAdded ? 'Đã thêm vỏ từ QR' : 'Mã đã được quét',
-                    description: wasAdded ? code : `${code} đã tồn tại trong danh sách`,
+                    description: wasAdded ? normalizedCode : `${normalizedCode} đã tồn tại trong danh sách`,
                     type: wasAdded ? 'success' : 'warning'
                 });
             } else {
                 notificationService.add({
                     title: 'Không tìm thấy mã trong kho',
-                    description: code,
+                    description: normalizedCode,
                     type: 'error'
                 });
             }
@@ -450,6 +473,55 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
             const invalidRows = items.filter(i => (Number(i.quantity) || 0) > 1);
             if (invalidRows.length > 0) {
                 alert('Mỗi vỏ trả phải tương ứng 1 mã serial. Vui lòng để số lượng mỗi dòng bằng 1.');
+                return;
+            }
+        }
+
+        if (formData.issue_type === 'TRA_MAY') {
+            const invalidRows = validItems.filter((i) => {
+                const qty = Number(i.quantity) || 0;
+                return qty !== 1;
+            });
+            if (invalidRows.length > 0) {
+                alert('Mỗi máy phải tương ứng đúng 1 mã serial. Vui lòng để số lượng mỗi dòng bằng 1.');
+                return;
+            }
+
+            const missingItemIdRows = validItems.filter((i) => !i.item_id || !(i.item_code || '').trim());
+            if (missingItemIdRows.length > 0) {
+                alert('Phiếu xuất máy chỉ được chọn từ danh sách máy sẵn sàng trong kho. Không dùng mã nhập tay linh tinh.');
+                return;
+            }
+
+            const serials = validItems.map((i) => (i.item_code || '').trim().toUpperCase()).filter(Boolean);
+            const uniqueSerials = new Set(serials);
+            if (uniqueSerials.size !== serials.length) {
+                alert('Danh sách mã máy đang bị trùng. Vui lòng kiểm tra lại.');
+                return;
+            }
+
+            const { data: machineRows, error: machineError } = await supabase
+                .from('machines')
+                .select('id, serial_number, status, warehouse')
+                .in('serial_number', [...uniqueSerials]);
+
+            if (machineError) {
+                alert('Không thể kiểm tra mã máy trong kho: ' + machineError.message);
+                return;
+            }
+
+            const normalizedWarehouse = (formData.warehouse_id || '').trim();
+            const dbMap = new Map((machineRows || []).map((m) => [String(m.serial_number || '').trim().toUpperCase(), m]));
+            const invalidSerial = [...uniqueSerials].find((serial) => {
+                const machine = dbMap.get(serial);
+                if (!machine) return true;
+                if (String(machine.warehouse || '').trim() !== normalizedWarehouse) return true;
+                if (String(machine.status || '').toLowerCase().trim() === 'thuộc khách hàng') return true;
+                return false;
+            });
+
+            if (invalidSerial) {
+                alert(`Mã máy ${invalidSerial} không hợp lệ với kho hiện tại hoặc không còn trạng thái sẵn sàng.`);
                 return;
             }
         }

@@ -132,6 +132,15 @@ const Customers = () => {
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
     const [selectedCustomer, setSelectedCustomer] = useState(null);
+    const [statusApprovalModal, setStatusApprovalModal] = useState({
+        open: false,
+        customerId: null,
+        customerName: '',
+        targetStatus: '',
+        warehouseId: '',
+        isSubmitting: false,
+        error: '',
+    });
 
     const [selectedCategories, setSelectedCategories] = useState([]);
     const [selectedManagedBy, setSelectedManagedBy] = useState([]);
@@ -765,33 +774,7 @@ const Customers = () => {
         );
     };
 
-    const handleStatusChange = async (id, newStatus) => {
-        if (id == null || newStatus == null || newStatus === '') {
-            alert('❌ Không cập nhật được: thiếu mã khách hoặc trạng thái.');
-            return;
-        }
-
-        let selectedWarehouseId = null;
-        if (filterType === 'lead' && newStatus === 'Thành công') {
-            if (!warehousesList || warehousesList.length === 0) {
-                alert('⚠️ Chưa có danh sách kho hoạt động để gán khách hàng.');
-                return;
-            }
-            const optionsText = warehousesList
-                .map((warehouse, idx) => `${idx + 1}. ${warehouse.name}`)
-                .join('\n');
-            const picked = window.prompt(
-                `Chọn kho gán cho khách hàng (nhập số thứ tự):\n${optionsText}`
-            );
-            if (!picked) return;
-            const pickedIndex = parseInt(picked, 10) - 1;
-            if (pickedIndex < 0 || pickedIndex >= warehousesList.length) {
-                alert('❌ Lựa chọn kho không hợp lệ.');
-                return;
-            }
-            selectedWarehouseId = warehousesList[pickedIndex].id;
-        }
-
+    const runStatusUpdate = async (id, newStatus, selectedWarehouseId = null) => {
         const patch = {
             status: newStatus,
             success_at: newStatus === 'Thành công' ? new Date().toISOString() : null,
@@ -856,6 +839,61 @@ const Customers = () => {
                     : '';
             alert('❌ Không thể cập nhật trạng thái: ' + raw + networkHint);
         }
+    };
+
+    const handleStatusChange = async (id, newStatus) => {
+        if (id == null || newStatus == null || newStatus === '') {
+            alert('❌ Không cập nhật được: thiếu mã khách hoặc trạng thái.');
+            return;
+        }
+
+        if (filterType === 'lead' && newStatus === 'Thành công') {
+            const selectedCustomerRow = customers.find((c) => c.id === id);
+            setStatusApprovalModal({
+                open: true,
+                customerId: id,
+                customerName: selectedCustomerRow?.name || '',
+                targetStatus: newStatus,
+                warehouseId: warehousesList?.[0]?.id || '',
+                isSubmitting: false,
+                error: '',
+            });
+            return;
+        }
+
+        await runStatusUpdate(id, newStatus, null);
+    };
+
+    const closeStatusApprovalModal = () => {
+        setStatusApprovalModal({
+            open: false,
+            customerId: null,
+            customerName: '',
+            targetStatus: '',
+            warehouseId: '',
+            isSubmitting: false,
+            error: '',
+        });
+    };
+
+    const submitStatusApproval = async () => {
+        if (!statusApprovalModal.customerId) return;
+
+        if (!statusApprovalModal.warehouseId) {
+            setStatusApprovalModal((prev) => ({
+                ...prev,
+                error: 'Vui lòng chọn kho để gán khách hàng trước khi duyệt.',
+            }));
+            return;
+        }
+
+        setStatusApprovalModal((prev) => ({ ...prev, isSubmitting: true, error: '' }));
+        await runStatusUpdate(
+            statusApprovalModal.customerId,
+            statusApprovalModal.targetStatus,
+            statusApprovalModal.warehouseId
+        );
+        closeStatusApprovalModal();
     };
 
 
@@ -2543,7 +2581,80 @@ const Customers = () => {
                     onSuccess={handleFormSubmitSuccess}
                     categories={CUSTOMER_CATEGORIES}
                     warehouses={warehousesList}
+                    isLeadMode={location.pathname === '/khach-hang-lead'}
                 />
+            )}
+
+            {statusApprovalModal.open && (
+                <div className="fixed inset-0 z-[100020] flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm" onClick={closeStatusApprovalModal} />
+                    <div className="relative w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+                        <div className="flex items-start justify-between gap-4">
+                            <div>
+                                <h3 className="text-xl font-black text-slate-800">Duyệt khách hàng thành công</h3>
+                                <p className="mt-1 text-sm text-slate-500">
+                                    {statusApprovalModal.customerName
+                                        ? `Khách hàng: ${statusApprovalModal.customerName}`
+                                        : 'Vui lòng chọn kho để gán khách hàng.'}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={closeStatusApprovalModal}
+                                className="h-9 w-9 rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-100"
+                                aria-label="Đóng"
+                            >
+                                <X size={16} className="mx-auto" />
+                            </button>
+                        </div>
+
+                        <div className="mt-5 space-y-2">
+                            <label className="block text-sm font-bold text-slate-700">Kho gán cho khách hàng</label>
+                            <select
+                                value={statusApprovalModal.warehouseId}
+                                onChange={(e) =>
+                                    setStatusApprovalModal((prev) => ({
+                                        ...prev,
+                                        warehouseId: e.target.value,
+                                        error: '',
+                                    }))
+                                }
+                                className="w-full h-12 rounded-2xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40"
+                            >
+                                <option value="">-- Chọn kho --</option>
+                                {warehousesList.map((warehouse) => (
+                                    <option key={warehouse.id} value={warehouse.id}>
+                                        {warehouse.name}
+                                    </option>
+                                ))}
+                            </select>
+                            {warehousesList.length === 0 && (
+                                <p className="text-xs font-semibold text-amber-600">Hiện chưa có kho hoạt động để gán.</p>
+                            )}
+                            {statusApprovalModal.error && (
+                                <p className="text-xs font-semibold text-rose-600">{statusApprovalModal.error}</p>
+                            )}
+                        </div>
+
+                        <div className="mt-6 flex items-center justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={closeStatusApprovalModal}
+                                className="h-11 px-5 rounded-2xl border border-slate-300 text-slate-700 font-bold hover:bg-slate-100"
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                type="button"
+                                onClick={submitStatusApproval}
+                                disabled={statusApprovalModal.isSubmitting || warehousesList.length === 0}
+                                className="h-11 px-5 rounded-2xl bg-primary text-white font-bold hover:brightness-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {statusApprovalModal.isSubmitting ? 'Đang duyệt...' : 'Xác nhận duyệt'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {isDetailsModalOpen && selectedCustomer && (
