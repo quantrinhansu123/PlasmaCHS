@@ -41,7 +41,8 @@ ALTER TABLE cylinders ADD CONSTRAINT check_cylinder_status CHECK (
         'chờ nạp', 
         'hỏng', 
         'thuộc khách hàng', 
-        'bình rỗng'
+        'bình rỗng',
+        'đã trả ncc'
     )
 );
 

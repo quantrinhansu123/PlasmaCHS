@@ -45,7 +45,8 @@ ALTER TABLE machines ADD CONSTRAINT check_machine_status CHECK (
         'thuộc khách hàng', 
         'kiểm tra', 
         'đang sửa', 
-        'bảo trì'
+        'bảo trì',
+        'đã trả ncc'
     )
 );
 
