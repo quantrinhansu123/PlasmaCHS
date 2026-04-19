@@ -6,6 +6,12 @@ import { supabase } from '../../supabase/config';
 import { toast } from 'react-toastify';
 import usePermissions from '../../hooks/usePermissions';
 import { notificationService } from '../../utils/notificationService';
+import {
+    isAdminRole as isAdminRoleHelper,
+    isSalesRole as isSalesRoleHelper,
+    isWarehouseRole as isWarehouseRoleHelper,
+    normalizeRole,
+} from '../../utils/accessControl';
 import MachineHandoverPrintTemplate from '../MachineHandoverPrintTemplate';
 import GoodsIssuePrintTemplate from '../GoodsIssues/GoodsIssuePrintTemplate';
 import OrderHistoryTimeline from '../Orders/OrderHistoryTimeline';
@@ -31,23 +37,10 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
     const navigate = useNavigate();
     const { role, user } = usePermissions();
 
-    const normalizeRoleKey = (value) =>
-        (value || '')
-            .toString()
-            .trim()
-            .toLowerCase()
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .replace(/[^a-z0-9]/g, '');
-
-    const normalizedRole = normalizeRoleKey(role);
-    const isAdminRole = normalizedRole === 'admin';
-    const isWarehouseRole = normalizedRole.includes('kho') || normalizedRole.includes('thukho');
-    const isSalesRole =
-        normalizedRole.includes('nvkd') ||
-        normalizedRole.includes('nhanvienkinhdoanh') ||
-        normalizedRole.includes('kinhdoanh') ||
-        normalizedRole.includes('sale');
+    const normalizedRole = normalizeRole(role);
+    const isAdminRole = isAdminRoleHelper(role);
+    const isWarehouseRole = isWarehouseRoleHelper(role);
+    const isSalesRole = isSalesRoleHelper(role);
     
     // Authorization check for Machine Code
     const canEditMachineCode = isAdminRole || isWarehouseRole;
@@ -1107,9 +1100,9 @@ Ghi chú: ${formData.notes}`,
 
                         const r = role?.toLowerCase() || '';
                         let canApprove = false;
-                        if (r === 'admin' || r === 'giám đốc') canApprove = true;
+                        if (isAdminRole) canApprove = true;
                         else if (isLevel1 && (r.includes('lead') || r.includes('trưởng'))) canApprove = true;
-                        else if (isLevel2 && (r === 'admin' || r === 'giám đốc')) canApprove = true;
+                        else if (isLevel2 && isAdminRole) canApprove = true;
                         else if (isLevel3 && (r.includes('kho'))) canApprove = true;
 
                         const canEdit = ['CHO_DUYET', 'CHO_CTY_DUYET', 'KHO_XU_LY', 'DA_DUYET'].includes(formData.status);
@@ -1161,7 +1154,7 @@ Ghi chú: ${formData.notes}`,
                     })()}
 
                     {/* Kho xử lý panel - hiện khi thủ kho đang xử lý */}
-                    {formData.status === 'KHO_XU_LY' && (role?.toLowerCase().includes('kho') || role === 'Admin') && (
+                    {formData.status === 'KHO_XU_LY' && (isWarehouseRole || isAdminRole) && (
                         <div className="w-full bg-amber-50 border border-amber-200 rounded-2xl p-4 mt-2 animate-in fade-in duration-300">
                             <div className="flex items-center gap-2 mb-3">
                                 <Warehouse size={18} className="text-amber-700" />

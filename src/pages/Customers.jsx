@@ -55,6 +55,11 @@ import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 import { notificationService } from '../utils/notificationService';
+import {
+    isAdminRole,
+    isLeadSaleRole,
+    isSalesRole,
+} from '../utils/accessControl';
 
 ChartJS.register(
     CategoryScale,
@@ -113,7 +118,7 @@ function appendLeadCustomerFilters(query, {
 }
 
 const Customers = () => {
-    const { role: rawRole } = usePermissions();
+    const { role: rawRole, user, roleScope } = usePermissions();
     const normalizeRole = (r) => {
         if (!r) return '';
         return r.toLowerCase()
@@ -122,7 +127,7 @@ const Customers = () => {
             .replace(/\s+/g, '_');
     };
     const role = normalizeRole(rawRole);
-    const isAdminOrManager = role === 'admin' || role === 'manager' || role === 'quan_ly';
+    const isAdminOrManager = isAdminRole(role);
     const location = useLocation();
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
@@ -324,6 +329,38 @@ const Customers = () => {
             let query = supabase
                 .from('customers')
                 .select('*', { count: 'exact' });
+
+            const currentUserNames = [...new Set([
+                user?.name,
+                user?.username,
+                localStorage.getItem('user_name'),
+                sessionStorage.getItem('user_name')
+            ].filter(Boolean))];
+
+            if (!isAdminRole(rawRole) && (isSalesRole(rawRole) || isLeadSaleRole(rawRole) || roleScope === 'own' || roleScope === 'team')) {
+                let visibleNames = currentUserNames;
+
+                if (isLeadSaleRole(rawRole) || roleScope === 'team') {
+                    const managedNames = (user?.nguoi_quan_ly || '')
+                        .split(',')
+                        .map((name) => name.trim())
+                        .filter(Boolean);
+
+                    visibleNames = [...new Set([
+                        ...currentUserNames,
+                        ...managedNames,
+                    ])];
+                }
+
+                const ownerClause = [
+                    ...visibleNames.map((name) => `managed_by.eq."${String(name).replace(/"/g, '\\"')}"`),
+                    ...visibleNames.map((name) => `care_by.eq."${String(name).replace(/"/g, '\\"')}"`),
+                ].join(',');
+
+                if (ownerClause) {
+                    query = query.or(ownerClause);
+                }
+            }
 
             if (filterType === 'lead') {
                 query = appendLeadCustomerFilters(query, {

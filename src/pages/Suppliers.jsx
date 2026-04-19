@@ -41,6 +41,7 @@ import SupplierFormModal from '../components/Suppliers/SupplierFormModal';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
+import { isAdminRole } from '../utils/accessControl';
 
 ChartJS.register(
     CategoryScale,
@@ -64,6 +65,7 @@ const TABLE_COLUMNS_DEF = [
 
 const Suppliers = () => {
     const { role } = usePermissions();
+    const canManageSuppliers = isAdminRole(role);
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
     const [searchTerm, setSearchTerm] = useState('');
@@ -566,7 +568,7 @@ const Suppliers = () => {
                                             >
                                                 <Edit size={18} />
                                             </button>
-                                            {(role === 'admin' || role === 'manager') && (
+                                            {canManageSuppliers && (
                                                 <button 
                                                     onClick={() => handleDeleteSupplier(supplier.id, supplier.name)} 
                                                     className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-950 bg-rose-50 border border-rose-100 shadow-sm transition-all"
@@ -763,7 +765,7 @@ const Suppliers = () => {
                                                 >
                                                     <Edit size={18} />
                                                 </button>
-                                                {(role === 'admin' || role === 'manager') && (
+                                                {canManageSuppliers && (
                                                     <button 
                                                         onClick={() => handleDeleteSupplier(supplier.id, supplier.name)} 
                                                         className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" 

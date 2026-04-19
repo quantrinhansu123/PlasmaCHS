@@ -49,6 +49,7 @@ import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import { SHIPPER_STATUSES, SHIPPING_TYPES } from '../constants/shipperConstants';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
+import { isAdminRole } from '../utils/accessControl';
 
 ChartJS.register(
     CategoryScale,
@@ -73,6 +74,7 @@ const TABLE_COLUMNS_DEF = [
 
 const Shippers = () => {
     const { role } = usePermissions();
+    const canManageShippers = isAdminRole(role);
     const navigate = useNavigate();
 
     const [activeView, setActiveView] = useState('list');
@@ -695,7 +697,7 @@ const Shippers = () => {
                                     <div className="flex items-center justify-end gap-3 pt-3 border-t border-border/70 mt-1">
                                         <button onClick={() => handleViewShipper(shipper)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg"><Eye size={16} /></button>
                                         <button onClick={() => handleEditShipper(shipper)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
-                                        {(role === 'admin' || role === 'manager') && (
+                                        {canManageShippers && (
                                             <button onClick={() => handleDeleteShipper(shipper.id, shipper.name)} className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg"><Trash2 size={16} /></button>
                                         )}
                                     </div>
@@ -980,7 +982,7 @@ const Shippers = () => {
                                                 <button onClick={() => handleEditShipper(shipper)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
                                                     <Edit className="w-4 h-4" />
                                                 </button>
-                                                {(role === 'admin' || role === 'manager') && (
+                                                {canManageShippers && (
                                                     <button onClick={() => handleDeleteShipper(shipper.id, shipper.name)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>

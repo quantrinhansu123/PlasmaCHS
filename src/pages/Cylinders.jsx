@@ -47,6 +47,7 @@ import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import { CYLINDER_STATUSES } from '../constants/machineConstants';
 import usePermissions from '../hooks/usePermissions';
+import { isAdminRole, isWarehouseRole } from '../utils/accessControl';
 import { supabase } from '../supabase/config';
 
 ChartJS.register(
@@ -79,6 +80,7 @@ const CATEGORY_OPTIONS = [
 
 const Cylinders = () => {
     const { role, department } = usePermissions();
+    const canManageCylinders = isAdminRole(role);
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
     const [selectedIds, setSelectedIds] = useState([]);
@@ -187,7 +189,7 @@ const Cylinders = () => {
             if (selectedWarehouses.length > 0) query = query.in('warehouse_id', selectedWarehouses);
 
             // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-            if (role !== 'Admin' && department) {
+            if (isWarehouseRole(role) && department) {
                 const userBranch = department.includes('-') ? department.split('-')[0].trim() : department.trim();
                 const { data: matchedWarehouses } = await supabase
                     .from('warehouses')
@@ -245,7 +247,7 @@ const Cylinders = () => {
 
             // Apply same filters to stat queries
             let matchedWhIds = [];
-            if (role !== 'Admin' && department) {
+            if (isWarehouseRole(role) && department) {
                 const userBranch = department.includes('-') ? department.split('-')[0].trim() : department.trim();
                 const { data: whs } = await supabase.from('warehouses').select('id').ilike('name', `%${userBranch}%`);
                 if (whs) matchedWhIds = whs.map(w => w.id);
@@ -263,7 +265,7 @@ const Cylinders = () => {
                 if (selectedCategories.length > 0) queries[key] = queries[key].in('category', selectedCategories);
                 if (selectedWarehouses.length > 0) queries[key] = queries[key].in('warehouse_id', selectedWarehouses);
                 
-                if (role !== 'Admin' && department) {
+                if (isWarehouseRole(role) && department) {
                     if (matchedWhIds.length > 0) {
                         if (selectedWarehouses.length > 0) {
                             const scopedWhIds = selectedWarehouses.filter(id => matchedWhIds.includes(id));
@@ -381,7 +383,7 @@ const Cylinders = () => {
             }
 
             // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-            if (role !== 'Admin' && department) {
+            if (isWarehouseRole(role) && department) {
                 const userBranch = department.includes('-') ? department.split('-')[0].trim() : department.trim();
                 
                 // Get matching warehouse IDs for this branch
@@ -1075,7 +1077,7 @@ const Cylinders = () => {
                                         <div className="flex items-center gap-3">
                                             <button onClick={() => handleViewCylinder(cylinder)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg"><Eye size={16} /></button>
                                             <button onClick={() => handleEditCylinder(cylinder)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
-                                            {(role === 'admin' || role === 'manager') && (
+                                            {canManageCylinders && (
                                                 <button onClick={() => handleDeleteCylinder(cylinder.id, cylinder.serial_number)} className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg"><Trash2 size={16} /></button>
                                             )}
                                         </div>
@@ -1457,7 +1459,7 @@ const Cylinders = () => {
                                                 <button onClick={() => handleEditCylinder(cylinder)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
                                                     <Edit className="w-4 h-4" />
                                                 </button>
-                                                {(role === 'admin' || role === 'manager') && (
+                                                {canManageCylinders && (
                                                     <button onClick={() => handleDeleteCylinder(cylinder.id, cylinder.serial_number)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>

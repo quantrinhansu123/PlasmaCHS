@@ -48,6 +48,7 @@ import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import { MACHINE_STATUSES, MACHINE_TYPES } from '../constants/machineConstants';
 import usePermissions from '../hooks/usePermissions';
+import { isAdminRole } from '../utils/accessControl';
 import { supabase } from '../supabase/config';
 
 ChartJS.register(
@@ -73,15 +74,7 @@ const TABLE_COLUMNS = [
 
 const Machines = () => {
     const { role: rawRole, department } = usePermissions();
-    const normalizeRole = (r) => {
-        if (!r) return '';
-        return r.toLowerCase()
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .replace(/\s+/g, '_');
-    };
-    const role = normalizeRole(rawRole);
-    const isAdminOrManager = role === 'admin' || role === 'manager' || role === 'quan_ly';
+    const isAdminOrManager = isAdminRole(rawRole);
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
     const [selectedIds, setSelectedIds] = useState([]);

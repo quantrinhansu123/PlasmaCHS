@@ -44,6 +44,14 @@ import OrderStatusUpdater from '../components/Orders/OrderStatusUpdater';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import usePermissions from '../hooks/usePermissions';
+import {
+    isAdminRole,
+    isLeadSaleRole,
+    isSalesRole,
+    isShipperRole,
+    isWarehouseRole,
+    normalizeRole,
+} from '../utils/accessControl';
 
 const getApprovedQuantityFromRequest = (request) => {
     const directApproved = parseInt(request?.quantityApproved ?? request?.quantity_approved, 10);
@@ -140,21 +148,12 @@ export default function MachineRequests() {
     const fetchData = async () => {
         setLoading(true);
         try {
-            // Normalize role
-            const normalizeRoleKey = (value) =>
-                (value || '')
-                    .toString()
-                    .trim()
-                    .toLowerCase()
-                    .normalize('NFD')
-                    .replace(/[\u0300-\u036f]/g, '')
-                    .replace(/\s+/g, '_');
-
-            const normalizedRole = normalizeRoleKey(role);
-            const isAdmin = normalizedRole === 'admin';
-            const isLeader = normalizedRole.includes('lead');
-            const isThuKhoRole = normalizedRole.includes('thu_kho');
-            const isShipperRole = normalizedRole.includes('shipper') || normalizedRole.includes('giao_hang');
+            const normalizedRole = normalizeRole(role);
+            const isAdmin = isAdminRole(role);
+            const isLeader = isLeadSaleRole(role);
+            const isThuKhoRole = normalizedRole.includes('thukho');
+            const shipperRole = isShipperRole(role);
+            const warehouseRole = isWarehouseRole(role);
             
             // Get user info
             const storageUserName = localStorage.getItem('user_name') || sessionStorage.getItem('user_name') || '';
@@ -187,12 +186,19 @@ export default function MachineRequests() {
             }
 
             // Shipper chỉ nhìn thấy đơn được giao cho mình
-            if (isShipperRole && !isAdmin) {
+            if (shipperRole && !isAdmin) {
                 query = query.eq('delivery_unit', storageUserName);
             }
 
+            if (warehouseRole && department) {
+                const warehouseCode = department.includes('-')
+                    ? department.split('-')[0].trim()
+                    : department.trim();
+                query = query.eq('warehouse', warehouseCode);
+            }
+
             // Role-based visibility filtering
-            if (!isAdmin && !isThuKhoRole && !isShipperRole) {
+            if (!isAdmin && !isThuKhoRole && !shipperRole && !warehouseRole) {
                 // Leaders see their own + managed staff's requests
                 if (isLeader) {
                     if (visibleSalesNames.length > 0) {
@@ -200,7 +206,7 @@ export default function MachineRequests() {
                     }
                 } 
                 // Regular NVKD (Sales) only see their own requests
-                else {
+                else if (isSalesRole(role)) {
                     const myNames = [user?.name, user?.username, storageUserName].filter(Boolean);
                     if (myNames.length > 0) {
                         query = query.in('ordered_by', myNames);

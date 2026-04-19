@@ -47,6 +47,7 @@ import MobilePagination from '../components/layout/MobilePagination';
 import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import { WAREHOUSE_STATUSES } from '../constants/warehouseConstants';
 import usePermissions from '../hooks/usePermissions';
+import { isAdminRole } from '../utils/accessControl';
 import { supabase } from '../supabase/config';
 
 ChartJS.register(
@@ -72,15 +73,7 @@ const TABLE_COLUMNS_DEF = [
 
 const Warehouses = () => {
     const { role: rawRole } = usePermissions();
-    const normalizeRole = (r) => {
-        if (!r) return '';
-        return r.toLowerCase()
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .replace(/\s+/g, '_');
-    };
-    const role = normalizeRole(rawRole);
-    const isAdminOrManager = role === 'admin' || role === 'manager' || role === 'quan_ly';
+    const isAdminOrManager = isAdminRole(rawRole);
     const navigate = useNavigate();
 
     const [activeView, setActiveView] = useState('list');

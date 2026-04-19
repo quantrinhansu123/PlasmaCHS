@@ -56,6 +56,7 @@ import { RECEIPT_STATUSES, TABLE_COLUMNS } from '../constants/goodsReceiptConsta
 import { supabase } from '../supabase/config';
 import { notificationService } from '../utils/notificationService';
 import usePermissions from '../hooks/usePermissions';
+import { isWarehouseRole } from '../utils/accessControl';
 
 // Register Chart.js components
 ChartJS.register(
@@ -200,7 +201,7 @@ const GoodsReceipts = () => {
                 .select('*, items:goods_receipt_items(item_name, item_type)');
 
             // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-            if (role !== 'Admin' && department) {
+            if (isWarehouseRole(role) && department) {
                 const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
                 query = query.eq('warehouse_id', userWhCode);
                 // Note: If warehouse_id in DB is UUID and department is Name, 

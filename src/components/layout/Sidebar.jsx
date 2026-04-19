@@ -6,10 +6,16 @@ import { clsx } from 'clsx';
 import { sidebarMenu } from '../../constants/sidebarMenu';
 import { actionModuleGroups } from '../../constants/actionModuleData';
 import { usePermissions } from '../../hooks/usePermissions';
-import { canAccessPath } from '../../utils/accessControl';
+import { canAccessPath, normalizeRole } from '../../utils/accessControl';
 
 function Sidebar({ isOpen, setIsOpen }) {
   const { role, permissions } = usePermissions();
+  const hasRoleAccess = (allowedRoles, currentRole) => {
+    if (!allowedRoles || allowedRoles.length === 0) return true;
+    const normalizedCurrent = normalizeRole(currentRole);
+    return allowedRoles.some((r) => normalizeRole(r) === normalizedCurrent);
+  };
+
   return (
     <>
       {isOpen && (
@@ -47,7 +53,7 @@ function Sidebar({ isOpen, setIsOpen }) {
 
         <nav className="flex-1 overflow-y-auto py-6 space-y-2 custom-scrollbar flex flex-col items-center lg:items-stretch">
           {sidebarMenu
-            .filter(item => (!item.roles || item.roles.includes(role)) && canAccessPath(item.path, role, permissions))
+            .filter(item => hasRoleAccess(item.roles, role) && canAccessPath(item.path, role, permissions))
             .map((item) => (
               <NavItem
                 key={item.path}

@@ -15,6 +15,7 @@ const ROUTE_RULES = [
     { prefix: '/quan-ly-thiet-bi', anyOfModules: ['machines', 'cylinders', 'reports'] },
     { prefix: '/may', module: 'machines' },
     { prefix: '/binh', module: 'cylinders' },
+    { prefix: '/phieu-sua-chua', module: 'machines' },
 
     { prefix: '/kho', anyOfModules: ['warehouses', 'reports'] },
     { prefix: '/kho/dieu-chuyen', module: 'warehouses' },
@@ -46,12 +47,45 @@ const SORTED_RULES = [...ROUTE_RULES].sort((a, b) => b.prefix.length - a.prefix.
 
 export const normalizeRole = (role) => {
     if (!role) return '';
-    return String(role).trim().toLowerCase();
+    return String(role)
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .toLowerCase();
 };
 
 export const isAdminRole = (role) => {
     const r = normalizeRole(role);
-    return r === 'admin' || r === 'quản trị' || r === 'quan tri';
+    return r === 'admin' || r === 'quantri' || r === 'company' || r === 'congty' || r === 'manager' || r === 'quanly';
+};
+
+export const isSalesRole = (role) => {
+    const r = normalizeRole(role);
+    return r.includes('nvkd') || r.includes('nhanvienkinhdoanh') || r.includes('kinhdoanh') || r.includes('sale');
+};
+
+export const isLeadSaleRole = (role) => {
+    const r = normalizeRole(role);
+    return r.includes('leadsale') || r.includes('truongkinhdoanh') || r.includes('lead');
+};
+
+export const isWarehouseRole = (role) => {
+    const r = normalizeRole(role);
+    return r.includes('thukho') || r.includes('kho') || r.includes('warehouse');
+};
+
+export const isShipperRole = (role) => {
+    const r = normalizeRole(role);
+    return r.includes('shipper') || r.includes('giaohang');
+};
+
+export const getDataVisibilityScope = (role) => {
+    if (isAdminRole(role)) return 'all';
+    if (isLeadSaleRole(role)) return 'team';
+    if (isSalesRole(role)) return 'own';
+    if (isWarehouseRole(role)) return 'warehouse';
+    if (isShipperRole(role)) return 'assigned_orders';
+    return 'own';
 };
 
 export const hasModuleView = (permissions, moduleId) => {

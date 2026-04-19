@@ -37,6 +37,7 @@ import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import { RECOVERY_STATUSES, RECOVERY_TABLE_COLUMNS } from '../constants/recoveryConstants';
 import usePermissions from '../hooks/usePermissions';
+import { isAdminRole } from '../utils/accessControl';
 import {
     ArcElement,
     BarElement,
@@ -79,6 +80,7 @@ const CHART_COLORS = [
 const CylinderRecoveries = () => {
     const navigate = useNavigate();
     const { role } = usePermissions();
+    const canDeleteRecoveries = isAdminRole(role);
     const [activeView, setActiveView] = useState('list');
     const [searchTerm, setSearchTerm] = useState('');
     const [loading, setLoading] = useState(true);
@@ -623,7 +625,7 @@ const CylinderRecoveries = () => {
                                                 >
                                                     <Edit className="w-4 h-4" />
                                                 </button>
-                                                {(role === 'admin' || role === 'manager') && (
+                                                {canDeleteRecoveries && (
                                                     <button 
                                                         onClick={() => handleDelete(recovery.id, recovery.recovery_code)} 
                                                         className="p-2 text-red-700 bg-red-50 border border-red-100 rounded-lg"

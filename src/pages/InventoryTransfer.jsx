@@ -29,6 +29,7 @@ import BarcodeScanner from '../components/Common/BarcodeScanner';
 import MachineHandoverPrintTemplate from '../components/MachineHandoverPrintTemplate';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
 import usePermissions from '../hooks/usePermissions';
+import { isWarehouseRole } from '../utils/accessControl';
 import { supabase } from '../supabase/config';
 import { notificationService } from '../utils/notificationService';
 
@@ -164,7 +165,7 @@ const InventoryTransfer = () => {
         if (data) {
             setWarehouses(data);
 
-            if (role !== 'Admin' && department) {
+            if (isWarehouseRole(role) && department) {
                 const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
                 const userWh = data.find(w => w.id === userWhCode);
                 if (userWh) {
@@ -736,7 +737,7 @@ const InventoryTransfer = () => {
                                         onValueChange={(val) => setFormData(prev => ({ ...prev, from_warehouse_id: val }))}
                                         placeholder="Chọn kho xuất..."
                                         searchPlaceholder="Tìm kho..."
-                                        disabled={role !== 'Admin' && department}
+                                        disabled={isWarehouseRole(role) && department}
                                     />
                                 </div>
                                 <div className="flex md:hidden items-center justify-center -my-2.5 text-primary/30 pointer-events-none">

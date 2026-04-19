@@ -61,6 +61,13 @@ import {
 import usePermissions from '../hooks/usePermissions';
 import useReports from '../hooks/useReports';
 import { supabase } from '../supabase/config';
+import {
+    isAdminRole,
+    isLeadSaleRole,
+    isShipperRole as isShipperRoleHelper,
+    isWarehouseRole as isWarehouseRoleHelper,
+    normalizeRole as normalizeRoleKey,
+} from '../utils/accessControl';
 
 // Register Chart.js components
 ChartJS.register(
@@ -283,22 +290,12 @@ const Orders = () => {
     const fetchOrders = async () => {
         setIsLoading(true);
         try {
-            const normalizeRoleKey = (value) =>
-                (value || '')
-                    .toString()
-                    .trim()
-                    .toLowerCase()
-                    .normalize('NFD')
-                    .replace(/[\u0300-\u036f]/g, '')
-                    .replace(/\s+/g, '_');
-
             const normalizedRole = normalizeRoleKey(role);
-            const isAdmin = normalizedRole === 'admin';
-            const isLeader = normalizedRole.includes('lead');
-            const isThuKhoRole = normalizedRole.includes('thu_kho');
-            const isShipperRole = normalizedRole.includes('shipper') || normalizedRole.includes('giao_hang');
-            const isWarehouseRole =
-                !isThuKhoRole && normalizedRole.includes('kho');
+            const isAdmin = isAdminRole(role);
+            const isLeader = isLeadSaleRole(role);
+            const isThuKhoRole = normalizedRole.includes('thukho');
+            const isShipperRole = isShipperRoleHelper(role);
+            const isWarehouseRole = isWarehouseRoleHelper(role) && !isThuKhoRole;
             const storageUserName =
                 localStorage.getItem('user_name') ||
                 sessionStorage.getItem('user_name') ||

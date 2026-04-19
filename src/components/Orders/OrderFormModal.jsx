@@ -10,6 +10,7 @@ import {
 import usePermissions from '../../hooks/usePermissions';
 import { useReports } from '../../hooks/useReports';
 import { supabase } from '../../supabase/config';
+import { isAdminRole, isWarehouseRole } from '../../utils/accessControl';
 import BarcodeScanner from '../Common/BarcodeScanner';
 import OrderFormReadOnlyView from './OrderFormReadOnlyView';
 import clsx from 'clsx';
@@ -262,7 +263,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 let finalWarehouses = data;
                 
                 // If not admin and user has a department, filter the list
-                if (role !== 'Admin' && department) {
+                if (isWarehouseRole(role) && department) {
                     const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
                     finalWarehouses = data.filter(wh => wh.name === userWhCode || wh.id === userWhCode);
                 }
@@ -272,7 +273,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 if (!isEdit && finalWarehouses.length > 0) {
                     // Try to find the matched warehouse first, otherwise take the first available
                     let defaultWh = finalWarehouses[0].id;
-                    if (role !== 'Admin' && department) {
+                    if (isWarehouseRole(role) && department) {
                         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
                         const matched = finalWarehouses.find(wh => wh.name === userWhCode || wh.id === userWhCode);
                         if (matched) defaultWh = matched.id;
@@ -798,21 +799,26 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         e.preventDefault();
         setErrorMsg('');
 
+        const failSubmit = (message) => {
+            setErrorMsg(message);
+            toast.error(message);
+        };
+
         const validItems = formData.items.filter(it => it.quantity > 0);
         const needsCylinderWarehouse = validItems.some((it) => it.productType?.startsWith('BINH') && it.quantity > 0);
         if (needsCylinderWarehouse && !formData.warehouse) {
-            setErrorMsg('Vui lòng chọn kho xuất hàng để gán mã bình.');
+            failSubmit('Vui lòng chọn kho xuất hàng để gán mã bình.');
             return;
         }
 
         const phoneRegex = /^(0|84)(3|5|7|8|9)([0-9]{8})$/;
         if (!formData.customerId || !formData.recipientName || !formData.recipientAddress || !formData.recipientPhone || validItems.length === 0) {
-            setErrorMsg('Vui lòng chọn khách hàng, nhập thông tin giao hàng và ít nhất một loại sản phẩm với số lượng lớn hơn 0.');
+            failSubmit('Vui lòng chọn khách hàng, nhập thông tin giao hàng và ít nhất một loại sản phẩm với số lượng lớn hơn 0.');
             return;
         }
 
         if (!phoneRegex.test(formData.recipientPhone.replace(/\s/g, ''))) {
-            setErrorMsg('Số điện thoại không đúng định dạng (VD: 0987xxxxxx, 10 chữ số).');
+            failSubmit('Số điện thoại không đúng định dạng (VD: 0987xxxxxx, 10 chữ số).');
             return;
         }
 
@@ -820,7 +826,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         const zeroPrice = validItems.filter(it => !it.unitPrice || Number(it.unitPrice) === 0);
         if (zeroPrice.length > 0) {
             const names = zeroPrice.map(it => it.productType || 'Sản phẩm').join(', ');
-            setErrorMsg(`⚠️ Vui lòng nhập đơn giá cho: ${names}. Đơn giá không được để trống hoặc bằng 0đ.`);
+            failSubmit(`Vui lòng nhập đơn giá cho: ${names}. Đơn giá không được để trống hoặc bằng 0đ.`);
             return;
         }
 
@@ -842,7 +848,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 'Admin hệ thống';
 
             let initialStatus = 'CHO_DUYET';
-            if (!isEdit && (role === 'admin' || role === 'thu_kho')) {
+            if (!isEdit && (isAdminRole(role) || isWarehouseRole(role))) {
                 initialStatus = 'DA_DUYET';
             }
 
@@ -959,7 +965,9 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
             onSuccess();
         } catch (error) {
             console.error('Error saving multi-product order:', error);
-            setErrorMsg(error.message || 'Lỗi khi lưu đơn hàng đa sản phẩm.');
+            const msg = error.message || 'Lỗi khi lưu đơn hàng đa sản phẩm.';
+            setErrorMsg(msg);
+            toast.error(msg);
         } finally {
             setIsLoading(false);
         }

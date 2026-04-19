@@ -52,6 +52,7 @@ import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import { supabase } from '../supabase/config';
 import { ISSUE_STATUSES, ISSUE_TABLE_COLUMNS, ISSUE_TYPES } from '../constants/goodsIssueConstants';
 import usePermissions from '../hooks/usePermissions';
+import { isWarehouseRole } from '../utils/accessControl';
 
 // Register ChartJS components
 ChartJS.register(
@@ -180,7 +181,7 @@ const GoodsIssues = () => {
                 .select('*');
 
             // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-            if (role !== 'Admin' && department) {
+            if (isWarehouseRole(role) && department) {
                 const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
                 query = query.eq('warehouse_id', userWhCode);
             }

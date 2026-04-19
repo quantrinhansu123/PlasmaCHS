@@ -2,6 +2,7 @@
 
 export const USER_ROLES = [
     { id: 'Admin', label: 'Quản trị viên (Admin)' },
+    { id: 'Manager', label: 'Quản lý (Manager)' },
     { id: 'Nhân viên kinh doanh', label: 'Nhân viên kinh doanh' },
     { id: 'Nhân viên kỹ thuật', label: 'Nhân viên kỹ thuật' },
     { id: 'Kế toán', label: 'Kế toán' },

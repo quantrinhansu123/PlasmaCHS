@@ -1,5 +1,14 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabase/config';
+import {
+    getDataVisibilityScope,
+    isAdminRole,
+    isLeadSaleRole,
+    isSalesRole,
+    isShipperRole,
+    isWarehouseRole,
+    normalizeRole,
+} from '../utils/accessControl';
 
 const normalizeRoleKey = (value) => {
     if (!value) return '';
@@ -127,18 +136,22 @@ export const usePermissions = () => {
         fetchPermissionsAndUser();
     }, []);
 
-    const canView = (module) => role === 'Admin' || permissions[module]?.view || false;
-    const canCreate = (module) => role === 'Admin' || permissions[module]?.create || false;
-    const canEdit = (module) => role === 'Admin' || permissions[module]?.edit || false;
-    const canDelete = (module) => role === 'Admin' || permissions[module]?.delete || false;
+    const isCompanyRole = isAdminRole(role);
 
-    const canViewAllReports = () => role === 'Admin' || permissions.reports?.view_all || false;
-    const canViewOwnReports = () => role === 'Admin' || permissions.reports?.view_own || false;
-    const canViewWarehouseReports = () => role === 'Admin' || permissions.reports?.view_warehouse || false;
-    const canViewErrorReports = () => role === 'Admin' || permissions.reports?.view_errors || false;
-    const canExportReports = () => role === 'Admin' || permissions.reports?.export || false;
-    const canScheduleReports = () => role === 'Admin' || permissions.reports?.schedule || false;
-    const canUpdateReports = () => role === 'Admin' || permissions.reports?.update || false;
+    const canView = (module) => isCompanyRole || permissions[module]?.view || false;
+    const canCreate = (module) => isCompanyRole || permissions[module]?.create || false;
+    const canEdit = (module) => isCompanyRole || permissions[module]?.edit || false;
+    const canDelete = (module) => isCompanyRole || permissions[module]?.delete || false;
+
+    const canViewAllReports = () => isCompanyRole || permissions.reports?.view_all || false;
+    const canViewOwnReports = () => isCompanyRole || permissions.reports?.view_own || false;
+    const canViewWarehouseReports = () => isCompanyRole || permissions.reports?.view_warehouse || false;
+    const canViewErrorReports = () => isCompanyRole || permissions.reports?.view_errors || false;
+    const canExportReports = () => isCompanyRole || permissions.reports?.export || false;
+    const canScheduleReports = () => isCompanyRole || permissions.reports?.schedule || false;
+    const canUpdateReports = () => isCompanyRole || permissions.reports?.update || false;
+
+    const roleNormalization = normalizeRole(role);
 
     return {
         permissions,
@@ -146,6 +159,13 @@ export const usePermissions = () => {
         department,
         user,
         loading,
+        isCompanyRole,
+        isSalesRole: isSalesRole(role),
+        isLeadSaleRole: isLeadSaleRole(role),
+        isWarehouseRole: isWarehouseRole(role),
+        isShipperRole: isShipperRole(role),
+        roleScope: getDataVisibilityScope(role),
+        normalizedRole: roleNormalization,
         canView,
         canCreate,
         canEdit,

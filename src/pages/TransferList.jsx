@@ -35,6 +35,7 @@ import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import PrintOptionsModal from '../components/Orders/PrintOptionsModal';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
+import { isAdminRole, isWarehouseRole } from '../utils/accessControl';
 
 const PAGE_SIZE = 30;
 const DEFAULT_COLUMN_ORDER = ['code', 'status', 'transaction_type', 'from', 'to', 'items', 'qty', 'note', 'date'];
@@ -615,8 +616,7 @@ export default function TransferList() {
         }
     };
 
-    const normalizedRole = (role || '').toString().toLowerCase();
-    const canApproveTransfer = normalizedRole === 'admin' || normalizedRole.includes('kho');
+    const canApproveTransfer = isAdminRole(role) || isWarehouseRole(role);
 
     const handleApproveTransfer = async (record) => {
         if (!record || record.status === 'DA_DUYET') return;
