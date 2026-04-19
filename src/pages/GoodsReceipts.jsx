@@ -581,7 +581,7 @@ const GoodsReceipts = () => {
                             const { error: cylSyncError } = await supabase
                                 .from('cylinders')
                                 .update({
-                                    status: item.item_status || 'sẵn sàng',
+                                    status: 'sẵn sàng',
                                     warehouse_id: receipt.warehouse_id,
                                     customer_id: null,
                                     customer_name: null,
@@ -594,7 +594,7 @@ const GoodsReceipts = () => {
                                 .from('cylinders')
                                 .insert({
                                     serial_number: normalizedSerial,
-                                    status: item.item_status || 'sẵn sàng',
+                                    status: 'sẵn sàng',
                                     warehouse_id: receipt.warehouse_id,
                                     category: 'BV',
                                     volume: item.item_name, // e.g. "Bình 4L", "Bình oxi"
@@ -616,7 +616,7 @@ const GoodsReceipts = () => {
                             const { error: machSyncError } = await supabase
                                 .from('machines')
                                 .update({
-                                    status: item.item_status || 'sẵn sàng',
+                                    status: 'sẵn sàng',
                                     warehouse: receipt.warehouse_id,
                                     customer_id: null,
                                     customer_name: null
@@ -629,7 +629,7 @@ const GoodsReceipts = () => {
                                 .from('machines')
                                 .insert({
                                     serial_number: normalizedSerial,
-                                    status: item.item_status || 'sẵn sàng',
+                                    status: 'sẵn sàng',
                                     warehouse: receipt.warehouse_id,
                                     machine_type: item.item_name, // e.g. "Máy PlasmaRosy"
                                     customer_name: null,
@@ -702,17 +702,17 @@ const GoodsReceipts = () => {
 
             // Log notification
             await notificationService.add({
-                title: 'Nhập kho thành công',
+                title: '✅ Nhập kho thành công',
                 description: `Phiếu nhập ${receipt.receipt_code} đã được phê duyệt và cập nhật tồn kho.`,
                 type: 'success',
                 link: '/bao-cao/kho'
             });
 
-            alert('✅ Đã duyệt phiếu nhập và cập nhật tồn kho thành công!');
+            toast.success(`✅ Đã duyệt phiếu nhập ${receipt.receipt_code} thành công!`);
             fetchReceipts();
         } catch (error) {
             console.error('Error approving receipt:', error);
-            alert('❌ Lỗi khi duyệt phiếu: ' + error.message);
+            toast.error(`❌ Lỗi khi duyệt phiếu: ${error.message}`);
         }
     };
 

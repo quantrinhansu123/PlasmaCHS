@@ -576,6 +576,58 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
 
             if (itemsError) throw itemsError;
 
+            if (!isEdit && isReturnToSupplier) {
+                const normalizedSerials = [...new Set(
+                    validItems
+                        .map((item) => (item.item_code || '').toString().trim().toUpperCase())
+                        .filter(Boolean)
+                )];
+
+                if (normalizedSerials.length > 0) {
+                    if (formData.issue_type === 'TRA_MAY') {
+                        // Fetch machine IDs by serial (ilike = case-insensitive) to avoid case mismatch
+                        const { data: machineRows, error: machineFetchError } = await supabase
+                            .from('machines')
+                            .select('id')
+                            .or(normalizedSerials.map(s => `serial_number.ilike.${s}`).join(','));
+                        if (machineFetchError) throw machineFetchError;
+                        const machineIds = (machineRows || []).map(m => m.id);
+                        if (machineIds.length > 0) {
+                            const { error: machineStatusError } = await supabase
+                                .from('machines')
+                                .update({
+                                    status: 'đã trả ncc',
+                                    warehouse: null,
+                                    customer_id: null,
+                                    customer_name: null
+                                })
+                                .in('id', machineIds);
+                            if (machineStatusError) throw machineStatusError;
+                        }
+                    } else {
+                        // Fetch cylinder IDs by serial (ilike = case-insensitive)
+                        const { data: cylinderRows, error: cylinderFetchError } = await supabase
+                            .from('cylinders')
+                            .select('id')
+                            .or(normalizedSerials.map(s => `serial_number.ilike.${s}`).join(','));
+                        if (cylinderFetchError) throw cylinderFetchError;
+                        const cylinderIds = (cylinderRows || []).map(c => c.id);
+                        if (cylinderIds.length > 0) {
+                            const { error: cylinderStatusError } = await supabase
+                                .from('cylinders')
+                                .update({
+                                    status: 'đã trả ncc',
+                                    warehouse_id: null,
+                                    customer_id: null,
+                                    customer_name: null
+                                })
+                                .in('id', cylinderIds);
+                            if (cylinderStatusError) throw cylinderStatusError;
+                        }
+                    }
+                }
+            }
+
             // INVENTORY DEDUCTION: Deduct from warehouse inventory when creating a new goods issue
             if (!isEdit) {
                 // Group items by product type for inventory deduction
@@ -630,7 +682,11 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
             onSuccess();
         } catch (error) {
             console.error('Error saving goods issue:', error);
-            alert('❌ Có lỗi xảy ra: ' + error.message);
+            notificationService.add({
+                title: '❌ Lỗi khi lưu phiếu',
+                description: error.message,
+                type: 'error'
+            });
         } finally {
             setIsLoading(false);
         }

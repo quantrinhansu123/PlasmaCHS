@@ -405,6 +405,22 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
             return;
         }
 
+        // Warn (not block) if BINH/MAY items have no serials — status sync won't happen on approve
+        if (formData.receipt_type === 'BINH' || formData.receipt_type === 'MAY') {
+            const allMissingSerials = items.every(item => {
+                const serials = (item.assigned_serials || [])
+                    .map(s => (typeof s === 'string' ? s : s?.serial)?.trim())
+                    .filter(Boolean);
+                return serials.length === 0;
+            });
+            if (allMissingSerials) {
+                toast.warn(
+                    '⚠️ Chưa nhập mã serial. Sau khi duyệt phiếu, bình/máy sẽ không được tự động cập nhật trạng thái vào danh sách.',
+                    { autoClose: 6000 }
+                );
+            }
+        }
+
         setIsSubmitting(true);
         try {
             // Flatten items for DB storage

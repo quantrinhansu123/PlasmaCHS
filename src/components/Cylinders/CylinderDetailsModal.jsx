@@ -293,6 +293,7 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                                             return cylinder.customers?.name || cylinder.customer_name?.split(' / ')[0] || '—';
                                         }
                                         if (status === 'đang vận chuyển') return '—';
+                                        if (status === 'đã trả ncc') return 'NCC';
                                         if (['sẵn sàng', 'bình rỗng', 'chờ nạp', 'hỏng'].includes(status)) {
                                             return warehouseName || cylinder.warehouses?.name || '—';
                                         }

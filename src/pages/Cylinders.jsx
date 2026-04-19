@@ -765,6 +765,8 @@ const Cylinders = () => {
                 return 'bg-amber-50 text-amber-600 border-amber-100';
             case 'hỏng':
                 return 'bg-rose-50 text-rose-500 border-rose-100';
+            case 'đã trả ncc':
+                return 'bg-orange-50 text-orange-600 border-orange-100';
             default:
                 return 'bg-slate-50 text-slate-500 border-slate-100';
         }
@@ -853,6 +855,8 @@ const Cylinders = () => {
                 return 'hover:bg-amber-50/60';
             case 'hỏng':
                 return 'hover:bg-rose-50/60';
+            case 'đã trả ncc':
+                return 'hover:bg-orange-50/60';
             default:
                 return 'hover:bg-primary/5';
         }
@@ -865,6 +869,7 @@ const Cylinders = () => {
         status === 'đang vận chuyển' && 'border-l-indigo-400',
         (status === 'chờ nạp' || status === 'bình rỗng') && 'border-l-amber-400',
         status === 'hỏng' && 'border-l-rose-400',
+        status === 'đã trả ncc' && 'border-l-orange-400',
         !status && 'border-l-transparent'
     );
 
@@ -884,6 +889,10 @@ const Cylinders = () => {
         // 3. Warehouse / Ready / Empty / Repair Logic: Show Warehouse Name
         if (['sẵn sàng', 'bình rỗng', 'chờ nạp', 'hỏng'].includes(status) || !status) {
             return cylinder.warehouses?.name || '—';
+        }
+
+        if (status === 'đã trả ncc') {
+            return 'NCC';
         }
 
         // Fallback

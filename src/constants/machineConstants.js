@@ -2,6 +2,7 @@ export const MACHINE_STATUSES = [
     { id: 'chưa xác định', label: 'Chưa xác định' },
     { id: 'sẵn sàng', label: 'Sẵn sàng' },
     { id: 'thuộc khách hàng', label: 'Thuộc khách hàng' },
+    { id: 'đã trả ncc', label: 'Đã trả NCC' },
     { id: 'kiểm tra', label: 'Kiểm tra' },
     { id: 'đang sửa', label: 'Đang sửa' },
     { id: 'bảo trì', label: 'Bảo trì' },
@@ -68,6 +69,7 @@ export const CYLINDER_STATUSES = [
     { id: 'hỏng', label: 'Hỏng' },
     { id: 'thuộc khách hàng', label: 'Thuộc khách hàng' },
     { id: 'bình rỗng', label: 'Bình rỗng' },
+    { id: 'đã trả ncc', label: 'Đã trả NCC' },
 ];
 
 export const HANDLE_TYPES = [

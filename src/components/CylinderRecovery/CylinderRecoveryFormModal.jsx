@@ -582,7 +582,13 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                 for (const serial of serialNumbers) {
                     await supabase
                         .from('cylinders')
-                        .update({ status: 'sẵn sàng', customer_name: null, updated_at: new Date().toISOString() })
+                        .update({
+                            status: 'bình rỗng',
+                            warehouse_id: formData.warehouse_id,
+                            customer_id: null,
+                            customer_name: null,
+                            updated_at: new Date().toISOString()
+                        })
                         .eq('serial_number', serial);
                 }
 

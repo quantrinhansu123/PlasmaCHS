@@ -721,6 +721,8 @@ const Machines = () => {
                 return 'bg-amber-50 text-amber-600 border-amber-100';
             case 'đang sửa':
                 return 'bg-rose-50 text-rose-500 border-rose-100';
+            case 'đã trả ncc':
+                return 'bg-orange-50 text-orange-600 border-orange-100';
             default:
                 return 'bg-slate-50 text-slate-500 border-slate-100';
         }
@@ -798,6 +800,8 @@ const Machines = () => {
                 return 'hover:bg-amber-50/60';
             case 'đang sửa':
                 return 'hover:bg-rose-50/60';
+            case 'đã trả ncc':
+                return 'hover:bg-orange-50/60';
             default:
                 return 'hover:bg-primary/5';
         }
@@ -809,6 +813,7 @@ const Machines = () => {
         status === 'thuộc khách hàng' && 'border-l-blue-400',
         (status === 'kiểm tra' || status === 'bảo trì') && 'border-l-amber-400',
         status === 'đang sửa' && 'border-l-rose-400',
+        status === 'đã trả ncc' && 'border-l-orange-400',
         !status && 'border-l-transparent'
     );
 
