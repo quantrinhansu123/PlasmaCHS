@@ -7,26 +7,32 @@ import { actionModuleGroups, allActionSections } from '../constants/actionModule
 import useBookmarkedPaths from '../hooks/useBookmarkedPaths';
 import { ModuleCard } from '../components/ui/ModuleCard';
 import usePermissions from '../hooks/usePermissions';
+import { canAccessPath } from '../utils/accessControl';
 
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState('chuc-nang');
   const [searchQuery, setSearchQuery] = useState('');
   const { bookmarkedPaths, isBookmarked, toggleBookmark } = useBookmarkedPaths();
-  const { role } = usePermissions();
+  const { role, permissions } = usePermissions();
 
   const allSections = allActionSections;
-  const moduleCards = actionModuleGroups.map((group) => ({
-    icon: group.icon,
-    title: group.title,
-    description: group.description,
-    href: group.path,
-    colorScheme: group.colorScheme,
-  }));
+  const moduleCards = actionModuleGroups
+    .filter((group) =>
+      canAccessPath(group.path, role, permissions) &&
+      group.items?.some((item) => canAccessPath(item.href || item.path, role, permissions))
+    )
+    .map((group) => ({
+      icon: group.icon,
+      title: group.title,
+      description: group.description,
+      href: group.path,
+      colorScheme: group.colorScheme,
+    }));
 
   const allBookmarkedItems = allSections
     .flatMap((section) => section.items)
-    .filter((item) => bookmarkedPaths.includes(item.path));
+    .filter((item) => bookmarkedPaths.includes(item.path) && canAccessPath(item.path, role, permissions));
 
   const username = localStorage.getItem('user_name') || "Lê Minh Công";
   
@@ -76,8 +82,9 @@ const Dashboard = () => {
           <div className="space-y-8">
             {allSections.map((section, idx) => {
               const filteredItems = section.items.filter(item =>
-                item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                item.description.toLowerCase().includes(searchQuery.toLowerCase())
+                canAccessPath(item.path, role, permissions) &&
+                (item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  item.description.toLowerCase().includes(searchQuery.toLowerCase()))
               );
 
               if (filteredItems.length === 0) return null;

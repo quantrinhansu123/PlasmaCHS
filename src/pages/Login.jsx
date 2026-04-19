@@ -74,9 +74,9 @@ const Login = () => {
     useEffect(() => {
         const isAuthed = localStorage.getItem('is_authenticated') === 'true';
         if (isAuthed) {
-            navigate(from, { replace: true });
+            navigate('/trang-chu', { replace: true });
         }
-    }, [navigate, from]);
+    }, [navigate]);
 
     const handleLogin = async (e) => {
         e.preventDefault();
@@ -123,7 +123,7 @@ const Login = () => {
             toast.success(`Chào mừng trở lại, ${user.name}!`);
 
             setTimeout(() => {
-                navigate(from, { replace: true });
+                navigate('/trang-chu', { replace: true });
             }, 500);
         } catch (err) {
             console.error('Login error:', err);

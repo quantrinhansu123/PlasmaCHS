@@ -3,10 +3,11 @@ import { ChevronLeft, Home, ClipboardList } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { clsx } from 'clsx';
 import { usePermissions } from '../../hooks/usePermissions';
+import { canAccessPath } from '../../utils/accessControl';
 
 function MobileBottomNav() {
   const navigate = useNavigate();
-  const { role } = usePermissions();
+  const { role, permissions } = usePermissions();
   const location = useLocation();
 
   const isHome = location.pathname === '/trang-chu' || location.pathname === '/';
@@ -38,7 +39,7 @@ function MobileBottomNav() {
       </button>
 
       {/* Right Slot: Shipping Tasks or Spacer */}
-      {(role === 'Admin' || role === 'Shipper') ? (
+      {canAccessPath('/nhiem-vu-giao-hang', role, permissions) ? (
         <button
           onClick={() => navigate('/nhiem-vu-giao-hang')}
           className={clsx(

@@ -5,6 +5,8 @@ import { ModuleCard } from '../components/ui/ModuleCard';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { actionModuleSectionsByPath } from '../constants/actionModuleData';
 import useBookmarkedPaths from '../hooks/useBookmarkedPaths';
+import usePermissions from '../hooks/usePermissions';
+import { canAccessPath } from '../utils/accessControl';
 
 const ModulePage = () => {
   const [activeTab, setActiveTab] = useState('tat-ca');
@@ -12,11 +14,12 @@ const ModulePage = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { bookmarkedPaths, isBookmarked, toggleBookmark } = useBookmarkedPaths();
+  const { role, permissions } = usePermissions();
 
   const data = actionModuleSectionsByPath[location.pathname] || [];
   const filteredBookmarkedItems = data
     .flatMap((section) => section.items)
-    .filter((item) => bookmarkedPaths.includes(item.path))
+    .filter((item) => bookmarkedPaths.includes(item.path) && canAccessPath(item.path, role, permissions))
     .filter(
       (item) =>
         item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -97,8 +100,9 @@ const ModulePage = () => {
           {data.map((section, idx) => {
             // Filter items by search query
             const filteredItems = section.items.filter(item => 
-              item.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-              item.description.toLowerCase().includes(searchQuery.toLowerCase())
+              canAccessPath(item.path, role, permissions) &&
+              (item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                item.description.toLowerCase().includes(searchQuery.toLowerCase()))
             );
 
             if (filteredItems.length === 0) return null;
@@ -127,7 +131,7 @@ const ModulePage = () => {
             );
           })}
           
-          {searchQuery && !data.some(s => s.items.some(i => i.title.toLowerCase().includes(searchQuery.toLowerCase()) || i.description.toLowerCase().includes(searchQuery.toLowerCase()))) && (
+          {searchQuery && !data.some(s => s.items.some(i => canAccessPath(i.path, role, permissions) && (i.title.toLowerCase().includes(searchQuery.toLowerCase()) || i.description.toLowerCase().includes(searchQuery.toLowerCase())))) && (
             <div className="text-center py-16 text-muted-foreground bg-card/50 rounded-2xl border border-border">
               Không tìm thấy kết quả phù hợp cho "{searchQuery}"
             </div>
