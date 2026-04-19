@@ -10,12 +10,36 @@ import { notificationService } from '../../utils/notificationService';
 import MachineIssueRequestForm from '../Machines/MachineIssueRequestForm';
 import usePermissions from '../../hooks/usePermissions';
 
+const parseNoteFieldList = (noteText, prefix) => {
+    const lines = (noteText || '').split('\n').map(l => l.trim());
+    const line = lines.find((l) => l.startsWith(prefix));
+    if (!line) return [];
+    const raw = line.replace(prefix, '').replace(/\.$/, '').trim();
+    if (!raw) return [];
+    return raw.split(',').map(s => s.trim()).filter(Boolean);
+};
+
+const stripWarehouseAssignmentSection = (noteText) => {
+    if (!noteText) return '';
+    return noteText
+        .replace(/\n*=== MÁY ĐÃ GÁN TỪ KHO ===[\s\S]*$/g, '')
+        .trim();
+};
+
+const isMachineProductType = (productType) => {
+    if (!productType) return false;
+    const normalized = String(productType).trim();
+    if (normalized.startsWith('MAY')) return true;
+    return ['TM', 'SD', 'FM', 'Khac', 'KHAC', 'DNXM'].includes(normalized);
+};
+
 export default function OrderStatusUpdater({ order, warehouseName, userRole, onClose, onUpdateSuccess }) {
     const { user } = usePermissions();
     const [isLoading, setIsLoading] = useState(false);
     const [deliveryUnit, setDeliveryUnit] = useState(order?.delivery_unit || '');
     const [selectedFile, setSelectedFile] = useState(null);
     const [errorMsg, setErrorMsg] = useState('');
+    const [quantityValidationMsg, setQuantityValidationMsg] = useState('');
     const [scannedSerials, setScannedSerials] = useState('');
     const [activeTab, setActiveTab] = useState('actions');
     const [shippers, setShippers] = useState([]);
@@ -40,8 +64,16 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     // Warehouse assignment when company approves DNXM
     const [approvedWarehouseId, setApprovedWarehouseId] = useState(order?.warehouse || '');
     const [warehouseList, setWarehouseList] = useState([]);
+    const [machineAssignments, setMachineAssignments] = useState([]);
+    const [availableMachineSerials, setAvailableMachineSerials] = useState([]);
+    const [isFetchingMachineSerials, setIsFetchingMachineSerials] = useState(false);
+    const [machineAssignErrorMsg, setMachineAssignErrorMsg] = useState('');
 
     const isDNXM = order?.order_code?.startsWith('DNXM-');
+    const hasMachineItems = orderItems.length > 0
+        ? orderItems.some(it => isMachineProductType(it?.product_type))
+        : (isMachineProductType(order?.product_type) || isMachineProductType(order?.product_type_2));
+    const approvedMachineCount = Math.max(0, parseInt(adjustedQuantity2) || 0);
 
     useEffect(() => {
         if (order?.warehouse && (realWarehouseName === order.warehouse || /^[0-9a-fA-F]{8}-/.test(realWarehouseName))) {
@@ -70,6 +102,58 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             });
         }
     }, [order?.status, isDNXM]);
+
+    useEffect(() => {
+        if (!hasMachineItems || order?.status !== 'KHO_XU_LY') return;
+
+        const initialSerials = (order?.department || '')
+            .split(/[\n,]+/)
+            .map(s => s.trim())
+            .filter(Boolean);
+
+        setMachineAssignments((prev) => {
+            const next = Array.from({ length: approvedMachineCount }).map((_, idx) => ({
+                serial: prev[idx]?.serial || initialSerials[idx] || '',
+            }));
+            return next;
+        });
+    }, [
+        hasMachineItems,
+        order?.status,
+        order?.department,
+        approvedMachineCount,
+        order?.id
+    ]);
+
+    useEffect(() => {
+        const fetchAvailableMachineSerials = async () => {
+            if (!hasMachineItems || order?.status !== 'KHO_XU_LY' || !order?.warehouse) {
+                setAvailableMachineSerials([]);
+                return;
+            }
+
+            try {
+                setIsFetchingMachineSerials(true);
+                const { data, error } = await supabase
+                    .from('machines')
+                    .select('serial_number')
+                    .eq('warehouse', order.warehouse)
+                    .eq('status', 'sẵn sàng')
+                    .order('serial_number', { ascending: true })
+                    .limit(3000);
+
+                if (error) throw error;
+                setAvailableMachineSerials((data || []).map(item => item.serial_number).filter(Boolean));
+            } catch (err) {
+                console.error('Error fetching machine serials:', err);
+                setAvailableMachineSerials([]);
+            } finally {
+                setIsFetchingMachineSerials(false);
+            }
+        };
+
+        fetchAvailableMachineSerials();
+    }, [hasMachineItems, order?.status, order?.warehouse]);
 
     // Initialize delivery checklist from assigned items
     useEffect(() => {
@@ -180,6 +264,39 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             }
             return prev;
         });
+    };
+
+    const updateMachineAssignmentField = (idx, field, value, totalCount) => {
+        setMachineAssignments(prev => {
+            const next = [...prev];
+            while (next.length < totalCount) next.push({ serial: '' });
+            next[idx] = { ...next[idx], [field]: value };
+            return next;
+        });
+    };
+
+    const handleMachineSerialChange = (idx, rawValue, totalCount) => {
+        const value = rawValue || '';
+        const normalized = value.trim().toUpperCase();
+
+        if (!normalized) {
+            setMachineAssignErrorMsg('');
+            updateMachineAssignmentField(idx, 'serial', value, totalCount);
+            return;
+        }
+
+        const duplicateIdx = machineAssignments.findIndex((item, i) => {
+            if (i === idx) return false;
+            return String(item?.serial || '').trim().toUpperCase() === normalized;
+        });
+
+        if (duplicateIdx !== -1) {
+            setMachineAssignErrorMsg(`Mã máy ${value} đã được chọn ở máy #${duplicateIdx + 1}.`);
+            return;
+        }
+
+        setMachineAssignErrorMsg('');
+        updateMachineAssignmentField(idx, 'serial', value, totalCount);
     };
 
     useEffect(() => {
@@ -346,6 +463,8 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 for (const item of orderItems) {
                     if (!item.quantity || item.quantity <= 0) continue;
 
+                    if (isMachineProductType(item.product_type)) continue;
+
                     const productLabel = PRODUCT_TYPES.find(p => p.id === item.product_type)?.label || item.product_type;
 
                     const { data: invData, error: invErr } = await supabase
@@ -417,6 +536,67 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 throw new Error('Bạn phải bắt buộc chọn Đơn vị vận chuyển trước khi xuất kho giao hàng.');
             }
 
+            const shouldValidateDnxmMachineAssign =
+                hasMachineItems &&
+                order.status === 'KHO_XU_LY' &&
+                transition.nextStatus === 'CHO_GIAO_HANG';
+
+            if (shouldValidateDnxmMachineAssign) {
+                const expectedCount = Math.max(0, parseInt(adjustedQuantity2) || 0);
+                if (expectedCount <= 0) {
+                    throw new Error('Đơn máy cần có số lượng phê duyệt lớn hơn 0 trước khi kho báo đã xuất.');
+                }
+
+                if (machineAssignments.length !== expectedCount) {
+                    throw new Error(`Vui lòng nhập đủ thông tin ${expectedCount} máy đã gán.`);
+                }
+
+                const missing = machineAssignments.findIndex((item) => {
+                    return !item?.serial?.trim();
+                });
+                if (missing !== -1) {
+                    throw new Error(`Máy #${missing + 1} chưa nhập mã máy.`);
+                }
+
+                const serials = machineAssignments.map(item => item.serial.trim());
+                const uniqueSerials = new Set(serials.map(s => s.toUpperCase()));
+                if (uniqueSerials.size !== serials.length) {
+                    setMachineAssignErrorMsg('Mã máy bị trùng. Vui lòng kiểm tra lại danh sách máy đã gán.');
+                    throw new Error('Mã máy bị trùng. Vui lòng kiểm tra lại danh sách máy đã gán.');
+                }
+
+                const { data: machineRows, error: machineFetchErr } = await supabase
+                    .from('machines')
+                    .select('serial_number, status, warehouse')
+                    .in('serial_number', serials);
+
+                if (machineFetchErr) {
+                    throw new Error('Không thể kiểm tra mã máy: ' + machineFetchErr.message);
+                }
+
+                if (!machineRows || machineRows.length !== serials.length) {
+                    throw new Error('Có mã máy không tồn tại trong hệ thống. Vui lòng kiểm tra lại.');
+                }
+
+                const invalidMachine = machineRows.find((m) => m.status !== 'sẵn sàng' || m.warehouse !== order.warehouse);
+                if (invalidMachine) {
+                    throw new Error(`Mã máy ${invalidMachine.serial_number} không ở trạng thái sẵn sàng tại kho hiện tại.`);
+                }
+
+                const { error: updateMachineErr } = await supabase
+                    .from('machines')
+                    .update({
+                        status: 'kiểm tra',
+                        customer_name: order.customer_name || null,
+                        updated_at: new Date().toISOString()
+                    })
+                    .in('serial_number', serials);
+
+                if (updateMachineErr) {
+                    throw new Error('Không thể cập nhật trạng thái máy đã gán: ' + updateMachineErr.message);
+                }
+            }
+
             if ((transition.nextStatus === 'CHO_DOI_SOAT' || transition.nextStatus === 'HOAN_THANH') && order.status === 'DANG_GIAO_HANG') {
                 if (!confirmDeliveryCheck) {
                     throw new Error('Bạn cần tick xác nhận đã giao hàng cho khách hàng.');
@@ -439,6 +619,25 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                         type: 'error',
                         link: `/don-hang`
                     });
+                }
+
+                if (hasMachineItems && order.department) {
+                    const machineSerials = order.department.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+                    if (machineSerials.length > 0) {
+                        const { error: deliveredMachineErr } = await supabase
+                            .from('machines')
+                            .update({
+                                status: 'thuộc khách hàng',
+                                customer_name: order.customer_name || null,
+                                warehouse: null,
+                                updated_at: new Date().toISOString()
+                            })
+                            .in('serial_number', machineSerials);
+
+                        if (deliveredMachineErr) {
+                            throw new Error('Không thể cập nhật máy sang trạng thái thuộc khách hàng: ' + deliveredMachineErr.message);
+                        }
+                    }
                 }
             }
 
@@ -525,10 +724,12 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             }
 
             // Perform DB update
+            let nextNote = transition.label === 'Yêu cầu điều chỉnh' ? adjustmentNote : (order.note || '');
+
             const updatePayload = {
                 status: transition.nextStatus,
                 updated_at: new Date().toISOString(),
-                note: transition.label === 'Yêu cầu điều chỉnh' ? adjustmentNote : order.note
+                note: nextNote
             };
 
             // Công ty duyệt DNXM → gán kho cấp
@@ -563,6 +764,22 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             // Nếu đây là lúc xuất kho (Gán mã bình) hoặc Shipper gán mã bổ sung
             if (((transition.nextStatus === 'CHO_GIAO_HANG' || transition.nextStatus === 'DA_DUYET') && order.status === 'KHO_XU_LY' && order.product_type?.startsWith('BINH')) || needsCylinderAssignmentByShipper) {
                 updatePayload.assigned_cylinders = scannedSerials.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+            }
+
+            if (hasMachineItems && order.status === 'KHO_XU_LY' && transition.nextStatus === 'CHO_GIAO_HANG') {
+                const machineSerials = machineAssignments.map(item => item.serial.trim()).filter(Boolean);
+                const assignmentLines = machineAssignments
+                    .map((item, idx) => `${idx + 1}) Mã: ${item.serial.trim()}`)
+                    .join('\n');
+
+                nextNote = [
+                    stripWarehouseAssignmentSection(nextNote),
+                    '=== MÁY ĐÃ GÁN TỪ KHO ===',
+                    assignmentLines,
+                ].filter(Boolean).join('\n');
+
+                updatePayload.note = nextNote;
+                updatePayload.department = machineSerials.join(', ');
             }
 
             if (deliveryUnit) {
@@ -748,13 +965,15 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                                 value={adjustedQuantity}
                                                 onChange={e => {
                                                     const val = e.target.value;
-                                                    setAdjustedQuantity(val === '' ? '' : Math.max(0, parseInt(val) || 0));
-                                                    
-                                                    // Cap quantity2 if it exceeds new quantity1
-                                                    const q1 = parseInt(val) || 0;
+                                                    const nextRequestedQty = val === '' ? '' : Math.max(0, parseInt(val) || 0);
+                                                    setAdjustedQuantity(nextRequestedQty);
+
+                                                    const q1 = parseInt(nextRequestedQty) || 0;
                                                     const q2 = parseInt(adjustedQuantity2) || 0;
                                                     if (q2 > q1) {
-                                                        setAdjustedQuantity2(q1);
+                                                        setQuantityValidationMsg('Số lượng phê duyệt không được lớn hơn số lượng yêu cầu.');
+                                                    } else {
+                                                        setQuantityValidationMsg('');
                                                     }
                                                 }}
                                             />
@@ -770,12 +989,22 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                                 onChange={e => {
                                                     const val = e.target.value;
                                                     const q1 = parseInt(adjustedQuantity) || 0;
-                                                    const inputVal = val === '' ? 0 : (parseInt(val) || 0);
-                                                    setAdjustedQuantity2(val === '' ? '' : Math.min(inputVal, q1));
+                                                    const inputVal = val === '' ? '' : Math.max(0, parseInt(val) || 0);
+                                                    const normalizedApprovedQty = parseInt(inputVal) || 0;
+                                                    setAdjustedQuantity2(inputVal);
+
+                                                    if (normalizedApprovedQty > q1) {
+                                                        setQuantityValidationMsg('Số lượng phê duyệt không được lớn hơn số lượng yêu cầu.');
+                                                    } else {
+                                                        setQuantityValidationMsg('');
+                                                    }
                                                 }}
                                             />
                                         </div>
                                     </div>
+                                    {quantityValidationMsg && (
+                                        <p className="text-[11px] text-rose-600 font-bold text-center">{quantityValidationMsg}</p>
+                                    )}
                                     {(adjustedQuantity !== order.quantity || adjustedQuantity2 !== order.quantity_2) && (
                                         <p className="text-[11px] text-orange-600 font-bold italic text-center">* Số lượng đã điều chỉnh so với đơn gốc.</p>
                                     )}
@@ -816,7 +1045,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                             <div className="space-y-3 pt-3 border-t border-slate-100">
                                                 <div className="flex items-center justify-between">
                                                     <label className="flex items-center gap-1.5 text-xs font-black text-slate-500 uppercase tracking-widest">
-                                                        <ScanBarcode className="w-4 h-4 text-primary" />
+                                                        <ScanLine className="w-4 h-4 text-primary" />
                                                         <span>Mã vỏ bình RFID ({totalCylCount})</span>
                                                     </label>
                                                     <button
@@ -877,7 +1106,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                                                         title="Mở camera quét RFID"
                                                                         aria-label="Mở camera quét RFID"
                                                                     >
-                                                                        <ScanBarcode className="w-5 h-5 shrink-0" strokeWidth={2.25} />
+                                                                        <ScanLine className="w-5 h-5 shrink-0" strokeWidth={2.25} />
                                                                     </button>
                                                                     {isOpen && (
                                                                         <div className="absolute z-[9999] left-0 right-0 top-[46px] bg-white border border-slate-200 rounded-xl shadow-xl max-h-48 overflow-y-auto">
@@ -919,6 +1148,64 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                             </div>
                                         );
                                     })()}
+                                </div>
+                            )}
+
+                            {hasMachineItems && order.status === 'KHO_XU_LY' && approvedMachineCount > 0 && (
+                                <div className="space-y-3 bg-cyan-50/60 p-4 rounded-2xl border border-cyan-200 shadow-sm">
+                                    <div className="flex items-center justify-between">
+                                        <p className="text-[11px] font-black text-cyan-700 uppercase tracking-widest">
+                                            Gán mã máy theo SL phê duyệt ({approvedMachineCount})
+                                        </p>
+                                        {isFetchingMachineSerials && (
+                                            <span className="text-[10px] font-bold text-cyan-600 italic">Đang tải serial sẵn sàng...</span>
+                                        )}
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        {Array.from({ length: approvedMachineCount }).map((_, idx) => {
+                                            const row = machineAssignments[idx] || { serial: '' };
+                                            const currentSerialUpper = String(row.serial || '').trim().toUpperCase();
+                                            const usedByOther = new Set(
+                                                machineAssignments
+                                                    .map((item, i) => (i === idx ? '' : String(item?.serial || '').trim().toUpperCase()))
+                                                    .filter(Boolean)
+                                            );
+                                            const rowSerialOptions = availableMachineSerials.filter((serial) => {
+                                                const key = String(serial || '').trim().toUpperCase();
+                                                if (!key) return false;
+                                                return !usedByOther.has(key) || key === currentSerialUpper;
+                                            });
+                                            return (
+                                                <div key={idx} className="bg-white border border-cyan-100 rounded-xl p-3 space-y-2.5">
+                                                    <p className="text-[11px] font-black text-slate-600 uppercase tracking-wider">Máy #{idx + 1}</p>
+
+                                                    <input
+                                                        type="text"
+                                                        list={`dnxm-ready-machine-serials-${idx}`}
+                                                        value={row.serial}
+                                                        onChange={(e) => handleMachineSerialChange(idx, e.target.value, approvedMachineCount)}
+                                                        className="w-full h-10 px-3 bg-slate-50 border border-slate-200 rounded-lg text-[13px] font-bold text-slate-800 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100 font-mono"
+                                                        placeholder="Nhập mã máy (serial)"
+                                                    />
+
+                                                    <datalist id={`dnxm-ready-machine-serials-${idx}`}>
+                                                        {rowSerialOptions.map((serial) => (
+                                                            <option key={`${idx}-${serial}`} value={serial} />
+                                                        ))}
+                                                    </datalist>
+
+                                                    <p className="text-[11px] text-slate-500 font-medium">Chỉ cần nhập mã máy theo số lượng đã phê duyệt.</p>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+
+                                    {machineAssignErrorMsg && (
+                                        <p className="text-[11px] font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                                            {machineAssignErrorMsg}
+                                        </p>
+                                    )}
                                 </div>
                             )}
                             {/* RFID Scanner for Shipper */}
@@ -987,7 +1274,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                                                 title="Mở camera quét RFID"
                                                                 aria-label="Mở camera quét RFID"
                                                             >
-                                                                <ScanBarcode className="w-5 h-5 shrink-0" strokeWidth={2.25} />
+                                                                <ScanLine className="w-5 h-5 shrink-0" strokeWidth={2.25} />
                                                             </button>
                                                             {activeCylDropdownWH === `sp-${idx}` && (
                                                                 <div className="absolute z-[9999] left-0 right-0 top-[46px] bg-white border border-orange-200 rounded-xl shadow-xl max-h-48 overflow-y-auto">
@@ -1280,10 +1567,10 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                 )}
                             </div>
 
-                            {errorMsg && (
+                            {(errorMsg || quantityValidationMsg) && (
                                 <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl text-[13px] font-bold text-rose-600 flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
                                     <XCircle className="w-4 h-4 shrink-0" />
-                                    {errorMsg}
+                                    {quantityValidationMsg || errorMsg}
                                 </div>
                             )}
 
@@ -1327,6 +1614,10 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                                     onClick={() => {
                                                         if (action.label === 'Yêu cầu điều chỉnh' && !adjustmentNote.trim()) {
                                                             setErrorMsg('Vui lòng nhập lý do điều chỉnh trước khi xác nhận.');
+                                                            return;
+                                                        }
+                                                        if (quantityValidationMsg) {
+                                                            setErrorMsg(quantityValidationMsg);
                                                             return;
                                                         }
                                                         handleUpdateStatus(action);

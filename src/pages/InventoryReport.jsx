@@ -37,6 +37,7 @@ import MobilePageHeader from '../components/layout/MobilePageHeader';
 import MobilePagination from '../components/layout/MobilePagination';
 import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import { supabase } from '../supabase/config';
+import usePermissions from '../hooks/usePermissions';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
@@ -63,6 +64,7 @@ const TABLE_COLUMNS_DEF = [
 
 const InventoryReport = () => {
     const navigate = useNavigate();
+    const { role, department } = usePermissions();
     const [activeView, setActiveView] = useState('list');
     const [inventory, setInventory] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -143,8 +145,9 @@ const InventoryReport = () => {
     const fetchInventory = async () => {
         setLoading(true);
         try {
-            const userBranch = (role !== 'Admin' && department) 
-                ? (department.includes('-') ? department.split('-')[0].trim() : department.trim())
+            const normalizedDepartment = typeof department === 'string' ? department.trim() : '';
+            const userBranch = (role !== 'Admin' && normalizedDepartment)
+                ? (normalizedDepartment.includes('-') ? normalizedDepartment.split('-')[0].trim() : normalizedDepartment)
                 : null;
 
             // 1. Fetch Materials (VAT_TU) from inventory table
@@ -233,9 +236,17 @@ const InventoryReport = () => {
                 });
             });
 
+            const materialRows = (invData || []).map((row) => ({
+                ...row,
+                item_type: row?.item_type || 'VAT_TU',
+                item_name: row?.item_name || row?.name || row?.material_name || 'Không rõ',
+                quantity: Number(row?.quantity) || 0,
+                updated_at: row?.updated_at || new Date().toISOString(),
+            }));
+
             // Combine all
             const unifiedInventory = [
-                ...(invData || []),
+                ...materialRows,
                 ...machRows,
                 ...cylRows
             ];
@@ -256,7 +267,8 @@ const InventoryReport = () => {
     const getWarehouseName = (id) => warehouses.find(w => w.id === id)?.name || id;
 
     const filteredInventory = inventory.filter(item => {
-        const matchesSearch = item.item_name.toLowerCase().includes(searchTerm.toLowerCase());
+        const itemName = String(item?.item_name || item?.name || '').toLowerCase();
+        const matchesSearch = itemName.includes(searchTerm.toLowerCase());
         const matchesWarehouse = selectedWarehouses.length === 0 || selectedWarehouses.includes(item.warehouse_id);
         const matchesType = selectedTypes.length === 0 || selectedTypes.includes(item.item_type);
         return matchesSearch && matchesWarehouse && matchesType;
@@ -275,9 +287,9 @@ const InventoryReport = () => {
         const data = filteredInventory.map(item => ({
             'Kho': getWarehouseName(item.warehouse_id),
             'Loại': item.item_type,
-            'Tên hàng': item.item_name,
+            'Tên hàng': item.item_name || item.name || 'Không rõ',
             'Số lượng': item.quantity,
-            'Cập nhật cuối': new Date(item.updated_at).toLocaleString('vi-VN')
+            'Cập nhật cuối': item.updated_at ? new Date(item.updated_at).toLocaleString('vi-VN') : ''
         }));
         const ws = XLSX.utils.json_to_sheet(data);
         const wb = XLSX.utils.book_new();

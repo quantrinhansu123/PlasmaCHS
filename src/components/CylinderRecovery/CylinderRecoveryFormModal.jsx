@@ -753,7 +753,7 @@ export default function CylinderRecoveryFormModal({ recovery, onClose, onSuccess
                             {!isReadOnly && (
                                 <div className="rounded-3xl border-2 border-primary/30 bg-primary/5 p-4 sm:p-5 space-y-3 shadow-sm animate-in zoom-in-95 duration-300">
                                     <label className="flex items-center gap-2 text-[15px] font-black text-primary uppercase tracking-tight">
-                                        <ScanBarcode className="w-5 h-5" />
+                                        <ScanLine className="w-5 h-5" />
                                         Quét hoặc Nhập Barcode (Bình hoặc Đơn)
                                     </label>
                                     <div className="flex gap-2">

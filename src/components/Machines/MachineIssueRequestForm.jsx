@@ -333,6 +333,27 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
     };
 
     const handleCheckboxChange = (group, key) => {
+        const singleSelectGroups = ['machineType', 'machineColor', 'shippingMethod'];
+
+        if (singleSelectGroups.includes(group)) {
+            setFormData(prev => {
+                const currentValue = !!prev[group]?.[key];
+                const resetGroup = Object.keys(prev[group] || {}).reduce((acc, itemKey) => {
+                    acc[itemKey] = false;
+                    return acc;
+                }, {});
+
+                return {
+                    ...prev,
+                    [group]: {
+                        ...resetGroup,
+                        [key]: !currentValue
+                    }
+                };
+            });
+            return;
+        }
+
         setFormData(prev => ({
             ...prev,
             [group]: {
@@ -828,7 +849,8 @@ Ghi chú: ${formData.notes}`,
                                         {Object.keys(formData.machineType).map(type => (
                                             <label key={type} className="flex items-center gap-3 cursor-pointer p-2 rounded hover:bg-muted transition-colors border border-transparent hover:border-border">
                                                 <input
-                                                    type="checkbox"
+                                                    type="radio"
+                                                    name="machineType"
                                                     checked={formData.machineType[type]}
                                                     onChange={() => handleCheckboxChange('machineType', type)}
                                                     className="w-4 h-4 rounded text-primary focus:ring-primary/20"
@@ -862,7 +884,8 @@ Ghi chú: ${formData.notes}`,
                                         {Object.keys(formData.shippingMethod).map(method => (
                                             <label key={method} className="flex items-center gap-3 cursor-pointer p-2 rounded hover:bg-muted transition-colors border border-transparent hover:border-border">
                                                 <input
-                                                    type="checkbox"
+                                                    type="radio"
+                                                    name="shippingMethod"
                                                     checked={formData.shippingMethod[method]}
                                                     onChange={() => handleCheckboxChange('shippingMethod', method)}
                                                     className="w-4 h-4 rounded text-primary focus:ring-primary/20"
@@ -881,7 +904,8 @@ Ghi chú: ${formData.notes}`,
                                         {Object.keys(formData.machineColor).map(color => (
                                             <label key={color} className="flex items-center gap-3 cursor-pointer p-2 rounded hover:bg-muted transition-colors border border-transparent hover:border-border">
                                                 <input
-                                                    type="checkbox"
+                                                    type="radio"
+                                                    name="machineColor"
                                                     checked={formData.machineColor[color]}
                                                     onChange={() => handleCheckboxChange('machineColor', color)}
                                                     className="w-4 h-4 rounded text-primary focus:ring-primary/20"

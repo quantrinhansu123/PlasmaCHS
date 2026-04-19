@@ -100,6 +100,8 @@ const Cylinders = () => {
     const [uniqueVolumes, setUniqueVolumes] = useState([]);
     const [uniqueWarehouses, setUniqueWarehouses] = useState([]);
 
+    const EMPTY_WAREHOUSE_ID = '00000000-0000-0000-0000-000000000000';
+
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(50);
@@ -182,6 +184,7 @@ const Cylinders = () => {
             if (selectedVolumes.length > 0) query = query.in('volume', selectedVolumes);
             if (selectedCustomers.length > 0) query = query.in('customer_name', selectedCustomers);
             if (selectedCategories.length > 0) query = query.in('category', selectedCategories);
+            if (selectedWarehouses.length > 0) query = query.in('warehouse_id', selectedWarehouses);
 
             // Apply warehouse filter for warehouse managers/staff (Non-Admin)
             if (role !== 'Admin' && department) {
@@ -192,9 +195,17 @@ const Cylinders = () => {
                     .ilike('name', `%${userBranch}%`);
                 
                 if (matchedWarehouses && matchedWarehouses.length > 0) {
-                    query = query.in('warehouse_id', matchedWarehouses.map(w => w.id));
+                    const matchedWhIds = matchedWarehouses.map(w => w.id);
+                    if (selectedWarehouses.length > 0) {
+                        const scopedWhIds = selectedWarehouses.filter(id => matchedWhIds.includes(id));
+                        query = scopedWhIds.length > 0
+                            ? query.in('warehouse_id', scopedWhIds)
+                            : query.eq('warehouse_id', EMPTY_WAREHOUSE_ID);
+                    } else {
+                        query = query.in('warehouse_id', matchedWhIds);
+                    }
                 } else {
-                    query = query.eq('warehouse_id', '00000000-0000-0000-0000-000000000000');
+                    query = query.eq('warehouse_id', EMPTY_WAREHOUSE_ID);
                 }
             }
 
@@ -216,8 +227,8 @@ const Cylinders = () => {
             if (custData) setUniqueCustomers(custData.map(c => c.name));
 
             // Fetch unique warehouses
-            const { data: whData } = await supabase.from('warehouses').select('name').order('name');
-            if (whData) setUniqueWarehouses(whData.map(w => w.name));
+            const { data: whData } = await supabase.from('warehouses').select('id, name').order('name');
+            if (whData) setUniqueWarehouses(whData);
         } catch (err) {
             console.error('Error fetching filter options:', err);
         }
@@ -250,12 +261,20 @@ const Cylinders = () => {
                 if (selectedVolumes.length > 0) queries[key] = queries[key].in('volume', selectedVolumes);
                 if (selectedCustomers.length > 0) queries[key] = queries[key].in('customer_name', selectedCustomers);
                 if (selectedCategories.length > 0) queries[key] = queries[key].in('category', selectedCategories);
+                if (selectedWarehouses.length > 0) queries[key] = queries[key].in('warehouse_id', selectedWarehouses);
                 
                 if (role !== 'Admin' && department) {
                     if (matchedWhIds.length > 0) {
-                        queries[key] = queries[key].in('warehouse_id', matchedWhIds);
+                        if (selectedWarehouses.length > 0) {
+                            const scopedWhIds = selectedWarehouses.filter(id => matchedWhIds.includes(id));
+                            queries[key] = scopedWhIds.length > 0
+                                ? queries[key].in('warehouse_id', scopedWhIds)
+                                : queries[key].eq('warehouse_id', EMPTY_WAREHOUSE_ID);
+                        } else {
+                            queries[key] = queries[key].in('warehouse_id', matchedWhIds);
+                        }
                     } else {
-                        queries[key] = queries[key].eq('warehouse_id', '00000000-0000-0000-0000-000000000000');
+                        queries[key] = queries[key].eq('warehouse_id', EMPTY_WAREHOUSE_ID);
                     }
                 }
             });
@@ -357,6 +376,9 @@ const Cylinders = () => {
             if (selectedCategories.length > 0) {
                 query = query.in('category', selectedCategories);
             }
+            if (selectedWarehouses.length > 0) {
+                query = query.in('warehouse_id', selectedWarehouses);
+            }
 
             // Apply warehouse filter for warehouse managers/staff (Non-Admin)
             if (role !== 'Admin' && department) {
@@ -369,10 +391,18 @@ const Cylinders = () => {
                     .ilike('name', `%${userBranch}%`);
                 
                 if (matchedWarehouses && matchedWarehouses.length > 0) {
-                    query = query.in('warehouse_id', matchedWarehouses.map(w => w.id));
+                    const matchedWhIds = matchedWarehouses.map(w => w.id);
+                    if (selectedWarehouses.length > 0) {
+                        const scopedWhIds = selectedWarehouses.filter(id => matchedWhIds.includes(id));
+                        query = scopedWhIds.length > 0
+                            ? query.in('warehouse_id', scopedWhIds)
+                            : query.eq('warehouse_id', EMPTY_WAREHOUSE_ID);
+                    } else {
+                        query = query.in('warehouse_id', matchedWhIds);
+                    }
                 } else {
                     // Fallback to strict match if ilike fails or no results
-                    query = query.eq('warehouse_id', '00000000-0000-0000-0000-000000000000'); // No results
+                    query = query.eq('warehouse_id', EMPTY_WAREHOUSE_ID); // No results
                 }
             }
 
@@ -499,7 +529,7 @@ const Cylinders = () => {
                 'Loại quai': 'Có quai',
                 'Phân loại (BV/TM)': 'BV',
                 'Khối lượng tịnh (kg)': '8',
-                'Kho quản lý': uniqueWarehouses[0] || 'Kho tổng',
+                'Kho quản lý': uniqueWarehouses[0]?.name || 'Kho tổng',
                 'Trạng thái': 'sẵn sàng',
                 'Hạn kiểm định': '2026-12-31',
                 'Khách hàng': 'Phòng khám đa khoa VH',
@@ -655,9 +685,9 @@ const Cylinders = () => {
     }));
 
     const warehouseOptions = uniqueWarehouses.map(item => ({
-        id: item,
-        label: item,
-        count: cylinders.filter(c => c.warehouses?.name === item).length
+        id: item.id,
+        label: item.name,
+        count: cylinders.filter(c => c.warehouse_id === item.id).length
     }));
 
     const categoryOptions = CATEGORY_OPTIONS.map(item => ({
