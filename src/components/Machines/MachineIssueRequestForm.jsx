@@ -235,7 +235,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
 
     useEffect(() => {
         const fetchWarehouses = async () => {
-            const { data: whs, error } = await supabase.from('warehouses').select('id, name').order('name');
+            const { data: whs, error } = await supabase.from('warehouses').select('id, name, code').order('name');
             if (!error) setWarehouseList(whs || []);
         };
         fetchWarehouses();
@@ -386,8 +386,9 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
     const [pendingNextStatus, setPendingNextStatus] = useState(null);
     const [pendingApproveData, setPendingApproveData] = useState(null);
 
-    const loadReadyMachinesByWarehouse = async (warehouseId) => {
-        if (!warehouseId) {
+    // Filter machines by warehouseCode (e.g. 'HN', 'TP.HCM') — must match machines.warehouse
+    const loadReadyMachinesByWarehouse = async (warehouseCode) => {
+        if (!warehouseCode) {
             setAvailableProducts([]);
             setAvailableMachineCodes([]);
             return;
@@ -395,7 +396,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
         const { data, error } = await supabase
             .from('machines')
             .select('serial_number, machine_type, warehouse, status')
-            .eq('warehouse', warehouseId)
+            .eq('warehouse', warehouseCode)
             .eq('status', 'sẵn sàng');
         if (error) {
             console.error('Error loading warehouse machines:', error);
@@ -627,7 +628,8 @@ Ghi chú: ${formData.notes}`,
 
         // Specially Handle level 2 -> 3: Assign Warehouse — Show a proper modal instead of window.prompt
         if (formData.status === 'CHO_CTY_DUYET') {
-            const { data: whs } = await supabase.from('warehouses').select('id, name').order('name');
+            // Fetch with code so we can store the short code (HN/TP.HCM/TH/DN) into orders.warehouse
+            const { data: whs } = await supabase.from('warehouses').select('id, name, code').order('name');
             if (whs && whs.length > 0) {
                 setWarehouseList(whs);
                 setPendingNextStatus(nextStatus);
@@ -640,10 +642,11 @@ Ghi chú: ${formData.notes}`,
         await executeApprove({ nextStatus, successMsg, notifTitle, notifDesc, assignedWarehouse: formData.warehouse });
     };
 
-    const handleWarehouseSelected = async (whName) => {
+    // whValue is the warehouses.code (e.g. 'HN') — NOT the display name
+    const handleWarehouseSelected = async (whValue) => {
         setShowWarehouseModal(false);
-        if (!whName || !pendingApproveData) return;
-        await executeApprove({ ...pendingApproveData, assignedWarehouse: whName });
+        if (!whValue || !pendingApproveData) return;
+        await executeApprove({ ...pendingApproveData, assignedWarehouse: whValue });
         setPendingApproveData(null);
         setPendingNextStatus(null);
     };
@@ -928,16 +931,22 @@ Ghi chú: ${formData.notes}`,
 
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="col-span-2">
-                                        <label className="block text-sm font-medium text-foreground mb-1.5">Kho</label>
+                                            <label className="block text-sm font-medium text-foreground mb-1.5">Kho</label>
                                         <select
                                             value={formData.warehouse}
                                             onChange={(e) => handleInputChange('warehouse', e.target.value)}
                                             className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
                                         >
                                             <option value="">-- Chọn kho --</option>
-                                            {warehouseList.map((warehouse) => (
-                                                <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>
-                                            ))}
+                                            {warehouseList.map((wh) => {
+                                                // Use code (HN/TP.HCM/TH/DN) as value so it matches orders.warehouse constraint
+                                                const whValue = wh.code || wh.name;
+                                                return (
+                                                    <option key={wh.id} value={whValue}>
+                                                        {wh.name}{wh.code ? ` (${wh.code})` : ''}
+                                                    </option>
+                                                );
+                                            })}
                                         </select>
                                     </div>
                                     <div className="col-span-2">
@@ -1246,20 +1255,25 @@ Ghi chú: ${formData.notes}`,
                             </button>
                         </div>
                         <div className="p-4 space-y-2">
-                            {warehouseList.map(wh => (
-                                <button
-                                    key={wh.id}
-                                    onClick={() => handleWarehouseSelected(wh.id)}
-                                    className="w-full flex items-center gap-3 px-5 py-4 rounded-2xl border border-slate-200 hover:border-primary hover:bg-primary/5 transition-all text-left group"
-                                >
-                                    <div className="w-10 h-10 bg-slate-100 group-hover:bg-primary/10 rounded-xl flex items-center justify-center shrink-0 transition-colors">
-                                        <Warehouse size={20} className="text-slate-500 group-hover:text-primary transition-colors" />
-                                    </div>
-                                    <div>
-                                        <p className="font-bold text-[14px] text-slate-800 group-hover:text-primary transition-colors">{wh.name}</p>
-                                    </div>
-                                </button>
-                            ))}
+                            {warehouseList.map(wh => {
+                                // Use code (HN/TP.HCM/TH/DN) — must match orders.warehouse CHECK constraint
+                                const whCode = wh.code || wh.name;
+                                return (
+                                    <button
+                                        key={wh.id}
+                                        onClick={() => handleWarehouseSelected(whCode)}
+                                        className="w-full flex items-center gap-3 px-5 py-4 rounded-2xl border border-slate-200 hover:border-primary hover:bg-primary/5 transition-all text-left group"
+                                    >
+                                        <div className="w-10 h-10 bg-slate-100 group-hover:bg-primary/10 rounded-xl flex items-center justify-center shrink-0 transition-colors">
+                                            <Warehouse size={20} className="text-slate-500 group-hover:text-primary transition-colors" />
+                                        </div>
+                                        <div>
+                                            <p className="font-bold text-[14px] text-slate-800 group-hover:text-primary transition-colors">{wh.name}</p>
+                                            {wh.code && <p className="text-xs text-slate-400 mt-0.5">Mã kho: {wh.code}</p>}
+                                        </div>
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
                 </div>
