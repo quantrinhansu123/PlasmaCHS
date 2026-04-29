@@ -19,7 +19,6 @@ import {
 } from 'lucide-react';
 import { useLocation, Link, useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
-import { toast } from 'react-toastify';
 
 import { sidebarMenu, extraMenuItems } from '../../constants/sidebarMenu';
 import { actionModuleGroups } from '../../constants/actionModuleData';
@@ -77,19 +76,6 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
         lastProcessedIdRef.current = payload.new.id;
 
         setNotifications(prev => [payload.new, ...prev]);
-        // Hiển thị thông báo nổi cho tất cả người dùng
-        toast.info(
-          <div className="flex flex-col gap-1">
-            <div className="font-bold text-[14px]">{payload.new.title}</div>
-            <div className="text-[12px] opacity-90">{payload.new.description}</div>
-          </div>,
-          {
-            icon: <Bell size={18} className="text-blue-500" />,
-            onClick: () => {
-              if (payload.new.link) navigate(payload.new.link);
-            }
-          }
-        );
       })
       .on('postgres_changes', {
         event: 'UPDATE',

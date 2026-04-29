@@ -23,6 +23,7 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
         nguoi_quan_ly: '',
         team: '',
         department: '',
+        chi_nhanh: '',
         sales_group: '',
         approval_level: 'Staff',
         status: 'Hoạt động',
@@ -35,25 +36,32 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
     const [departmentSuggestions, setDepartmentSuggestions] = useState([]);
     const [salesGroupSuggestions, setSalesGroupSuggestions] = useState([]);
     const [teamSuggestions, setTeamSuggestions] = useState([]);
+    const [chiNhanhSuggestions, setChiNhanhSuggestions] = useState([]);
 
     useEffect(() => {
         let cancelled = false;
         (async () => {
             try {
-                const [usersRes, custRes] = await Promise.all([
-                    supabase.from('app_users').select('name, department, sales_group, team'),
+                const [usersRes, custRes, whRes] = await Promise.all([
+                    supabase.from('app_users').select('name, department, sales_group, team, chi_nhanh'),
                     supabase.from('customers').select('agency_name, business_group'),
+                    supabase.from('warehouses').select('branch_office'),
                 ]);
                 if (cancelled) return;
                 const managers = new Set();
                 const dep = new Set();
                 const sg = new Set();
                 const teams = new Set();
+                const chiNhanh = new Set();
                 (usersRes.data || []).forEach((u) => {
                     if (u.name?.trim()) managers.add(u.name.trim());
                     if (u.department?.trim()) dep.add(u.department.trim());
                     if (u.sales_group?.trim()) sg.add(u.sales_group.trim());
                     if (u.team?.trim()) teams.add(u.team.trim());
+                    if (u.chi_nhanh?.trim()) chiNhanh.add(u.chi_nhanh.trim());
+                });
+                (whRes.data || []).forEach((w) => {
+                    if (w.branch_office?.trim()) chiNhanh.add(w.branch_office.trim());
                 });
                 (custRes.data || []).forEach((c) => {
                     if (c.agency_name?.trim()) dep.add(c.agency_name.trim());
@@ -64,8 +72,9 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                 setDepartmentSuggestions([...dep].sort(sortVi));
                 setSalesGroupSuggestions([...sg].sort(sortVi));
                 setTeamSuggestions([...teams].sort(sortVi));
+                setChiNhanhSuggestions([...chiNhanh].sort(sortVi));
             } catch (e) {
-                console.error('Load manager/department/sales_group/team suggestions:', e);
+                console.error('Load manager/department/sales_group/team/chi_nhanh suggestions:', e);
             }
         })();
         return () => {
@@ -90,6 +99,7 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                 nguoi_quan_ly: user.nguoi_quan_ly || '',
                 team: user.team || '',
                 department: user.department || '',
+                chi_nhanh: user.chi_nhanh || '',
                 sales_group: user.sales_group || '',
                 approval_level: user.approval_level || 'Staff',
                 status: user.status || 'Hoạt động',
@@ -157,6 +167,7 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                 nguoi_quan_ly: formData.nguoi_quan_ly.trim(),
                 team: formData.team.trim(),
                 department: formData.department.trim(),
+                chi_nhanh: formData.chi_nhanh.trim(),
                 sales_group: formData.sales_group.trim(),
                 approval_level: formData.approval_level,
                 status: formData.status,
@@ -448,6 +459,25 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                                             Gợi ý từ nhân sự và Nhóm KD (khách hàng); có thể thêm giá trị mới.
                                         </p>
                                     </div>
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                        Chi nhánh
+                                    </label>
+                                    <Combobox
+                                        options={chiNhanhSuggestions}
+                                        value={formData.chi_nhanh}
+                                        onChange={(v) =>
+                                            setFormData((prev) => ({ ...prev, chi_nhanh: v }))
+                                        }
+                                        placeholder="Chọn chi nhánh hoặc nhập mới..."
+                                        emptyMessage="Không khớp gợi ý — Enter để dùng text đã gõ."
+                                        className="!h-12 rounded-2xl text-[15px] font-semibold bg-slate-50 border-slate-200"
+                                    />
+                                    <p className="text-[10px] text-slate-400 font-medium ml-1">
+                                        Gợi ý từ kho (chi nhánh) và nhân sự hiện có.
+                                    </p>
                                 </div>
 
                                 <div className="space-y-1.5">

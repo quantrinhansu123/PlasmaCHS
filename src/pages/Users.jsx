@@ -30,7 +30,8 @@ import {
     SlidersHorizontal,
     CheckCircle,
     Package,
-    Lock
+    Lock,
+    Building2
 } from 'lucide-react';
 import { useEffect, useState, useRef } from 'react';
 import MobilePageHeader from '../components/layout/MobilePageHeader';
@@ -124,6 +125,7 @@ const Users = () => {
     const [selectedRoles, setSelectedRoles] = useState([]);
     const [selectedStatuses, setSelectedStatuses] = useState([]);
     const [selectedDepartments, setSelectedDepartments] = useState([]);
+    const [selectedChiNhanh, setSelectedChiNhanh] = useState([]);
     const [selectedTeams, setSelectedTeams] = useState([]);
     
     // Mobile filter sheet state
@@ -132,6 +134,7 @@ const Users = () => {
     const [pendingRoles, setPendingRoles] = useState([]);
     const [pendingStatuses, setPendingStatuses] = useState([]);
     const [pendingDepartments, setPendingDepartments] = useState([]);
+    const [pendingChiNhanh, setPendingChiNhanh] = useState([]);
     const [pendingTeams, setPendingTeams] = useState([]);
 
     // Dropdown state
@@ -201,6 +204,7 @@ const Users = () => {
         setPendingRoles(selectedRoles);
         setPendingStatuses(selectedStatuses);
         setPendingDepartments(selectedDepartments);
+        setPendingChiNhanh(selectedChiNhanh);
         setPendingTeams(selectedTeams);
         setShowMobileFilter(true);
     };
@@ -209,6 +213,7 @@ const Users = () => {
         setSelectedRoles(pendingRoles);
         setSelectedStatuses(pendingStatuses);
         setSelectedDepartments(pendingDepartments);
+        setSelectedChiNhanh(pendingChiNhanh);
         setSelectedTeams(pendingTeams);
         closeMobileFilter();
     };
@@ -273,6 +278,8 @@ const Users = () => {
                 );
             case 'department':
                 return <div className="text-[13px] font-medium text-foreground tracking-tight">{user.department || '-'}</div>;
+            case 'chi_nhanh':
+                return <div className="text-[13px] font-medium text-foreground tracking-tight">{user.chi_nhanh || '-'}</div>;
             case 'sales_group':
                 return <div className="text-[13px] font-medium text-foreground tracking-tight">{user.sales_group || '-'}</div>;
             case 'nguoi_quan_ly':
@@ -407,11 +414,13 @@ const Users = () => {
         selectedRoles.length > 0 ||
         selectedStatuses.length > 0 ||
         selectedDepartments.length > 0 ||
+        selectedChiNhanh.length > 0 ||
         selectedTeams.length > 0;
     const totalActiveFilters =
         selectedRoles.length +
         selectedStatuses.length +
         selectedDepartments.length +
+        selectedChiNhanh.length +
         selectedTeams.length;
 
     // Filter options
@@ -447,6 +456,16 @@ const Users = () => {
             count: users.filter(u => (u.team || '').trim() === team).length
         }));
 
+    const chiNhanhOptions = Array.from(
+        new Set(users.map(u => (u.chi_nhanh || '').trim()).filter(Boolean))
+    )
+        .sort((a, b) => a.localeCompare(b, 'vi', { sensitivity: 'base' }))
+        .map((cn) => ({
+            id: cn,
+            label: cn,
+            count: users.filter(u => (u.chi_nhanh || '').trim() === cn).length
+        }));
+
     const filteredUsers = users.filter(user => {
         const matchesSearch = !searchTerm || (
             user.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -454,15 +473,19 @@ const Users = () => {
             user.phone?.includes(searchTerm) ||
             user.role?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             user.nguoi_quan_ly?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            user.team?.toLowerCase().includes(searchTerm.toLowerCase())
+            user.team?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (user.chi_nhanh || '').toLowerCase().includes(searchTerm.toLowerCase())
         );
 
         const matchesRole = selectedRoles.length === 0 || selectedRoles.includes(user.role);
         const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(user.status);
         const matchesDepartment = selectedDepartments.length === 0 || selectedDepartments.includes(user.department);
+        const matchesChiNhanh =
+            selectedChiNhanh.length === 0 ||
+            selectedChiNhanh.includes((user.chi_nhanh || '').trim());
         const matchesTeam = selectedTeams.length === 0 || selectedTeams.includes(user.team);
 
-        return matchesSearch && matchesRole && matchesStatus && matchesDepartment && matchesTeam;
+        return matchesSearch && matchesRole && matchesStatus && matchesDepartment && matchesChiNhanh && matchesTeam;
     });
 
     const getRowStyle = (status, isSelected) => {
@@ -508,7 +531,7 @@ const Users = () => {
     // Reset pagination when filters change
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchTerm, selectedRoles, selectedStatuses, selectedDepartments, selectedTeams]);
+    }, [searchTerm, selectedRoles, selectedStatuses, selectedDepartments, selectedChiNhanh, selectedTeams]);
 
     return (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5 font-sans">
@@ -684,6 +707,34 @@ const Users = () => {
 
                                 <div className="relative">
                                     <button
+                                        onClick={() => setActiveDropdown(activeDropdown === 'chi_nhanh' ? null : 'chi_nhanh')}
+                                        className={clsx(
+                                            "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
+                                            getFilterButtonClass(activeDropdown === 'chi_nhanh' || selectedChiNhanh.length > 0)
+                                        )}
+                                    >
+                                        <Building2 size={14} className={getFilterIconClass(activeDropdown === 'chi_nhanh' || selectedChiNhanh.length > 0, "text-violet-600")} />
+                                        Chi nhánh
+                                        {selectedChiNhanh.length > 0 && (
+                                            <span className="px-1.5 py-0.5 rounded-full bg-violet-600 text-white text-[10px] font-bold">
+                                                {selectedChiNhanh.length}
+                                            </span>
+                                        )}
+                                        <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'chi_nhanh' ? "rotate-180" : "")} />
+                                    </button>
+                                    {activeDropdown === 'chi_nhanh' && (
+                                        <FilterDropdown
+                                            options={chiNhanhOptions}
+                                            selected={selectedChiNhanh}
+                                            setSelected={setSelectedChiNhanh}
+                                            filterSearch={filterSearch}
+                                            setFilterSearch={setFilterSearch}
+                                        />
+                                    )}
+                                </div>
+
+                                <div className="relative">
+                                    <button
                                         onClick={() => setActiveDropdown(activeDropdown === 'team' ? null : 'team')}
                                         className={clsx(
                                             "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
@@ -716,6 +767,7 @@ const Users = () => {
                                             setSelectedRoles([]);
                                             setSelectedStatuses([]);
                                             setSelectedDepartments([]);
+                                            setSelectedChiNhanh([]);
                                             setSelectedTeams([]);
                                         }}
                                         className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-red-300 text-red-500 text-[12px] font-bold hover:bg-red-50 transition-all"
@@ -926,6 +978,17 @@ const Users = () => {
                                                                         </p>
                                                                     </div>
                                                                 </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className="w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center text-violet-600 shrink-0">
+                                                                        <Building2 size={14} />
+                                                                    </div>
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Chi nhánh</p>
+                                                                        <p className="text-[12px] text-foreground font-bold truncate">
+                                                                            {user.chi_nhanh || '—'}
+                                                                        </p>
+                                                                    </div>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -1125,6 +1188,34 @@ const Users = () => {
 
                                 <div className="relative">
                                     <button
+                                        onClick={() => setActiveDropdown(activeDropdown === 'chi_nhanh' ? null : 'chi_nhanh')}
+                                        className={clsx(
+                                            "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
+                                            getFilterButtonClass(activeDropdown === 'chi_nhanh' || selectedChiNhanh.length > 0)
+                                        )}
+                                    >
+                                        <Building2 size={14} className={getFilterIconClass(activeDropdown === 'chi_nhanh' || selectedChiNhanh.length > 0, "text-violet-600")} />
+                                        Chi nhánh
+                                        {selectedChiNhanh.length > 0 && (
+                                            <span className="px-1.5 py-0.5 rounded-full bg-violet-600 text-white text-[10px] font-bold">
+                                                {selectedChiNhanh.length}
+                                            </span>
+                                        )}
+                                        <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'chi_nhanh' ? "rotate-180" : "")} />
+                                    </button>
+                                    {activeDropdown === 'chi_nhanh' && (
+                                        <FilterDropdown
+                                            options={chiNhanhOptions}
+                                            selected={selectedChiNhanh}
+                                            setSelected={setSelectedChiNhanh}
+                                            filterSearch={filterSearch}
+                                            setFilterSearch={setFilterSearch}
+                                        />
+                                    )}
+                                </div>
+
+                                <div className="relative">
+                                    <button
                                         onClick={() => setActiveDropdown(activeDropdown === 'team' ? null : 'team')}
                                         className={clsx(
                                             "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
@@ -1157,6 +1248,7 @@ const Users = () => {
                                             setSelectedRoles([]);
                                             setSelectedStatuses([]);
                                             setSelectedDepartments([]);
+                                            setSelectedChiNhanh([]);
                                             setSelectedTeams([]);
                                         }}
                                         className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-red-300 text-red-500 text-[12px] font-bold hover:bg-red-50 transition-all"
@@ -1301,6 +1393,14 @@ const Users = () => {
                             options: departmentOptions,
                             selectedValues: pendingDepartments,
                             onSelectionChange: setPendingDepartments,
+                        },
+                        {
+                            id: 'chi_nhanh',
+                            label: 'Chi nhánh',
+                            icon: <Building2 size={16} />,
+                            options: chiNhanhOptions,
+                            selectedValues: pendingChiNhanh,
+                            onSelectionChange: setPendingChiNhanh,
                         },
                         {
                             id: 'team',

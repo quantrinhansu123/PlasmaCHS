@@ -42,6 +42,7 @@ import * as XLSX from 'xlsx';
 import CylinderDetailsModal from '../components/Cylinders/CylinderDetailsModal';
 import CylinderFormModal from '../components/Cylinders/CylinderFormModal';
 import CylinderQCDialog from '../components/Cylinders/CylinderQCDialog';
+import WarehouseDetailsModal from '../components/Warehouses/WarehouseDetailsModal';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
@@ -90,7 +91,9 @@ const Cylinders = () => {
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [isQCModalOpen, setIsQCModalOpen] = useState(false);
     const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+    const [isWarehouseModalOpen, setIsWarehouseModalOpen] = useState(false);
     const [selectedCylinder, setSelectedCylinder] = useState(null);
+    const [selectedWarehouse, setSelectedWarehouse] = useState(null);
     const [showMoreActions, setShowMoreActions] = useState(false);
 
     const [selectedStatuses, setSelectedStatuses] = useState([]);
@@ -360,7 +363,7 @@ const Cylinders = () => {
         try {
             let query = supabase
                 .from('cylinders')
-                .select('*, warehouses(name), customers(name)', { count: 'exact' });
+                .select('*, warehouses(id, name), customers(name)', { count: 'exact' });
 
             // Apply Filters (Server-side)
             if (searchTerm) {
@@ -493,6 +496,33 @@ const Cylinders = () => {
     const handleViewCylinder = (cylinder) => {
         setSelectedCylinder(cylinder);
         setIsDetailsModalOpen(true);
+    };
+
+    const handleViewWarehouse = async (cylinder) => {
+        const warehouseId = cylinder?.warehouse_id || cylinder?.warehouses?.id;
+        if (!warehouseId) {
+            alert('Bình này chưa có kho quản lý để xem chi tiết.');
+            return;
+        }
+
+        try {
+            const { data, error } = await supabase
+                .from('warehouses')
+                .select('*')
+                .eq('id', warehouseId)
+                .maybeSingle();
+
+            if (error) throw error;
+
+            setSelectedWarehouse(data || {
+                id: warehouseId,
+                name: cylinder?.warehouses?.name || 'Kho quản lý'
+            });
+            setIsWarehouseModalOpen(true);
+        } catch (error) {
+            console.error('Error fetching warehouse details:', error);
+            alert('❌ Không thể tải chi tiết kho: ' + error.message);
+        }
     };
 
     const handleFormSubmitSuccess = () => {
@@ -647,6 +677,26 @@ const Cylinders = () => {
     const getStatusLabel = (status) => {
         const item = CYLINDER_STATUSES.find(s => s.id === status);
         return item ? item.label : status;
+    };
+
+    const getCurrentLocation = (cylinder) => {
+        const warehouseName = cylinder?.warehouses?.name;
+        const customerName = cylinder?.customers?.name || cylinder?.customer_name?.split(' / ')[0];
+        const customerDepartment = cylinder?.customer_name?.split(' / ')[1];
+
+        if (cylinder?.status === 'sẵn sàng' && warehouseName) {
+            return `Kho: ${warehouseName}`;
+        }
+
+        if (customerName) {
+            return customerDepartment ? `${customerName} / ${customerDepartment}` : customerName;
+        }
+
+        if (warehouseName) {
+            return `Kho: ${warehouseName}`;
+        }
+
+        return '—';
     };
 
     const filteredCylinders = cylinders;
@@ -1084,6 +1134,7 @@ const Cylinders = () => {
                                             <span>{cylinder.warehouses?.name || '—'}</span>
                                         </div>
                                         <div className="flex items-center gap-3">
+                                            <button onClick={() => handleViewWarehouse(cylinder)} className="px-2 py-1 text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg text-[10px] font-bold">Xem kho</button>
                                             <button onClick={() => handleViewCylinder(cylinder)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg"><Eye size={16} /></button>
                                             <button onClick={() => handleEditCylinder(cylinder)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg"><Edit size={16} /></button>
                                             {canManageCylinders && (
@@ -1940,6 +1991,13 @@ const Cylinders = () => {
                 <CylinderDetailsModal
                     cylinder={selectedCylinder}
                     onClose={() => setIsDetailsModalOpen(false)}
+                />
+            )}
+
+            {isWarehouseModalOpen && selectedWarehouse && (
+                <WarehouseDetailsModal
+                    warehouse={selectedWarehouse}
+                    onClose={() => setIsWarehouseModalOpen(false)}
                 />
             )}
 

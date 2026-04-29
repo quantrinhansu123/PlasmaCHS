@@ -5,14 +5,12 @@ import { clsx } from 'clsx';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import MobileBottomNav from './MobileBottomNav';
-import GlobalNotifications from './GlobalNotifications';
 
 function MainLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
     <div className="flex h-screen bg-background text-foreground overflow-hidden">
-      <GlobalNotifications />
       <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
 
       <div

@@ -23,6 +23,7 @@ export default function SupplierDetailsModal({ supplier, onClose }) {
     const [isClosing, setIsClosing] = useState(false);
 
     const [receipts, setReceipts] = useState([]);
+    const [issues, setIssues] = useState([]);
     const [transactions, setTransactions] = useState([]);
 
     // Thêm các state cho form Payment
@@ -52,16 +53,27 @@ export default function SupplierDetailsModal({ supplier, onClose }) {
     const fetchSupplierData = async () => {
         setLoading(true);
         try {
-            // 1. Lấy Lịch sử nhập hàng (Chỉ tính DA_NHAP hoặc HOAN_THANH)
+            const supplierName = (supplier?.name || '').trim();
+
+            // 1. Lấy lịch sử nhập hàng theo tên NCC (chấp nhận lệch hoa/thường)
             const { data: receiptsData, error: err1 } = await supabase
                 .from('goods_receipts')
                 .select('*')
-                .eq('supplier_name', supplier.name)
+                .ilike('supplier_name', supplierName)
                 .order('created_at', { ascending: false });
 
             if (err1) throw err1;
 
-            // 2. Lấy Lịch sử Giao dịch (Thu/Chi)
+            // 2. Lấy lịch sử xuất trả NCC theo supplier_id
+            const { data: issuesData, error: errIssues } = await supabase
+                .from('goods_issues')
+                .select('*')
+                .eq('supplier_id', supplier.id)
+                .order('created_at', { ascending: false });
+
+            if (errIssues) throw errIssues;
+
+            // 3. Lấy Lịch sử Giao dịch (Thu/Chi)
             const { data: txData, error: err2 } = await supabase
                 .from('supplier_transactions')
                 .select('*')
@@ -71,9 +83,10 @@ export default function SupplierDetailsModal({ supplier, onClose }) {
             if (err2) throw err2;
 
             setReceipts(receiptsData || []);
+            setIssues(issuesData || []);
             setTransactions(txData || []);
 
-            // 3. Tính toán công nợ
+            // 4. Tính toán công nợ
             const validReceipts = (receiptsData || []).filter(r => r.status === 'DA_NHAP' || r.status === 'HOAN_THANH');
             const totalImport = validReceipts.reduce((sum, r) => sum + (Number(r.total_amount) || 0), 0);
 
@@ -234,8 +247,8 @@ export default function SupplierDetailsModal({ supplier, onClose }) {
                         >
                             <div className="flex items-center gap-2">
                                 <Package className="w-4 h-4" />
-                                PHIẾU NHẬP
-                                <span className="bg-emerald-50 text-emerald-600 py-0.5 px-2 rounded-full text-[10px] leading-none shrink-0 border border-emerald-100">{receipts.length}</span>
+                                XUẤT / NHẬP
+                                <span className="bg-emerald-50 text-emerald-600 py-0.5 px-2 rounded-full text-[10px] leading-none shrink-0 border border-emerald-100">{receipts.length + issues.length}</span>
                             </div>
                         </button>
                         <button
@@ -374,7 +387,7 @@ export default function SupplierDetailsModal({ supplier, onClose }) {
                             {/* TAB: RECEIPTS & TRANSACTIONS TABLE STYLING */}
                             {(activeTab === 'receipts' || activeTab === 'transactions') && (
                                 <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden min-h-[400px]">
-                                    {(activeTab === 'receipts' && receipts.length === 0) || (activeTab === 'transactions' && transactions.length === 0) ? (
+                                    {(activeTab === 'receipts' && receipts.length === 0 && issues.length === 0) || (activeTab === 'transactions' && transactions.length === 0) ? (
                                         <div className="flex flex-col items-center justify-center py-32 opacity-30 grayscale">
                                             <FileText size={64} className="mb-4" />
                                             <p className="font-black tracking-widest uppercase text-sm">Trống dữ liệu</p>
@@ -384,8 +397,9 @@ export default function SupplierDetailsModal({ supplier, onClose }) {
                                             <thead className="bg-slate-50/80 border-b border-slate-100">
                                                 {activeTab === 'receipts' ? (
                                                     <tr>
+                                                        <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Loại phiếu</th>
                                                         <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Mã phiếu</th>
-                                                        <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ngày nhập</th>
+                                                        <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ngày</th>
                                                         <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Số lượng</th>
                                                         <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Tổng giá trị</th>
                                                         <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Trạng thái</th>
@@ -401,22 +415,61 @@ export default function SupplierDetailsModal({ supplier, onClose }) {
                                                 )}
                                             </thead>
                                             <tbody className="divide-y divide-slate-50">
-                                                {activeTab === 'receipts' ? receipts.map(r => (
-                                                    <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
-                                                        <td className="px-8 py-5 font-black text-[13px] text-slate-800 tracking-tight">{r.receipt_code}</td>
-                                                        <td className="px-8 py-5 text-[13px] font-bold text-slate-500">{formatDate(r.receipt_date)}</td>
-                                                        <td className="px-8 py-5 text-[13px] font-black text-slate-700 text-center">{r.total_items} item</td>
-                                                        <td className="px-8 py-5 text-[13px] font-black text-emerald-600 text-right">{formatCurrency(r.total_amount)}</td>
-                                                        <td className="px-8 py-5 text-center">
-                                                            <span className={clsx(
-                                                                "px-3 py-1 text-[10px] font-black tracking-widest uppercase rounded-lg border",
-                                                                (r.status === 'DA_NHAP' || r.status === 'HOAN_THANH') ? "bg-emerald-50 text-emerald-600 border-emerald-100" : "bg-amber-50 text-amber-600 border-amber-100"
-                                                            )}>
-                                                                {r.status}
-                                                            </span>
-                                                        </td>
-                                                    </tr>
-                                                )) : transactions.map(tx => (
+                                                {activeTab === 'receipts'
+                                                    ? [
+                                                        ...(receipts || []).map(r => ({
+                                                            rowType: 'NHAP',
+                                                            id: `r-${r.id}`,
+                                                            code: r.receipt_code,
+                                                            date: r.receipt_date,
+                                                            qty: r.total_items,
+                                                            amount: r.total_amount,
+                                                            status: r.status
+                                                        })),
+                                                        ...(issues || []).map(i => ({
+                                                            rowType: 'XUAT',
+                                                            id: `i-${i.id}`,
+                                                            code: i.issue_code,
+                                                            date: i.issue_date,
+                                                            qty: i.total_items,
+                                                            amount: null,
+                                                            status: i.status
+                                                        }))
+                                                    ]
+                                                        .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
+                                                        .map(row => (
+                                                            <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
+                                                                <td className="px-8 py-5">
+                                                                    <span className={clsx(
+                                                                        "px-3 py-1 text-[10px] font-black tracking-widest uppercase rounded-lg border",
+                                                                        row.rowType === 'NHAP'
+                                                                            ? "bg-emerald-50 text-emerald-600 border-emerald-100"
+                                                                            : "bg-amber-50 text-amber-700 border-amber-100"
+                                                                    )}>
+                                                                        {row.rowType === 'NHAP' ? 'NHẬP' : 'XUẤT'}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="px-8 py-5 font-black text-[13px] text-slate-800 tracking-tight">{row.code || '—'}</td>
+                                                                <td className="px-8 py-5 text-[13px] font-bold text-slate-500">{formatDate(row.date)}</td>
+                                                                <td className="px-8 py-5 text-[13px] font-black text-slate-700 text-center">{row.qty || 0} item</td>
+                                                                <td className="px-8 py-5 text-[13px] font-black text-right">
+                                                                    {row.rowType === 'NHAP'
+                                                                        ? <span className="text-emerald-600">{formatCurrency(row.amount)}</span>
+                                                                        : <span className="text-slate-400">—</span>}
+                                                                </td>
+                                                                <td className="px-8 py-5 text-center">
+                                                                    <span className={clsx(
+                                                                        "px-3 py-1 text-[10px] font-black tracking-widest uppercase rounded-lg border",
+                                                                        (row.status === 'DA_NHAP' || row.status === 'HOAN_THANH' || row.status === 'DA_XUAT')
+                                                                            ? "bg-emerald-50 text-emerald-600 border-emerald-100"
+                                                                            : "bg-amber-50 text-amber-600 border-amber-100"
+                                                                    )}>
+                                                                        {row.status || '—'}
+                                                                    </span>
+                                                                </td>
+                                                            </tr>
+                                                        ))
+                                                    : transactions.map(tx => (
                                                     <tr key={tx.id} className="hover:bg-slate-50/50 transition-colors">
                                                         <td className="px-8 py-5 font-black text-[13px] text-slate-800 tracking-tight">{tx.transaction_code}</td>
                                                         <td className="px-8 py-5 text-[13px] font-bold text-slate-500">{formatDate(tx.transaction_date)}</td>
@@ -447,7 +500,7 @@ export default function SupplierDetailsModal({ supplier, onClose }) {
                         TRẠNG THÁI HỒ SƠ: <span className="text-primary tracking-normal font-black">ACTIVE</span>
                     </div>
                     <div>
-                        {activeTab === 'receipts' ? receipts.length : transactions.length} BẢN GHI ĐƯỢC TÌM THẤY
+                        {activeTab === 'receipts' ? receipts.length + issues.length : transactions.length} BẢN GHI ĐƯỢC TÌM THẤY
                     </div>
                 </div>
 

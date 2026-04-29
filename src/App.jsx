@@ -5,6 +5,7 @@ import 'react-toastify/dist/ReactToastify.css';
 import ErrorBoundary from './components/ErrorBoundary';
 import ProtectedRoute from './components/ProtectedRoute';
 import ScrollToTop from './components/ScrollToTop';
+import GlobalNotifications from './components/layout/GlobalNotifications';
 import MainLayout from './components/layout/MainLayout';
 
 
@@ -93,6 +94,7 @@ function App() {
   return (
     <Router>
       <ScrollToTop />
+      <GlobalNotifications />
       <div className="min-h-screen bg-background">
         <ErrorBoundary>
           <Routes>
