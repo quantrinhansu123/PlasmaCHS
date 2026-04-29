@@ -42,7 +42,6 @@ import * as XLSX from 'xlsx';
 import CylinderDetailsModal from '../components/Cylinders/CylinderDetailsModal';
 import CylinderFormModal from '../components/Cylinders/CylinderFormModal';
 import CylinderQCDialog from '../components/Cylinders/CylinderQCDialog';
-import WarehouseDetailsModal from '../components/Warehouses/WarehouseDetailsModal';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
@@ -91,9 +90,7 @@ const Cylinders = () => {
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [isQCModalOpen, setIsQCModalOpen] = useState(false);
     const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
-    const [isWarehouseModalOpen, setIsWarehouseModalOpen] = useState(false);
     const [selectedCylinder, setSelectedCylinder] = useState(null);
-    const [selectedWarehouse, setSelectedWarehouse] = useState(null);
     const [showMoreActions, setShowMoreActions] = useState(false);
 
     const [selectedStatuses, setSelectedStatuses] = useState([]);
@@ -498,31 +495,13 @@ const Cylinders = () => {
         setIsDetailsModalOpen(true);
     };
 
-    const handleViewWarehouse = async (cylinder) => {
+    const handleViewWarehouse = (cylinder) => {
         const warehouseId = cylinder?.warehouse_id || cylinder?.warehouses?.id;
         if (!warehouseId) {
             alert('Bình này chưa có kho quản lý để xem chi tiết.');
             return;
         }
-
-        try {
-            const { data, error } = await supabase
-                .from('warehouses')
-                .select('*')
-                .eq('id', warehouseId)
-                .maybeSingle();
-
-            if (error) throw error;
-
-            setSelectedWarehouse(data || {
-                id: warehouseId,
-                name: cylinder?.warehouses?.name || 'Kho quản lý'
-            });
-            setIsWarehouseModalOpen(true);
-        } catch (error) {
-            console.error('Error fetching warehouse details:', error);
-            alert('❌ Không thể tải chi tiết kho: ' + error.message);
-        }
+        navigate(`/kho/danh-sach?warehouseId=${warehouseId}`);
     };
 
     const handleFormSubmitSuccess = () => {
@@ -1991,13 +1970,6 @@ const Cylinders = () => {
                 <CylinderDetailsModal
                     cylinder={selectedCylinder}
                     onClose={() => setIsDetailsModalOpen(false)}
-                />
-            )}
-
-            {isWarehouseModalOpen && selectedWarehouse && (
-                <WarehouseDetailsModal
-                    warehouse={selectedWarehouse}
-                    onClose={() => setIsWarehouseModalOpen(false)}
                 />
             )}
 

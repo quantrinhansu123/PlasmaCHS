@@ -35,7 +35,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 import WarehouseDetailsModal from '../components/Warehouses/WarehouseDetailsModal';
 import WarehouseFormModal from '../components/Warehouses/WarehouseFormModal';
@@ -75,6 +75,7 @@ const Warehouses = () => {
     const { role: rawRole } = usePermissions();
     const isAdminOrManager = isAdminRole(rawRole);
     const navigate = useNavigate();
+    const location = useLocation();
 
     const [activeView, setActiveView] = useState('list');
     const [selectedIds, setSelectedIds] = useState([]);
@@ -135,6 +136,7 @@ const Warehouses = () => {
     const isColumnVisible = (key) => visibleColumns.includes(key);
     const visibleCount = visibleColumns.length;
     const totalCount = defaultColOrder.length;
+    const warehouseIdFromQuery = new URLSearchParams(location.search).get('warehouseId');
 
     useEffect(() => {
         fetchWarehouses();
@@ -144,6 +146,27 @@ const Warehouses = () => {
         const managers = [...new Set(warehouses.map(w => w.manager_name).filter(Boolean))];
         setUniqueManagers(managers);
     }, [warehouses]);
+
+    useEffect(() => {
+        if (!warehouseIdFromQuery || warehouses.length === 0) return;
+
+        const matchedWarehouse = warehouses.find((warehouse) => warehouse.id === warehouseIdFromQuery);
+        if (matchedWarehouse) {
+            setSelectedWarehouse(matchedWarehouse);
+            setIsDetailsModalOpen(true);
+        }
+
+        const searchParams = new URLSearchParams(location.search);
+        searchParams.delete('warehouseId');
+        const nextSearch = searchParams.toString();
+        navigate(
+            {
+                pathname: location.pathname,
+                search: nextSearch ? `?${nextSearch}` : ''
+            },
+            { replace: true }
+        );
+    }, [warehouseIdFromQuery, warehouses, location.pathname, location.search, navigate]);
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -193,6 +216,40 @@ const Warehouses = () => {
     const fetchWarehouses = async () => {
         setIsLoading(true);
         try {
+            const buildWarehouseAliases = (warehouseInfo) => {
+                const rawValues = [
+                    warehouseInfo?.id,
+                    warehouseInfo?.name,
+                    warehouseInfo?.branch_office
+                ].filter(Boolean);
+
+                const aliases = new Set();
+                rawValues.forEach((value) => {
+                    const normalized = String(value).trim();
+                    if (!normalized) return;
+                    aliases.add(normalized);
+                });
+
+                const combinedText = rawValues
+                    .map((value) => String(value).toLowerCase())
+                    .join(' ');
+
+                if (combinedText.includes('ha noi') || combinedText.includes('hà nội')) aliases.add('HN');
+                if (combinedText.includes('thanh hoa') || combinedText.includes('thanh hóa')) aliases.add('TH');
+                if (combinedText.includes('da nang') || combinedText.includes('đà nẵng')) aliases.add('DN');
+                if (
+                    combinedText.includes('hcm')
+                    || combinedText.includes('hồ chí minh')
+                    || combinedText.includes('ho chi minh')
+                    || combinedText.includes('tp.hcm')
+                ) {
+                    aliases.add('TP.HCM');
+                    aliases.add('HCM');
+                }
+
+                return Array.from(aliases);
+            };
+
             const { data, error } = await supabase
                 .from('warehouses')
                 .select('*')
@@ -228,10 +285,9 @@ const Warehouses = () => {
             });
 
             const warehousesWithCounts = baseWarehouses.map(w => {
-                const idKey = (w.id || '').toString().trim();
-                const nameKey = (w.name || '').toString().trim();
-                const machineCount = (machineCountMap.get(idKey) || 0) + (nameKey ? (machineCountMap.get(nameKey) || 0) : 0);
-                const cylinderCount = (cylinderCountMap.get(idKey) || 0) + (nameKey ? (cylinderCountMap.get(nameKey) || 0) : 0);
+                const aliases = buildWarehouseAliases(w);
+                const machineCount = aliases.reduce((sum, key) => sum + (machineCountMap.get(key) || 0), 0);
+                const cylinderCount = aliases.reduce((sum, key) => sum + (cylinderCountMap.get(key) || 0), 0);
                 return {
                     ...w,
                     machine_count: machineCount,

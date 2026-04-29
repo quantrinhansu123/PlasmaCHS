@@ -92,6 +92,32 @@ const PIPELINE_ATTENTION_STATUSES = new Set([
     'KHO_XU_LY'
 ]);
 
+const normalizeText = (value) =>
+    String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toLowerCase();
+
+const extractWarehouseFromNote = (note) => {
+    const text = String(note || '');
+    if (!text) return '';
+    const match = text.match(/Kho:\s*([^\n\r.]+)/i);
+    return (match?.[1] || '').trim();
+};
+
+const getWarehouseAliases = (warehouse) => {
+    const rawName = String(warehouse?.name || '').trim();
+    const rawCode = String(warehouse?.code || '').trim();
+    const rawId = String(warehouse?.id || '').trim();
+    const shortFromName = rawName.includes('-') ? rawName.split('-')[0].trim() : '';
+    const compactName = rawName.replace(/\s+/g, '');
+
+    return [rawId, rawName, rawCode, shortFromName, compactName]
+        .map(normalizeText)
+        .filter(Boolean);
+};
+
 const Orders = () => {
     const { role, department, user, loading: permissionsLoading } = usePermissions();
     const navigate = useNavigate();
@@ -322,10 +348,7 @@ const Orders = () => {
                 .select('*, order_items(*)')
                 .neq('order_type', 'DNXM');
 
-            // Thủ kho chỉ nhìn thấy đơn ở trạng thái Kho xử lý
-            if (isThuKhoRole) {
-                query = query.eq('status', 'KHO_XU_LY');
-            }
+            // Thủ kho: hiển thị đầy đủ đơn, không giới hạn cứng theo 1 trạng thái.
 
             // Shipper chỉ nhìn thấy đơn được giao cho mình
             if (isShipperRole && !isAdmin) {
@@ -344,7 +367,8 @@ const Orders = () => {
             }
 
             // Role-based visibility filtering
-            if (!isAdmin && !isThuKhoRole && !isShipperRole) {
+            // Kho phải thấy đầy đủ đơn theo phạm vi kho, không bó theo ordered_by như NVKD.
+            if (!isAdmin && !isThuKhoRole && !isShipperRole && !isWarehouseRole) {
                 // Leaders see their own + managed staff's orders
                 if (isLeader) {
                     if (visibleSalesNames.length > 0) {
@@ -363,7 +387,67 @@ const Orders = () => {
             const { data, error } = await query.order('created_at', { ascending: false });
 
             if (error) throw error;
-            setOrders(data || []);
+
+            let scopedOrders = data || [];
+
+            // Kho/Thủ kho: phạm vi dữ liệu theo kho phụ trách trong danh sách kho
+            // (match theo Tên kho, đồng thời hỗ trợ code/id và note để tương thích dữ liệu cũ).
+            if (!isAdmin && (isThuKhoRole || isWarehouseRole)) {
+                const managerCandidates = [user?.name, user?.username, storageUserName]
+                    .map((v) => normalizeText(v))
+                    .filter(Boolean);
+
+                const { data: warehousesData } = await supabase
+                    .from('warehouses')
+                    .select('id, name, code, manager_name');
+
+                const myWarehouses = (warehousesData || []).filter((w) => {
+                    const managerNormalized = normalizeText(w.manager_name);
+                    if (!managerNormalized) return false;
+                    return managerCandidates.some((candidate) =>
+                        managerNormalized.includes(candidate) || candidate.includes(managerNormalized)
+                    );
+                });
+
+                let scopedWarehouses = myWarehouses;
+                if (scopedWarehouses.length === 0) {
+                    const branchTokens = [department, user?.chi_nhanh]
+                        .map((v) => normalizeText(v))
+                        .filter(Boolean);
+                    if (branchTokens.length > 0) {
+                        scopedWarehouses = (warehousesData || []).filter((w) => {
+                            const keys = getWarehouseAliases(w);
+                            return branchTokens.some((token) =>
+                                keys.some((key) => key.includes(token) || token.includes(key))
+                            );
+                        });
+                    }
+                }
+
+                if (scopedWarehouses.length > 0) {
+                    const allowedWarehouseValues = new Set(
+                        scopedWarehouses.flatMap((w) => getWarehouseAliases(w))
+                    );
+
+                    scopedOrders = scopedOrders.filter((order) => {
+                        const candidates = [
+                            normalizeText(order.warehouse),
+                            normalizeText(extractWarehouseFromNote(order.note)),
+                        ].filter(Boolean);
+                        return candidates.some((candidate) => allowedWarehouseValues.has(candidate));
+                    });
+                } else if (department) {
+                    const fallbackWarehouseCode = department.includes('-')
+                        ? department.split('-')[0].trim()
+                        : department.trim();
+                    const fallbackKey = normalizeText(fallbackWarehouseCode);
+                    scopedOrders = scopedOrders.filter((order) => normalizeText(order.warehouse) === fallbackKey);
+                } else {
+                    scopedOrders = [];
+                }
+            }
+
+            setOrders(scopedOrders);
         } catch (error) {
             console.error('Error fetching orders:', error);
             alert('❌ Không thể tải danh sách đơn hàng: ' + error.message);

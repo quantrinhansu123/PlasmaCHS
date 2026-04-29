@@ -23,6 +23,7 @@ import {
     Eye,
     FilePlus,
     Filter,
+    LayoutGrid,
     List,
     Mail,
     MapPin,
@@ -188,6 +189,13 @@ const Customers = () => {
 
     const searchParams = new URLSearchParams(location.search);
     const filterType = searchParams.get('filter') || (location.pathname === '/khach-hang-lead' ? 'lead' : null);
+
+    // Nếu rời khỏi route lead mà đang bật Kanban thì quay về Danh sách
+    useEffect(() => {
+        if (filterType !== 'lead' && activeView === 'kanban') {
+            setActiveView('list');
+        }
+    }, [filterType, activeView]);
 
     /** Lead / khách hàng: đã lọc trên server — không lọc lại client (tránh tải trang rồi vứt bớt dòng) */
     const leadFilterRef = useRef(null);
@@ -954,6 +962,53 @@ const Customers = () => {
         return Math.ceil((new Date(c.care_expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
     };
 
+    const kanbanColumns = useMemo(
+        () => [
+            { id: 'Trong hạn', label: 'Trong hạn', tone: 'emerald' },
+            { id: 'Sắp hết hạn', label: 'Sắp hết hạn', tone: 'amber' },
+            { id: 'Hết hạn', label: 'Hết hạn', tone: 'rose' },
+            { id: 'Chưa có hạn CS', label: 'Chưa có hạn CS', tone: 'slate' },
+        ],
+        []
+    );
+
+    const getLeadCareStatus = (customer) => {
+        const diff = getCareExpiryDiffDays(customer);
+        if (diff == null) return 'Chưa có hạn CS';
+        if (diff <= 0) return 'Hết hạn';
+        if (diff <= 10) return 'Sắp hết hạn';
+        return 'Trong hạn';
+    };
+
+    const leadKanbanGroups = useMemo(() => {
+        const groups = Object.fromEntries(kanbanColumns.map((col) => [col.id, []]));
+        filteredCustomers.forEach((customer) => {
+            const key = getLeadCareStatus(customer);
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(customer);
+        });
+
+        // Sắp xếp ổn định theo created_at DESC trong mỗi cột
+        kanbanColumns.forEach((col) => {
+            (groups[col.id] || []).sort((a, b) => {
+                const ad = a?.created_at ? new Date(a.created_at).getTime() : 0;
+                const bd = b?.created_at ? new Date(b.created_at).getTime() : 0;
+                return bd - ad;
+            });
+        });
+
+        return groups;
+    }, [filteredCustomers, getCareExpiryDiffDays, kanbanColumns]);
+
+    const availableViews = useMemo(() => {
+        const base = [{ id: 'list', label: 'Danh sách', icon: <List size={16} /> }];
+        if (filterType === 'lead') {
+            base.push({ id: 'kanban', label: 'Kanban', icon: <LayoutGrid size={16} /> });
+        }
+        base.push({ id: 'stats', label: 'Thống kê', icon: <BarChart2 size={16} /> });
+        return base;
+    }, [filterType]);
+
     /**
      * Lead: STT theo thứ tự tạo toàn danh sách (1 = tạo sớm nhất, N = mới nhất).
      * API sort created_at DESC; offset trong trang = from + chỉ số dòng trong `customers`.
@@ -1440,10 +1495,7 @@ const Customers = () => {
             <PageViewSwitcher
                 activeView={activeView}
                 setActiveView={setActiveView}
-                views={[
-                    { id: 'list', label: 'Danh sách', icon: <List size={16} /> },
-                    { id: 'stats', label: 'Thống kê', icon: <BarChart2 size={16} /> },
-                ]}
+                views={availableViews}
             />
 
             {activeView === 'list' && (
@@ -2238,6 +2290,165 @@ const Customers = () => {
                                 <ChevronRight size={16} className="-ml-2.5" />
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {activeView === 'kanban' && filterType === 'lead' && (
+                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col w-full">
+                    <div className="p-3 md:p-4 border-b border-border flex items-center justify-between gap-3 flex-wrap">
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => navigate(-1)}
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground text-[12px] font-bold transition-all bg-white shadow-sm shrink-0"
+                            >
+                                <ChevronLeft size={16} />
+                                Quay lại
+                            </button>
+                            <div className="rounded-xl border border-primary/20 bg-primary/5 px-3 py-1.5 text-[12px] font-bold text-primary">
+                                Tổng lead: {isLoading ? '…' : formatNumber(filteredCustomersCount)}
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap justify-end">
+                            <div className="text-[12px] text-muted-foreground font-semibold">Nhóm theo: Trạng thái CS</div>
+                            <div className="h-5 w-px bg-slate-200" />
+                            <span className="text-[12px] font-semibold text-slate-600">Trạng thái:</span>
+
+                            <button
+                                type="button"
+                                onClick={() => setSelectedStatuses([])}
+                                className={clsx(
+                                    'h-8 px-3 rounded-lg text-[12px] font-bold border transition-all',
+                                    selectedStatuses.length === 0
+                                        ? 'bg-primary/10 text-primary border-primary/30'
+                                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                )}
+                            >
+                                Tất cả
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => setSelectedStatuses(['Chưa thành công'])}
+                                className={clsx(
+                                    'h-8 px-3 rounded-lg text-[12px] font-bold border transition-all',
+                                    selectedStatuses.length === 1 && selectedStatuses[0] === 'Chưa thành công'
+                                        ? 'bg-slate-100 text-slate-800 border-slate-300'
+                                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                )}
+                            >
+                                Chưa thành công
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => setSelectedStatuses(['Thành công'])}
+                                className={clsx(
+                                    'h-8 px-3 rounded-lg text-[12px] font-bold border transition-all',
+                                    selectedStatuses.length === 1 && selectedStatuses[0] === 'Thành công'
+                                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                )}
+                            >
+                                Thành công
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 overflow-x-auto overflow-y-hidden p-3 md:p-4">
+                        {isLoading ? (
+                            <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
+                        ) : (
+                            <div className="grid grid-flow-col auto-cols-[minmax(280px,1fr)] gap-4 min-w-max h-full">
+                                {kanbanColumns.map((column) => {
+                                    const columnItems = leadKanbanGroups[column.id] || [];
+                                    const toneClass =
+                                        column.tone === 'emerald'
+                                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                            : column.tone === 'amber'
+                                                ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                                : column.tone === 'rose'
+                                                    ? 'border-rose-200 bg-rose-50 text-rose-700'
+                                                    : 'border-slate-200 bg-slate-50 text-slate-700';
+
+                                    return (
+                                        <div key={column.id} className="min-h-0 h-full flex flex-col rounded-2xl border border-slate-200 bg-slate-50/30">
+                                            <div className="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between gap-2">
+                                                <span className={clsx('px-2.5 py-1 rounded-lg text-[11px] font-black uppercase tracking-wide border', toneClass)}>
+                                                    {column.label}
+                                                </span>
+                                                <span className="text-[12px] font-bold text-slate-600">{columnItems.length}</span>
+                                            </div>
+
+                                            <div className="p-3 space-y-2.5 overflow-y-auto min-h-[24rem]">
+                                                {columnItems.length === 0 ? (
+                                                    <div className="rounded-xl border border-dashed border-slate-200 bg-white/70 px-3 py-6 text-center text-[12px] text-slate-400 italic">
+                                                        Không có lead
+                                                    </div>
+                                                ) : (
+                                                    columnItems.map((c) => {
+                                                        const lockedForNonAdmin =
+                                                            filterType === 'lead' &&
+                                                            c?.status === 'Thành công' &&
+                                                            !isAdminOrManager;
+
+                                                        return (
+                                                            <div
+                                                                key={c.id}
+                                                                className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm hover:shadow-md transition-shadow"
+                                                            >
+                                                                <div className="flex items-start justify-between gap-2 mb-2">
+                                                                    <div className="min-w-0">
+                                                                        <p className="text-[13px] font-extrabold text-slate-900 truncate">{c.name || '—'}</p>
+                                                                        <p className="text-[11px] text-slate-500 truncate">{c.phone || '—'}</p>
+                                                                    </div>
+                                                                    <span className={clsx(getCategoryBadgeClass(c.category), 'whitespace-nowrap')}>
+                                                                        {getLabel(CUSTOMER_CATEGORIES, c.category)}
+                                                                    </span>
+                                                                </div>
+
+                                                                <p className="text-[12px] text-slate-600 line-clamp-2 mb-3">{c.address || '—'}</p>
+
+                                                                <div className="flex items-center justify-between gap-2">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleViewCustomer(c)}
+                                                                        className={clsx(
+                                                                            'h-9 px-3 rounded-lg bg-slate-100 text-slate-700 font-bold text-[12px] transition-all',
+                                                                            'hover:bg-slate-200'
+                                                                        )}
+                                                                    >
+                                                                        Chi tiết
+                                                                    </button>
+
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={lockedForNonAdmin}
+                                                                        onClick={() =>
+                                                                            handleStatusChange(c.id, c.status === 'Thành công' ? 'Chưa thành công' : 'Thành công')
+                                                                        }
+                                                                        className={clsx(
+                                                                            'h-9 px-3 rounded-lg font-bold text-[12px] border transition-all',
+                                                                            c.status === 'Thành công'
+                                                                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                                                                : 'bg-primary text-white border-primary'
+                                                                        )}
+                                                                    >
+                                                                        {c.status === 'Thành công' ? 'Hủy KQ' : 'Chốt đơn'}
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

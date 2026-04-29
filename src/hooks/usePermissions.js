@@ -69,6 +69,22 @@ const applyRolePermissionOverrides = (permissions, roleName) => {
         };
     }
 
+    const isWarehouseKeeperRole =
+        normalized.includes('thukho') ||
+        normalized.includes('kho') ||
+        normalized.includes('warehouse');
+
+    // Thủ kho needs full module cards in "Đơn hàng & Kinh doanh".
+    // Keep action-level restrictions in each page; this only guarantees module visibility.
+    if (isWarehouseKeeperRole) {
+        ['orders', 'customers', 'promotions', 'dnxm', 'reports', 'shipping_tasks'].forEach((moduleKey) => {
+            merged[moduleKey] = {
+                ...(merged[moduleKey] || {}),
+                view: true,
+            };
+        });
+    }
+
     return merged;
 };
 
@@ -92,7 +108,7 @@ export const usePermissions = () => {
                     return;
                 }
 
-                let query = supabase.from('app_users').select('id, name, role, username, department, nguoi_quan_ly');
+                let query = supabase.from('app_users').select('id, name, role, username, department, chi_nhanh, nguoi_quan_ly');
 
                 if (userId) {
                     query = query.eq('id', userId);
@@ -116,6 +132,7 @@ export const usePermissions = () => {
                         name: userName || 'Guest',
                         role: safeRole,
                         department: userDeptFromStorage,
+                        chi_nhanh: localStorage.getItem('user_chi_nhanh') || sessionStorage.getItem('user_chi_nhanh') || '',
                         nguoi_quan_ly: userName,
                     });
                     setRole(safeRole);

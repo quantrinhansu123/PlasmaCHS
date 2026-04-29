@@ -14,12 +14,15 @@ import {
     AlertCircle,
     Image as ImageIcon,
     Loader2,
-    RefreshCw
+    RefreshCw,
+    LayoutGrid,
+    List
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/config';
 import { clsx } from 'clsx';
 import { toast } from 'react-toastify';
+import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 
 const ShippingTasks = () => {
     const navigate = useNavigate();
@@ -32,6 +35,7 @@ const ShippingTasks = () => {
     const [uploadedImages, setUploadedImages] = useState([]);
     const [notes, setNotes] = useState('');
     const [deliveryStatus, setDeliveryStatus] = useState('HOAN_THANH');
+    const [activeView, setActiveView] = useState('list');
 
     useEffect(() => {
         fetchShippingOrders();
@@ -110,13 +114,19 @@ const ShippingTasks = () => {
             const finalStatus = deliveryStatus; // HOAN_THANH or TRA_HANG
             const notePrefix = finalStatus === 'TRA_HANG' ? '[Lý do Giao Không Thành Công]: ' : '[Ghi chú Shipper]: ';
             const newNoteText = notes ? `\n${notePrefix}${notes}` : '';
+            const uploadedProofText = finalStatus === 'HOAN_THANH' && uploadedImages.length > 0
+                ? `\n[Ảnh giao hàng]: ${uploadedImages.join(', ')}`
+                : '';
+            const deliveryImageUrl = finalStatus === 'HOAN_THANH'
+                ? (uploadedImages[0] || selectedOrder.delivery_image_url || null)
+                : selectedOrder.delivery_image_url;
 
             const { error } = await supabase
                 .from('orders')
                 .update({
                     status: finalStatus,
-                    delivery_images: finalStatus === 'HOAN_THANH' ? uploadedImages : selectedOrder.delivery_images,
-                    note: (selectedOrder.note || '') + newNoteText,
+                    delivery_image_url: deliveryImageUrl,
+                    note: (selectedOrder.note || '') + newNoteText + uploadedProofText,
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', selectedOrder.id);
@@ -144,6 +154,15 @@ const ShippingTasks = () => {
         order.recipient_phone?.includes(searchTerm)
     );
 
+    const kanbanByShipper = filteredOrders.reduce((acc, order) => {
+        const shipperName = (order.delivery_unit || '').trim() || 'Chưa phân công';
+        if (!acc[shipperName]) acc[shipperName] = [];
+        acc[shipperName].push(order);
+        return acc;
+    }, {});
+
+    const shipperColumns = Object.entries(kanbanByShipper).sort(([a], [b]) => a.localeCompare(b, 'vi'));
+
     const getStatusBadge = (status) => {
         switch (status) {
             case 'CHO_GIAO_HANG': return 'bg-amber-100 text-amber-700 border-amber-200';
@@ -169,6 +188,17 @@ const ShippingTasks = () => {
                         <ChevronLeft size={20} className="text-slate-600" />
                     </button>
                     <h1 className="text-xl font-bold text-slate-900">Nhiệm vụ giao hàng</h1>
+                </div>
+
+                <div className="mb-3">
+                    <PageViewSwitcher
+                        activeView={activeView}
+                        setActiveView={setActiveView}
+                        views={[
+                            { id: 'list', label: 'Danh sách', icon: <List size={16} /> },
+                            { id: 'kanban', label: 'Kanban', icon: <LayoutGrid size={16} /> },
+                        ]}
+                    />
                 </div>
 
                 <div className="relative">
@@ -204,7 +234,7 @@ const ShippingTasks = () => {
                             Tải lại trang
                         </button>
                     </div>
-                ) : (
+                ) : activeView === 'list' ? (
                     filteredOrders.map((order) => (
                         <div key={order.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden active:scale-[0.98] transition-transform duration-200">
                             <div className="p-4 border-b border-slate-100 flex justify-between items-start">
@@ -277,6 +307,45 @@ const ShippingTasks = () => {
                             </div>
                         </div>
                     ))
+                ) : (
+                    <div className="overflow-x-auto overflow-y-hidden">
+                        <div className="grid grid-flow-col auto-cols-[280px] gap-3 min-h-full">
+                            {shipperColumns.map(([shipperName, shipperOrders]) => (
+                                <div key={shipperName} className="rounded-xl border border-slate-200 bg-white flex flex-col min-h-0">
+                                    <div className="px-3 py-2.5 border-b border-slate-100 flex items-center justify-between">
+                                        <p className="text-[12px] font-bold text-slate-700 truncate pr-2">{shipperName}</p>
+                                        <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[11px] font-bold">
+                                            {shipperOrders.length}
+                                        </span>
+                                    </div>
+                                    <div className="p-2.5 space-y-2 overflow-y-auto min-h-0">
+                                        {shipperOrders.map((order) => (
+                                            <div
+                                                key={order.id}
+                                                className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 cursor-pointer hover:bg-white hover:shadow-sm transition-all"
+                                                onClick={() => {
+                                                    setSelectedOrder(order);
+                                                    setDeliveryStatus('HOAN_THANH');
+                                                    setNotes('');
+                                                    setUploadedImages([]);
+                                                    setIsConfirmModalOpen(true);
+                                                }}
+                                            >
+                                                <div className="flex items-start justify-between gap-2">
+                                                    <p className="text-[12px] font-bold text-primary">#{order.order_code}</p>
+                                                    <span className={clsx('px-1.5 py-0.5 rounded-full text-[9px] font-bold border uppercase', getStatusBadge(order.status))}>
+                                                        {getStatusLabel(order.status)}
+                                                    </span>
+                                                </div>
+                                                <p className="text-[12px] font-bold text-slate-800 mt-1 line-clamp-2">{order.recipient_name || order.customer_name}</p>
+                                                <p className="text-[11px] text-slate-500 mt-1 line-clamp-1">{order.recipient_phone || '—'}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 )}
             </div>
 

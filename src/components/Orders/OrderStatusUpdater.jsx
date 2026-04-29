@@ -19,6 +19,12 @@ const parseNoteFieldList = (noteText, prefix) => {
     return raw.split(',').map(s => s.trim()).filter(Boolean);
 };
 
+const parseApprovedQuantityFromNote = (noteText) => {
+    const match = String(noteText || '').match(/SL phê duyệt:\s*([0-9]+)/i);
+    if (!match?.[1]) return 0;
+    return parseInt(match[1], 10) || 0;
+};
+
 const stripWarehouseAssignmentSection = (noteText) => {
     if (!noteText) return '';
     return noteText
@@ -73,7 +79,16 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     const hasMachineItems = orderItems.length > 0
         ? orderItems.some(it => isMachineProductType(it?.product_type))
         : (isMachineProductType(order?.product_type) || isMachineProductType(order?.product_type_2));
-    const approvedMachineCount = Math.max(0, parseInt(adjustedQuantity2) || 0);
+    const approvedMachineCount = Math.max(
+        0,
+        parseInt(adjustedQuantity2, 10) ||
+        parseInt(order?.quantity_approved, 10) ||
+        parseApprovedQuantityFromNote(order?.note) ||
+        parseInt(adjustedQuantity, 10) ||
+        parseInt(order?.quantity_2, 10) ||
+        parseInt(order?.quantity, 10) ||
+        0
+    );
 
     useEffect(() => {
         if (order?.warehouse && (realWarehouseName === order.warehouse || /^[0-9a-fA-F]{8}-/.test(realWarehouseName))) {

@@ -62,6 +62,32 @@ const getApprovedQuantityFromRequest = (request) => {
     return parseInt(request?.quantity, 10) || 0;
 };
 
+const normalizeText = (value) =>
+    String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toLowerCase();
+
+const extractWarehouseFromNote = (note) => {
+    const text = String(note || '');
+    if (!text) return '';
+    const match = text.match(/Kho:\s*([^\n\r.]+)/i);
+    return (match?.[1] || '').trim();
+};
+
+const getWarehouseAliases = (warehouse) => {
+    const rawName = String(warehouse?.name || '').trim();
+    const rawCode = String(warehouse?.code || '').trim();
+    const rawId = String(warehouse?.id || '').trim();
+    const shortFromName = rawName.includes('-') ? rawName.split('-')[0].trim() : '';
+    const compactName = rawName.replace(/\s+/g, '');
+
+    return [rawId, rawName, rawCode, shortFromName, compactName]
+        .map(normalizeText)
+        .filter(Boolean);
+};
+
 // Register Chart.js components
 ChartJS.register(
     CategoryScale,
@@ -78,6 +104,7 @@ ChartJS.register(
 export default function MachineRequests() {
     const navigate = useNavigate();
     const { role, department, user, loading: permissionsLoading } = usePermissions();
+    const isAdmin = isAdminRole(role);
     const [requests, setRequests] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
@@ -90,6 +117,9 @@ export default function MachineRequests() {
     const [toDate, setToDate] = useState('');
     const [selectedStatuses, setSelectedStatuses] = useState([]);
     const [selectedCustomers, setSelectedCustomers] = useState([]);
+
+    // Bulk selection (xóa nhiều phiếu)
+    const [selectedRequestIds, setSelectedRequestIds] = useState([]);
 
     // Mobile filter sheet state
     const [showMobileFilter, setShowMobileFilter] = useState(false);
@@ -180,17 +210,12 @@ export default function MachineRequests() {
                 .select('*')
                 .eq('order_type', 'DNXM');
 
-            // Thủ kho chỉ nhìn thấy đơn ở trạng thái Kho xử lý
-            if (isThuKhoRole) {
-                query = query.eq('status', 'KHO_XU_LY');
-            }
-
             // Shipper chỉ nhìn thấy đơn được giao cho mình
             if (shipperRole && !isAdmin) {
                 query = query.eq('delivery_unit', storageUserName);
             }
 
-            if (warehouseRole && department) {
+            if (warehouseRole && !isThuKhoRole && department) {
                 const warehouseCode = department.includes('-')
                     ? department.split('-')[0].trim()
                     : department.trim();
@@ -217,7 +242,72 @@ export default function MachineRequests() {
             const { data, error } = await query.order('created_at', { ascending: false });
             
             if (error) throw error;
-            setRequests(data || []);
+
+            let scopedData = data || [];
+
+            // Thủ kho: lấy kho theo cột "Thủ kho" trong danh sách kho,
+            // rồi hiển thị toàn bộ phiếu có Kho khớp Tên kho (và hỗ trợ code/id để tương thích dữ liệu cũ).
+            if (!isAdmin && (isThuKhoRole || warehouseRole)) {
+                const possibleManagerNames = [
+                    user?.name,
+                    user?.username,
+                    storageUserName,
+                ]
+                    .map((v) => (v || '').trim())
+                    .filter(Boolean);
+
+                if (possibleManagerNames.length > 0) {
+                    const normalizedManagers = possibleManagerNames.map(normalizeText);
+                    const { data: warehousesData } = await supabase
+                        .from('warehouses')
+                        .select('id, name, code, manager_name');
+
+                    const myWarehouses = (warehousesData || []).filter((w) => {
+                        const manager = normalizeText(w.manager_name);
+                        if (!manager) return false;
+                        return normalizedManagers.some((candidate) =>
+                            manager.includes(candidate) || candidate.includes(manager)
+                        );
+                    });
+
+                    let scopedWarehouses = myWarehouses;
+                    if (scopedWarehouses.length === 0) {
+                        const branchTokens = [department, user?.chi_nhanh]
+                            .map((v) => normalizeText(v))
+                            .filter(Boolean);
+                        if (branchTokens.length > 0) {
+                            scopedWarehouses = (warehousesData || []).filter((w) => {
+                                const keys = getWarehouseAliases(w);
+                                return branchTokens.some((token) =>
+                                    keys.some((key) => key.includes(token) || token.includes(key))
+                                );
+                            });
+                        }
+                    }
+
+                    if (scopedWarehouses.length > 0) {
+                        const allowedWarehouseValues = new Set(
+                            scopedWarehouses.flatMap((w) => getWarehouseAliases(w))
+                        );
+
+                        scopedData = scopedData.filter((order) => {
+                            const warehouseCandidates = [
+                                order.warehouse,
+                                extractWarehouseFromNote(order.note),
+                            ]
+                                .map(normalizeText)
+                                .filter(Boolean);
+                            return warehouseCandidates.some((candidate) => allowedWarehouseValues.has(candidate));
+                        });
+                    } else {
+                        scopedData = [];
+                    }
+                } else {
+                    scopedData = [];
+                }
+            }
+
+            setRequests(scopedData);
         } catch (error) {
             toast.error('Lỗi tải dữ liệu: ' + error.message);
         } finally {
@@ -258,6 +348,7 @@ export default function MachineRequests() {
         label: s.label,
         count: requests.filter(o => o.status === s.id).length
     }));
+    const kanbanStatuses = COMMON_STATUSES.filter((s) => s.id !== 'ALL');
 
     const totalRecords = filteredRequests.length;
     const paginatedRequests = filteredRequests.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -265,12 +356,41 @@ export default function MachineRequests() {
     const hasActiveFilters = selectedStatuses.length > 0 || selectedCustomers.length > 0 || fromDate || toDate;
     const totalActiveFilters = selectedStatuses.length + selectedCustomers.length + (fromDate ? 1 : 0) + (toDate ? 1 : 0);
 
+    useEffect(() => {
+        // Tránh tình trạng user chọn trước rồi lọc/phân trang làm lệch danh sách xóa
+        setSelectedRequestIds([]);
+    }, [searchTerm, selectedStatuses, selectedCustomers, fromDate, toDate, currentPage, pageSize]);
+
+    const toggleSelectOne = (id) => {
+        setSelectedRequestIds((prev) =>
+            prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+        );
+    };
+
     const handleDelete = async (id, code) => {
         if (!window.confirm(`Bạn có chắc muốn xóa phiếu đề nghị ${code}?`)) return;
         try {
             const { error } = await supabase.from('orders').delete().eq('id', id);
             if (error) throw error;
             toast.success(`Đã xóa phiếu ${code}`);
+            fetchData();
+        } catch (error) {
+            toast.error('Lỗi xóa phiếu: ' + error.message);
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (!selectedRequestIds.length) return;
+        if (!window.confirm(`Bạn có chắc muốn xóa ${selectedRequestIds.length} phiếu đề nghị?`)) return;
+        try {
+            const { error } = await supabase
+                .from('orders')
+                .delete()
+                .in('id', selectedRequestIds);
+
+            if (error) throw error;
+            toast.success(`Đã xóa ${selectedRequestIds.length} phiếu`);
+            setSelectedRequestIds([]);
             fetchData();
         } catch (error) {
             toast.error('Lỗi xóa phiếu: ' + error.message);
@@ -334,6 +454,7 @@ export default function MachineRequests() {
                 setActiveView={setActiveView}
                 views={[
                     { id: 'list', label: 'Danh sách', icon: <List size={16} /> },
+                    { id: 'kanban', label: 'Kanban', icon: <Calendar size={16} /> },
                     { id: 'stats', label: 'Thống kê', icon: <BarChart2 size={16} /> },
                 ]}
             />
@@ -364,6 +485,27 @@ export default function MachineRequests() {
                         }
                     />
 
+                    {selectedRequestIds.length > 0 && (
+                        <div className="mx-3 md:mx-4 mb-2 md:mb-3 mt-1 bg-slate-50 border border-slate-200 rounded-xl p-2 flex items-center justify-between gap-3">
+                            <div className="text-[12px] text-slate-700 font-bold">
+                                Đã chọn <span className="text-primary">{selectedRequestIds.length}</span> phiếu
+                            </div>
+                            {isAdmin ? (
+                                <button
+                                    type="button"
+                                    onClick={handleBulkDelete}
+                                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-rose-50 text-rose-700 text-[12px] font-bold border border-rose-100 hover:bg-rose-100 transition-all"
+                                >
+                                    <Trash2 size={14} /> Xóa hàng loạt
+                                </button>
+                            ) : (
+                                <div className="text-[12px] text-muted-foreground font-bold">
+                                    Chỉ Admin được xóa hàng loạt
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* Mobile View */}
                     <div className="md:hidden flex-1 overflow-y-auto p-3 pb-24 flex flex-col gap-3">
                         {loading ? (
@@ -376,7 +518,16 @@ export default function MachineRequests() {
                                 return (
                                     <div key={r.id} className="rounded-2xl border border-primary/15 bg-white shadow-sm p-4 transition-all duration-200">
                                         <div className="flex items-start justify-between gap-2 mb-2">
-                                            <div className="flex gap-3">
+                                                        <div className="flex gap-3">
+                                                            <div className="pt-0.5">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={selectedRequestIds.includes(r.id)}
+                                                                    disabled={!isAdmin}
+                                                                    onChange={() => toggleSelectOne(r.id)}
+                                                                    className="w-5 h-5 rounded-lg border-slate-300 text-primary focus:ring-primary/20 transition-all cursor-pointer shadow-sm"
+                                                                />
+                                                            </div>
                                                 <div>
                                                     <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">#{((currentPage - 1) * pageSize) + index + 1}</p>
                                                     <h3 className="text-[14px] font-bold text-foreground leading-tight mt-0.5 cursor-pointer" onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)}>{r.order_code}</h3>
@@ -408,6 +559,12 @@ export default function MachineRequests() {
                                                 <div className="text-[14px] text-foreground font-black mt-0.5">
                                                     {getApprovedQuantityFromRequest(r)} máy
                                                 </div>
+                                            </div>
+                                            <div className="col-span-2">
+                                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Kho</p>
+                                                <p className="text-[12px] text-foreground font-bold mt-0.5">
+                                                    {r.warehouse || extractWarehouseFromNote(r.note) || '—'}
+                                                </p>
                                             </div>
                                         </div>
 
@@ -528,10 +685,32 @@ export default function MachineRequests() {
                             <table className="w-full text-left border-collapse">
                                 <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur shadow-sm">
                                     <tr>
+                                        <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider w-10">
+                                            <input
+                                                type="checkbox"
+                                                disabled={!isAdmin || paginatedRequests.length === 0}
+                                                checked={
+                                                    paginatedRequests.length > 0 &&
+                                                    paginatedRequests.every((r) => selectedRequestIds.includes(r.id))
+                                                }
+                                                onChange={() => {
+                                                    const idsOnPage = paginatedRequests.map((r) => r.id);
+                                                    setSelectedRequestIds((prev) => {
+                                                        const allSelected = idsOnPage.length > 0 && idsOnPage.every((id) => prev.includes(id));
+                                                        if (allSelected) {
+                                                            return prev.filter((id) => !idsOnPage.includes(id));
+                                                        }
+                                                        return Array.from(new Set([...prev, ...idsOnPage]));
+                                                    });
+                                                }}
+                                                className="w-5 h-5 rounded-lg border-slate-300 text-primary focus:ring-primary/20 transition-all cursor-pointer shadow-sm"
+                                            />
+                                        </th>
                                         <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Mã phiếu</th>
                                         <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Ngày tạo</th>
                                         <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Khách hàng</th>
                                         <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Người yêu cầu</th>
+                                        <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Kho</th>
                                         <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Số lượng</th>
                                         <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Trạng thái</th>
                                         <th className="px-5 py-3.5 text-center text-[12px] font-bold text-slate-500 uppercase tracking-wider">Thao tác</th>
@@ -539,16 +718,26 @@ export default function MachineRequests() {
                                 </thead>
                                 <tbody className="divide-y divide-border/60 bg-white">
                                     {loading ? (
-                                        <tr><td colSpan={6} className="px-6 py-20 text-center text-slate-400 font-bold italic">Đang tải dữ liệu...</td></tr>
+                                        <tr><td colSpan={9} className="px-6 py-20 text-center text-slate-400 font-bold italic">Đang tải dữ liệu...</td></tr>
                                     ) : paginatedRequests.length === 0 ? (
-                                        <tr><td colSpan={6} className="px-6 py-20 text-center text-slate-400 font-bold italic">Không tìm thấy phiếu nào</td></tr>
+                                        <tr><td colSpan={9} className="px-6 py-20 text-center text-slate-400 font-bold italic">Không tìm thấy phiếu nào</td></tr>
                                     ) : (
                                         paginatedRequests.map(r => (
                                             <tr key={r.id} className="group hover:bg-muted/30 transition-colors">
+                                                <td className="px-5 py-3.5 w-10">
+                                                    <input
+                                                        type="checkbox"
+                                                        disabled={!isAdmin}
+                                                        checked={selectedRequestIds.includes(r.id)}
+                                                        onChange={() => toggleSelectOne(r.id)}
+                                                        className="w-5 h-5 rounded-lg border-slate-300 text-primary focus:ring-primary/20 transition-all cursor-pointer shadow-sm"
+                                                    />
+                                                </td>
                                                 <td className="px-5 py-3.5"><span className="text-[14px] font-bold text-primary hover:underline cursor-pointer" onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)}>{r.order_code}</span></td>
                                                 <td className="px-5 py-3.5 text-[13px] font-semibold text-slate-600">{new Date(r.created_at).toLocaleDateString('vi-VN')}</td>
                                                 <td className="px-5 py-3.5"><div className="text-[14px] font-bold text-slate-900 line-clamp-1">{r.customer_name}</div></td>
                                                 <td className="px-5 py-3.5 text-[13px] font-medium text-slate-500">{r.ordered_by || '—'}</td>
+                                                <td className="px-5 py-3.5 text-[13px] font-medium text-slate-600">{r.warehouse || extractWarehouseFromNote(r.note) || '—'}</td>
                                                 <td className="px-5 py-3.5"><span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-md font-bold text-[12px]">{getApprovedQuantityFromRequest(r)} máy</span></td>
                                                 <td className="px-5 py-3.5">
                                                     {(() => {
@@ -636,6 +825,85 @@ export default function MachineRequests() {
                             totalRecords={totalRecords}
                         />
                     )}
+                </div>
+            )}
+
+            {activeView === 'kanban' && (
+                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full mb-2 md:mb-0">
+                    <div className="p-3 md:p-4 border-b border-border/60 flex items-center gap-2">
+                        <button
+                            onClick={() => navigate(-1)}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground text-[12px] font-bold transition-all bg-white shadow-sm shrink-0"
+                        >
+                            <ChevronLeft size={16} />
+                            Quay lại
+                        </button>
+                        <div className="relative flex-1">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
+                            <input
+                                type="text"
+                                placeholder="Tìm trong Kanban..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="w-full pl-10 pr-8 py-1.5 bg-muted/20 border border-border/80 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="flex-1 overflow-x-auto overflow-y-hidden p-3 md:p-4">
+                        <div className="grid grid-flow-col auto-cols-[320px] md:auto-cols-[360px] gap-4 min-h-full">
+                            {kanbanStatuses.map((status) => {
+                                const statusRequests = filteredRequests.filter((r) => r.status === status.id);
+                                return (
+                                    <div key={status.id} className="rounded-xl border border-border bg-slate-50/60 flex flex-col min-h-0">
+                                        <div className="px-3 py-2.5 border-b border-border/60 flex items-center justify-between">
+                                            <span className="text-[12px] font-bold text-slate-700">{status.label}</span>
+                                            <span className="px-2 py-0.5 rounded-full bg-white border border-border text-[11px] font-bold text-slate-600">
+                                                {statusRequests.length}
+                                            </span>
+                                        </div>
+                                        <div className="p-3 space-y-3 overflow-y-auto min-h-0">
+                                            {statusRequests.length === 0 ? (
+                                                <div className="text-[12px] text-muted-foreground italic text-center py-6">Trống</div>
+                                            ) : (
+                                                statusRequests.map((r) => (
+                                                    <div
+                                                        key={r.id}
+                                                        className="w-full rounded-xl border border-border bg-white p-3.5 min-h-[140px] flex flex-col justify-between hover:shadow-md hover:border-primary/30 transition-all"
+                                                    >
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)}
+                                                            className="text-left"
+                                                        >
+                                                            <div className="text-[13px] font-extrabold text-primary">{r.order_code || '—'}</div>
+                                                            <div className="text-[14px] font-bold text-foreground mt-1.5 line-clamp-2">{r.customer_name || '—'}</div>
+                                                        </button>
+
+                                                        <div className="pt-3">
+                                                            <div className="text-[12px] text-muted-foreground">
+                                                                Kho: {r.warehouse || extractWarehouseFromNote(r.note) || '—'}
+                                                            </div>
+                                                            <div className="text-[12px] text-muted-foreground mt-1">
+                                                                YC: {r.ordered_by || '—'} • SL: {getApprovedQuantityFromRequest(r)}
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-end gap-1.5">
+                                                            <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-all" title="Xem chi tiết"><Eye size={16} /></button>
+                                                            <button onClick={() => handleViewAsOrder(r)} className="p-1.5 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 rounded-lg transition-all" title="Thao tác Đơn hàng"><Package size={16} /></button>
+                                                            <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)} className="p-1.5 text-slate-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-all" title="Chỉnh sửa"><Edit size={16} /></button>
+                                                            <button onClick={() => handleDelete(r.id, r.order_code)} className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all" title="Xóa"><Trash2 size={16} /></button>
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
                 </div>
             )}
 

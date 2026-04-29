@@ -159,6 +159,48 @@ const Machines = () => {
     const isColumnVisible = (key) => visibleColumns.includes(key);
     const visibleCount = visibleColumns.length;
     const totalCount = defaultColOrder.length;
+    const scopedWarehouseKeys = useMemo(() => {
+        if (isAdminOrManager) return [];
+
+        const deptText = (department || '').trim();
+        if (!deptText) return [];
+
+        const normalize = (value) => (value || '')
+            .toString()
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .trim();
+
+        const deptNormalized = normalize(deptText);
+        const aliases = new Set([deptText]);
+
+        if (deptNormalized.includes('ha noi')) aliases.add('HN');
+        if (deptNormalized.includes('thanh hoa')) aliases.add('TH');
+        if (deptNormalized.includes('da nang')) aliases.add('DN');
+        if (deptNormalized.includes('hcm') || deptNormalized.includes('ho chi minh')) {
+            aliases.add('TP.HCM');
+            aliases.add('HCM');
+        }
+
+        warehousesList.forEach((warehouse) => {
+            const name = (warehouse?.name || '').trim();
+            const id = (warehouse?.id || '').trim();
+            const nameNormalized = normalize(name);
+
+            const isMatchedByName = deptNormalized && (
+                nameNormalized.includes(deptNormalized) || deptNormalized.includes(nameNormalized)
+            );
+            const isMatchedById = id && aliases.has(id);
+
+            if (isMatchedByName || isMatchedById) {
+                if (id) aliases.add(id);
+                if (name) aliases.add(name);
+            }
+        });
+
+        return Array.from(aliases).filter(Boolean);
+    }, [department, isAdminOrManager, warehousesList]);
 
     useEffect(() => {
         fetchWarehouses();
@@ -168,7 +210,7 @@ const Machines = () => {
         fetchMachines();
         fetchGlobalStats();
         fetchMetadataForCharts();
-    }, [currentPage, searchTerm, selectedStatuses, selectedMachineTypes, selectedCustomers, selectedDepartments, selectedWarehouses]);
+    }, [currentPage, searchTerm, selectedStatuses, selectedMachineTypes, selectedCustomers, selectedDepartments, selectedWarehouses, scopedWarehouseKeys]);
 
     const fetchMetadataForCharts = async () => {
         try {
@@ -187,8 +229,11 @@ const Machines = () => {
 
             // Apply warehouse filter for warehouse managers/staff only.
             if (!isAdminOrManager && department) {
-                const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-                query = query.ilike('warehouse', `%${userWhCode}%`);
+                if (scopedWarehouseKeys.length > 0) {
+                    query = query.in('warehouse', scopedWarehouseKeys);
+                } else {
+                    query = query.ilike('warehouse', `%${department.trim()}%`);
+                }
             }
 
             const { data } = await query;
@@ -222,8 +267,11 @@ const Machines = () => {
 
                 // Apply warehouse filter for warehouse managers/staff only.
                 if (!isAdminOrManager && department) {
-                    const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-                    queries[key] = queries[key].ilike('warehouse', `%${userWhCode}%`);
+                    if (scopedWarehouseKeys.length > 0) {
+                        queries[key] = queries[key].in('warehouse', scopedWarehouseKeys);
+                    } else {
+                        queries[key] = queries[key].ilike('warehouse', `%${department.trim()}%`);
+                    }
                 }
             });
 
@@ -331,8 +379,11 @@ const Machines = () => {
 
             // Apply warehouse filter for warehouse managers/staff only.
             if (!isAdminOrManager && department) {
-                const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-                query = query.ilike('warehouse', `%${userWhCode}%`);
+                if (scopedWarehouseKeys.length > 0) {
+                    query = query.in('warehouse', scopedWarehouseKeys);
+                } else {
+                    query = query.ilike('warehouse', `%${department.trim()}%`);
+                }
             }
 
             const from = (currentPage - 1) * pageSize;
@@ -395,7 +446,7 @@ const Machines = () => {
 
     const fetchWarehouses = async () => {
         try {
-            const { data } = await supabase.from('warehouses').select('id, name').order('name');
+            const { data } = await supabase.from('warehouses').select('id, name, branch_office').order('name');
             if (data) {
                 setWarehousesList(data);
             }
@@ -593,6 +644,50 @@ const Machines = () => {
         reader.readAsBinaryString(file);
     };
 
+    const normalizeText = (value) => (value || '')
+        .toString()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim();
+
+    const inferWarehouseRegionAliases = (value) => {
+        const normalized = normalizeText(value);
+        const aliases = new Set();
+
+        if (normalized.includes('ha noi')) aliases.add('HN');
+        if (normalized.includes('thanh hoa')) aliases.add('TH');
+        if (normalized.includes('da nang')) aliases.add('DN');
+        if (normalized.includes('hcm') || normalized.includes('ho chi minh')) {
+            aliases.add('TP.HCM');
+            aliases.add('HCM');
+        }
+
+        return Array.from(aliases);
+    };
+
+    const resolveWarehouse = (warehouseValue) => {
+        if (!warehouseValue) return null;
+
+        const raw = warehouseValue.toString().trim();
+        const normalizedRaw = normalizeText(raw);
+        const rawAliases = new Set([raw, ...inferWarehouseRegionAliases(raw)]);
+
+        return warehousesList.find((item) => {
+            const candidates = [
+                item?.id,
+                item?.name,
+                item?.branch_office,
+                ...inferWarehouseRegionAliases(item?.name),
+                ...inferWarehouseRegionAliases(item?.branch_office)
+            ].filter(Boolean);
+
+            const normalizedCandidates = candidates.map((candidate) => normalizeText(candidate));
+            return candidates.some((candidate) => rawAliases.has(candidate))
+                || normalizedCandidates.includes(normalizedRaw);
+        }) || null;
+    };
+
     const getLabel = (list, id) => {
         return list.find(item => item.id === id)?.label || id;
     };
@@ -604,7 +699,7 @@ const Machines = () => {
 
     const getWarehouseLabel = (warehouseId) => {
         if (!warehouseId) return '—';
-        return warehousesList.find(item => item.id === warehouseId)?.name || warehouseId;
+        return resolveWarehouse(warehouseId)?.name || warehouseId;
     };
 
 
@@ -652,7 +747,7 @@ const Machines = () => {
     const warehouseOptions = warehousesList.map(item => ({
         id: item.id,
         label: item.name,
-        count: allMetadata.filter(m => m.warehouse === item.id).length
+        count: allMetadata.filter(m => resolveWarehouse(m.warehouse)?.id === item.id).length
     }));
 
     const clearAllFilters = () => {
