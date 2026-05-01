@@ -8,6 +8,11 @@ import BarcodeScanner from '../Common/BarcodeScanner';
 import { notificationService } from '../../utils/notificationService';
 import MachineIssueRequestForm from '../Machines/MachineIssueRequestForm';
 import usePermissions from '../../hooks/usePermissions';
+import {
+    collectMachineSerialsForOrder,
+    isMachineProductType,
+    resolvedOrderCustomerAssetName,
+} from '../../utils/orderMachineSerials';
 
 const parseNoteFieldList = (noteText, prefix) => {
     const lines = (noteText || '').split('\n').map(l => l.trim());
@@ -29,13 +34,6 @@ const stripWarehouseAssignmentSection = (noteText) => {
     return noteText
         .replace(/\n*=== MÁY ĐÃ GÁN TỪ KHO ===[\s\S]*$/g, '')
         .trim();
-};
-
-const isMachineProductType = (productType) => {
-    if (!productType) return false;
-    const normalized = String(productType).trim();
-    if (normalized.startsWith('MAY')) return true;
-    return ['TM', 'SD', 'FM', 'Khac', 'KHAC', 'DNXM'].includes(normalized);
 };
 
 const toUuidOrNull = (value) => {
@@ -173,7 +171,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         fetchAvailableMachineSerials();
     }, [hasMachineItems, order?.status, order?.warehouse]);
 
-    // Initialize delivery checklist from assigned items (header + order_items — đơn một dòng bình thường chỉ có ở items)
+    // Checklist giao: bình từ assigned + dòng BINH; máy từ collectMachineSerialsForOrder (order_items, department, khối note kho).
     useEffect(() => {
         if (order?.status === 'DANG_GIAO_HANG') {
             const checklist = {};
@@ -194,30 +192,29 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             binhSerials.forEach((serial) => {
                 checklist[`BINH:${serial}`] = false;
             });
-            if (isDNXM) {
-                // Đối với đơn máy, lấy mã từ department hoặc note
-                let machineSerials = [];
-                if (order.department) {
-                    machineSerials = order.department.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
-                } else if (order.note && order.note.includes('Mã máy:')) {
-                    const match = order.note.match(/Mã máy:\s*(.*)/);
-                    if (match && match[1]) {
-                        machineSerials = match[1].split(',').map(s => s.trim()).filter(Boolean);
-                    }
-                }
+            collectMachineSerialsForOrder(order, orderItems, {}).forEach((serial) => {
+                checklist[`MAY:${serial}`] = false;
+            });
 
-                machineSerials.forEach(serial => {
-                    checklist[`MAY:${serial}`] = false;
-                });
-            } else if (order.department) {
-                const machineSerials = order.department.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
-                machineSerials.forEach(serial => {
-                    checklist[`MAY:${serial}`] = false;
-                });
-            }
+            const saved =
+                order.delivery_checklist && typeof order.delivery_checklist === 'object'
+                    ? order.delivery_checklist
+                    : {};
+            Object.keys(checklist).forEach((k) => {
+                if (saved[k] === true) checklist[k] = true;
+            });
+
             setDeliveryChecklist(checklist);
         }
-    }, [order?.id, order?.status, order?.assigned_cylinders, order?.department, orderItems, isDNXM]);
+    }, [
+        order?.id,
+        order?.status,
+        order?.assigned_cylinders,
+        order?.department,
+        order?.delivery_checklist,
+        order?.note,
+        orderItems,
+    ]);
 
     const handleProofImageChange = (e) => {
         const file = e.target.files[0];
@@ -643,7 +640,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     .from('machines')
                     .update({
                         status: 'kiểm tra',
-                        customer_name: order.customer_name || null,
+                        customer_name: resolvedOrderCustomerAssetName(order),
                         updated_at: new Date().toISOString()
                     })
                     .in('serial_number', serials);
@@ -701,7 +698,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                         .from('cylinders')
                         .update({
                             status: 'thuộc khách hàng',
-                            customer_name: order.customer_name || null,
+                            customer_name: resolvedOrderCustomerAssetName(order),
                             updated_at: new Date().toISOString()
                         })
                         .in('serial_number', deliveredCylinderSerials);
@@ -711,14 +708,15 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     }
                 }
 
-                if (hasMachineItems && order.department) {
-                    const machineSerials = order.department.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+                if (hasMachineItems) {
+                    const machineSerials = collectMachineSerialsForOrder(order, orderItems, deliveryChecklist);
                     if (machineSerials.length > 0) {
+                        const custName = resolvedOrderCustomerAssetName(order);
                         const { error: deliveredMachineErr } = await supabase
                             .from('machines')
                             .update({
                                 status: 'thuộc khách hàng',
-                                customer_name: order.customer_name || null,
+                                customer_name: custName,
                                 warehouse: null,
                                 updated_at: new Date().toISOString()
                             })
@@ -779,10 +777,8 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 }
 
                 // Release any machines assigned to this order back to available
-                const machineItems = orderItems.filter(it => !it.product_type?.startsWith('BINH'));
-                if (machineItems.length > 0 && order.department) {
-                    // If machines were assigned via department/serial, release them
-                    const machineSerials = order.department.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
+                if (hasMachineItems) {
+                    const machineSerials = collectMachineSerialsForOrder(order, orderItems, {});
                     if (machineSerials.length > 0) {
                         await supabase
                             .from('machines')

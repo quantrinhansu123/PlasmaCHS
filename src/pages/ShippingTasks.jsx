@@ -27,6 +27,10 @@ import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import usePermissions from '../hooks/usePermissions';
 import { isShipperRole, isAdminRole } from '../utils/accessControl';
 import { tryQuickCompleteRecovery } from '../utils/cylinderRecoveryCompletion';
+import {
+    collectMachineSerialsForOrder,
+    resolvedOrderCustomerAssetName,
+} from '../utils/orderMachineSerials';
 
 /** Gộp đơn giao hàng + phiếu thu hồi vỏ cần shipper / tài xế xử lý */
 const ShippingTasks = () => {
@@ -43,6 +47,8 @@ const ShippingTasks = () => {
     const [deliveryStatus, setDeliveryStatus] = useState('HOAN_THANH');
     const [activeView, setActiveView] = useState('list');
     const [machineChecklist, setMachineChecklist] = useState({});
+    /** Dòng order_items của đơn đang mở modal giao — cần để gom mã máy giống OrderStatusUpdater */
+    const [shippingOrderItems, setShippingOrderItems] = useState([]);
     /** Tách khỏi isLoading (giao hàng / tải trang) để nút Hoàn thành thu hồi luôn bấm được */
     const [completingRecoveryId, setCompletingRecoveryId] = useState(null);
 
@@ -171,45 +177,39 @@ const ShippingTasks = () => {
         return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(raw) ? raw : null;
     };
 
-    const parseMachineSerialsFromOrder = (order) => {
-        const sanitizeSerial = (value) => {
-            const cleaned = String(value || '')
-                .replace(/^\d+\)\s*/g, '')
-                .replace(/^mã máy:\s*/i, '')
-                .replace(/^mã:\s*/i, '')
-                .replace(/[.;]+$/g, '')
-                .trim();
-            if (!cleaned) return '';
-            if (!/[a-z0-9]/i.test(cleaned)) return '';
-            return cleaned;
-        };
+    /** Checklist MAY: trên đơn (web đơn) + order_items đã tải */
+    const resolveMachineSerialsForShippingConfirm = (order, items) => {
+        const rawCl =
+            order?.delivery_checklist && typeof order.delivery_checklist === 'object'
+                ? order.delivery_checklist
+                : {};
+        return collectMachineSerialsForOrder(order, items, rawCl);
+    };
 
-        const fromDepartment = String(order?.department || '')
-            .split(/[\n,]+/)
-            .map(sanitizeSerial)
-            .filter(Boolean);
-
-        const note = String(order?.note || '');
-        const fromNote = [];
-        note.split('\n').forEach((line) => {
-            const trimmed = line.trim();
-            // Hỗ trợ cả format "Mã máy: A, B" và "1) Mã: A"
-            const multiMatch = trimmed.match(/^Mã máy:\s*(.+)$/i);
-            if (multiMatch?.[1]) {
-                multiMatch[1]
-                    .split(',')
-                    .map(sanitizeSerial)
-                    .filter(Boolean)
-                    .forEach((serial) => fromNote.push(serial));
-            }
-            const singleMatch = trimmed.match(/Mã:\s*(.+)$/i);
-            if (singleMatch?.[1]) {
-                const serial = sanitizeSerial(singleMatch[1]);
-                if (serial) fromNote.push(serial);
-            }
-        });
-
-        return [...new Set([...fromDepartment, ...fromNote])];
+    const openDeliveryConfirmModal = async (order) => {
+        try {
+            const { data, error } = await supabase
+                .from('order_items')
+                .select('order_id, product_type, serial_number')
+                .eq('order_id', order.id);
+            if (error) throw error;
+            const items = data || [];
+            setShippingOrderItems(items);
+            setSelectedOrder(order);
+            setDeliveryStatus('HOAN_THANH');
+            setNotes('');
+            setUploadedImages([]);
+            const serials = resolveMachineSerialsForShippingConfirm(order, items);
+            const initialChecklist = {};
+            serials.forEach((serial) => {
+                initialChecklist[serial] = false;
+            });
+            setMachineChecklist(initialChecklist);
+            setIsConfirmModalOpen(true);
+        } catch (e) {
+            console.error(e);
+            toast.error('❌ Không tải được chi tiết đơn để xác nhận mã máy: ' + (e?.message || ''));
+        }
     };
 
     const parseCylinderSerialsFromOrder = (order) => {
@@ -231,7 +231,10 @@ const ShippingTasks = () => {
 
     const confirmDelivery = async () => {
         if (!selectedOrder) return;
-        const machineSerialsForConfirm = parseMachineSerialsFromOrder(selectedOrder);
+        const machineSerialsForConfirm = resolveMachineSerialsForShippingConfirm(
+            selectedOrder,
+            shippingOrderItems,
+        );
         
         if (deliveryStatus === 'TRA_HANG' && !notes.trim()) {
             toast.error('Vui lòng nhập lý do giao hàng chưa thành công!');
@@ -247,9 +250,13 @@ const ShippingTasks = () => {
 
         setIsLoading(true);
         try {
-            const finalStatus = deliveryStatus === 'HOAN_THANH'
-                ? (selectedOrder.status === 'CHO_GIAO_HANG' ? 'DANG_GIAO_HANG' : 'HOAN_THANH')
-                : 'TRA_HANG';
+            /**
+             * Giao thành công: luôn chốt HOAN_THANH (kể cả khi đang CHO_GIAO_HANG).
+             * Chuỗi “Cho giao → Đang giao” một bước khiến finalStatus không bao giờ là HOAN_THANH,
+             * nên không chạy cập nhật máy/bình — shipper có ảnh + đã tick mã là xác nhận giao xong.
+             */
+            const finalStatus =
+                deliveryStatus !== 'HOAN_THANH' ? 'TRA_HANG' : 'HOAN_THANH';
             const notePrefix = finalStatus === 'TRA_HANG' ? '[Lý do Giao Không Thành Công]: ' : '[Ghi chú Shipper]: ';
             const newNoteText = notes ? `\n${notePrefix}${notes}` : '';
             const uploadedProofText = finalStatus === 'HOAN_THANH' && uploadedImages.length > 0
@@ -262,53 +269,61 @@ const ShippingTasks = () => {
                 ? uploadedImages[0]
                 : (selectedOrder.delivery_proof_base64 || null);
 
-            // Khi giao thành công từ bước "ĐANG_GIAO_HANG", đồng bộ máy sang "thuộc khách hàng".
-            if (finalStatus === 'HOAN_THANH' && selectedOrder.status === 'DANG_GIAO_HANG') {
-                const machineSerials = (selectedOrder.department || '')
-                    .split(/[\n,]+/)
-                    .map((serial) => serial.trim())
-                    .filter(Boolean);
-
-                if (machineSerials.length > 0) {
-                    const { error: deliveredMachineErr } = await supabase
-                        .from('machines')
-                        .update({
-                            status: 'thuộc khách hàng',
-                            customer_name: selectedOrder.customer_name || null,
-                            warehouse: null,
-                            updated_at: new Date().toISOString()
-                        })
-                        .in('serial_number', machineSerials);
-
-                    if (deliveredMachineErr) {
-                        throw new Error('Không thể cập nhật máy sang trạng thái thuộc khách hàng: ' + deliveredMachineErr.message);
+            /** Gộp tick máy shipper vào JSON (đồng bộ với OrderStatusUpdater / parseCylinderSerialsFromOrder). */
+            let nextDeliveryChecklist =
+                selectedOrder.delivery_checklist && typeof selectedOrder.delivery_checklist === 'object'
+                    ? { ...selectedOrder.delivery_checklist }
+                    : {};
+            if (finalStatus === 'HOAN_THANH' && machineSerialsForConfirm.length > 0) {
+                machineSerialsForConfirm.forEach((sn) => {
+                    if (machineChecklist[sn]) {
+                        nextDeliveryChecklist[`MAY:${sn}`] = true;
                     }
-                }
+                });
             }
 
-            const { error } = await supabase
+            const orderUpdatePayload = {
+                status: finalStatus,
+                delivery_image_url: deliveryImageUrl,
+                delivery_proof_base64: deliveryProofBase64,
+                note: (selectedOrder.note || '') + newNoteText + uploadedProofText,
+                updated_at: new Date().toISOString(),
+                ...(finalStatus === 'HOAN_THANH' && Object.keys(nextDeliveryChecklist).length > 0
+                    ? { delivery_checklist: nextDeliveryChecklist }
+                    : {}),
+            };
+
+            const { data: updatedRows, error } = await supabase
                 .from('orders')
-                .update({
-                    status: finalStatus,
-                    delivery_image_url: deliveryImageUrl,
-                    delivery_proof_base64: deliveryProofBase64,
-                    note: (selectedOrder.note || '') + newNoteText + uploadedProofText,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', selectedOrder.id);
+                .update(orderUpdatePayload)
+                .eq('id', selectedOrder.id)
+                .select('id, status, order_code');
 
             if (error) throw error;
 
+            const saved = Array.isArray(updatedRows) ? updatedRows[0] : updatedRows;
+            if (!saved || saved.status !== finalStatus) {
+                throw new Error(
+                    saved
+                        ? `Đơn không chuyển đúng trạng thái (mong: ${finalStatus}, lưu: ${saved.status}). Kiểm tra quyền DB/RLS.`
+                        : 'Không cập nhật được đơn (không có bản ghi trả về sau khi lưu). Kiểm tra quyền hoặc RLS trên bảng orders.',
+                );
+            }
+
             if (finalStatus === 'HOAN_THANH') {
                 const cylinderSerials = parseCylinderSerialsFromOrder(selectedOrder);
-                const machineSerials = parseMachineSerialsFromOrder(selectedOrder);
+                const machineSerials = resolveMachineSerialsForShippingConfirm(
+                    selectedOrder,
+                    shippingOrderItems,
+                );
 
                 if (cylinderSerials.length > 0) {
+                    const cylCust = resolvedOrderCustomerAssetName(selectedOrder);
                     const { error: cylinderErr } = await supabase
                         .from('cylinders')
                         .update({
                             status: 'thuộc khách hàng',
-                            customer_name: selectedOrder.customer_name || null,
+                            customer_name: cylCust,
                             updated_at: new Date().toISOString()
                         })
                         .in('serial_number', cylinderSerials);
@@ -316,11 +331,12 @@ const ShippingTasks = () => {
                 }
 
                 if (machineSerials.length > 0) {
+                    const custName = resolvedOrderCustomerAssetName(selectedOrder);
                     const { error: machineErr } = await supabase
                         .from('machines')
                         .update({
                             status: 'thuộc khách hàng',
-                            customer_name: selectedOrder.customer_name || null,
+                            customer_name: custName,
                             warehouse: null,
                             updated_at: new Date().toISOString()
                         })
@@ -343,14 +359,13 @@ const ShippingTasks = () => {
             }
 
             toast.success(
-                finalStatus === 'DANG_GIAO_HANG'
-                    ? '✅ Đã chuyển đơn sang trạng thái Đang giao!'
-                    : finalStatus === 'HOAN_THANH'
-                        ? '✅ Đã xác nhận giao hàng thành công!'
-                        : '⚠️ Đã báo cáo giao thất bại!'
+                finalStatus === 'HOAN_THANH'
+                    ? '✅ Đã xác nhận giao hàng thành công! Trạng thái đơn: Hoàn thành.'
+                    : '⚠️ Đã báo cáo giao thất bại!'
             );
             setIsConfirmModalOpen(false);
             setSelectedOrder(null);
+            setShippingOrderItems([]);
             setUploadedImages([]);
             setNotes('');
             setDeliveryStatus('HOAN_THANH');
@@ -447,6 +462,11 @@ const ShippingTasks = () => {
             setCompletingRecoveryId(null);
         }
     };
+
+    const shipModMachineSerials =
+        isConfirmModalOpen && selectedOrder
+            ? resolveMachineSerialsForShippingConfirm(selectedOrder, shippingOrderItems)
+            : [];
 
     return (
         <div className="flex flex-col h-full bg-slate-50">
@@ -562,17 +582,7 @@ const ShippingTasks = () => {
                                 </button>
                                 <button 
                                     type="button"
-                                    onClick={() => {
-                                        setSelectedOrder(order);
-                                        setDeliveryStatus('HOAN_THANH');
-                                        setNotes('');
-                                        setUploadedImages([]);
-                                        const serials = parseMachineSerialsFromOrder(order);
-                                        const initialChecklist = {};
-                                        serials.forEach((serial) => { initialChecklist[serial] = false; });
-                                        setMachineChecklist(initialChecklist);
-                                        setIsConfirmModalOpen(true);
-                                    }}
+                                    onClick={() => openDeliveryConfirmModal(order)}
                                     className="flex-[1.5] bg-primary text-white py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md shadow-primary/20 active:bg-primary/90"
                                 >
                                     <CheckCircle2 size={18} />
@@ -700,18 +710,7 @@ const ShippingTasks = () => {
                                             <div
                                                 key={`k-ord-${task.order.id}`}
                                                 className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 cursor-pointer hover:bg-white hover:shadow-sm transition-all"
-                                                onClick={() => {
-                                                    const order = task.order;
-                                                    setSelectedOrder(order);
-                                                    setDeliveryStatus('HOAN_THANH');
-                                                    setNotes('');
-                                                    setUploadedImages([]);
-                                                    const serials = parseMachineSerialsFromOrder(order);
-                                                    const initialChecklist = {};
-                                                    serials.forEach((serial) => { initialChecklist[serial] = false; });
-                                                    setMachineChecklist(initialChecklist);
-                                                    setIsConfirmModalOpen(true);
-                                                }}
+                                                onClick={() => openDeliveryConfirmModal(task.order)}
                                             >
                                                 <div className="flex items-start justify-between gap-2">
                                                     <p className="text-[12px] font-bold text-primary">#{task.order.order_code}</p>
@@ -784,7 +783,15 @@ const ShippingTasks = () => {
                     <div className="bg-white w-full max-w-lg rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-10 duration-500">
                         <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white rounded-t-3xl z-10">
                             <h2 className="text-xl font-bold text-slate-900">Xác nhận giao hàng</h2>
-                            <button onClick={() => setIsConfirmModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setIsConfirmModalOpen(false);
+                                    setShippingOrderItems([]);
+                                    setSelectedOrder(null);
+                                }}
+                                className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400"
+                            >
                                 <X size={20} />
                             </button>
                         </div>
@@ -857,11 +864,11 @@ const ShippingTasks = () => {
                                 </div>
                             )}
 
-                            {deliveryStatus === 'HOAN_THANH' && selectedOrder && parseMachineSerialsFromOrder(selectedOrder).length > 0 && (
+                            {deliveryStatus === 'HOAN_THANH' && selectedOrder && shipModMachineSerials.length > 0 && (
                                 <div className="animate-in fade-in slide-in-from-top-2 duration-300">
                                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Tích xác nhận mã máy đã giao</p>
                                     <div className="space-y-2 max-h-44 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
-                                        {parseMachineSerialsFromOrder(selectedOrder).map((serial) => (
+                                        {shipModMachineSerials.map((serial) => (
                                             <label key={serial} className="flex items-center gap-2 text-sm font-semibold text-slate-700">
                                                 <input
                                                     type="checkbox"
@@ -909,9 +916,7 @@ const ShippingTasks = () => {
                             </button>
                             <p className="text-center text-[11px] text-slate-400 mt-3 italic">
                                 {deliveryStatus === 'HOAN_THANH'
-                                    ? (selectedOrder?.status === 'CHO_GIAO_HANG'
-                                        ? 'Trạng thái đơn hàng sẽ chuyển thành Đang giao.'
-                                        : 'Trạng thái đơn hàng sẽ chuyển thành Hoàn thành.')
+                                    ? 'Đơn chuyển sang Hoàn thành; máy và bình (nếu có) đều được cập nhật theo mã đã tích.'
                                     : 'Đơn hàng sẽ được trả về kho (Trạng thái: Đơn hàng trả về).'}
                             </p>
                         </div>

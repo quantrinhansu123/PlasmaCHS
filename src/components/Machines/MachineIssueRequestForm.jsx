@@ -200,7 +200,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
         } else if (phone) {
             setFormData(prev => ({ ...prev, phone }));
         }
-    }, [location.search]);
+    }, [location.search, overrideOrderId, overrideViewOnly]);
 
     // Bug2 fix: watch user?.name specifically — fires even when user loads async after mount
     useEffect(() => {

@@ -1,10 +1,11 @@
 import {
     Activity,
+    FileText,
     History,
     MapPin,
     MonitorIcon,
     Package,
-    Thermometer,
+    User,
     X,
     ChevronRight,
     Calendar,
@@ -15,17 +16,56 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
 import { supabase } from '../../supabase/config';
+import MachineIssueRequestForm from './MachineIssueRequestForm';
 import OrderFormModal from '../Orders/OrderFormModal';
+import {
+    normalizeMachineSerialKey,
+    fetchOrderItemsForMachineSerialVariants,
+    isOrderDeliveredCompleted,
+    resolveOrderCustomerDisplay,
+} from '../../utils/machineCustomerFromOrders';
+
+function escapeIlikePattern(text) {
+    return String(text || '')
+        .replace(/\\/g, '\\\\')
+        .replace(/%/g, '\\%')
+        .replace(/_/g, '\\_')
+        .replace(/,/g, '');
+}
+
+/** Đơn phiếu Đề nghị xuất máy — mở form DNXM thay vì OrderFormModal. */
+function isDnxmOrderRecord(order) {
+    if (!order) return false;
+    if (order.order_type === 'DNXM') return true;
+    return /^DNXM/i.test(String(order.order_code || '').trim());
+}
+
+function isMachineProductLine(productType) {
+    if (!productType) return false;
+    const n = String(productType).trim();
+    const u = n.toUpperCase();
+    if (u.startsWith('MAY') || n.startsWith('MÁY')) return true;
+    return ['TM', 'SD', 'FM', 'Khac', 'KHAC', 'DNXM', 'MAY_ROSY', 'MAY_MED', 'MAY_MED_NEW'].includes(n);
+}
 
 export default function MachineDetailsModal({ machine, onClose }) {
     const [loading, setLoading] = useState(true);
+    const [usingCustomerLabel, setUsingCustomerLabel] = useState(() => String(machine?.customer_name || '').trim() || '—');
+    /** Đơn hoàn thành dùng để suy ra khách — hiện mã đơn cho rõ có biên bản. */
+    const [usingCustomerOrderCode, setUsingCustomerOrderCode] = useState('');
     const [orders, setOrders] = useState([]);
     const [transferLogs, setTransferLogs] = useState([]);
     const [isClosing, setIsClosing] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState(null);
+    /** Mở phiếu đề nghị xuất máy lồng (tránh navigate / modal đơn tách). */
+    const [dnxmPreviewOrderId, setDnxmPreviewOrderId] = useState(null);
 
     useEffect(() => {
         if (!machine) return;
+        setUsingCustomerLabel(String(machine.customer_name || '').trim() || '—');
+        setUsingCustomerOrderCode('');
+        setSelectedOrder(null);
+        setDnxmPreviewOrderId(null);
         fetchMachineHistory();
     }, [machine]);
 
@@ -37,29 +77,115 @@ export default function MachineDetailsModal({ machine, onClose }) {
     const fetchMachineHistory = async () => {
         setLoading(true);
         try {
+            const serial = (machine.serial_number || '').trim();
+            const p = `%${escapeIlikePattern(serial)}%`;
+
+            const orderIdSet = new Set();
+
+            if (serial) {
+                const [{ data: itemRows, error: itemErr }, { data: deptRows, error: deptErr }, { data: dnxmRows, error: dnxmErr }] =
+                    await Promise.all([
+                        supabase.from('order_items').select('order_id').ilike('serial_number', p),
+                        supabase.from('orders').select('id').ilike('department', p),
+                        supabase
+                            .from('orders')
+                            .select('id')
+                            .eq('order_type', 'DNXM')
+                            .or(`department.ilike.${p},note.ilike.${p}`),
+                    ]);
+
+                if (itemErr) throw itemErr;
+                if (deptErr) throw deptErr;
+                if (dnxmErr) throw dnxmErr;
+
+                (itemRows || []).forEach((r) => r.order_id && orderIdSet.add(r.order_id));
+                (deptRows || []).forEach((r) => r.id && orderIdSet.add(r.id));
+                (dnxmRows || []).forEach((r) => r.id && orderIdSet.add(r.id));
+            }
+
+            const orderIds = [...orderIdSet];
             const [ordersRes, transferRes] = await Promise.all([
-                supabase
-                    .from('orders')
-                    .select('*')
-                    .eq('order_type', 'DNXM')
-                    .or(`department.ilike.%${machine.serial_number}%,note.ilike.%${machine.serial_number}%`)
-                    .order('created_at', { ascending: false }),
+                orderIds.length === 0
+                    ? Promise.resolve({ data: [], error: null })
+                    : supabase
+                          .from('orders')
+                          .select('*')
+                          .in('id', orderIds)
+                          .order('created_at', { ascending: false }),
                 supabase
                     .from('inventory_transactions')
                     .select('*')
                     .eq('transaction_type', 'OUT')
                     .like('reference_code', 'TRF%')
-                    .ilike('note', `%${machine.serial_number}%`)
-                    .order('created_at', { ascending: false })
+                    .ilike('note', `%${escapeIlikePattern(serial)}%`)
+                    .order('created_at', { ascending: false }),
             ]);
 
             if (ordersRes.error) throw ordersRes.error;
             if (transferRes.error) throw transferRes.error;
 
-            setOrders(ordersRes.data || []);
+            const ordersData = ordersRes.data || [];
+            setOrders(ordersData);
             setTransferLogs(transferRes.data || []);
+
+            const customerIdsFromOrders = [
+                ...new Set((ordersData || []).map((o) => o.customer_id).filter(Boolean)),
+            ];
+            /** @type {Record<string, { name?: string | null }>} */
+            let customersById = {};
+            if (customerIdsFromOrders.length > 0) {
+                const { data: custRows } = await supabase
+                    .from('customers')
+                    .select('id, name')
+                    .in('id', customerIdsFromOrders);
+                (custRows || []).forEach((c) => {
+                    if (c?.id) customersById[c.id] = c;
+                });
+            }
+
+            let custLabel = '';
+            setUsingCustomerOrderCode('');
+
+            if (serial) {
+                const snLinks = await fetchOrderItemsForMachineSerialVariants(supabase, serial);
+                const machineItemRows = (snLinks || []).filter((it) => isMachineProductLine(it?.product_type));
+
+                /** Khớp theo serial chuẩn hóa (máy “PLT -x” vs dòng chi tiết “PLT-x”) */
+                let machineItemOrderIds = new Set(
+                    machineItemRows
+                        .filter((r) => normalizeMachineSerialKey(r.serial_number) === normalizeMachineSerialKey(serial))
+                        .map((r) => r.order_id),
+                );
+                if (machineItemOrderIds.size === 0 && machineItemRows.length) {
+                    machineItemOrderIds = new Set(machineItemRows.map((r) => r.order_id).filter(Boolean));
+                }
+
+                const hoanMatched = (ordersData || [])
+                    .filter((o) => isOrderDeliveredCompleted(o.status) && machineItemOrderIds.has(o.id))
+                    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+                custLabel = resolveOrderCustomerDisplay(hoanMatched[0], customersById);
+                let sourceOrderCode = hoanMatched[0]?.order_code ? String(hoanMatched[0].order_code) : '';
+
+                if (!custLabel) {
+                    const hoanRelated = (ordersData || [])
+                        .filter((o) => isOrderDeliveredCompleted(o.status))
+                        .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+                    custLabel = resolveOrderCustomerDisplay(hoanRelated[0], customersById);
+                    if (!sourceOrderCode && hoanRelated[0]?.order_code) {
+                        sourceOrderCode = String(hoanRelated[0].order_code);
+                    }
+                }
+
+                setUsingCustomerOrderCode(sourceOrderCode || '');
+            }
+
+            if (!custLabel) custLabel = String(machine.customer_name || '').trim();
+
+            setUsingCustomerLabel(custLabel || '—');
         } catch (error) {
             console.error('Error fetching machine history:', error);
+            setUsingCustomerOrderCode('');
+            setUsingCustomerLabel(String(machine?.customer_name || '').trim() || '—');
         } finally {
             setLoading(false);
         }
@@ -75,7 +201,7 @@ export default function MachineDetailsModal({ machine, onClose }) {
     };
 
     const getStatusStyle = (status) => {
-        if (['DA_DUYET', 'HOAN_THANH'].includes(status)) {
+        if (status === 'DA_DUYET' || isOrderDeliveredCompleted(status)) {
             return 'bg-emerald-50 text-emerald-600 border-emerald-100';
         }
         if (['HUY_DON', 'DOI_SOAT_THAT_BAI'].includes(status)) {
@@ -120,7 +246,7 @@ export default function MachineDetailsModal({ machine, onClose }) {
             {/* Drawer Panel */}
             <div 
                 className={clsx(
-                    "absolute top-0 right-0 h-full w-full max-w-[600px] bg-white shadow-2xl flex flex-col animate-in slide-in-from-right duration-500",
+                    "font-roboto absolute top-0 right-0 h-full w-full max-w-[600px] bg-white shadow-2xl flex flex-col animate-in slide-in-from-right duration-500",
                     isClosing && "animate-out slide-out-to-right duration-300"
                 )}
             >
@@ -151,6 +277,44 @@ export default function MachineDetailsModal({ machine, onClose }) {
                     >
                         <X className="w-5 h-5" />
                     </button>
+                </div>
+
+                {/* Khách / đơn — ngay dưới tiêu đề; có mã đơn để khớp với lịch sử */}
+                <div className="px-6 py-4 border-b border-sky-100 bg-gradient-to-b from-sky-50/90 to-white shrink-0">
+                    <div className="rounded-2xl border-2 border-sky-200 bg-white px-5 py-4 flex items-start gap-4 shadow-sm">
+                        <div className="w-12 h-12 rounded-xl bg-sky-100 border border-sky-300/70 flex items-center justify-center text-sky-800 shrink-0">
+                            <User className="w-6 h-6" strokeWidth={2.25} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <p className="text-[11px] font-black text-sky-800 uppercase tracking-widest mb-2">
+                                Khách hàng đang sử dụng máy
+                            </p>
+                            <p className={clsx(
+                                'text-[18px] font-black leading-snug break-words tracking-tight',
+                                usingCustomerLabel && usingCustomerLabel !== '—' ? 'text-slate-900' : 'text-slate-400'
+                            )}>
+                                {usingCustomerLabel}
+                            </p>
+                            {usingCustomerOrderCode ? (
+                                <p className="text-[13px] font-semibold text-slate-700 mt-2">
+                                    Theo đơn:{' '}
+                                    <span className="font-mono font-bold text-primary">{usingCustomerOrderCode}</span>
+                                </p>
+                            ) : null}
+                            {(machine.status || '') !== 'thuộc khách hàng'
+                                && usingCustomerLabel
+                                && usingCustomerLabel !== '—' ? (
+                                    <p className="text-[12px] text-slate-600 mt-2 font-medium leading-relaxed">
+                                        Trạng thái kho máy hiện là «{machine.status || '—'}»; khách và mã đơn lấy từ đơn đã hoàn thành có dòng chi tiết trùng serial.
+                                    </p>
+                                ) : null}
+                            {(!usingCustomerLabel || usingCustomerLabel === '—') && !loading ? (
+                                <p className="text-[12px] text-slate-500 mt-2 font-medium leading-relaxed">
+                                    Chưa khớp khách với đơn hoàn thành trong lịch sử (kiểm tra serial trên dòng chi tiết đơn và trạng thái đơn).
+                                </p>
+                            ) : null}
+                        </div>
+                    </div>
                 </div>
 
                 {/* Sub-header Navigation */}
@@ -203,7 +367,7 @@ export default function MachineDetailsModal({ machine, onClose }) {
                                                             <MapPin size={12} className="text-indigo-400" />
                                                             Khách hàng & Loại đơn
                                                         </div>
-                                                        <p className="font-black text-[14px] text-slate-800 leading-tight">{o.customer_name || '—'}</p>
+                                                        <p className="font-black text-[14px] text-slate-800 leading-tight">{o.customer_name || o.recipient_name || '—'}</p>
                                                     </div>
                                                     <div className="bg-slate-50/80 border border-slate-100 rounded-xl p-3">
                                                         <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
@@ -222,11 +386,27 @@ export default function MachineDetailsModal({ machine, onClose }) {
                                                 </div>
                                                 <div className="mt-4 flex justify-end">
                                                     <button
-                                                        onClick={() => setSelectedOrder(o)}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            if (isDnxmOrderRecord(o)) {
+                                                                setDnxmPreviewOrderId(o.id);
+                                                            } else {
+                                                                setSelectedOrder(o);
+                                                            }
+                                                        }}
                                                         className="flex items-center gap-1.5 text-[11px] font-black text-primary uppercase tracking-wider hover:underline"
                                                     >
-                                                        CHI TIẾT ĐƠN
-                                                        <ChevronRight size={14} />
+                                                        {isDnxmOrderRecord(o) ? (
+                                                            <>
+                                                                <FileText size={14} className="shrink-0" />
+                                                                Phiếu đề nghị xuất máy
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                Chi tiết đơn
+                                                                <ChevronRight size={14} />
+                                                            </>
+                                                        )}
                                                     </button>
                                                 </div>
                                             </div>
@@ -281,6 +461,37 @@ export default function MachineDetailsModal({ machine, onClose }) {
                             fetchMachineHistory();
                         }}
                     />
+                )}
+
+                {dnxmPreviewOrderId && (
+                    <div className="fixed inset-0 z-[100015] bg-black/80 flex flex-col items-center justify-center p-4 animate-in fade-in duration-200">
+                        <div className="w-full max-w-5xl max-h-[94vh] bg-slate-50 rounded-2xl overflow-hidden flex flex-col shadow-2xl border border-slate-200">
+                            <div className="flex items-center justify-between p-4 bg-white border-b border-slate-200 shrink-0">
+                                <h3 className="font-black text-slate-800 text-sm md:text-lg uppercase tracking-wider">
+                                    Phiếu đề nghị xuất máy
+                                </h3>
+                                <button
+                                    type="button"
+                                    onClick={() => setDnxmPreviewOrderId(null)}
+                                    className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500"
+                                    aria-label="Đóng"
+                                >
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto min-h-0 custom-scrollbar">
+                                <MachineIssueRequestForm
+                                    key={dnxmPreviewOrderId}
+                                    overrideOrderId={dnxmPreviewOrderId}
+                                    overrideViewOnly
+                                    onClosePopup={() => {
+                                        setDnxmPreviewOrderId(null);
+                                        fetchMachineHistory();
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    </div>
                 )}
             </div>
         </div>

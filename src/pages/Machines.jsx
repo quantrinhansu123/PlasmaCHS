@@ -48,6 +48,12 @@ import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import { MACHINE_STATUSES, MACHINE_TYPES } from '../constants/machineConstants';
 import usePermissions from '../hooks/usePermissions';
+import {
+    MACHINE_STATUSES_ENRICH_CUSTOMER_FROM_ORDERS,
+    isOrderDeliveredCompleted,
+    normalizeMachineSerialKey,
+    resolveOrderCustomerDisplay,
+} from '../utils/machineCustomerFromOrders';
 import { isAdminRole } from '../utils/accessControl';
 import { supabase } from '../supabase/config';
 
@@ -62,6 +68,142 @@ ChartJS.register(
     ChartTooltip,
     ChartLegend
 );
+
+/** Escape cho chuỗi trong filter .or(... ilike.%x%) — tránh % _ , phá cú pháp PostgREST */
+function escapeIlikeOrFragment(text) {
+    return String(text || '')
+        .replace(/\\/g, '\\\\')
+        .replace(/%/g, '\\%')
+        .replace(/_/g, '\\_')
+        .replace(/,/g, '');
+}
+
+/** Giá trị có thể lưu ở machines.warehouse: code (HN), UUID, hoặc tên kho */
+function warehouseRowStorageKeys(w) {
+    if (!w) return [];
+    const code = (w.code || '').toString().trim();
+    const id = (w.id || '').toString().trim();
+    const name = (w.name || '').toString().trim();
+    return [...new Set([code, id, name].filter(Boolean))];
+}
+
+function machineWarehouseMatchesRow(storedValue, whRow) {
+    const v = (storedValue || '').toString().trim();
+    if (!v || !whRow) return false;
+    if (whRow.code && v === whRow.code) return true;
+    if (whRow.id && v === String(whRow.id)) return true;
+    if (whRow.name && v === whRow.name) return true;
+    return false;
+}
+
+/** Khớp loại máy trên order_items (tránh nhầm dòng bình) */
+function isMachineProductLine(productType) {
+    if (!productType) return false;
+    const n = String(productType).trim();
+    const u = n.toUpperCase();
+    if (u.startsWith('MAY') || n.startsWith('MÁY')) return true;
+    return ['TM', 'SD', 'FM', 'Khac', 'KHAC', 'DNXM', 'MAY_ROSY', 'MAY_MED', 'MAY_MED_NEW'].includes(n);
+}
+
+/**
+ * Hiển thị đúng “khách đang dùng máy”: chuẩn hóa serial, nhiều trạng thái máy + đơn hoàn thành (nhiều kiểu lưu status).
+ */
+async function enrichInUseMachineCustomersFromOrders(supabaseClient, machineRows) {
+    const rows = machineRows || [];
+    const targets = rows.filter(
+        (m) =>
+            MACHINE_STATUSES_ENRICH_CUSTOMER_FROM_ORDERS.has(m.status) &&
+            String(m.serial_number || '').trim(),
+    );
+    if (!targets.length) return rows;
+
+    const variantSet = new Set();
+    targets.forEach((m) => {
+        const s = String(m.serial_number).trim();
+        [s, s.replace(/\s+/g, ' ').trim(), s.replace(/\s+/g, '')].forEach((v) => {
+            if (v) variantSet.add(v);
+        });
+    });
+    const variants = [...variantSet];
+    const chunkSize = 90;
+    /** @type {{ serial_number?: string; order_id: string; product_type?: string }[]} */
+    let allItems = [];
+
+    for (let i = 0; i < variants.length; i += chunkSize) {
+        const part = variants.slice(i, i + chunkSize);
+        const { data: itemChunk, error: itemErr } = await supabaseClient
+            .from('order_items')
+            .select('serial_number, order_id, product_type')
+            .in('serial_number', part);
+        if (itemErr) {
+            console.warn('[Machines] enrich customer (order_items):', itemErr);
+            return rows;
+        }
+        allItems.push(...(itemChunk || []));
+    }
+
+    const machineItems = allItems.filter((it) => isMachineProductLine(it?.product_type));
+
+    const orderIds = [...new Set(machineItems.map((r) => r.order_id).filter(Boolean))];
+    if (!orderIds.length) return rows;
+
+    /** @type {Record<string, unknown>} */
+    const orderMap = {};
+    /** @type {Set<string>} */
+    const customerIds = new Set();
+
+    for (let i = 0; i < orderIds.length; i += chunkSize) {
+        const part = orderIds.slice(i, i + chunkSize);
+        const { data: ordChunk, error: ordErr } = await supabaseClient
+            .from('orders')
+            .select('id, customer_name, recipient_name, customer_id, status, created_at')
+            .in('id', part);
+
+        if (ordErr) {
+            console.warn('[Machines] enrich customer (orders):', ordErr);
+            return rows;
+        }
+        (ordChunk || []).forEach((o) => {
+            if (!isOrderDeliveredCompleted(o.status)) return;
+            orderMap[o.id] = o;
+            if (o.customer_id) customerIds.add(o.customer_id);
+        });
+    }
+
+    /** @type {Record<string, { name?: string | null }>} */
+    const customersById = {};
+    const cidList = [...customerIds];
+    for (let i = 0; i < cidList.length; i += chunkSize) {
+        const part = cidList.slice(i, i + chunkSize);
+        const { data: custChunk } = await supabaseClient.from('customers').select('id, name').in('id', part);
+        (custChunk || []).forEach((c) => {
+            if (c?.id) customersById[c.id] = c;
+        });
+    }
+
+    /** @type {Record<string, { created_at?: string; label: string }>} */
+    const bestByNormSerial = {};
+    machineItems.forEach((r) => {
+        const o = orderMap[r.order_id];
+        if (!o?.created_at) return;
+        const nkItem = normalizeMachineSerialKey(r.serial_number);
+        if (!nkItem) return;
+        const label = resolveOrderCustomerDisplay(o, customersById);
+        if (!label) return;
+        const prev = bestByNormSerial[nkItem];
+        if (!prev || new Date(o.created_at) > new Date(prev.created_at || 0)) {
+            bestByNormSerial[nkItem] = { created_at: o.created_at, label };
+        }
+    });
+
+    return rows.map((m) => {
+        if (!MACHINE_STATUSES_ENRICH_CUSTOMER_FROM_ORDERS.has(m.status)) return m;
+        const nk = normalizeMachineSerialKey(m.serial_number);
+        const hit = bestByNormSerial[nk];
+        if (!hit?.label) return m;
+        return { ...m, customer_name: hit.label };
+    });
+}
 
 const TABLE_COLUMNS = [
     { key: 'serial_number', label: 'Mã Máy (Serial)' },
@@ -194,8 +336,7 @@ const Machines = () => {
             const isMatchedById = id && aliases.has(id);
 
             if (isMatchedByName || isMatchedById) {
-                if (id) aliases.add(id);
-                if (name) aliases.add(name);
+                warehouseRowStorageKeys(warehouse).forEach((k) => aliases.add(k));
             }
         });
 
@@ -210,7 +351,7 @@ const Machines = () => {
         fetchMachines();
         fetchGlobalStats();
         fetchMetadataForCharts();
-    }, [currentPage, searchTerm, selectedStatuses, selectedMachineTypes, selectedCustomers, selectedDepartments, selectedWarehouses, scopedWarehouseKeys]);
+    }, [currentPage, searchTerm, selectedStatuses, selectedMachineTypes, selectedCustomers, selectedDepartments, selectedWarehouses, scopedWarehouseKeys, department, isAdminOrManager]);
 
     const fetchMetadataForCharts = async () => {
         try {
@@ -219,7 +360,8 @@ const Machines = () => {
                 .select('status, machine_type, customer_name, department_in_charge, warehouse');
 
             if (searchTerm) {
-                query = query.or(`serial_number.ilike.%${searchTerm}%,machine_type.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%,department_in_charge.ilike.%${searchTerm}%`);
+                const p = `%${escapeIlikeOrFragment(searchTerm)}%`;
+                query = query.or(`serial_number.ilike.${p},machine_type.ilike.${p},customer_name.ilike.${p},department_in_charge.ilike.${p},warehouse.ilike.${p}`);
             }
             if (selectedStatuses.length > 0) query = query.in('status', selectedStatuses);
             if (selectedMachineTypes.length > 0) query = query.in('machine_type', selectedMachineTypes);
@@ -255,7 +397,8 @@ const Machines = () => {
             // Apply same filters to stat queries
             Object.keys(queries).forEach(key => {
                 if (searchTerm) {
-                    queries[key] = queries[key].or(`serial_number.ilike.%${searchTerm}%,machine_type.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%,department_in_charge.ilike.%${searchTerm}%`);
+                    const p = `%${escapeIlikeOrFragment(searchTerm)}%`;
+                    queries[key] = queries[key].or(`serial_number.ilike.${p},machine_type.ilike.${p},customer_name.ilike.${p},department_in_charge.ilike.${p},warehouse.ilike.${p}`);
                 }
                 if (key === 'total') {
                     if (selectedStatuses.length > 0) queries[key] = queries[key].in('status', selectedStatuses);
@@ -359,7 +502,8 @@ const Machines = () => {
 
             // Apply Filters (Server-side)
             if (searchTerm) {
-                query = query.or(`serial_number.ilike.%${searchTerm}%,machine_type.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%,department_in_charge.ilike.%${searchTerm}%`);
+                const p = `%${escapeIlikeOrFragment(searchTerm)}%`;
+                query = query.or(`serial_number.ilike.${p},machine_type.ilike.${p},customer_name.ilike.${p},department_in_charge.ilike.${p},warehouse.ilike.${p}`);
             }
             if (selectedStatuses.length > 0) {
                 query = query.in('status', selectedStatuses);
@@ -394,7 +538,14 @@ const Machines = () => {
                 .range(from, to);
 
             if (error && error.code !== '42P01') throw error;
-            setMachines(data || []);
+            const rawList = data || [];
+            let list = rawList;
+            try {
+                list = await enrichInUseMachineCustomersFromOrders(supabase, rawList);
+            } catch (enrichErr) {
+                console.warn('[Machines] enrich in-use customer display:', enrichErr);
+            }
+            setMachines(list);
             setTotalRecords(count || 0);
             setSelectedIds([]); // Clear selection on refresh
         } catch (error) {
@@ -446,7 +597,7 @@ const Machines = () => {
 
     const fetchWarehouses = async () => {
         try {
-            const { data } = await supabase.from('warehouses').select('id, name, branch_office').order('name');
+            const { data } = await supabase.from('warehouses').select('id, name, branch_office, code').order('name');
             if (data) {
                 setWarehousesList(data);
             }
@@ -565,9 +716,10 @@ const Machines = () => {
 
                 setIsLoading(true);
 
-                // Map warehouse names to IDs
+                // Map tên kho → mã lưu DB (ưu tiên code, fallback id) — khớp orders/machines chuẩn hóa
                 const warehouseMap = (warehousesList || []).reduce((acc, w) => {
-                    acc[w.name.toLowerCase()] = w.id;
+                    const val = (w.code || w.id || '').toString();
+                    if (w.name) acc[w.name.toLowerCase()] = val;
                     return acc;
                 }, {});
 
@@ -675,6 +827,7 @@ const Machines = () => {
 
         return warehousesList.find((item) => {
             const candidates = [
+                item?.code,
                 item?.id,
                 item?.name,
                 item?.branch_office,
@@ -744,11 +897,14 @@ const Machines = () => {
         count: allMetadata.filter(m => m.department_in_charge === item).length
     }));
 
-    const warehouseOptions = warehousesList.map(item => ({
-        id: item.id,
-        label: item.name,
-        count: allMetadata.filter(m => resolveWarehouse(m.warehouse)?.id === item.id).length
-    }));
+    const warehouseOptions = warehousesList.map((item) => {
+        const filterKey = (item.code || item.id || '').toString().trim();
+        return {
+            id: filterKey,
+            label: item.name || filterKey,
+            count: allMetadata.filter((m) => machineWarehouseMatchesRow(m.warehouse, item)).length,
+        };
+    });
 
     const clearAllFilters = () => {
         setSelectedStatuses([]);
@@ -913,7 +1069,7 @@ const Machines = () => {
     );
 
     return (
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5">
+        <div className="font-roboto animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5">
             <PageViewSwitcher
                 activeView={activeView}
                 setActiveView={setActiveView}

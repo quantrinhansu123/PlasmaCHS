@@ -66,6 +66,19 @@ export default function MachineFormModal({ machine, onClose, onSuccess }) {
         setTimeout(onClose, 300);
     }, [onClose]);
 
+    const resolveWarehouseStorageValue = (raw, list) => {
+        const v = (raw || '').toString().trim();
+        if (!v) return '';
+        const row = (list || []).find(
+            (w) =>
+                String(w.id) === v ||
+                (w.code && String(w.code) === v) ||
+                (w.name && w.name === v)
+        );
+        if (row) return String(row.code || row.id || '').trim();
+        return v;
+    };
+
     useEffect(() => {
         const fetchAllData = async () => {
             try {
@@ -117,7 +130,7 @@ export default function MachineFormModal({ machine, onClose, onSuccess }) {
                 serial_number: machine.serial_number || '',
                 machine_account: machine.machine_account || '',
                 status: machine.status || 'chưa xác định',
-                warehouse: machine.warehouse || '',
+                warehouse: resolveWarehouseStorageValue(machine.warehouse, warehousesList),
                 bluetooth_mac: machine.bluetooth_mac || '',
                 machine_type: machine.machine_type || 'BV',
                 version: machine.version || '',
@@ -130,7 +143,7 @@ export default function MachineFormModal({ machine, onClose, onSuccess }) {
             });
             setCustomerSearch(machine.customer_name || '');
         }
-    }, [machine, isEdit]);
+    }, [machine, isEdit, warehousesList]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -259,8 +272,8 @@ export default function MachineFormModal({ machine, onClose, onSuccess }) {
                     </button>
                 </div>
 
-                {/* Form Body */}
-                <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar bg-slate-50/30">
+                {/* Form Body — Times New Roman theo yêu cầu in/biểu mẫu */}
+                <div className="font-roboto flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar bg-slate-50/30 [&_input]:font-roboto [&_select]:font-roboto [&_textarea]:font-roboto [&_button]:font-roboto">
                     {errorMsg && (
                         <div className="p-3.5 bg-red-50 border border-red-100 rounded-xl text-[13px] font-bold text-red-600 flex items-center gap-2 animate-shake">
                             <X className="w-4 h-4 shrink-0" />
@@ -327,7 +340,10 @@ export default function MachineFormModal({ machine, onClose, onSuccess }) {
                                             className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-100 focus:border-blue-400 focus:bg-white outline-none transition-all font-bold text-slate-700 cursor-pointer"
                                         >
                                             <option value="">-- Chưa xác định --</option>
-                                            {warehousesList.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                                            {warehousesList.map((w) => {
+                                                const val = (w.code || w.id || '').toString();
+                                                return <option key={w.id} value={val}>{w.name}</option>;
+                                            })}
                                         </select>
                                     </div>
                                 </div>
@@ -483,7 +499,7 @@ export default function MachineFormModal({ machine, onClose, onSuccess }) {
                     </div>
 
                     {/* Footer Actions */}
-                    <div className="px-6 py-4 bg-white border-t border-slate-100 shrink-0 flex items-center justify-end gap-3 shadow-[0_-8px_20px_rgba(0,0,0,0.03)] z-20">
+                    <div className="font-roboto px-6 py-4 bg-white border-t border-slate-100 shrink-0 flex items-center justify-end gap-3 shadow-[0_-8px_20px_rgba(0,0,0,0.03)] z-20 [&_button]:font-roboto">
                         <button
                             type="button"
                             onClick={handleClose}
