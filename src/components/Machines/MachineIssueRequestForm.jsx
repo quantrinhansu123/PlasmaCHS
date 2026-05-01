@@ -14,7 +14,6 @@ import {
 } from '../../utils/accessControl';
 import MachineHandoverPrintTemplate from '../MachineHandoverPrintTemplate';
 import GoodsIssuePrintTemplate from '../GoodsIssues/GoodsIssuePrintTemplate';
-import OrderHistoryTimeline from '../Orders/OrderHistoryTimeline';
 import Combobox from '../ui/Combobox';
 
 const dmyToYmd = (dmy) => {
@@ -32,6 +31,7 @@ const ymdToDmy = (ymd) => {
     const [y, m, d] = parts;
     return `${d}/${m}/${y}`;
 };
+
 
 const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePopup }) => {
     const location = useLocation();
@@ -110,6 +110,14 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
             .split(/[,\n]+/)
             .map((s) => s.trim())
             .filter(Boolean);
+
+    const stripDeliveryImageNote = (value) =>
+        String(value || '')
+            .split('\n')
+            .filter((line) => !/^\s*\[Ảnh giao hàng\]\s*:/i.test(String(line || '').trim()))
+            .join('\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
 
     const getSelectedMachineTypeKey = (machineTypeMap) =>
         Object.keys(machineTypeMap || {}).find((key) => machineTypeMap[key]);
@@ -233,6 +241,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
                     const rest = lines.slice(ghichuIndex + 1).map(l => l.replace(/\.\s*$/, '')).join('\n');
                     notesRemaining = `${firstLine}${rest ? '\n' + rest : ''}`;
                 }
+                notesRemaining = stripDeliveryImageNote(notesRemaining);
                 
                 setFormData({
                     orangeNumber: data.order_code?.replace('DNXM-', '') || '',
@@ -650,14 +659,6 @@ Ghi chú: ${formData.notes}`,
                     await assignMachinesToCustomer(formData.machineCode, formData.customerName);
                 }
 
-                // Append history record
-                await supabase.from('order_history').insert([{
-                    order_id: editOrderId,
-                    action: 'EDITED',
-                    created_by: currentActorName,
-                    reason: 'Cập nhật thông tin phiếu'
-                }]);
-
                 toast.success('Đã cập nhật Phiếu Đề Nghị Xuất Máy thành công!');
                 setTimeout(() => navigate('/de-nghi-xuat-may'), 1000);
             } else {
@@ -672,15 +673,6 @@ Ghi chú: ${formData.notes}`,
                 
                 const newOrderId = insertedData?.id;
 
-                // Add initial history record
-                if (newOrderId) {
-                    await supabase.from('order_history').insert([{
-                        order_id: newOrderId,
-                        action: 'CREATED',
-                        created_by: currentActorName,
-                        new_status: 'CHO_DUYET'
-                    }]);
-                }
                 notificationService.add({
                     title: `💡 ĐNXM mới: ${orderData.customer_name}`,
                     description: `${currentActorName} vừa lập phiếu đề nghị xuất máy mới.`,
@@ -786,16 +778,6 @@ Ghi chú: ${formData.notes}`,
             if (assignedWarehouse && !warehouseCodeForOrder) {
                 throw new Error(`Kho không hợp lệ cho duyệt phiếu: "${assignedWarehouse}". Vui lòng chọn lại kho.`);
             }
-
-            // Track in order_history table
-            await supabase.from('order_history').insert([{
-                order_id: editOrderId,
-                action: 'STATUS_CHANGED',
-                old_status: formData.status,
-                new_status: nextStatus,
-                created_by: currentActorName,
-                reason: `Duyệt nâng cấp trạng thái. Kho: ${warehouseCodeForOrder || 'N/A'}`
-            }]);
 
             const { error } = await supabase.from('orders').update({
                 status: nextStatus,
@@ -1420,14 +1402,6 @@ Ghi chú: ${formData.notes}`,
                         ) : null}
                     </div>
 
-                    {/* History Timeline */}
-                    {editOrderId && (
-                        <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 mt-2">
-                            <h3 className="font-bold text-slate-700 text-sm mb-3 uppercase tracking-wide">Lịch Sử Duyệt Phiếu</h3>
-                            <OrderHistoryTimeline orderId={editOrderId} />
-                        </div>
-                    )}
-
                     {onClosePopup ? (
                         <button
                             onClick={onClosePopup}
@@ -1719,12 +1693,11 @@ Ghi chú: ${formData.notes}`,
                             {/* Notes */}
                             <div className="mt-6 flex flex-col">
                                 <span className="mb-2">14. Ghi chú khác (nếu có):</span>
-                                <textarea
-                                    value={formData.notes}
-                                    readOnly
-                                    className="w-full border-b border-gray-400 focus:outline-none min-h-[60px] resize-none bg-transparent print:border-none print:min-h-0"
-                                    placeholder=""
-                                />
+                                <div
+                                    className="w-full border-b border-gray-400 min-h-[60px] bg-transparent px-1 py-1 whitespace-pre-wrap break-words leading-relaxed print:border-none print:min-h-0"
+                                >
+                                    {formData.notes || ''}
+                                </div>
                             </div>
                         </div>
 

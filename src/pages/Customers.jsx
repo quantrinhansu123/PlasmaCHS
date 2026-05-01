@@ -74,6 +74,18 @@ ChartJS.register(
     ChartLegend
 );
 
+/** Tìm mã / tên / SĐT / địa chỉ trên Supabase (phân trang + count đúng). */
+function appendCustomerTextSearch(query, searchTrimmed) {
+    let q = query;
+    const t = (searchTrimmed || '').trim();
+    if (t) {
+        const esc = t.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_').replace(/,/g, '');
+        const p = `%${esc}%`;
+        q = q.or(`code.ilike.${p},name.ilike.${p},phone.ilike.${p},address.ilike.${p}`);
+    }
+    return q;
+}
+
 /** Bộ lọc lead trên Supabase (khớp phân trang + đếm tổng). */
 function appendLeadCustomerFilters(query, {
     searchTrimmed,
@@ -85,13 +97,7 @@ function appendLeadCustomerFilters(query, {
     selectedStatuses,
     categoryDefinitions,
 }) {
-    let q = query;
-    const t = (searchTrimmed || '').trim();
-    if (t) {
-        const esc = t.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_').replace(/,/g, '');
-        const p = `%${esc}%`;
-        q = q.or(`code.ilike.${p},name.ilike.${p},phone.ilike.${p},address.ilike.${p}`);
-    }
+    let q = appendCustomerTextSearch(query, searchTrimmed);
     if (leadCreatedFrom) {
         q = q.gte('created_at', new Date(`${leadCreatedFrom}T00:00:00`).toISOString());
     }
@@ -117,6 +123,9 @@ function appendLeadCustomerFilters(query, {
     }
     return q;
 }
+
+const normalizeSearchText = (value) => String(value || '').toLowerCase().trim();
+const normalizePhoneDigits = (value) => String(value || '').replace(/\D/g, '');
 
 const Customers = () => {
     const { role: rawRole, user, roleScope } = usePermissions();
@@ -174,7 +183,7 @@ const Customers = () => {
     const [pendingLeadCreatedTo, setPendingLeadCreatedTo] = useState('');
     const [leadDistinctCareBy, setLeadDistinctCareBy] = useState([]);
     const [leadDistinctManagedBy, setLeadDistinctManagedBy] = useState([]);
-    const [debouncedLeadSearch, setDebouncedLeadSearch] = useState('');
+    const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
     const [showMoreActions, setShowMoreActions] = useState(false);
     const [isSearchExpanded, setIsSearchExpanded] = useState(false);
     const searchInputRef = useRef(null);
@@ -189,13 +198,6 @@ const Customers = () => {
 
     const searchParams = new URLSearchParams(location.search);
     const filterType = searchParams.get('filter') || (location.pathname === '/khach-hang-lead' ? 'lead' : null);
-
-    // Nếu rời khỏi route lead mà đang bật Kanban thì quay về Danh sách
-    useEffect(() => {
-        if (filterType !== 'lead' && activeView === 'kanban') {
-            setActiveView('list');
-        }
-    }, [filterType, activeView]);
 
     /** Lead / khách hàng: đã lọc trên server — không lọc lại client (tránh tải trang rồi vứt bớt dòng) */
     const leadFilterRef = useRef(null);
@@ -282,13 +284,9 @@ const Customers = () => {
     }, []);
 
     useEffect(() => {
-        if (filterType !== 'lead') {
-            setDebouncedLeadSearch('');
-            return;
-        }
-        const t = setTimeout(() => setDebouncedLeadSearch(searchTerm), 320);
+        const t = setTimeout(() => setDebouncedSearchTerm(searchTerm), 320);
         return () => clearTimeout(t);
-    }, [searchTerm, filterType]);
+    }, [searchTerm]);
 
     useEffect(() => {
         if (filterType !== 'lead') return;
@@ -318,8 +316,13 @@ const Customers = () => {
         selectedManagedBy,
         selectedCategories,
         selectedStatuses,
-        debouncedLeadSearch,
+        debouncedSearchTerm,
     ]);
+
+    useEffect(() => {
+        if (filterType === 'lead') return;
+        setCurrentPage(1);
+    }, [debouncedSearchTerm, filterType]);
 
     const fetchCustomers = useCallback(async () => {
         setIsLoading(true);
@@ -338,41 +341,11 @@ const Customers = () => {
                 .from('customers')
                 .select('*', { count: 'exact' });
 
-            const currentUserNames = [...new Set([
-                user?.name,
-                user?.username,
-                localStorage.getItem('user_name'),
-                sessionStorage.getItem('user_name')
-            ].filter(Boolean))];
-
-            if (!isAdminRole(rawRole) && (isSalesRole(rawRole) || isLeadSaleRole(rawRole) || roleScope === 'own' || roleScope === 'team')) {
-                let visibleNames = currentUserNames;
-
-                if (isLeadSaleRole(rawRole) || roleScope === 'team') {
-                    const managedNames = (user?.nguoi_quan_ly || '')
-                        .split(',')
-                        .map((name) => name.trim())
-                        .filter(Boolean);
-
-                    visibleNames = [...new Set([
-                        ...currentUserNames,
-                        ...managedNames,
-                    ])];
-                }
-
-                const ownerClause = [
-                    ...visibleNames.map((name) => `managed_by.eq."${String(name).replace(/"/g, '\\"')}"`),
-                    ...visibleNames.map((name) => `care_by.eq."${String(name).replace(/"/g, '\\"')}"`),
-                ].join(',');
-
-                if (ownerClause) {
-                    query = query.or(ownerClause);
-                }
-            }
+            // Keep customer listing full on frontend; backend RLS (if any) remains the source of truth.
 
             if (filterType === 'lead') {
                 query = appendLeadCustomerFilters(query, {
-                    searchTrimmed: debouncedLeadSearch,
+                    searchTrimmed: debouncedSearchTerm,
                     leadCreatedFrom,
                     leadCreatedTo,
                     selectedCareBy,
@@ -385,8 +358,8 @@ const Customers = () => {
                     .order('status', { ascending: true, nullsFirst: true })
                     .order('created_at', { ascending: false });
             } else {
+                query = appendCustomerTextSearch(query, debouncedSearchTerm);
                 query = query
-                    .eq('status', 'Thành công')
                     .order('created_at', { ascending: false });
             }
 
@@ -451,7 +424,7 @@ const Customers = () => {
         currentPage,
         pageSize,
         filterType,
-        debouncedLeadSearch,
+        debouncedSearchTerm,
         leadCreatedFrom,
         leadCreatedTo,
         selectedCareBy,
@@ -644,12 +617,17 @@ const Customers = () => {
         filterType === 'lead'
             ? customers
             : customers.filter((c) => {
-                  const search = searchTerm.toLowerCase();
+                  const rawSearch = debouncedSearchTerm.trim() || searchTerm;
+                  const search = normalizeSearchText(rawSearch);
+                  const searchDigits = normalizePhoneDigits(rawSearch);
+                  const customerPhoneDigits = normalizePhoneDigits(c.phone);
                   const matchesSearch =
+                      !search ||
                       (c.code?.toLowerCase().includes(search)) ||
                       (c.name?.toLowerCase().includes(search)) ||
                       (c.phone?.toLowerCase().includes(search)) ||
-                      (c.address?.toLowerCase().includes(search));
+                      (c.address?.toLowerCase().includes(search)) ||
+                      (searchDigits.length > 0 && customerPhoneDigits.includes(searchDigits));
 
                   const matchesCategory =
                       selectedCategories.length === 0 ||
@@ -1000,14 +978,41 @@ const Customers = () => {
         return groups;
     }, [filteredCustomers, getCareExpiryDiffDays, kanbanColumns]);
 
+    const customerCategoryColumns = useMemo(
+        () => [
+            ...CUSTOMER_CATEGORIES.map((cat) => ({ id: cat.id, label: cat.label, tone: 'slate' })),
+            { id: '__OTHER__', label: 'Khác', tone: 'slate' },
+        ],
+        []
+    );
+
+    const customerKanbanGroups = useMemo(() => {
+        const groups = Object.fromEntries(customerCategoryColumns.map((col) => [col.id, []]));
+        filteredCustomers.forEach((customer) => {
+            const directKey = String(customer?.category || '').trim();
+            const byLabel = CUSTOMER_CATEGORIES.find((cat) => cat.label === directKey)?.id;
+            const key = byLabel || directKey || '__OTHER__';
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(customer);
+        });
+
+        customerCategoryColumns.forEach((col) => {
+            (groups[col.id] || []).sort((a, b) => {
+                const ad = a?.created_at ? new Date(a.created_at).getTime() : 0;
+                const bd = b?.created_at ? new Date(b.created_at).getTime() : 0;
+                return bd - ad;
+            });
+        });
+
+        return groups;
+    }, [filteredCustomers, customerCategoryColumns]);
+
     const availableViews = useMemo(() => {
         const base = [{ id: 'list', label: 'Danh sách', icon: <List size={16} /> }];
-        if (filterType === 'lead') {
-            base.push({ id: 'kanban', label: 'Kanban', icon: <LayoutGrid size={16} /> });
-        }
+        base.push({ id: 'kanban', label: 'Kanban', icon: <LayoutGrid size={16} /> });
         base.push({ id: 'stats', label: 'Thống kê', icon: <BarChart2 size={16} /> });
         return base;
-    }, [filterType]);
+    }, []);
 
     /**
      * Lead: STT theo thứ tự tạo toàn danh sách (1 = tạo sớm nhất, N = mới nhất).
@@ -2294,7 +2299,7 @@ const Customers = () => {
                 </div>
             )}
 
-            {activeView === 'kanban' && filterType === 'lead' && (
+            {activeView === 'kanban' && (
                 <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col w-full">
                     <div className="p-3 md:p-4 border-b border-border flex items-center justify-between gap-3 flex-wrap">
                         <div className="flex items-center gap-2">
@@ -2307,53 +2312,87 @@ const Customers = () => {
                                 Quay lại
                             </button>
                             <div className="rounded-xl border border-primary/20 bg-primary/5 px-3 py-1.5 text-[12px] font-bold text-primary">
-                                Tổng lead: {isLoading ? '…' : formatNumber(filteredCustomersCount)}
+                                Tổng khách: {isLoading ? '…' : formatNumber(filteredCustomersCount)}
                             </div>
                         </div>
 
                         <div className="flex items-center gap-2 flex-wrap justify-end">
-                            <div className="text-[12px] text-muted-foreground font-semibold">Nhóm theo: Trạng thái CS</div>
+                            <div className="text-[12px] text-muted-foreground font-semibold">
+                                Nhóm theo: {filterType === 'lead' ? 'Trạng thái CS' : 'Loại khách'}
+                            </div>
                             <div className="h-5 w-px bg-slate-200" />
-                            <span className="text-[12px] font-semibold text-slate-600">Trạng thái:</span>
-
-                            <button
-                                type="button"
-                                onClick={() => setSelectedStatuses([])}
-                                className={clsx(
-                                    'h-8 px-3 rounded-lg text-[12px] font-bold border transition-all',
-                                    selectedStatuses.length === 0
-                                        ? 'bg-primary/10 text-primary border-primary/30'
-                                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                                )}
-                            >
-                                Tất cả
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={() => setSelectedStatuses(['Chưa thành công'])}
-                                className={clsx(
-                                    'h-8 px-3 rounded-lg text-[12px] font-bold border transition-all',
-                                    selectedStatuses.length === 1 && selectedStatuses[0] === 'Chưa thành công'
-                                        ? 'bg-slate-100 text-slate-800 border-slate-300'
-                                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                                )}
-                            >
-                                Chưa thành công
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={() => setSelectedStatuses(['Thành công'])}
-                                className={clsx(
-                                    'h-8 px-3 rounded-lg text-[12px] font-bold border transition-all',
-                                    selectedStatuses.length === 1 && selectedStatuses[0] === 'Thành công'
-                                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                                )}
-                            >
-                                Thành công
-                            </button>
+                            {filterType === 'lead' ? (
+                                <>
+                                    <span className="text-[12px] font-semibold text-slate-600">Trạng thái:</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedStatuses([])}
+                                        className={clsx(
+                                            'h-8 px-3 rounded-lg text-[12px] font-bold border transition-all',
+                                            selectedStatuses.length === 0
+                                                ? 'bg-primary/10 text-primary border-primary/30'
+                                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                        )}
+                                    >
+                                        Tất cả
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedStatuses(['Chưa thành công'])}
+                                        className={clsx(
+                                            'h-8 px-3 rounded-lg text-[12px] font-bold border transition-all',
+                                            selectedStatuses.length === 1 && selectedStatuses[0] === 'Chưa thành công'
+                                                ? 'bg-slate-100 text-slate-800 border-slate-300'
+                                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                        )}
+                                    >
+                                        Chưa thành công
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedStatuses(['Thành công'])}
+                                        className={clsx(
+                                            'h-8 px-3 rounded-lg text-[12px] font-bold border transition-all',
+                                            selectedStatuses.length === 1 && selectedStatuses[0] === 'Thành công'
+                                                ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                        )}
+                                    >
+                                        Thành công
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <span className="text-[12px] font-semibold text-slate-600">Loại khách:</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedCategories([])}
+                                        className={clsx(
+                                            'h-8 px-3 rounded-lg text-[12px] font-bold border transition-all',
+                                            selectedCategories.length === 0
+                                                ? 'bg-primary/10 text-primary border-primary/30'
+                                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                        )}
+                                    >
+                                        Tất cả
+                                    </button>
+                                    {CUSTOMER_CATEGORIES.map((cat) => (
+                                        <button
+                                            key={cat.id}
+                                            type="button"
+                                            onClick={() => setSelectedCategories([cat.id])}
+                                            className={clsx(
+                                                'h-8 px-3 rounded-lg text-[12px] font-bold border transition-all',
+                                                selectedCategories.length === 1 && selectedCategories[0] === cat.id
+                                                    ? 'bg-slate-100 text-slate-800 border-slate-300'
+                                                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                            )}
+                                        >
+                                            {cat.label}
+                                        </button>
+                                    ))}
+                                </>
+                            )}
                         </div>
                     </div>
 
@@ -2362,8 +2401,9 @@ const Customers = () => {
                             <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
                         ) : (
                             <div className="grid grid-flow-col auto-cols-[minmax(280px,1fr)] gap-4 min-w-max h-full">
-                                {kanbanColumns.map((column) => {
-                                    const columnItems = leadKanbanGroups[column.id] || [];
+                                {(filterType === 'lead' ? kanbanColumns : customerCategoryColumns).map((column) => {
+                                    const groups = filterType === 'lead' ? leadKanbanGroups : customerKanbanGroups;
+                                    const columnItems = groups[column.id] || [];
                                     const toneClass =
                                         column.tone === 'emerald'
                                             ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
@@ -2385,7 +2425,7 @@ const Customers = () => {
                                             <div className="p-3 space-y-2.5 overflow-y-auto min-h-[24rem]">
                                                 {columnItems.length === 0 ? (
                                                     <div className="rounded-xl border border-dashed border-slate-200 bg-white/70 px-3 py-6 text-center text-[12px] text-slate-400 italic">
-                                                        Không có lead
+                                                        Không có dữ liệu
                                                     </div>
                                                 ) : (
                                                     columnItems.map((c) => {

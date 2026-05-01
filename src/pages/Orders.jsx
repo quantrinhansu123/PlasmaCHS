@@ -118,6 +118,83 @@ const getWarehouseAliases = (warehouse) => {
         .filter(Boolean);
 };
 
+const getWarehouseKeyVariants = (value) => {
+    const normalized = normalizeText(value);
+    if (!normalized) return [];
+
+    const shortByDash = normalized.includes('-') ? normalized.split('-')[0].trim() : '';
+    const compact = normalized.replace(/\s+/g, '');
+    const alnumOnly = normalized.replace(/[^a-z0-9]/g, '');
+
+    return [...new Set([normalized, shortByDash, compact, alnumOnly].filter(Boolean))];
+};
+
+const HIDDEN_ORDER_COLUMNS = new Set(['department']);
+
+const isMachineProductType = (productType) => {
+    const upper = String(productType || '').toUpperCase();
+    return /^(MAY|MÁY)/i.test(String(productType || '')) || ['TM', 'SD', 'FM', 'KHAC', 'DNXM', 'MAY_ROSY', 'MAY_MED', 'MAY_MED_NEW'].includes(upper);
+};
+
+const extractMachineCodesFromOrder = (order) => {
+    const fromDepartment = String(order?.department || '')
+        .split(/[\n,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    const fromItems = (order?.order_items || [])
+        .filter((it) => isMachineProductType(it?.product_type))
+        .map((it) => String(it?.serial_number || '').trim())
+        .filter(Boolean);
+    const fromNote = String(order?.note || '')
+        .split('\n')
+        .map((line) => {
+            const match = line.match(/Mã:\s*(.+)$/i);
+            return (match?.[1] || '').trim();
+        })
+        .filter(Boolean);
+    return [...new Set([...fromDepartment, ...fromItems, ...fromNote])];
+};
+
+/** Mã vỏ hiển thị trên danh sách đơn: header + từng dòng order_items + checklist giao/thu hồi */
+const collectCylinderSerialsFromOrder = (order) => {
+    const out = [];
+    const pushScalar = (s) => {
+        const v = String(s || '').trim();
+        if (v) out.push(v);
+    };
+    const pushArr = (arr) => {
+        if (!Array.isArray(arr)) return;
+        arr.forEach((entry) => {
+            if (typeof entry === 'string') pushScalar(entry);
+            else if (entry && typeof entry === 'object') pushScalar(entry.serial ?? entry.rfid ?? entry.code);
+        });
+    };
+
+    pushArr(order?.assigned_cylinders);
+
+    (order?.order_items || []).forEach((it) => {
+        pushArr(it?.assigned_cylinders);
+        const pt = String(it?.product_type || '').toUpperCase();
+        if (pt.includes('BINH') || pt === 'BINH' || pt === 'BINH_4L' || pt === 'BINH_8L') {
+            pushScalar(it?.serial_number);
+        }
+    });
+
+    const dc = order?.delivery_checklist;
+    if (dc && typeof dc === 'object' && !Array.isArray(dc)) {
+        for (const [key] of Object.entries(dc)) {
+            const k = String(key).trim();
+            if (/^BINH:/i.test(k)) {
+                pushScalar(k.replace(/^BINH:/i, '').trim());
+            } else if (/^BINH\s+/i.test(k)) {
+                pushScalar(k.replace(/^BINH\s+/i, '').trim());
+            }
+        }
+    }
+
+    return [...new Set(out)];
+};
+
 const Orders = () => {
     const { role, department, user, loading: permissionsLoading } = usePermissions();
     const navigate = useNavigate();
@@ -139,8 +216,12 @@ const Orders = () => {
     const rowMenuRef = useRef(null);
     const [serialsModalOrder, setSerialsModalOrder] = useState(null);
     const [warehousesList, setWarehousesList] = useState([]);
-    const defaultColOrder = TABLE_COLUMNS.map(col => col.key);
-    const columnDefs = TABLE_COLUMNS.reduce((acc, col) => {
+    const defaultColOrder = TABLE_COLUMNS
+        .map(col => col.key)
+        .filter((key) => !HIDDEN_ORDER_COLUMNS.has(key));
+    const columnDefs = TABLE_COLUMNS
+        .filter((col) => !HIDDEN_ORDER_COLUMNS.has(col.key))
+        .reduce((acc, col) => {
         acc[col.key] = { label: col.label };
         return acc;
     }, {});
@@ -168,6 +249,11 @@ const Orders = () => {
     });
     const [showColumnPicker, setShowColumnPicker] = useState(false);
     const columnPickerRef = useRef(null);
+
+    useEffect(() => {
+        setVisibleColumns((prev) => prev.filter((key) => !HIDDEN_ORDER_COLUMNS.has(key)));
+        setColumnOrder((prev) => prev.filter((key) => !HIDDEN_ORDER_COLUMNS.has(key)));
+    }, []);
 
     const isColumnVisible = (key) => visibleColumns.includes(key);
     const visibleTableColumns = columnOrder
@@ -225,7 +311,7 @@ const Orders = () => {
         if (permissionsLoading) return;
         fetchOrders();
         fetchWarehouses();
-    }, [permissionsLoading, role, department, user?.name]);
+    }, [permissionsLoading, role, department, user?.name, user?.username, user?.chi_nhanh, user?.nguoi_quan_ly]);
 
     useEffect(() => {
         // Extract unique customers from orders
@@ -321,7 +407,7 @@ const Orders = () => {
             const isLeader = isLeadSaleRole(role);
             const isThuKhoRole = normalizedRole.includes('thukho');
             const isShipperRole = isShipperRoleHelper(role);
-            const isWarehouseRole = isWarehouseRoleHelper(role) && !isThuKhoRole;
+            const isWarehouseRole = isWarehouseRoleHelper(role);
             const storageUserName =
                 localStorage.getItem('user_name') ||
                 sessionStorage.getItem('user_name') ||
@@ -345,8 +431,12 @@ const Orders = () => {
 
             let query = supabase
                 .from('orders')
-                .select('*, order_items(*)')
-                .neq('order_type', 'DNXM');
+                .select('*, order_items(*)');
+
+            // Thủ kho cần nhìn thấy cả DNXM để xử lý luồng kho.
+            if (!isThuKhoRole) {
+                query = query.neq('order_type', 'DNXM');
+            }
 
             // Thủ kho: hiển thị đầy đủ đơn, không giới hạn cứng theo 1 trạng thái.
 
@@ -428,22 +518,34 @@ const Orders = () => {
                     const allowedWarehouseValues = new Set(
                         scopedWarehouses.flatMap((w) => getWarehouseAliases(w))
                     );
+                    const allowedKeys = new Set(
+                        Array.from(allowedWarehouseValues).flatMap((key) => getWarehouseKeyVariants(key))
+                    );
 
                     scopedOrders = scopedOrders.filter((order) => {
                         const candidates = [
-                            normalizeText(order.warehouse),
-                            normalizeText(extractWarehouseFromNote(order.note)),
-                        ].filter(Boolean);
-                        return candidates.some((candidate) => allowedWarehouseValues.has(candidate));
+                            order.warehouse,
+                            extractWarehouseFromNote(order.note),
+                        ].flatMap((candidate) => getWarehouseKeyVariants(candidate));
+                        return candidates.some((candidateKey) => allowedKeys.has(candidateKey));
                     });
                 } else if (department) {
                     const fallbackWarehouseCode = department.includes('-')
                         ? department.split('-')[0].trim()
                         : department.trim();
-                    const fallbackKey = normalizeText(fallbackWarehouseCode);
-                    scopedOrders = scopedOrders.filter((order) => normalizeText(order.warehouse) === fallbackKey);
+                    const fallbackKeys = new Set(getWarehouseKeyVariants(fallbackWarehouseCode));
+                    if (isThuKhoRole) {
+                        // Thủ kho không bị bó cứng theo department text vì dữ liệu kho có thể lưu dạng code/id/name khác nhau.
+                        scopedOrders = scopedOrders;
+                    } else {
+                        scopedOrders = scopedOrders.filter((order) =>
+                            getWarehouseKeyVariants(order.warehouse).some((candidateKey) => fallbackKeys.has(candidateKey))
+                        );
+                    }
                 } else {
-                    scopedOrders = [];
+                    // Fallback an toàn cho Thủ kho: nếu thiếu mapping kho trên hồ sơ user
+                    // thì không ẩn toàn bộ dữ liệu đơn hàng.
+                    scopedOrders = isThuKhoRole ? scopedOrders : [];
                 }
             }
 
@@ -458,7 +560,7 @@ const Orders = () => {
 
     const fetchWarehouses = async () => {
         try {
-            const { data } = await supabase.from('warehouses').select('id, name').order('name');
+            const { data } = await supabase.from('warehouses').select('id, name, code, branch_office').order('name');
             if (data) {
                 setWarehousesList(data);
             }
@@ -654,6 +756,21 @@ const Orders = () => {
             return '—';
         }
         return id;
+    };
+
+    const getWarehouseLabel = (warehouseValue) => {
+        if (!warehouseValue) return '—';
+        const lookupKey = normalizeText(warehouseValue);
+        const matchedWarehouse = warehousesList.find((warehouse) =>
+            getWarehouseAliases(warehouse).includes(lookupKey)
+        );
+
+        if (matchedWarehouse?.name) return matchedWarehouse.name;
+
+        if (typeof warehouseValue === 'string' && /^[0-9a-fA-F]{8}-/.test(warehouseValue)) {
+            return '—';
+        }
+        return warehouseValue;
     };
 
     const hasActiveFilters = selectedStatuses.length > 0 || selectedCustomerCategories.length > 0 ||
@@ -960,24 +1077,29 @@ const Orders = () => {
                 }
                 return <span className="text-[13px] font-semibold text-foreground">{formatNumber(order.quantity)}</span>;
             case 'department':
-                return <span className="text-[13px] text-muted-foreground font-normal">{order.department || '—'}</span>;
-            case 'cylinders':
                 return (
-                    order.assigned_cylinders && order.assigned_cylinders.length > 0 ? (
+                    <span className="text-[13px] text-muted-foreground font-normal">
+                        —
+                    </span>
+                );
+            case 'cylinders': {
+                const cylinderSerials = collectCylinderSerialsFromOrder(order);
+                return (
+                    cylinderSerials.length > 0 ? (
                         <div className="flex flex-wrap gap-1.5 max-w-[220px]">
-                            {order.assigned_cylinders.slice(0, 3).map((serial, idx) => (
+                            {cylinderSerials.slice(0, 3).map((serial, idx) => (
                                 <span key={idx} className="px-2.5 py-1 bg-muted/30 text-muted-foreground rounded-md text-xs font-medium border border-border">
                                     {serial}
                                 </span>
                             ))}
-                            {order.assigned_cylinders.length > 3 && (
+                            {cylinderSerials.length > 3 && (
                                 <button
                                     onClick={() => setSerialsModalOrder(order)}
                                     type="button"
                                     className="!h-auto !px-2.5 !py-1 !rounded-full !text-xs !font-semibold inline-flex items-center justify-center min-w-[40px] bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-colors"
                                     title="Bấm để xem danh sách đầy đủ"
                                 >
-                                    +{order.assigned_cylinders.length - 3}
+                                    +{cylinderSerials.length - 3}
                                 </button>
                             )}
                         </div>
@@ -985,6 +1107,7 @@ const Orders = () => {
                         <span className="text-muted-foreground">—</span>
                     )
                 );
+            }
             case 'cylinder_debt':
                 return (
                     <div className="flex flex-col gap-0.5">
@@ -1198,7 +1321,7 @@ const Orders = () => {
                                                     <div className="min-w-0 flex-1">
                                                         <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Kho / Vị trí</p>
                                                         <p className="text-[11px] text-foreground font-bold truncate">
-                                                            {getLabel(warehousesList, order.warehouse)} {order.department && ` / ${order.department}`}
+                                                            {getWarehouseLabel(order.warehouse)}
                                                         </p>
                                                     </div>
                                                 </div>
@@ -1245,7 +1368,7 @@ const Orders = () => {
                                                 >
                                                     <Printer size={18} />
                                                 </button>
-                                                {order.product_type?.startsWith('MAY') && (
+                                                {(isMachineProductType(order.product_type) || isMachineProductType(order.product_type_2)) && (
                                                     <button
                                                         onClick={() => handleHandoverPrint(order)}
                                                         className="p-2 text-green-700 bg-green-50 border border-green-100 rounded-lg active:scale-90 transition-all font-bold"
@@ -1782,7 +1905,7 @@ const Orders = () => {
                                                                     In phiếu xuất kho
                                                                 </button>
 
-                                                                {order.product_type?.startsWith('MAY') && (
+                                                                {(isMachineProductType(order.product_type) || isMachineProductType(order.product_type_2)) && (
                                                                     <button
                                                                         onClick={() => { handleHandoverPrint(order); setActiveRowMenu(null); }}
                                                                         className="w-full flex items-center gap-3 px-4 py-2.5 text-slate-600 hover:bg-slate-50 transition-colors text-[13px] font-bold"
@@ -2368,7 +2491,7 @@ const Orders = () => {
             {isActionModalOpen && createPortal(
                 <OrderStatusUpdater
                     order={selectedOrder}
-                    warehouseName={getLabel(warehousesList, selectedOrder?.warehouse)}
+                    warehouseName={getWarehouseLabel(selectedOrder?.warehouse)}
                     userRole={role}
                     onClose={() => setIsActionModalOpen(false)}
                     onUpdateSuccess={() => {
@@ -2394,7 +2517,7 @@ const Orders = () => {
                         </div>
                         <div className="p-6 overflow-y-auto bg-white">
                             <div className="grid grid-cols-2 gap-3">
-                                {serialsModalOrder.assigned_cylinders.map((serial, idx) => (
+                                {collectCylinderSerialsFromOrder(serialsModalOrder).map((serial, idx) => (
                                     <div key={idx} className="bg-white border border-border shadow-sm rounded-xl px-3 py-2 text-center text-sm font-bold text-foreground font-mono">
                                         {serial}
                                     </div>

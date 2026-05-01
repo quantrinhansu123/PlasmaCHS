@@ -25,7 +25,6 @@ import { supabase } from '../supabase/config';
 import OrderStatusUpdater from '../components/Orders/OrderStatusUpdater';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
-import OrderHistoryTimeline from '../components/Orders/OrderHistoryTimeline';
 import MobilePagination from '../components/layout/MobilePagination';
 
 // Delivery type constants
@@ -65,7 +64,6 @@ export default function DeliveryHistory() {
     const [orderToView, setOrderToView] = useState(null);
     const [activeView, setActiveView] = useState('list');
     const [previewImages, setPreviewImages] = useState(null);
-    const [historyModalOrder, setHistoryModalOrder] = useState(null);
 
     // Lookup maps
     const [customerMap, setCustomerMap] = useState({});
@@ -440,7 +438,7 @@ export default function DeliveryHistory() {
                                     <div className="flex items-center justify-end gap-2 pt-3 border-t border-border/70">
                                         {r.rawOrder && (
                                             <>
-                                                <button onClick={() => setHistoryModalOrder(r.rawOrder)} className="p-2 text-muted-foreground bg-slate-50 border border-slate-200 rounded-lg active:scale-90 transition-all" title="Xem lịch sử">
+                                                <button onClick={() => handleViewAsOrder(r)} className="p-2 text-muted-foreground bg-slate-50 border border-slate-200 rounded-lg active:scale-90 transition-all" title="Xem chi tiết">
                                                     <Eye size={18} />
                                                 </button>
                                                 <button onClick={() => handleViewAsOrder(r)} className="p-2 text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg active:scale-90 transition-all" title="Thao tác">
@@ -630,7 +628,7 @@ export default function DeliveryHistory() {
                                                 <div className="flex items-center justify-center gap-1.5">
                                                     {r.rawOrder && (
                                                         <>
-                                                            <button onClick={() => setHistoryModalOrder(r.rawOrder)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Lịch sử đơn hàng">
+                                                            <button onClick={() => handleViewAsOrder(r)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Xem chi tiết">
                                                                 <Eye size={18} />
                                                             </button>
                                                             <button onClick={() => handleViewAsOrder(r)} className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="Thao tác">
@@ -748,26 +746,6 @@ export default function DeliveryHistory() {
                         >
                             <X size={20} />
                         </button>
-                    </div>
-                </div>
-            )}
-
-            {/* History Modal (only for delivery orders) */}
-            {historyModalOrder && (
-                <div className="fixed inset-0 z-[200000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-300" onClick={() => setHistoryModalOrder(null)}>
-                    <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-300" onClick={(e) => e.stopPropagation()}>
-                        <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white rounded-t-3xl z-10">
-                            <div>
-                                <h2 className="text-xl font-black text-slate-900 leading-none mb-1">Lịch sử đơn hàng</h2>
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">#{historyModalOrder.order_code}</p>
-                            </div>
-                            <button onClick={() => setHistoryModalOrder(null)} className="p-2 bg-slate-50 hover:bg-slate-100 rounded-xl transition-colors">
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <div className="p-6 overflow-y-auto custom-scrollbar">
-                            <OrderHistoryTimeline orderId={historyModalOrder.id} />
-                        </div>
                     </div>
                 </div>
             )}

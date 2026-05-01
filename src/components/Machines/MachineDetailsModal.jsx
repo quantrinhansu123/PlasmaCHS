@@ -41,7 +41,8 @@ export default function MachineDetailsModal({ machine, onClose }) {
                 supabase
                     .from('orders')
                     .select('*')
-                    .ilike('department', `%${machine.serial_number}%`)
+                    .eq('order_type', 'DNXM')
+                    .or(`department.ilike.%${machine.serial_number}%,note.ilike.%${machine.serial_number}%`)
                     .order('created_at', { ascending: false }),
                 supabase
                     .from('inventory_transactions')

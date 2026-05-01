@@ -16,6 +16,7 @@ import OrderFormReadOnlyView from './OrderFormReadOnlyView';
 import clsx from 'clsx';
 
 const READY_CYLINDER_STATUS = 'sẵn sàng';
+const isReadyCylinderStatus = (status) => String(status || '').trim().toLowerCase() === READY_CYLINDER_STATUS;
 
 /** Bình trong kho phải khớp loại sản phẩm đơn (theo volume). */
 function cylinderVolumeMatchesProduct(volume, productType) {
@@ -127,11 +128,11 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         items: [
             { 
                 productType: 'BINH_4L', 
-                quantity: 0, 
+                quantity: 1, 
                 unitPrice: 0, 
                 tempDept: '', 
                 tempSerial: '',
-                assignedCylinders: [] // RFID list for this specific item
+                assignedCylinders: [{ serial: '', scan_time: null }]
             }
         ],
         promotion: '',
@@ -146,6 +147,41 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
     const [cylinderDebt, setCylinderDebt] = useState([]);
     const [availableProductTypes, setAvailableProductTypes] = useState(PRODUCT_TYPES);
     const [isFetchingStock, setIsFetchingStock] = useState(false);
+
+    /** Chỉ dùng mã kho (cột code) cho orders.warehouse — tránh ghi nhầm tên kho dài và vi phạm check_warehouse trên DB. */
+    const warehouseSelectCode = (w) => String(w?.code || '').trim();
+
+    const resolveWarehouseCode = (value, warehouseList = []) => {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+        const normalized = raw.toLowerCase();
+        const matched = warehouseList.find((w) => {
+            const code = String(w?.code || '').trim().toLowerCase();
+            const id = String(w?.id || '').trim().toLowerCase();
+            const name = String(w?.name || '').trim().toLowerCase();
+            return normalized === code || normalized === id || normalized === name;
+        });
+        return matched ? warehouseSelectCode(matched) : '';
+    };
+
+    const getWarehouseLookupValues = (value, warehouseList = []) => {
+        const raw = String(value || '').trim();
+        if (!raw) return [];
+        const normalized = raw.toLowerCase();
+        const matched = warehouseList.find((w) => {
+            const code = String(w?.code || '').trim().toLowerCase();
+            const id = String(w?.id || '').trim().toLowerCase();
+            const name = String(w?.name || '').trim().toLowerCase();
+            return normalized === code || normalized === id || normalized === name;
+        });
+        const values = [
+            raw,
+            String(matched?.code || '').trim(),
+            String(matched?.id || '').trim(),
+            String(matched?.name || '').trim()
+        ].filter(Boolean);
+        return [...new Set(values)];
+    };
 
     useEffect(() => {
         if (isEdit) return;
@@ -258,34 +294,37 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
 
     const fetchWarehouses = async () => {
         try {
-            const { data } = await supabase.from('warehouses').select('id, name').eq('status', 'Đang hoạt động').order('name');
+            const { data } = await supabase.from('warehouses').select('id, name, code').eq('status', 'Đang hoạt động').order('name');
             if (data) {
                 let finalWarehouses = data;
                 
                 // If not admin and user has a department, filter the list
                 if (isWarehouseRole(role) && department) {
                     const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-                    finalWarehouses = data.filter(wh => wh.name === userWhCode || wh.id === userWhCode);
+                    finalWarehouses = data.filter(wh => wh.name === userWhCode || wh.id === userWhCode || wh.code === userWhCode);
                 }
 
                 setWarehousesList(finalWarehouses);
                 
                 if (!isEdit && finalWarehouses.length > 0) {
-                    // Try to find the matched warehouse first, otherwise take the first available
-                    let defaultWh = finalWarehouses[0].id;
+                    const firstCoded = finalWarehouses.find((wh) => warehouseSelectCode(wh));
+                    let defaultWh = firstCoded ? warehouseSelectCode(firstCoded) : '';
                     if (isWarehouseRole(role) && department) {
                         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-                        const matched = finalWarehouses.find(wh => wh.name === userWhCode || wh.id === userWhCode);
-                        if (matched) defaultWh = matched.id;
+                        const matched = finalWarehouses.find(wh => wh.name === userWhCode || wh.id === userWhCode || wh.code === userWhCode);
+                        if (matched) defaultWh = resolveWarehouseCode(warehouseSelectCode(matched) || matched.id || matched.name, finalWarehouses);
                     }
                     
                     setFormData(prev => {
-                        const newWh = prev.warehouse || defaultWh;
+                        const newWh = resolveWarehouseCode(prev.warehouse, finalWarehouses) || defaultWh;
                         updateStockOptions(newWh);
                         return { ...prev, warehouse: newWh };
                     });
                 } else if (isEdit && order.warehouse) {
-                    updateStockOptions(order.warehouse);
+                    const editWhCode = resolveWarehouseCode(order.warehouse, finalWarehouses);
+                    if (editWhCode) {
+                        updateStockOptions(editWhCode);
+                    }
                 }
             }
         } catch (error) {
@@ -302,15 +341,32 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
             }
             setIsFetchingCyls(true);
             try {
-                const { data, error } = await supabase
-                    .from('cylinders')
-                    .select('serial_number, volume, status, warehouse_id')
-                    .eq('warehouse_id', formData.warehouse)
-                    .eq('status', 's\u1eb5n s\u00e0ng')
-                    .order('serial_number', { ascending: true })
-                    .limit(5000);
-                if (error) throw error;
-                if (!cancelled) setWarehouseReadyCylinders(data || []);
+                const warehouseCandidates = getWarehouseLookupValues(formData.warehouse, warehousesList);
+                let loadedCylinders = [];
+                let latestError = null;
+
+                for (const warehouseKey of warehouseCandidates) {
+                    const { data, error } = await supabase
+                        .from('cylinders')
+                        .select('serial_number, volume, status, warehouse_id')
+                        .eq('warehouse_id', warehouseKey)
+                        .eq('status', 's\u1eb5n s\u00e0ng')
+                        .order('serial_number', { ascending: true })
+                        .limit(5000);
+
+                    if (error) {
+                        latestError = error;
+                        continue;
+                    }
+
+                    if (Array.isArray(data) && data.length > 0) {
+                        loadedCylinders = data;
+                        break;
+                    }
+                }
+
+                if (loadedCylinders.length === 0 && latestError) throw latestError;
+                if (!cancelled) setWarehouseReadyCylinders(loadedCylinders);
             } catch (e) {
                 console.error('loadWarehouseCylinders', e);
                 if (!cancelled) setWarehouseReadyCylinders([]);
@@ -320,13 +376,14 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         };
         loadWarehouseCylinders();
         return () => { cancelled = true; };
-    }, [formData.warehouse]);
+    }, [formData.warehouse, warehousesList]);
 
     const getCylinderSelectOptions = useCallback((itemIdx, cylIdx) => {
         const item = formData.items[itemIdx];
         if (!item?.productType?.startsWith('BINH')) return [];
         const taken = getTakenCylinderSerialsExceptSlot(formData.items, itemIdx, cylIdx);
         return (warehouseReadyCylinders || [])
+            .filter((c) => isReadyCylinderStatus(c.status))
             .filter((c) => cylinderVolumeMatchesProduct(c.volume, item.productType))
             .filter((c) => !taken.has((c.serial_number || '').trim().toUpperCase()))
             .slice()
@@ -460,7 +517,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 setFormData({
                     orderCode: order.order_code,
                     customerCategory: order.customer_category || 'TM',
-                    warehouse: order.warehouse || '',
+                    warehouse: resolveWarehouseCode(order.warehouse, warehousesList),
                     customerId: matchedCustomerId,
                     orderedBy: order.ordered_by || '',
                     recipientName: order.recipient_name || '',
@@ -574,18 +631,27 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         return searchMatch;
     });
 
+    /** Một dòng: tên người liên hệ + SĐT (đồng bộ với dropdown) */
+    const customerDropdownLabel = (c) => {
+        if (!c) return '';
+        const nm = String(c.recipient || c.name || '').trim();
+        const phone = String(c.phone || '').trim();
+        if (nm && phone) return `${nm} · ${phone}`;
+        return nm || phone || '—';
+    };
+
     const addItem = () => {
         setFormData(prev => ({
             ...prev,
             items: [
                 ...prev.items,
                 { 
-                    productType: availableProductTypes[0]?.id || 'BINH_LL', 
+                    productType: availableProductTypes[0]?.id || 'BINH_4L', 
                     quantity: 1, 
                     unitPrice: availableProductTypes[0]?.price || 0, 
                     tempDept: '', 
                     tempSerial: '', 
-                    assignedCylinders: (availableProductTypes[0]?.id || 'BINH_LL').startsWith('BINH') ? [{ serial: '', scan_time: null }] : [] 
+                    assignedCylinders: (availableProductTypes[0]?.id || 'BINH_4L').startsWith('BINH') ? [{ serial: '', scan_time: null }] : [] 
                 }
             ]
         }));
@@ -810,6 +876,11 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
             failSubmit('Vui lòng chọn kho xuất hàng để gán mã bình.');
             return;
         }
+        const resolvedWh = resolveWarehouseCode(formData.warehouse, warehousesList);
+        if (formData.warehouse && !resolvedWh) {
+            failSubmit('Kho đã chọn chưa có mã (code) trong hệ thống — không thể lưu đơn. Vui lòng cập nhật mã kho trong danh mục kho hoặc chọn kho khác.');
+            return;
+        }
 
         const phoneRegex = /^(0|84)(3|5|7|8|9)([0-9]{8})$/;
         if (!formData.customerId || !formData.recipientName || !formData.recipientAddress || !formData.recipientPhone || validItems.length === 0) {
@@ -822,11 +893,11 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
             return;
         }
 
-        // Block if any item has unitPrice = 0
-        const zeroPrice = validItems.filter(it => !it.unitPrice || Number(it.unitPrice) === 0);
-        if (zeroPrice.length > 0) {
-            const names = zeroPrice.map(it => it.productType || 'Sản phẩm').join(', ');
-            failSubmit(`Vui lòng nhập đơn giá cho: ${names}. Đơn giá không được để trống hoặc bằng 0đ.`);
+        // Allow unit price = 0; only block invalid negative values
+        const invalidNegativePrice = validItems.filter((it) => Number(it.unitPrice) < 0);
+        if (invalidNegativePrice.length > 0) {
+            const names = invalidNegativePrice.map((it) => it.productType || 'Sản phẩm').join(', ');
+            failSubmit(`Đơn giá không hợp lệ cho: ${names}. Đơn giá phải lớn hơn hoặc bằng 0đ.`);
             return;
         }
 
@@ -853,6 +924,11 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
             }
 
             // 1. ADVANCED VALIDATION for all items
+            const selectedWarehouseCandidates = new Set(
+                getWarehouseLookupValues(formData.warehouse, warehousesList)
+                    .map((v) => String(v || '').trim().toUpperCase())
+                    .filter(Boolean)
+            );
             for (const item of validItems) {
                 const isCyl = item.productType?.startsWith('BINH');
                 const serials = (item.assignedCylinders || []).map(c => (typeof c === 'string' ? c : c?.serial)?.trim().toUpperCase()).filter(Boolean);
@@ -879,7 +955,8 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                         throw new Error(`Sản phẩm ${item.productType}: Mã bình không tồn tại: ${missing.join(', ')}`);
                     }
                     for (const c of validCyls) {
-                        if (c.warehouse_id !== formData.warehouse) {
+                        const cylWarehouseValue = String(c.warehouse_id || '').trim().toUpperCase();
+                        if (!selectedWarehouseCandidates.has(cylWarehouseValue)) {
                             throw new Error(`Sản phẩm ${item.productType}: Mã ${c.serial_number} không thuộc kho xuất đã chọn.`);
                         }
                         if ((c.status || '').trim() !== READY_CYLINDER_STATUS) {
@@ -897,7 +974,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
             const payload = {
                 order_code: formData.orderCode,
                 customer_category: formData.customerCategory,
-                warehouse: formData.warehouse,
+                warehouse: resolveWarehouseCode(formData.warehouse, warehousesList),
                 customer_name: customerName,
                 customer_id: formData.customerId || null,
                 recipient_name: formData.recipientName,
@@ -952,15 +1029,6 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
 
             const { error: itemsErr } = await supabase.from('order_items').insert(itemsPayload);
             if (itemsErr) throw itemsErr;
-
-            // 4. LOG HISTORY
-            await supabase.from('order_history').insert([{
-                order_id: orderId,
-                action: isEdit ? 'EDITED' : 'CREATED',
-                new_status: payload.status,
-                created_by: currentUser,
-                reason: isEdit ? editReason : null
-            }]);
 
             onSuccess();
         } catch (error) {
@@ -1075,7 +1143,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                                 {isFetchingCustomers
                                                     ? 'Đang tải thông tin...'
                                                     : formData.customerId
-                                                        ? customers.find(c => c.id.toString() === formData.customerId.toString())?.name
+                                                        ? customerDropdownLabel(customers.find(c => c.id.toString() === formData.customerId.toString()))
                                                         : 'Chọn khách hàng trong hệ thống'}
                                             </span>
                                             {!isReadOnly && <ChevronDown className={`w-4 h-4 transition-transform ${isCustomerDropdownOpen ? 'rotate-180 text-primary' : 'text-primary/70'}`} />}
@@ -1088,7 +1156,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                                     <input
                                                         type="text"
                                                         className="w-full bg-transparent border-none outline-none text-sm font-semibold placeholder-slate-400 text-slate-700"
-                                                        placeholder="Tìm tên KH, người đại diện hoặc SDT..."
+                                                        placeholder="Tìm tên hoặc SĐT..."
                                                         value={customerSearchTerm}
                                                         onChange={(e) => setCustomerSearchTerm(e.target.value)}
                                                         onClick={(e) => e.stopPropagation()}
@@ -1103,12 +1171,8 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                                                 className={`px-4 py-2.5 cursor-pointer border-b border-slate-100 ${formData.customerId === customer.id ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
                                                                 onClick={() => handleCustomerSelect(customer)}
                                                             >
-                                                                <div className={`font-semibold text-sm ${formData.customerId === customer.id ? 'text-primary' : 'text-slate-800'}`}>
-                                                                    {customer.name}
-                                                                </div>
-                                                                <div className="text-xs text-slate-500 flex gap-3 mt-1">
-                                                                    {customer.recipient && <span>{customer.recipient}</span>}
-                                                                    {customer.phone && <span>{customer.phone}</span>}
+                                                                <div className={`text-sm font-semibold truncate ${formData.customerId === customer.id ? 'text-primary' : 'text-slate-800'}`}>
+                                                                    {customerDropdownLabel(customer)}
                                                                 </div>
                                                             </div>
                                                         ))
@@ -1270,10 +1334,24 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                             )}
                                         >
                                             <option value="">Chọn kho</option>
-                                            {warehousesList.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                                            {warehousesList
+                                                .filter((w) => warehouseSelectCode(w))
+                                                .map((w) => {
+                                                    const whCode = warehouseSelectCode(w);
+                                                    return (
+                                                        <option key={w.id} value={whCode}>
+                                                            {w.name} ({whCode})
+                                                        </option>
+                                                    );
+                                                })}
                                         </select>
                                         {!isReadOnly && <ChevronDown className="w-4 h-4 text-primary/70 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />}
                                     </div>
+                                    {!isReadOnly && warehousesList.length > 0 && !warehousesList.some((w) => warehouseSelectCode(w)) && (
+                                        <p className="text-[11px] font-semibold text-amber-600 px-1">
+                                            Chưa có kho nào được gán mã (code). Cập nhật cột code trong danh mục kho để tạo đơn bình.
+                                        </p>
+                                    )}
                                 </div>
 
                                 <div className="space-y-6 pt-2">
@@ -1403,14 +1481,15 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                                             {!formData.warehouse && !isReadOnly && (
                                                                 <p className="text-[11px] font-bold text-amber-600 mb-2">Chọn kho xuất để hiện danh sách mã bình sẵn sàng.</p>
                                                             )}
+                                                            {formData.warehouse && !isReadOnly && !isFetchingCyls && getCylinderSelectOptions(idx, 0).length === 0 && (
+                                                                <p className="text-[11px] font-bold text-amber-600 mb-2">Kho này hiện chưa có mã RFID sẵn sàng cho loại bình đã chọn.</p>
+                                                            )}
                                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-1 custom-scrollbar">
                                                                 {item.assignedCylinders?.map((cyl, cIdx) => {
                                                                     const dropKey = `it-${idx}-cyl-${cIdx}`;
                                                                     const currentVal = (typeof cyl === 'string' ? cyl : (cyl?.serial || '')).trim().toUpperCase();
                                                                     const rowReadOnly = mode === 'view' || item.isLocked;
                                                                     const options = getCylinderSelectOptions(idx, cIdx);
-                                                                    const optionSerials = new Set(options.map((o) => (o.serial_number || '').trim().toUpperCase()));
-                                                                    const showLegacyValue = Boolean(currentVal && !optionSerials.has(currentVal));
 
                                                                     return (
                                                                         <div key={dropKey} className="relative flex items-center gap-2">
@@ -1428,9 +1507,6 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                                                                     className="w-full h-10 pl-3 pr-10 bg-white border border-slate-200 rounded-xl text-[13px] font-mono font-bold text-primary focus:border-primary/50 focus:ring-2 focus:ring-primary/5 appearance-none cursor-pointer"
                                                                                 >
                                                                                     <option value="">— Chọn mã bình #{cIdx + 1} —</option>
-                                                                                    {showLegacyValue && (
-                                                                                        <option value={currentVal}>{currentVal} (đang gán)</option>
-                                                                                    )}
                                                                                     {options.map((c) => (
                                                                                         <option key={c.serial_number} value={(c.serial_number || '').trim().toUpperCase()}>
                                                                                             {(c.serial_number || '').trim().toUpperCase()}{c.volume ? ` — ${c.volume}` : ''}

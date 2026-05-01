@@ -128,6 +128,22 @@ const GoodsReceipts = () => {
     const listDropdownRef = useRef(null);
     const statsDropdownRef = useRef(null);
 
+    const resolveMachineType = (value) => {
+        const text = String(value || '').trim().toUpperCase();
+        if (!text) return 'TM';
+        if (text.includes('IOT')) return 'IOT';
+        if (text.includes('FM')) return 'FM';
+        if (text.includes('BV') || text.includes('ROSY') || text.includes('PLASMAROSY')) return 'BV';
+        if (text.includes('TM')) return 'TM';
+        return 'TM';
+    };
+    const parseMachineTypeFromItem = (item) => {
+        const noteText = String(item?.note || '');
+        const match = noteText.match(/\[MACHINE_TYPE:(BV|TM|FM|IOT)\]/i);
+        if (match?.[1]) return resolveMachineType(match[1]);
+        return resolveMachineType(item?.item_name);
+    };
+
     const visibleTableColumns = columnOrder
         .filter(key => visibleColumns.includes(key))
         .map(key => TABLE_COLUMNS.find(col => col.key === key))
@@ -625,13 +641,14 @@ const GoodsReceipts = () => {
                             if (machSyncError) throw new Error(`Không thể cập nhật máy ${normalizedSerial}: ${machSyncError.message}`);
                         } else {
                             // INSERT new machine
+                            const safeMachineType = parseMachineTypeFromItem(item);
                             const { error: machInsertError } = await supabase
                                 .from('machines')
                                 .insert({
                                     serial_number: normalizedSerial,
                                     status: 'sẵn sàng',
                                     warehouse: receipt.warehouse_id,
-                                    machine_type: item.item_name, // e.g. "Máy PlasmaRosy"
+                                    machine_type: safeMachineType,
                                     customer_name: null,
                                 });
                             if (machInsertError) throw new Error(`Không thể tạo mới máy ${normalizedSerial}: ${machInsertError.message}`);

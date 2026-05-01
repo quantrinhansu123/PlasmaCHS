@@ -5,10 +5,11 @@ const ROUTE_RULES = [
     { prefix: '/thong-ke', module: 'dashboard' },
     { prefix: '/bao-cao/', module: 'reports' },
 
-    { prefix: '/don-hang-kinh-doanh', anyOfModules: ['orders', 'customers', 'promotions', 'dnxm', 'reports'] },
-    { prefix: '/don-hang', module: 'orders' },
-    { prefix: '/danh-sach-dieu-chuyen', module: 'orders' },
-    { prefix: '/danh-sach-hang-luan-chuyen', module: 'orders' },
+    // warehouses / shipping_tasks: trang Đơn hàng vẫn dùng để xem đơn theo kho hoặc đơn được giao (Orders.jsx đã lọc)
+    { prefix: '/don-hang-kinh-doanh', anyOfModules: ['orders', 'customers', 'promotions', 'dnxm', 'reports', 'warehouses', 'shipping_tasks'] },
+    { prefix: '/don-hang', anyOfModules: ['orders', 'warehouses', 'shipping_tasks'] },
+    { prefix: '/danh-sach-dieu-chuyen', anyOfModules: ['orders', 'warehouses'] },
+    { prefix: '/danh-sach-hang-luan-chuyen', anyOfModules: ['orders', 'warehouses'] },
     { prefix: '/de-nghi-xuat-may', module: 'dnxm' },
     { prefix: '/lich-su-giao-hang', module: 'shipping_tasks' },
 

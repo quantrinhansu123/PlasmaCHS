@@ -5,7 +5,6 @@ import { createPortal } from 'react-dom';
 import { ORDER_STATE_TRANSITIONS, PRODUCT_TYPES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
 import BarcodeScanner from '../Common/BarcodeScanner';
-import OrderHistoryTimeline from './OrderHistoryTimeline';
 import { notificationService } from '../../utils/notificationService';
 import MachineIssueRequestForm from '../Machines/MachineIssueRequestForm';
 import usePermissions from '../../hooks/usePermissions';
@@ -39,6 +38,11 @@ const isMachineProductType = (productType) => {
     return ['TM', 'SD', 'FM', 'Khac', 'KHAC', 'DNXM'].includes(normalized);
 };
 
+const toUuidOrNull = (value) => {
+    const raw = String(value || '').trim();
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(raw) ? raw : null;
+};
+
 export default function OrderStatusUpdater({ order, warehouseName, userRole, onClose, onUpdateSuccess }) {
     const { user } = usePermissions();
     const [isLoading, setIsLoading] = useState(false);
@@ -47,7 +51,6 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     const [errorMsg, setErrorMsg] = useState('');
     const [quantityValidationMsg, setQuantityValidationMsg] = useState('');
     const [scannedSerials, setScannedSerials] = useState('');
-    const [activeTab, setActiveTab] = useState('actions');
     const [shippers, setShippers] = useState([]);
     const [adjustedQuantity, setAdjustedQuantity] = useState(order?.quantity || 0);
     const [adjustedQuantity2, setAdjustedQuantity2] = useState(order?.quantity_2 || 0);
@@ -170,15 +173,27 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         fetchAvailableMachineSerials();
     }, [hasMachineItems, order?.status, order?.warehouse]);
 
-    // Initialize delivery checklist from assigned items
+    // Initialize delivery checklist from assigned items (header + order_items — đơn một dòng bình thường chỉ có ở items)
     useEffect(() => {
         if (order?.status === 'DANG_GIAO_HANG') {
             const checklist = {};
-            if (order.assigned_cylinders?.length > 0) {
-                order.assigned_cylinders.forEach(serial => {
-                    checklist[`BINH:${serial}`] = false;
+            const binhSerials = new Set();
+            (order.assigned_cylinders || []).forEach((s) => {
+                const v = String(s || '').trim();
+                if (v) binhSerials.add(v);
+            });
+            (orderItems || []).forEach((it) => {
+                if (!it.product_type?.startsWith('BINH')) return;
+                (it.assigned_cylinders || []).forEach((s) => {
+                    const v = typeof s === 'string' ? s.trim() : String(s?.serial || '').trim();
+                    if (v) binhSerials.add(v);
                 });
-            }
+                const lineSn = String(it.serial_number || '').trim();
+                if (lineSn) binhSerials.add(lineSn);
+            });
+            binhSerials.forEach((serial) => {
+                checklist[`BINH:${serial}`] = false;
+            });
             if (isDNXM) {
                 // Đối với đơn máy, lấy mã từ department hoặc note
                 let machineSerials = [];
@@ -202,7 +217,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             }
             setDeliveryChecklist(checklist);
         }
-    }, [order?.id]);
+    }, [order?.id, order?.status, order?.assigned_cylinders, order?.department, orderItems, isDNXM]);
 
     const handleProofImageChange = (e) => {
         const file = e.target.files[0];
@@ -430,6 +445,22 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             const actionTime = new Date().toLocaleString('vi-VN');
 
             let imageUrl = order.delivery_image_url;
+            const logMachineActions = async ({ serials, action, description }) => {
+                const normalizedSerials = (serials || [])
+                    .map((s) => String(s || '').trim())
+                    .filter(Boolean);
+                if (normalizedSerials.length === 0) return;
+
+                const payload = normalizedSerials.map((serial) => ({
+                    serial_number: serial,
+                    warehouse_id: toUuidOrNull(order?.warehouse),
+                    action,
+                    description
+                }));
+
+                const { error: logErr } = await supabase.from('cylinder_logs').insert(payload);
+                if (logErr) throw new Error('Không thể ghi lịch sử mã máy: ' + logErr.message);
+            };
 
             // Validate adjusted quantities before proceeding
             const reqQty = parseInt(adjustedQuantity);
@@ -522,7 +553,12 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
 
             const isCylinder1 = order.product_type?.startsWith('BINH');
             const isCylinder2 = order.product_type_2?.startsWith('BINH');
-            const totalCylindersNeeded = (isCylinder1 ? order.quantity : 0) + (isCylinder2 ? order.quantity_2 : 0);
+            let totalCylindersNeeded = (isCylinder1 ? order.quantity : 0) + (isCylinder2 ? order.quantity_2 : 0);
+            if (totalCylindersNeeded === 0 && (orderItems || []).length > 0) {
+                totalCylindersNeeded = orderItems
+                    .filter((it) => it.product_type?.startsWith('BINH'))
+                    .reduce((sum, it) => sum + (parseInt(it.quantity, 10) || 0), 0);
+            }
 
             // Nếu Shipper gán mã lỗi do Kho quên
             const needsCylinderAssignmentByShipper = (order.status === 'CHO_GIAO_HANG' || order.status === 'DANG_GIAO_HANG') &&
@@ -615,9 +651,18 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 if (updateMachineErr) {
                     throw new Error('Không thể cập nhật trạng thái máy đã gán: ' + updateMachineErr.message);
                 }
+
+                await logMachineActions({
+                    serials,
+                    action: 'MAY_KHO_XUAT',
+                    description: `Đơn ${order.order_code}: Kho xuất máy, chuyển trạng thái sang kiểm tra. Người thực hiện: ${actorName}`
+                });
             }
 
-            if ((transition.nextStatus === 'CHO_DOI_SOAT' || transition.nextStatus === 'HOAN_THANH') && order.status === 'DANG_GIAO_HANG') {
+            const isDeliveryCompletionStep =
+                transition.nextStatus === 'HOAN_THANH' ||
+                ((transition.nextStatus === 'CHO_DOI_SOAT' || transition.nextStatus === 'HOAN_THANH') && order.status === 'DANG_GIAO_HANG');
+            if (isDeliveryCompletionStep) {
                 if (!confirmDeliveryCheck) {
                     throw new Error('Bạn cần tick xác nhận đã giao hàng cho khách hàng.');
                 }
@@ -641,6 +686,31 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     });
                 }
 
+                // Khi shipper xác nhận giao xong, cập nhật các mã bình thuộc phiếu sang trạng thái thuộc khách hàng
+                const assignedCylinderSerials = (order.assigned_cylinders || [])
+                    .map((serial) => String(serial || '').trim().toUpperCase())
+                    .filter(Boolean);
+                const checklistCylinderSerials = Object.keys(deliveryChecklist || {})
+                    .filter((key) => String(key || '').startsWith('BINH:'))
+                    .map((key) => String(key).split(':')[1] || '')
+                    .map((serial) => serial.trim().toUpperCase())
+                    .filter(Boolean);
+                const deliveredCylinderSerials = [...new Set([...assignedCylinderSerials, ...checklistCylinderSerials])];
+                if (deliveredCylinderSerials.length > 0) {
+                    const { error: deliveredCylinderErr } = await supabase
+                        .from('cylinders')
+                        .update({
+                            status: 'thuộc khách hàng',
+                            customer_name: order.customer_name || null,
+                            updated_at: new Date().toISOString()
+                        })
+                        .in('serial_number', deliveredCylinderSerials);
+
+                    if (deliveredCylinderErr) {
+                        throw new Error('Không thể cập nhật bình sang trạng thái thuộc khách hàng: ' + deliveredCylinderErr.message);
+                    }
+                }
+
                 if (hasMachineItems && order.department) {
                     const machineSerials = order.department.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
                     if (machineSerials.length > 0) {
@@ -657,6 +727,12 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                         if (deliveredMachineErr) {
                             throw new Error('Không thể cập nhật máy sang trạng thái thuộc khách hàng: ' + deliveredMachineErr.message);
                         }
+
+                        await logMachineActions({
+                            serials: machineSerials,
+                            action: 'MAY_GIAO_THANH_CONG',
+                            description: `Đơn ${order.order_code}: Giao máy thành công, chuyển trạng thái thuộc khách hàng. Người thực hiện: ${actorName}`
+                        });
                     }
                 }
             }
@@ -712,6 +788,12 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                             .from('machines')
                             .update({ status: 'sẵn sàng', customer_name: null, updated_at: new Date().toISOString() })
                             .in('serial_number', machineSerials);
+
+                        await logMachineActions({
+                            serials: machineSerials,
+                            action: 'MAY_HUY_DON_HOAN_KHO',
+                            description: `Đơn ${order.order_code}: Hủy đơn, hoàn trạng thái máy về sẵn sàng. Người thực hiện: ${actorName}`
+                        });
                     }
                 }
             }
@@ -781,8 +863,11 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 updatePayload.total_amount_2 = q2 * (order.unit_price_2 || 0);
             }
 
-            // Nếu đây là lúc xuất kho (Gán mã bình) hoặc Shipper gán mã bổ sung
-            if (((transition.nextStatus === 'CHO_GIAO_HANG' || transition.nextStatus === 'DA_DUYET') && order.status === 'KHO_XU_LY' && order.product_type?.startsWith('BINH')) || needsCylinderAssignmentByShipper) {
+            // Nếu đây là lúc xuất kho (Gán mã bình) hoặc Shipper gán mã bổ sung — có bình nếu header hoặc bất kỳ dòng order_items nào là BINH
+            const orderHasBinhProducts =
+                order.product_type?.startsWith('BINH') ||
+                (orderItems || []).some((it) => it.product_type?.startsWith('BINH'));
+            if (((transition.nextStatus === 'CHO_GIAO_HANG' || transition.nextStatus === 'DA_DUYET') && order.status === 'KHO_XU_LY' && orderHasBinhProducts) || needsCylinderAssignmentByShipper) {
                 updatePayload.assigned_cylinders = scannedSerials.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
             }
 
@@ -819,15 +904,6 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 .eq('id', order.id);
 
             if (dbError) throw dbError;
-
-            // Log history — ưu tiên user từ hook (chính xác nhất), fallback sang storage
-            await supabase.from('order_history').insert([{
-                order_id: order.id,
-                action: 'STATUS_CHANGED',
-                old_status: order.status,
-                new_status: transition.nextStatus,
-                created_by: actorName
-            }]);
 
             onUpdateSuccess();
             onClose();
@@ -906,40 +982,13 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                         )}
                     </div>
 
-                    {/* Tabs */}
-                    <div className="bg-white rounded-2xl p-1.5 border border-slate-200 shadow-sm grid grid-cols-2 gap-1.5">
-                        <button
-                            onClick={() => setActiveTab('actions')}
-                            className={clsx(
-                                "h-10 text-xs font-black uppercase tracking-wider rounded-xl transition-all flex items-center justify-center",
-                                activeTab === 'actions'
-                                    ? 'bg-primary text-white shadow'
-                                    : 'text-slate-500 hover:bg-slate-100'
-                            )}
-                        >
+                    <div className="bg-white rounded-2xl p-1.5 border border-slate-200 shadow-sm">
+                        <div className="h-10 text-xs font-black uppercase tracking-wider rounded-xl bg-primary text-white shadow flex items-center justify-center">
                             Thao tác
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('history')}
-                            className={clsx(
-                                "h-10 text-xs font-black uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-1.5",
-                                activeTab === 'history'
-                                    ? 'bg-primary text-white shadow'
-                                    : 'text-slate-500 hover:bg-slate-100'
-                            )}
-                        >
-                            <Clock className="w-4 h-4" /> Lịch sử
-                        </button>
+                        </div>
                     </div>
 
-                    {activeTab === 'history' && (
-                        <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-                            <OrderHistoryTimeline orderId={order.id} />
-                        </div>
-                    )}
-
-                    {activeTab === 'actions' && (
-                        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
 
                             {/* ── KHO CẤP: Công ty chỉ định khi duyệt DNXM ── */}
                             {order.status === 'CHO_CTY_DUYET' && isDNXM && (
@@ -1528,63 +1577,6 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                     );
                                 })()}
 
-                                {/* View proof for completed orders */}
-                                {(order.status === 'CHO_DOI_SOAT' || order.status === 'HOAN_THANH') && (
-                                    <div className="space-y-3">
-                                        <label className="block text-xs font-black text-slate-500 uppercase tracking-widest">
-                                            Ảnh chứng từ giao hàng
-                                        </label>
-                                        {order.delivery_proof_base64 ? (
-                                            <div className="space-y-2">
-                                                <img
-                                                    src={order.delivery_proof_base64}
-                                                    alt="Phiếu xác nhận"
-                                                    className="w-full max-h-[200px] object-contain rounded-xl border border-slate-200 bg-slate-50 cursor-pointer"
-                                                    onClick={() => setShowProofModal(true)}
-                                                />
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setShowProofModal(true)}
-                                                    className="w-full py-2 text-[11px] font-black text-primary uppercase tracking-wider bg-primary/5 rounded-xl hover:bg-primary/10 transition-all flex items-center justify-center gap-1.5"
-                                                >
-                                                    <ZoomIn size={14} /> Xem phóng to
-                                                </button>
-                                            </div>
-                                        ) : order.delivery_image_url ? (
-                                            <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl flex items-center justify-between shadow-sm">
-                                                <div className="flex items-center gap-2">
-                                                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                                                    <span className="text-[12px] font-bold text-emerald-700">Đã có chứng từ</span>
-                                                </div>
-                                                <a href={order.delivery_image_url} target="_blank" rel="noreferrer" className="text-[10px] font-black text-primary hover:underline hover:text-primary/80 uppercase tracking-wider">Xem ảnh</a>
-                                            </div>
-                                        ) : (
-                                            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-center">
-                                                <span className="text-[12px] text-slate-400 italic">Chưa có ảnh chứng từ</span>
-                                            </div>
-                                        )}
-
-                                        {/* Checklist review */}
-                                        {order.delivery_checklist && Object.keys(order.delivery_checklist).length > 0 && (
-                                            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1.5">
-                                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Checklist giao hàng</span>
-                                                {Object.entries(order.delivery_checklist).map(([key, checked]) => {
-                                                    const [type, serial] = key.split(':');
-                                                    return (
-                                                        <div key={key} className="flex items-center gap-2 text-[12px]">
-                                                            {checked
-                                                                ? <Check className="w-4 h-4 text-emerald-500" />
-                                                                : <X className="w-4 h-4 text-rose-500" />
-                                                            }
-                                                            <span className={clsx("font-mono font-bold", checked ? "text-slate-700" : "text-rose-600 line-through")}>{serial}</span>
-                                                            <span className="text-slate-400 text-[9px] uppercase">{type === 'BINH' ? 'Bình' : 'Máy'}</span>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
                             </div>
 
                             {(errorMsg || quantityValidationMsg) && (
@@ -1658,7 +1650,6 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                 )}
                             </div>
                         </div>
-                    )}
                 </div>
 
                 <div className="p-4 bg-white border-t border-slate-200 shrink-0 flex items-center justify-center">

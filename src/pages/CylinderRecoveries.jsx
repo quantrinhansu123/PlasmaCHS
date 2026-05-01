@@ -25,7 +25,7 @@ import {
 import * as XLSX from 'xlsx';
 import { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { clsx } from 'clsx';
 import MobilePageHeader from '../components/layout/MobilePageHeader';
 import MobilePagination from '../components/layout/MobilePagination';
@@ -53,6 +53,7 @@ import {
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { supabase } from '../supabase/config';
 import { toast } from 'react-toastify';
+import { tryQuickCompleteRecovery } from '../utils/cylinderRecoveryCompletion';
 
 ChartJS.register(
     CategoryScale,
@@ -79,6 +80,7 @@ const CHART_COLORS = [
 
 const CylinderRecoveries = () => {
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
     const { role } = usePermissions();
     const canDeleteRecoveries = isAdminRole(role);
     const [activeView, setActiveView] = useState('list');
@@ -97,6 +99,8 @@ const CylinderRecoveries = () => {
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(50);
     const [recoveryToEdit, setRecoveryToEdit] = useState(null);
+    /** Mở form với trạng thái Hoàn thành sẵn (nhập vỏ + lưu), nhưng recovery prop vẫn là bản ghi DB để xử lý kho đúng */
+    const [openRecoveryAsComplete, setOpenRecoveryAsComplete] = useState(false);
     const [recoveriesToPrint, setRecoveriesToPrint] = useState(null);
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [filterSearch, setFilterSearch] = useState('');
@@ -170,6 +174,36 @@ const CylinderRecoveries = () => {
         fetchOrders();
     }, []);
 
+    // Mở phiếu từ Nhiệm vụ giao hàng: /thu-hoi-vo?recovery=<uuid> [&hoanThanh=1]
+    const recoveryQueryId = searchParams.get('recovery');
+    const recoveryOpenComplete = searchParams.get('hoanThanh') === '1';
+    useEffect(() => {
+        if (!recoveryQueryId) return;
+        let cancelled = false;
+        (async () => {
+            const { data, error } = await supabase
+                .from('cylinder_recoveries')
+                .select('*')
+                .eq('id', recoveryQueryId)
+                .maybeSingle();
+            if (cancelled) return;
+            if (error || !data) {
+                toast.error('Không tìm thấy phiếu thu hồi.');
+            } else {
+                setRecoveryToEdit(data);
+                setOpenRecoveryAsComplete(recoveryOpenComplete && data.status !== 'HOAN_THANH');
+                setIsFormModalOpen(true);
+            }
+            setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                next.delete('recovery');
+                next.delete('hoanThanh');
+                return next;
+            }, { replace: true });
+        })();
+        return () => { cancelled = true; };
+    }, [recoveryQueryId, recoveryOpenComplete, setSearchParams]);
+
     const fetchRecoveries = async () => {
         try {
             setLoading(true);
@@ -181,7 +215,14 @@ const CylinderRecoveries = () => {
             if (error) throw error;
             setRecoveries(data || []);
         } catch (error) {
-            toast.error('Lỗi khi tải danh sách thu hồi: ' + error.message);
+            const message = String(error?.message || '');
+            const code = String(error?.code || '');
+            if (code === '42P01' || message.includes('Could not find the table')) {
+                setRecoveries([]);
+                toast.error("Thiếu bảng dữ liệu 'cylinder_recoveries'. Vui lòng chạy migration schema_cylinder_recoveries.sql.");
+                return;
+            }
+            toast.error('Lỗi khi tải danh sách thu hồi: ' + message);
         } finally {
             setLoading(false);
         }
@@ -218,9 +259,17 @@ const CylinderRecoveries = () => {
     };
 
     // Handlers
-    const handleEdit = (recovery, forceStatus = null) => {
-        setRecoveryToEdit(forceStatus ? { ...recovery, status: forceStatus } : recovery);
+    const handleEdit = (recovery, forComplete = false) => {
+        setRecoveryToEdit(recovery);
+        setOpenRecoveryAsComplete(!!forComplete && recovery?.status !== 'HOAN_THANH');
         setIsFormModalOpen(true);
+    };
+
+    const handleRecoveryCompleteClick = async (recovery) => {
+        const res = await tryQuickCompleteRecovery(supabase, recovery.id, {
+            onNeedOpenForm: () => handleEdit(recovery, true),
+        });
+        if (res?.ok) fetchRecoveries();
     };
 
     const handleDelete = async (id, code) => {
@@ -251,6 +300,7 @@ const CylinderRecoveries = () => {
 
     const handleFormSuccess = () => {
         setIsFormModalOpen(false);
+        setOpenRecoveryAsComplete(false);
         fetchRecoveries();
     };
 
@@ -481,7 +531,7 @@ const CylinderRecoveries = () => {
                                 </div>
 
                                 <button
-                                    onClick={() => { setRecoveryToEdit(null); setIsFormModalOpen(true); }}
+                                    onClick={() => { setRecoveryToEdit(null); setOpenRecoveryAsComplete(false); setIsFormModalOpen(true); }}
                                     className="p-2 rounded-xl bg-primary text-white shrink-0 shadow-lg shadow-primary/30 active:scale-95 transition-all"
                                 >
                                     <Plus size={20} />
@@ -606,7 +656,7 @@ const CylinderRecoveries = () => {
                                                 )}
                                                 {recovery.status === 'DANG_THU_HOI' && (
                                                     <button
-                                                        onClick={() => handleEdit(recovery, 'HOAN_THANH')}
+                                                        onClick={() => handleRecoveryCompleteClick(recovery)}
                                                         className="p-2 text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg flex items-center gap-1 font-bold text-[11px]"
                                                         title="Hoàn thành"
                                                     >
@@ -708,6 +758,7 @@ const CylinderRecoveries = () => {
                                 <button
                                     onClick={() => {
                                         setRecoveryToEdit(null);
+                                        setOpenRecoveryAsComplete(false);
                                         setIsFormModalOpen(true);
                                     }}
                                     className="flex items-center gap-2 px-6 h-10 rounded-lg bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all active:scale-95"
@@ -1016,7 +1067,7 @@ const CylinderRecoveries = () => {
                                                     )}
                                                     {recovery.status === 'DANG_THU_HOI' && (
                                                         <button
-                                                            onClick={() => handleEdit(recovery, 'HOAN_THANH')}
+                                                            onClick={() => handleRecoveryCompleteClick(recovery)}
                                                             className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-lg text-[11px] font-bold hover:bg-emerald-100 transition-all"
                                                         >
                                                             Hoàn thành
@@ -1330,7 +1381,11 @@ const CylinderRecoveries = () => {
             {isFormModalOpen && (
                 <CylinderRecoveryFormModal
                     recovery={recoveryToEdit}
-                    onClose={() => setIsFormModalOpen(false)}
+                    prefillComplete={openRecoveryAsComplete}
+                    onClose={() => {
+                        setIsFormModalOpen(false);
+                        setOpenRecoveryAsComplete(false);
+                    }}
                     onSuccess={handleFormSuccess}
                 />
             )}

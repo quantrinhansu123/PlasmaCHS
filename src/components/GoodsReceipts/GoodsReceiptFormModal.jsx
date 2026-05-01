@@ -56,6 +56,26 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
 
     const normalizeSerial = (value) => value?.toString().trim().toUpperCase() || '';
     const hasValue = (value) => value !== null && value !== undefined && value !== '';
+    const MACHINE_TYPE_OPTIONS = [
+        { id: 'BV', label: 'BV' },
+        { id: 'TM', label: 'TM' },
+        { id: 'FM', label: 'FM' },
+        { id: 'IOT', label: 'IOT' },
+    ];
+    const normalizeMachineType = (value) => {
+        const upper = String(value || '').trim().toUpperCase();
+        return ['BV', 'TM', 'FM', 'IOT'].includes(upper) ? upper : 'TM';
+    };
+    const parseMachineTypeFromNote = (note) => {
+        const text = String(note || '');
+        const match = text.match(/\[MACHINE_TYPE:(BV|TM|FM|IOT)\]/i);
+        return normalizeMachineType(match?.[1] || '');
+    };
+    const isPlasmaRosyItem = (itemName) => {
+        const raw = String(itemName || '').trim();
+        const upper = raw.toUpperCase();
+        return upper === 'MAY_ROSY' || upper.includes('PLASMAROSY') || upper.includes('ROSY');
+    };
     const getProductDisplayName = (itemName) => {
         const matchedProduct = PRODUCT_TYPES.find((product) => product.label === itemName);
         return matchedProduct ? `${matchedProduct.label} (${matchedProduct.id})` : itemName;
@@ -113,6 +133,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
     const emptyItem = {
         item_type: 'MAY',
         item_name: '',
+        machine_type: 'TM',
         serial_number: '',
         assigned_serials: [{ serial: '', scan_time: null }],
         item_status: '',
@@ -175,6 +196,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
 
                         return {
                             ...item,
+                            machine_type: normalizeMachineType(item.machine_type || parseMachineTypeFromNote(item.note)),
                             quantity: quantity || 1,
                             serial_number: normalizedSerial,
                             assigned_serials: assignedSerials
@@ -487,7 +509,9 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                 unit: item.unit,
                 unit_price: parseFloat(item.unit_price) || 0,
                 total_price: parseFloat(item.total_price) || 0,
-                note: item.note,
+                note: formData.receipt_type === 'MAY'
+                    ? `${String(item.note || '').trim()}${String(item.note || '').trim() ? '\n' : ''}[MACHINE_TYPE:${normalizeMachineType(item.machine_type)}]`
+                    : item.note,
                 receipt_id: receiptId
             }));
 
@@ -504,6 +528,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
             } else if (formData.receipt_type === 'MAY') {
                 const machinesSet = new Set(machinesList.map(normalizeSerial));
                 const invalidSerials = flattenedItems.filter(i => {
+                    if (isPlasmaRosyItem(i.item_name)) return false;
                     const serial = normalizeSerial(i.serial_number);
                     return serial && !machinesSet.has(serial);
                 });
@@ -887,6 +912,21 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                                             {formData.receipt_type === 'MAY' ? 'MÁY' : 'BÌNH'}
                                                         </div>
                                                     </div>
+                                                    {formData.receipt_type === 'MAY' && (
+                                                        <div className="space-y-1.5">
+                                                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">Loại máy</label>
+                                                            <select
+                                                                disabled={isReadOnly}
+                                                                value={normalizeMachineType(item.machine_type)}
+                                                                onChange={(e) => updateItem(idx, 'machine_type', normalizeMachineType(e.target.value))}
+                                                                className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-sm font-bold outline-none"
+                                                            >
+                                                                {MACHINE_TYPE_OPTIONS.map((opt) => (
+                                                                    <option key={opt.id} value={opt.id}>{opt.label}</option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
+                                                    )}
                                                     <div className="space-y-1.5">
                                                         <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">Trạng thái</label>
                                                         <select

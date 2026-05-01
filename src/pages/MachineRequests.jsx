@@ -88,6 +88,33 @@ const getWarehouseAliases = (warehouse) => {
         .filter(Boolean);
 };
 
+const getWarehouseKeyVariants = (value) => {
+    const normalized = normalizeText(value);
+    if (!normalized) return [];
+
+    const shortByDash = normalized.includes('-') ? normalized.split('-')[0].trim() : '';
+    const compact = normalized.replace(/\s+/g, '');
+    const alnumOnly = normalized.replace(/[^a-z0-9]/g, '');
+
+    return [...new Set([normalized, shortByDash, compact, alnumOnly].filter(Boolean))];
+};
+
+const warehouseKeyMatches = (candidateKeys, allowedKeys) => {
+    if (!candidateKeys?.length || !allowedKeys?.length) return false;
+    return candidateKeys.some((candidate) =>
+        allowedKeys.some((allowed) => candidate === allowed || candidate.includes(allowed) || allowed.includes(candidate))
+    );
+};
+
+const isMachineRequestOrder = (order) => {
+    const orderType = String(order?.order_type || '').trim().toUpperCase();
+    const orderCode = String(order?.order_code || '').trim().toUpperCase();
+    const note = String(order?.note || '');
+    if (orderType === 'DNXM') return true;
+    if (orderCode.includes('DNXM') || orderCode.includes('TMV')) return true;
+    return /Loại máy:|Phụ trách máy:|Mã máy:/i.test(note);
+};
+
 // Register Chart.js components
 ChartJS.register(
     CategoryScale,
@@ -147,9 +174,8 @@ export default function MachineRequests() {
     ];
 
     useEffect(() => {
-        if (permissionsLoading) return;
         fetchData();
-    }, [permissionsLoading, role, department, user?.name]);
+    }, []);
 
     // Mobile filter handlers
     const closeMobileFilter = () => {
@@ -178,136 +204,15 @@ export default function MachineRequests() {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const normalizedRole = normalizeRole(role);
-            const isAdmin = isAdminRole(role);
-            const isLeader = isLeadSaleRole(role);
-            const isThuKhoRole = normalizedRole.includes('thukho');
-            const shipperRole = isShipperRole(role);
-            const warehouseRole = isWarehouseRole(role);
-            
-            // Get user info
-            const storageUserName = localStorage.getItem('user_name') || sessionStorage.getItem('user_name') || '';
-            const managedNames = (user?.nguoi_quan_ly || '')
-                .split(',')
-                .map(name => name.trim())
-                .filter(Boolean);
-            
-            const visibleSalesNames = [
-                ...new Set(
-                    [
-                        user?.name,
-                        user?.username,
-                        storageUserName,
-                        ...managedNames
-                    ]
-                        .map(v => (v || '').trim())
-                        .filter(Boolean)
-                )
-            ];
-
             let query = supabase
                 .from('orders')
-                .select('*')
-                .eq('order_type', 'DNXM');
-
-            // Shipper chỉ nhìn thấy đơn được giao cho mình
-            if (shipperRole && !isAdmin) {
-                query = query.eq('delivery_unit', storageUserName);
-            }
-
-            if (warehouseRole && !isThuKhoRole && department) {
-                const warehouseCode = department.includes('-')
-                    ? department.split('-')[0].trim()
-                    : department.trim();
-                query = query.eq('warehouse', warehouseCode);
-            }
-
-            // Role-based visibility filtering
-            if (!isAdmin && !isThuKhoRole && !shipperRole && !warehouseRole) {
-                // Leaders see their own + managed staff's requests
-                if (isLeader) {
-                    if (visibleSalesNames.length > 0) {
-                        query = query.in('ordered_by', visibleSalesNames);
-                    }
-                } 
-                // Regular NVKD (Sales) only see their own requests
-                else if (isSalesRole(role)) {
-                    const myNames = [user?.name, user?.username, storageUserName].filter(Boolean);
-                    if (myNames.length > 0) {
-                        query = query.in('ordered_by', myNames);
-                    }
-                }
-            }
+                .select('*');
 
             const { data, error } = await query.order('created_at', { ascending: false });
             
             if (error) throw error;
 
-            let scopedData = data || [];
-
-            // Thủ kho: lấy kho theo cột "Thủ kho" trong danh sách kho,
-            // rồi hiển thị toàn bộ phiếu có Kho khớp Tên kho (và hỗ trợ code/id để tương thích dữ liệu cũ).
-            if (!isAdmin && (isThuKhoRole || warehouseRole)) {
-                const possibleManagerNames = [
-                    user?.name,
-                    user?.username,
-                    storageUserName,
-                ]
-                    .map((v) => (v || '').trim())
-                    .filter(Boolean);
-
-                if (possibleManagerNames.length > 0) {
-                    const normalizedManagers = possibleManagerNames.map(normalizeText);
-                    const { data: warehousesData } = await supabase
-                        .from('warehouses')
-                        .select('id, name, code, manager_name');
-
-                    const myWarehouses = (warehousesData || []).filter((w) => {
-                        const manager = normalizeText(w.manager_name);
-                        if (!manager) return false;
-                        return normalizedManagers.some((candidate) =>
-                            manager.includes(candidate) || candidate.includes(manager)
-                        );
-                    });
-
-                    let scopedWarehouses = myWarehouses;
-                    if (scopedWarehouses.length === 0) {
-                        const branchTokens = [department, user?.chi_nhanh]
-                            .map((v) => normalizeText(v))
-                            .filter(Boolean);
-                        if (branchTokens.length > 0) {
-                            scopedWarehouses = (warehousesData || []).filter((w) => {
-                                const keys = getWarehouseAliases(w);
-                                return branchTokens.some((token) =>
-                                    keys.some((key) => key.includes(token) || token.includes(key))
-                                );
-                            });
-                        }
-                    }
-
-                    if (scopedWarehouses.length > 0) {
-                        const allowedWarehouseValues = new Set(
-                            scopedWarehouses.flatMap((w) => getWarehouseAliases(w))
-                        );
-
-                        scopedData = scopedData.filter((order) => {
-                            const warehouseCandidates = [
-                                order.warehouse,
-                                extractWarehouseFromNote(order.note),
-                            ]
-                                .map(normalizeText)
-                                .filter(Boolean);
-                            return warehouseCandidates.some((candidate) => allowedWarehouseValues.has(candidate));
-                        });
-                    } else {
-                        scopedData = [];
-                    }
-                } else {
-                    scopedData = [];
-                }
-            }
-
-            setRequests(scopedData);
+            setRequests(data || []);
         } catch (error) {
             toast.error('Lỗi tải dữ liệu: ' + error.message);
         } finally {
