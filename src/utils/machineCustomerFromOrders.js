@@ -13,6 +13,8 @@ export const MACHINE_STATUSES_ENRICH_CUSTOMER_FROM_ORDERS = new Set([
     'thuộc khách hàng',
     'kiểm tra',
     'đang sử dụng',
+    'bảo trì',
+    'đang sửa',
 ]);
 
 export function resolveOrderCustomerDisplay(order, customersById = {}) {

@@ -16,10 +16,12 @@ import {
     User,
     Recycle,
     ArrowLeftRight,
-    Trash2
+    Trash2,
+    LayoutGrid,
+    MapPin,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { toast } from 'react-toastify';
 import { supabase } from '../supabase/config';
 import OrderStatusUpdater from '../components/Orders/OrderStatusUpdater';
@@ -35,6 +37,20 @@ const DELIVERY_TYPES = [
 ];
 
 const getTypeInfo = (type) => DELIVERY_TYPES.find(d => d.id === type) || DELIVERY_TYPES[0];
+
+const rowKey = (r) => `${r.type}::${r.id}`;
+
+function parseRowKey(key) {
+    const idx = String(key).indexOf('::');
+    if (idx === -1) return null;
+    return { type: key.slice(0, idx), id: key.slice(idx + 2) };
+}
+
+function chunkArray(arr, size) {
+    const out = [];
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+}
 
 export default function DeliveryHistory() {
     const navigate = useNavigate();
@@ -69,9 +85,19 @@ export default function DeliveryHistory() {
     const [customerMap, setCustomerMap] = useState({});
     const [warehouseMap, setWarehouseMap] = useState({});
 
+    /** Chọn nhiều để xóa — key dạng `GIAO_HANG::<uuid>` */
+    const [selectedRowKeys, setSelectedRowKeys] = useState([]);
+    const [bulkDeleting, setBulkDeleting] = useState(false);
+    const pageSelectAllRef = useRef(null);
+
     useEffect(() => {
         fetchAllData();
     }, []);
+
+    useEffect(() => {
+        const valid = new Set(records.map(rowKey));
+        setSelectedRowKeys((prev) => prev.filter((k) => valid.has(k)));
+    }, [records]);
 
     // Mobile filter handlers
     const closeMobileFilter = () => {
@@ -287,6 +313,99 @@ export default function DeliveryHistory() {
     const totalRecords = filteredRecords.length;
     const paginatedRecords = filteredRecords.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
+    const isRowSelected = (r) => selectedRowKeys.includes(rowKey(r));
+
+    const toggleRowSelected = (r) => {
+        const k = rowKey(r);
+        setSelectedRowKeys((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
+    };
+
+    const pageKeys = paginatedRecords.map(rowKey);
+    const selectedOnPageCount = pageKeys.filter((k) => selectedRowKeys.includes(k)).length;
+    const allPageSelected = pageKeys.length > 0 && selectedOnPageCount === pageKeys.length;
+    const somePageSelected = selectedOnPageCount > 0 && !allPageSelected;
+
+    useEffect(() => {
+        const el = pageSelectAllRef.current;
+        if (el) el.indeterminate = somePageSelected;
+    }, [somePageSelected]);
+
+    const toggleSelectAllOnPage = () => {
+        if (pageKeys.length === 0) return;
+        if (allPageSelected) {
+            setSelectedRowKeys((prev) => prev.filter((k) => !pageKeys.includes(k)));
+        } else {
+            setSelectedRowKeys((prev) => [...new Set([...prev, ...pageKeys])]);
+        }
+    };
+
+    const allFilteredKeys = filteredRecords.map(rowKey);
+    const allFilteredSelected =
+        allFilteredKeys.length > 0 && allFilteredKeys.every((k) => selectedRowKeys.includes(k));
+
+    const toggleSelectAllFiltered = () => {
+        if (allFilteredKeys.length === 0) return;
+        if (allFilteredSelected) {
+            setSelectedRowKeys((prev) => prev.filter((k) => !allFilteredKeys.includes(k)));
+        } else {
+            setSelectedRowKeys([...allFilteredKeys]);
+        }
+    };
+
+    const clearRowSelection = () => setSelectedRowKeys([]);
+
+    const handleBulkDelete = async () => {
+        if (selectedRowKeys.length === 0) return;
+        if (
+            !window.confirm(
+                `Xóa ${selectedRowKeys.length} bản ghi đã chọn? Không hoàn tác (đơn hàng / phiếu thu hồi / giao dịch luân chuyển kho).`,
+            )
+        ) {
+            return;
+        }
+        setBulkDeleting(true);
+        try {
+            const byType = { GIAO_HANG: [], THU_HOI_VO: [], LUAN_CHUYEN: [] };
+            for (const key of selectedRowKeys) {
+                const p = parseRowKey(key);
+                if (p && byType[p.type]) byType[p.type].push(p.id);
+            }
+
+            for (const chunk of chunkArray(byType.GIAO_HANG, 80)) {
+                if (chunk.length === 0) continue;
+                const { error: errOi } = await supabase.from('order_items').delete().in('order_id', chunk);
+                if (errOi) console.warn('order_items delete:', errOi);
+                const { error } = await supabase.from('orders').delete().in('id', chunk);
+                if (error) throw error;
+            }
+
+            for (const chunk of chunkArray(byType.THU_HOI_VO, 80)) {
+                if (chunk.length === 0) continue;
+                const { error: errItems } = await supabase
+                    .from('cylinder_recovery_items')
+                    .delete()
+                    .in('recovery_id', chunk);
+                if (errItems) console.warn('cylinder_recovery_items delete:', errItems);
+                const { error } = await supabase.from('cylinder_recoveries').delete().in('id', chunk);
+                if (error) throw error;
+            }
+
+            for (const chunk of chunkArray(byType.LUAN_CHUYEN, 80)) {
+                if (chunk.length === 0) continue;
+                const { error } = await supabase.from('inventory_transactions').delete().in('id', chunk);
+                if (error) throw error;
+            }
+
+            toast.success(`Đã xóa ${selectedRowKeys.length} bản ghi`);
+            setSelectedRowKeys([]);
+            await fetchAllData();
+        } catch (e) {
+            toast.error('Lỗi xóa: ' + (e.message || String(e)));
+        } finally {
+            setBulkDeleting(false);
+        }
+    };
+
     const hasActiveFilters = selectedTypes.length > 0 || selectedStatuses.length > 0 || fromDate || toDate;
     const totalActiveFilters = selectedTypes.length + selectedStatuses.length + (fromDate ? 1 : 0) + (toDate ? 1 : 0);
 
@@ -329,11 +448,12 @@ export default function DeliveryHistory() {
                 setActiveView={setActiveView}
                 views={[
                     { id: 'list', label: 'Danh sách', icon: <List size={16} /> },
+                    { id: 'kanban', label: 'Kanban', icon: <LayoutGrid size={16} /> },
                     { id: 'stats', label: 'Thống kê', icon: <BarChart2 size={16} /> }
                 ]}
             />
 
-            {activeView === 'list' && (
+            {(activeView === 'list' || activeView === 'kanban') && (
             <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full mb-2 md:mb-0">
                     <MobilePageHeader
                         searchTerm={searchTerm}
@@ -357,11 +477,151 @@ export default function DeliveryHistory() {
                             })}
                         </div>
                         }
-                        actions={<></>}
+                        selectionBar={
+                            (activeView === 'list' || activeView === 'kanban') && !loading ? (
+                                <div className="mt-2 flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50/90 px-3 py-2.5">
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                        {activeView === 'list' && (
+                                            <button
+                                                type="button"
+                                                onClick={toggleSelectAllOnPage}
+                                                disabled={paginatedRecords.length === 0 || bulkDeleting}
+                                                className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-black text-slate-700 disabled:opacity-40"
+                                            >
+                                                {allPageSelected ? 'Bỏ chọn trang' : 'Chọn cả trang'}
+                                            </button>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={toggleSelectAllFiltered}
+                                            disabled={filteredRecords.length === 0 || bulkDeleting}
+                                            className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-black text-slate-700 disabled:opacity-40"
+                                        >
+                                            {allFilteredSelected ? 'Bỏ chọn hết lọc' : `Chọn hết (${totalRecords})`}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={clearRowSelection}
+                                            disabled={selectedRowKeys.length === 0 || bulkDeleting}
+                                            className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-black text-slate-500 disabled:opacity-40"
+                                        >
+                                            Bỏ chọn
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleBulkDelete}
+                                            disabled={selectedRowKeys.length === 0 || bulkDeleting}
+                                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-rose-200 bg-rose-50 text-[10px] font-black text-rose-700 disabled:opacity-40"
+                                        >
+                                            <Trash2 size={12} />
+                                            {bulkDeleting ? 'Đang xóa…' : `Xóa (${selectedRowKeys.length})`}
+                                        </button>
+                                    </div>
+                                    {selectedRowKeys.length > 0 && (
+                                        <p className="text-[10px] font-semibold text-slate-500">
+                                            Đang chọn {selectedRowKeys.length} dòng (đơn / phiếu / luân chuyển).
+                                        </p>
+                                    )}
+                                </div>
+                            ) : null
+                        }
                     />
 
                 {/* Mobile Card List */}
                 <div className="md:hidden flex-1 flex flex-col min-h-0">
+                    {activeView === 'kanban' ? (
+                        <div className="flex-1 flex flex-col min-h-0 p-3 pb-3">
+                            {loading ? (
+                                <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
+                            ) : filteredRecords.length === 0 ? (
+                                <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy bản ghi nào!</div>
+                            ) : (
+                                <div className="flex-1 min-h-0 flex gap-3 overflow-x-auto pb-1 snap-x snap-mandatory scrollbar-hide">
+                                    {DELIVERY_TYPES.map((dt) => {
+                                        const columnRecords = filteredRecords.filter((r) => r.type === dt.id);
+                                        const TypeIcon = dt.icon;
+                                        return (
+                                            <div
+                                                key={dt.id}
+                                                className="snap-start shrink-0 w-[min(100%,248px)] flex flex-col rounded-lg border border-border bg-muted/20 min-h-[min(72vh,420px)] max-h-[min(72vh,420px)]"
+                                            >
+                                                <div className={clsx('px-2 py-1.5 border-b flex items-center justify-between gap-1.5 rounded-t-lg', dt.colorCls)}>
+                                                    <span className="flex items-center gap-1 text-[10px] font-black uppercase">
+                                                        <TypeIcon size={12} />
+                                                        {dt.label}
+                                                    </span>
+                                                    <span className="text-[10px] font-black tabular-nums">{columnRecords.length}</span>
+                                                </div>
+                                                <div className="flex-1 overflow-y-auto p-1.5 space-y-1 min-h-0">
+                                                    {columnRecords.map((r) => (
+                                                            <div
+                                                                key={`${r.type}-${r.id}`}
+                                                                className={clsx(
+                                                                    'rounded-md border border-slate-200/90 bg-white px-2 py-1 shadow-sm',
+                                                                    isRowSelected(r) && 'ring-2 ring-primary/30 bg-sky-50/50',
+                                                                )}
+                                                            >
+                                                                <div className="flex items-center justify-between gap-1">
+                                                                    <div className="flex gap-1.5 min-w-0 flex-1 items-center">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={isRowSelected(r)}
+                                                                            onChange={() => toggleRowSelected(r)}
+                                                                            disabled={bulkDeleting}
+                                                                            className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-primary"
+                                                                            aria-label={`Chọn ${r.code}`}
+                                                                        />
+                                                                        <span className="font-black text-[11px] truncate">#{r.code}</span>
+                                                                    </div>
+                                                                    <span className={clsx('text-[8px] font-bold px-1 py-px rounded border shrink-0 leading-tight max-w-[6.5rem] truncate', r.statusCls)} title={r.statusLabel}>
+                                                                        {r.statusLabel}
+                                                                    </span>
+                                                                </div>
+                                                                <p className="text-[11px] font-bold line-clamp-1 mt-0.5">{r.customerName}</p>
+                                                                <p className="text-[9px] text-muted-foreground truncate">
+                                                                    {new Date(r.date).toLocaleDateString('vi-VN')} · {r.executor} · SL {r.quantity}
+                                                                </p>
+                                                                <div className="flex flex-wrap items-center gap-0.5 mt-1 pt-1 border-t border-border/50">
+                                                                    {r.rawOrder && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleViewAsOrder(r)}
+                                                                            className="px-1.5 py-0.5 rounded bg-primary text-white text-[9px] font-bold leading-tight"
+                                                                        >
+                                                                            Đơn
+                                                                        </button>
+                                                                    )}
+                                                                    {r.type === 'THU_HOI_VO' && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => navigate(`/thu-hoi-vo?recovery=${r.id}`)}
+                                                                            className="px-1.5 py-0.5 rounded border border-amber-200 bg-amber-50 text-amber-800 text-[9px] font-bold leading-tight"
+                                                                        >
+                                                                            Phiếu TH
+                                                                        </button>
+                                                                    )}
+                                                                    {r.type === 'GIAO_HANG' && r.rawOrder?.recipient_address && (
+                                                                        <a
+                                                                            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.rawOrder.recipient_address)}`}
+                                                                            target="_blank"
+                                                                            rel="noopener noreferrer"
+                                                                            className="inline-flex h-6 w-6 items-center justify-center rounded border border-slate-200 bg-white text-slate-600 shrink-0"
+                                                                            title="Bản đồ"
+                                                                        >
+                                                                            <MapPin size={12} />
+                                                                        </a>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    ) : (
                     <div className="flex-1 overflow-y-auto p-3 pb-3 flex flex-col gap-3">
                     <div className="space-y-3">
                         {loading ? (
@@ -373,9 +633,17 @@ export default function DeliveryHistory() {
                                 const typeInfo = getTypeInfo(r.type);
                                 const TypeIcon = typeInfo.icon;
                                 return (
-                                <div key={`${r.type}-${r.id}`} className="rounded-xl border border-slate-200 bg-white shadow-sm p-3 transition-all duration-200 active:scale-[0.99] hover:shadow-md hover:border-primary/30 flex flex-col">
+                                <div key={`${r.type}-${r.id}`} className={clsx('rounded-xl border border-slate-200 bg-white shadow-sm p-3 transition-all duration-200 active:scale-[0.99] hover:shadow-md hover:border-primary/30 flex flex-col', isRowSelected(r) && 'ring-2 ring-primary/30 bg-sky-50/40')}>
                                     <div className="flex items-start justify-between gap-2 mb-2">
-                                        <div className="flex gap-2.5 min-w-0">
+                                        <div className="flex gap-2 min-w-0 flex-1">
+                                            <input
+                                                type="checkbox"
+                                                checked={isRowSelected(r)}
+                                                onChange={() => toggleRowSelected(r)}
+                                                disabled={bulkDeleting}
+                                                className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-primary"
+                                                aria-label={`Chọn ${r.code}`}
+                                            />
                                             <div>
                                                 <div className="flex items-center gap-1.5 mb-1 min-w-0">
                                                     <h3 className="font-bold text-[13px] text-foreground leading-tight whitespace-nowrap">#{r.code}</h3>
@@ -453,9 +721,10 @@ export default function DeliveryHistory() {
                         )}
                     </div>
                     </div>
+                    )}
 
                     {/* Mobile Pagination — outside overflow-y-auto so sticky works */}
-                    {!loading && (
+                    {!loading && activeView === 'list' && (
                         <MobilePagination
                             currentPage={currentPage}
                             setCurrentPage={setCurrentPage}
@@ -538,18 +807,196 @@ export default function DeliveryHistory() {
                                     )}
                                 </div>
                             </div>
-                            <div className="flex items-center">
+                            <div className="flex items-center gap-2">
                                 <span className="bg-emerald-100 text-emerald-700 px-4 py-1.5 rounded-xl text-[12px] font-bold whitespace-nowrap shadow-sm">
                                     Tổng: {totalRecords}
                                 </span>
                             </div>
                         </div>
+                        {(activeView === 'list' || activeView === 'kanban') && !loading && (
+                            <div className="mt-3 pt-3 border-t border-border/50 flex flex-wrap items-center gap-2">
+                                {activeView === 'list' && (
+                                    <button
+                                        type="button"
+                                        onClick={toggleSelectAllOnPage}
+                                        disabled={paginatedRecords.length === 0 || bulkDeleting}
+                                        className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-[12px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                                    >
+                                        {allPageSelected ? 'Bỏ chọn trang này' : 'Chọn cả trang này'}
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={toggleSelectAllFiltered}
+                                    disabled={filteredRecords.length === 0 || bulkDeleting}
+                                    className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-[12px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                                >
+                                    {allFilteredSelected ? 'Bỏ chọn hết (đang lọc)' : `Chọn hết đang lọc (${totalRecords})`}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={clearRowSelection}
+                                    disabled={selectedRowKeys.length === 0 || bulkDeleting}
+                                    className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-[12px] font-bold text-slate-500 hover:bg-slate-50 disabled:opacity-40"
+                                >
+                                    Bỏ chọn
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleBulkDelete}
+                                    disabled={selectedRowKeys.length === 0 || bulkDeleting}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-rose-200 bg-rose-50 text-[12px] font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-40"
+                                >
+                                    <Trash2 size={14} />
+                                    {bulkDeleting ? 'Đang xóa…' : `Xóa đã chọn (${selectedRowKeys.length})`}
+                                </button>
+                            </div>
+                        )}
                     </div>
 
-                    <div className="flex-1 overflow-auto custom-scrollbar">
+                    <div className="flex-1 overflow-auto custom-scrollbar min-h-0 flex flex-col">
+                        {activeView === 'kanban' ? (
+                            loading ? (
+                                <div className="flex-1 flex items-center justify-center py-20 text-slate-400 font-bold italic">Đang tải dữ liệu...</div>
+                            ) : filteredRecords.length === 0 ? (
+                                <div className="flex-1 flex items-center justify-center py-20 text-slate-500 font-medium">Không tìm thấy bản ghi nào.</div>
+                            ) : (
+                                <div className="flex-1 min-h-[320px] p-2.5 md:p-3 grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-2.5">
+                                    {DELIVERY_TYPES.map((dt) => {
+                                        const columnRecords = filteredRecords.filter((r) => r.type === dt.id);
+                                        const TypeIcon = dt.icon;
+                                        return (
+                                            <div
+                                                key={dt.id}
+                                                className="flex flex-col rounded-xl border border-border bg-muted/15 min-h-[280px] max-h-[calc(100vh-200px)]"
+                                            >
+                                                <div className={clsx('px-2 py-1.5 border-b flex items-center justify-between gap-2 shrink-0 rounded-t-xl', dt.colorCls)}>
+                                                    <span className="flex items-center gap-1 text-[11px] font-black uppercase tracking-wide">
+                                                        <TypeIcon size={13} />
+                                                        {dt.label}
+                                                    </span>
+                                                    <span className="text-[11px] font-black tabular-nums opacity-90">{columnRecords.length}</span>
+                                                </div>
+                                                <div className="flex-1 overflow-y-auto p-1.5 space-y-1 min-h-0">
+                                                    {columnRecords.map((r) => (
+                                                            <div
+                                                                key={`${r.type}-${r.id}`}
+                                                                className={clsx(
+                                                                    'rounded-md border border-slate-200/90 bg-white px-2 py-1.5 shadow-sm hover:border-primary/25 transition-colors',
+                                                                    isRowSelected(r) && 'ring-2 ring-primary/30 bg-sky-50/50',
+                                                                )}
+                                                            >
+                                                                <div className="flex items-center justify-between gap-1.5">
+                                                                    <div className="flex gap-1.5 min-w-0 flex-1 items-center">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={isRowSelected(r)}
+                                                                            onChange={() => toggleRowSelected(r)}
+                                                                            disabled={bulkDeleting}
+                                                                            className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-primary"
+                                                                            aria-label={`Chọn ${r.code}`}
+                                                                        />
+                                                                        <span className="font-black text-[11px] text-slate-800 truncate">#{r.code}</span>
+                                                                    </div>
+                                                                    <span className={clsx('text-[8px] font-bold px-1.5 py-0.5 rounded border shrink-0 leading-tight max-w-[7rem] truncate', r.statusCls)} title={r.statusLabel}>
+                                                                        {r.statusLabel}
+                                                                    </span>
+                                                                </div>
+                                                                <p className="text-[11px] font-bold text-slate-900 line-clamp-1 mt-0.5" title={r.customerName}>{r.customerName}</p>
+                                                                <p className="text-[9px] text-slate-500 truncate mt-px" title={`${r.executor} · SL ${r.quantity}`}>
+                                                                    {new Date(r.date).toLocaleDateString('vi-VN')} · <span className="text-slate-600">{r.executor}</span> · SL&nbsp;{r.quantity}
+                                                                </p>
+                                                                {r.images.length > 0 && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => openImagePreview(r)}
+                                                                        className="flex -space-x-1 mt-1"
+                                                                        title={`${r.images.length} ảnh`}
+                                                                    >
+                                                                        {r.images.slice(0, 2).map((img, i) => (
+                                                                            <img
+                                                                                key={i}
+                                                                                src={img}
+                                                                                alt=""
+                                                                                className="w-6 h-6 rounded object-cover border border-white shadow-sm"
+                                                                                onError={(e) => {
+                                                                                    e.target.style.display = 'none';
+                                                                                }}
+                                                                            />
+                                                                        ))}
+                                                                        {r.images.length > 2 ? (
+                                                                            <span className="w-6 h-6 rounded bg-slate-100 border border-white text-[8px] font-bold flex items-center justify-center text-slate-500">
+                                                                                +{r.images.length - 2}
+                                                                            </span>
+                                                                        ) : null}
+                                                                    </button>
+                                                                )}
+                                                                <div className="flex flex-wrap items-center gap-0.5 mt-1 pt-1 border-t border-slate-100/80">
+                                                                    {r.rawOrder && (
+                                                                        <>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleViewAsOrder(r)}
+                                                                                className="p-1 text-blue-600 hover:bg-blue-50 rounded-md"
+                                                                                title="Xem chi tiết"
+                                                                            >
+                                                                                <Eye size={13} />
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleViewAsOrder(r)}
+                                                                                className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-md"
+                                                                                title="Thao tác đơn"
+                                                                            >
+                                                                                <Package size={13} />
+                                                                            </button>
+                                                                            {r.rawOrder.recipient_address ? (
+                                                                                <a
+                                                                                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.rawOrder.recipient_address)}`}
+                                                                                    target="_blank"
+                                                                                    rel="noopener noreferrer"
+                                                                                    className="p-1 text-slate-600 hover:bg-slate-50 rounded-md border border-slate-200/80"
+                                                                                    title="Bản đồ"
+                                                                                >
+                                                                                    <MapPin size={13} />
+                                                                                </a>
+                                                                            ) : null}
+                                                                        </>
+                                                                    )}
+                                                                    {r.type === 'THU_HOI_VO' && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => navigate(`/thu-hoi-vo?recovery=${r.id}`)}
+                                                                            className="px-1.5 py-0.5 rounded border border-amber-200 bg-amber-50 text-amber-800 text-[9px] font-bold hover:bg-amber-100 leading-tight"
+                                                                        >
+                                                                            Phiếu TH
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )
+                        ) : (
                         <table className="w-full text-left border-collapse">
                             <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur shadow-sm">
                                 <tr>
+                                    <th className="w-11 px-2 py-3.5 text-center">
+                                        <input
+                                            ref={pageSelectAllRef}
+                                            type="checkbox"
+                                            checked={allPageSelected}
+                                            onChange={toggleSelectAllOnPage}
+                                            disabled={paginatedRecords.length === 0 || bulkDeleting}
+                                            className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary/30 cursor-pointer disabled:opacity-40"
+                                            title="Chọn / bỏ chọn cả trang này"
+                                            aria-label="Chọn cả trang"
+                                        />
+                                    </th>
                                     <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Loại</th>
                                     <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Mã</th>
                                     <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Ngày</th>
@@ -563,15 +1010,25 @@ export default function DeliveryHistory() {
                             </thead>
                             <tbody className="divide-y divide-border/60 bg-white">
                                 {loading ? (
-                                    <tr><td colSpan={9} className="px-6 py-20 text-center text-slate-400 font-bold italic">Đang tải dữ liệu...</td></tr>
+                                    <tr><td colSpan={10} className="px-6 py-20 text-center text-slate-400 font-bold italic">Đang tải dữ liệu...</td></tr>
                                 ) : paginatedRecords.length === 0 ? (
-                                    <tr><td colSpan={9} className="px-6 py-20 text-center text-slate-500 font-medium">Không tìm thấy bản ghi nào.</td></tr>
+                                    <tr><td colSpan={10} className="px-6 py-20 text-center text-slate-500 font-medium">Không tìm thấy bản ghi nào.</td></tr>
                                 ) : (
                                     paginatedRecords.map(r => {
                                         const typeInfo = getTypeInfo(r.type);
                                         const TypeIcon = typeInfo.icon;
                                         return (
-                                        <tr key={`${r.type}-${r.id}`} className="hover:bg-slate-50/80 transition-colors group">
+                                        <tr key={`${r.type}-${r.id}`} className={clsx('hover:bg-slate-50/80 transition-colors group', isRowSelected(r) && 'bg-sky-50/60')}>
+                                            <td className="w-11 px-2 py-3.5 text-center align-middle">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isRowSelected(r)}
+                                                    onChange={() => toggleRowSelected(r)}
+                                                    disabled={bulkDeleting}
+                                                    className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary/30 cursor-pointer disabled:opacity-40"
+                                                    aria-label={`Chọn ${r.code}`}
+                                                />
+                                            </td>
                                             <td className="px-5 py-3.5">
                                                 <span className={clsx("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border whitespace-nowrap", typeInfo.colorCls)}>
                                                     <TypeIcon size={12} />
@@ -647,6 +1104,7 @@ export default function DeliveryHistory() {
                                 )}
                             </tbody>
                         </table>
+                        )}
                     </div>
                 </div>
             </div>

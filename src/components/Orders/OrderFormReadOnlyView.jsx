@@ -5,13 +5,16 @@ import {
     ORDER_STATUSES,
     PRODUCT_TYPES
 } from '../../constants/orderConstants';
+import { stripDeliveryMediaFromNote } from '../../utils/orderNoteSanitize';
 
 function Row({ label, value }) {
     const display = value !== null && value !== undefined && value !== '' ? value : '—';
     return (
-        <div className="py-2.5 border-b border-slate-100 last:border-0">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">{label}</p>
-            <p className="text-[15px] font-semibold text-slate-900 break-words whitespace-pre-wrap">{display}</p>
+        <div className="py-2 border-b border-slate-100 last:border-0">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">{label}</p>
+            <p className="text-[13px] sm:text-[14px] font-semibold text-slate-900 break-words whitespace-pre-wrap leading-snug">
+                {display}
+            </p>
         </div>
     );
 }
@@ -60,12 +63,14 @@ export default function OrderFormReadOnlyView({
         : null;
 
     return (
-        <div className="space-y-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 xl:gap-5 items-start">
             {order && (statusLabel || order.ordered_by || order.created_at) && (
-                <div className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
-                    <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100 mb-1">
-                        <Package className="w-4 h-4 text-primary" />
-                        <h4 className="text-[18px] font-extrabold text-slate-800">Trạng thái & hệ thống</h4>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm h-fit min-w-0">
+                    <div className="flex items-center gap-2 pb-2.5 border-b border-slate-100 mb-0.5">
+                        <Package className="w-4 h-4 text-primary shrink-0" />
+                        <h4 className="text-[15px] sm:text-[17px] font-extrabold text-slate-800 leading-snug">
+                            Trạng thái & hệ thống
+                        </h4>
                     </div>
                     {statusLabel && <Row label="Trạng thái" value={statusLabel} />}
                     {order.ordered_by ? <Row label="Người tạo / phụ trách" value={order.ordered_by} /> : null}
@@ -75,10 +80,12 @@ export default function OrderFormReadOnlyView({
                 </div>
             )}
 
-            <div className="rounded-3xl border border-primary/20 bg-white p-5 sm:p-6 shadow-sm">
-                <div className="flex items-center gap-2.5 pb-3 border-b border-primary/10 mb-1">
-                    <Package className="w-4 h-4 text-primary" />
-                    <h4 className="text-[18px] font-extrabold text-primary">Thông tin đơn hàng</h4>
+            <div className="rounded-2xl border border-primary/20 bg-white p-4 sm:p-5 shadow-sm h-fit min-w-0">
+                <div className="flex items-center gap-2 pb-2.5 border-b border-primary/10 mb-0.5">
+                    <Package className="w-4 h-4 text-primary shrink-0" />
+                    <h4 className="text-[15px] sm:text-[17px] font-extrabold text-primary leading-snug">
+                        Thông tin đơn hàng
+                    </h4>
                 </div>
                 <Row label="Mã đơn hàng" value={formData.orderCode} />
                 <Row label="Khách hàng" value={displayCustomer} />
@@ -106,10 +113,12 @@ export default function OrderFormReadOnlyView({
                 )}
             </div>
 
-            <div className="rounded-3xl border border-primary/20 bg-white p-5 sm:p-6 shadow-sm">
-                <div className="flex items-center gap-2.5 pb-3 border-b border-primary/10 mb-1">
-                    <Edit3 className="w-4 h-4 text-primary/80" />
-                    <h4 className="text-[18px] font-extrabold text-primary">Sản phẩm & thanh toán</h4>
+            <div className="rounded-2xl border border-primary/20 bg-white p-4 sm:p-5 shadow-sm h-fit min-w-0">
+                <div className="flex items-center gap-2 pb-2.5 border-b border-primary/10 mb-0.5">
+                    <Edit3 className="w-4 h-4 text-primary/80 shrink-0" />
+                    <h4 className="text-[15px] sm:text-[17px] font-extrabold text-primary leading-snug">
+                        Sản phẩm & thanh toán
+                    </h4>
                 </div>
                 <Row label="Loại khách hàng" value={categoryLabel} />
                 <Row label="Kho xuất hàng" value={warehouseLabel} />
@@ -164,7 +173,7 @@ export default function OrderFormReadOnlyView({
                 )}
                 <Row label="Đơn vị vận chuyển" value={shipperLabel} />
                 <Row label="Phí giao hàng (VNĐ)" value={formatNumber(formData.shippingFee)} />
-                <Row label="Ghi chú" value={formData.note} />
+                <Row label="Ghi chú" value={stripDeliveryMediaFromNote(formData.note)} />
             </div>
         </div>
     );

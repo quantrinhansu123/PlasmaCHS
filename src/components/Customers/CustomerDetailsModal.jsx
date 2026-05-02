@@ -3,6 +3,8 @@ import {
     ArrowDownRight,
     ArrowUpRight,
     CreditCard,
+    Cpu,
+    Droplets,
     DollarSign,
     FileText,
     History,
@@ -19,17 +21,94 @@ import {
     Download,
     Edit,
     Trash2,
-    MoreVertical
+    MoreVertical,
+    ChevronDown,
+    ChevronRight,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
 import { supabase } from '../../supabase/config';
 import { getCustomerIdsForCareHistory } from '../../utils/customerCareHistory';
+import {
+    isOrderDeliveredCompleted,
+    MACHINE_STATUSES_ENRICH_CUSTOMER_FROM_ORDERS,
+    normalizeMachineSerialKey,
+} from '../../utils/machineCustomerFromOrders';
+import { collectMachineSerialsForOrder } from '../../utils/orderMachineSerials';
 import * as XLSX from 'xlsx';
 
+function escapeIlikeOrFragment(text) {
+    return String(text || '')
+        .replace(/\\/g, '\\\\')
+        .replace(/%/g, '\\%')
+        .replace(/_/g, '\\_')
+        .replace(/,/g, '');
+}
+
+function chunkArray(arr, chunkSize) {
+    const out = [];
+    for (let i = 0; i < arr.length; i += chunkSize) out.push(arr.slice(i, i + chunkSize));
+    return out;
+}
+
+function isCylinderProductType(productType) {
+    const u = String(productType || '').trim().toUpperCase();
+    if (!u) return false;
+    return u.includes('BINH');
+}
+
+const CYLINDER_STATUSES_AT_CUSTOMER = new Set(['thuộc khách hàng', 'đang sử dụng']);
+
+/** Biến thể để match `machines.serial_number` trong DB (.in phân biệt hoa thường). */
+function serialVariantsForMachinesLookup(serialRaw) {
+    const t = String(serialRaw || '').trim();
+    if (!t) return [];
+    const collapsed = t.replace(/\s+/g, '');
+    return [
+        ...new Set([
+            t,
+            collapsed,
+            t.toUpperCase(),
+            t.toLowerCase(),
+            collapsed.toUpperCase(),
+            collapsed.toLowerCase(),
+        ]),
+    ].filter(Boolean);
+}
+
+/** Chuẩn hóa số máy chủ Việt Nam để ghép đơn theo recipient_phone. */
+function phoneDigitsForPhoneMatch(phone) {
+    let d = String(phone || '').replace(/\D/g, '');
+    if (!d || d.length < 9) return '';
+    if (d.startsWith('84')) {
+        d = `0${d.slice(2)}`;
+    }
+    return d.slice(-11);
+}
+
+/** Gợi ý serial từ cột khách machines_in_use (text / JSON đơn giản / comma). */
+function machineSerialHintsFromCustomerRecord(cust) {
+    const raw = cust?.machines_in_use;
+    if (raw == null || raw === '') return [];
+    if (typeof raw === 'number') return [String(raw)];
+    let s = String(raw).trim();
+    if (!s) return [];
+    try {
+        const j = JSON.parse(s);
+        if (Array.isArray(j)) return j.map((x) => String(x).trim()).filter(Boolean);
+        if (j && typeof j === 'object') {
+            const arr = j.serials || j.machines || j.serial_numbers;
+            if (Array.isArray(arr)) return arr.map((x) => String(x).trim()).filter(Boolean);
+        }
+    } catch {
+        /* not JSON */
+    }
+    return s.split(/[\n,;/|]+/).map((x) => String(x).trim()).filter(Boolean);
+}
+
 export default function CustomerDetailsModal({ customer, onClose, hideCommerceTabs = false }) {
-    const [activeTab, setActiveTab] = useState('overview'); // overview, orders, transactions
+    const [activeTab, setActiveTab] = useState('overview'); // overview, assets_history, care_history, …
     const [loading, setLoading] = useState(true);
     const [isClosing, setIsClosing] = useState(false);
 
@@ -66,10 +145,356 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
         currentDebt: 0
     });
 
+    const defaultMachineRange = () => {
+        const to = new Date();
+        const from = new Date();
+        from.setMonth(from.getMonth() - 3);
+        return { from: from.toISOString().split('T')[0], to: to.toISOString().split('T')[0] };
+    };
+    const [machineRange, setMachineRange] = useState(defaultMachineRange);
+    const [customerMachines, setCustomerMachines] = useState([]);
+    const [customerCylinders, setCustomerCylinders] = useState([]);
+    const [machineLogs, setMachineLogs] = useState([]);
+    const [machinesHistoryLoading, setMachinesHistoryLoading] = useState(false);
+    const [expandedMachineSerial, setExpandedMachineSerial] = useState(null);
+    const [expandedCylinderSerial, setExpandedCylinderSerial] = useState(null);
+
+    const logsByNormSerial = useMemo(() => {
+        const map = new Map();
+        (machineLogs || []).forEach((row) => {
+            const sn = String(row?.serial_number || '').trim();
+            if (!sn) return;
+            const nk = normalizeMachineSerialKey(sn);
+            if (!map.has(nk)) map.set(nk, []);
+            map.get(nk).push(row);
+        });
+        return map;
+    }, [machineLogs]);
+
+    const logsForAssetSerial = (serial) =>
+        logsByNormSerial.get(normalizeMachineSerialKey(serial)) || [];
+
     useEffect(() => {
         if (!customer) return;
         fetchCustomerData();
     }, [customer]);
+
+    useEffect(() => {
+        if (!customer || activeTab !== 'assets_history') return undefined;
+        const nameTrim = String(customer.name || '').trim();
+        const custId = customer.id;
+        if (!custId && !nameTrim) return undefined;
+
+        let cancelled = false;
+
+        (async () => {
+            setMachinesHistoryLoading(true);
+            try {
+                const machinesById = new Map();
+                const cylindersById = new Map();
+                const rawMachineSerialsFromOrders = new Set();
+                const machineSerialNormFromOrders = new Set();
+                const cylinderSerialRawFromOrders = new Set();
+                const orderMap = new Map();
+
+                const mergeOrderRow = (o) => {
+                    if (!o?.id || orderMap.has(o.id)) return;
+                    orderMap.set(o.id, o);
+                };
+
+                const addMachineHints = (serialRaw) => {
+                    const base = String(serialRaw || '').trim();
+                    if (!base) return;
+                    serialVariantsForMachinesLookup(base).forEach((v) => rawMachineSerialsFromOrders.add(v));
+                    machineSerialNormFromOrders.add(normalizeMachineSerialKey(base));
+                };
+
+                const orderSelect =
+                    'id, status, department, note, delivery_checklist, customer_name, recipient_name, recipient_phone';
+                if (custId) {
+                    const { data: o1, error: e1 } = await supabase
+                        .from('orders')
+                        .select(orderSelect)
+                        .eq('customer_id', custId);
+                    if (e1) throw e1;
+                    (o1 || []).forEach((o) => mergeOrderRow(o));
+                }
+                if (nameTrim) {
+                    const { data: o2 } = await supabase
+                        .from('orders')
+                        .select(orderSelect)
+                        .eq('customer_name', nameTrim);
+                    (o2 || []).forEach((o) => mergeOrderRow(o));
+                    if (nameTrim.length >= 3) {
+                        const escRn = escapeIlikeOrFragment(nameTrim);
+                        const { data: oRn } = await supabase
+                            .from('orders')
+                            .select(orderSelect)
+                            .ilike('recipient_name', `%${escRn}%`);
+                        (oRn || []).forEach((o) => mergeOrderRow(o));
+                    }
+                    const invoiceName = String(customer?.invoice_company_name || '').trim();
+                    if (invoiceName.length >= 3 && invoiceName !== nameTrim) {
+                        const escInv = escapeIlikeOrFragment(invoiceName);
+                        const { data: oInv } = await supabase
+                            .from('orders')
+                            .select(orderSelect)
+                            .ilike('customer_name', `%${escInv}%`);
+                        (oInv || []).forEach((o) => mergeOrderRow(o));
+                    }
+                }
+
+                const phoneCore = phoneDigitsForPhoneMatch(customer?.phone);
+                if (phoneCore) {
+                    const { data: oPh } = await supabase
+                        .from('orders')
+                        .select(orderSelect)
+                        .ilike('recipient_phone', `%${phoneCore}%`);
+                    (oPh || []).forEach((o) => mergeOrderRow(o));
+                }
+
+                for (const hint of machineSerialHintsFromCustomerRecord(customer)) addMachineHints(hint);
+
+                const completedOrderIds = [...orderMap.values()]
+                    .filter((o) => isOrderDeliveredCompleted(o.status))
+                    .map((o) => o.id);
+
+                const allOrderIds = [...orderMap.keys()];
+                const itemsByOrderId = new Map();
+
+                for (const part of chunkArray(allOrderIds, 100)) {
+                    if (part.length === 0 || cancelled) continue;
+                    const { data: items, error: ei } = await supabase
+                        .from('order_items')
+                        .select('order_id, serial_number, product_type')
+                        .in('order_id', part);
+                    if (ei) {
+                        console.warn('order_items fetch', ei);
+                        continue;
+                    }
+                    for (const it of items || []) {
+                        const oid = it.order_id;
+                        if (!oid) continue;
+                        if (!itemsByOrderId.has(oid)) itemsByOrderId.set(oid, []);
+                        itemsByOrderId.get(oid).push(it);
+                    }
+                }
+
+                const checklistForOrder = (o) => {
+                    const raw = o?.delivery_checklist;
+                    if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw;
+                    if (typeof raw === 'string' && raw.trim()) {
+                        try {
+                            const parsed = JSON.parse(raw);
+                            if (parsed && typeof parsed === 'object') return parsed;
+                        } catch {
+                            /* ignore */
+                        }
+                    }
+                    return {};
+                };
+
+                for (const o of orderMap.values()) {
+                    if (cancelled) break;
+                    const items = itemsByOrderId.get(o.id) || [];
+                    const cl = checklistForOrder(o);
+                    for (const sn of collectMachineSerialsForOrder(o, items, cl)) addMachineHints(sn);
+                }
+
+                for (const oid of completedOrderIds) {
+                    if (cancelled) break;
+                    const items = itemsByOrderId.get(oid) || [];
+                    for (const it of items) {
+                        const sn = String(it.serial_number || '').trim();
+                        if (!sn) continue;
+                        if (isCylinderProductType(it.product_type)) {
+                            cylinderSerialRawFromOrders.add(sn);
+                            cylinderSerialRawFromOrders.add(sn.replace(/\s+/g, ''));
+                        }
+                    }
+                }
+
+                const nameMatchedMachineIds = new Set();
+                const markMachineNameMatched = (m) => {
+                    machinesById.set(m.id, m);
+                    nameMatchedMachineIds.add(m.id);
+                };
+
+                const machineSelectCols =
+                    'id, serial_number, status, machine_type, warehouse, version, created_at, updated_at';
+
+                if (nameTrim) {
+                    const { data: m1 } = await supabase
+                        .from('machines')
+                        .select(machineSelectCols)
+                        .eq('customer_name', nameTrim);
+                    (m1 || []).forEach(markMachineNameMatched);
+
+                    const esc = escapeIlikeOrFragment(nameTrim);
+                    const { data: m2 } = await supabase
+                        .from('machines')
+                        .select(machineSelectCols)
+                        .ilike('customer_name', `%${esc}%`);
+                    (m2 || []).forEach(markMachineNameMatched);
+                }
+                const invoiceNameForMachines = String(customer?.invoice_company_name || '').trim();
+                if (invoiceNameForMachines.length >= 3) {
+                    const escMachInv = escapeIlikeOrFragment(invoiceNameForMachines);
+                    const { data: mInvName } = await supabase
+                        .from('machines')
+                        .select(machineSelectCols)
+                        .ilike('customer_name', `%${escMachInv}%`);
+                    (mInvName || []).forEach(markMachineNameMatched);
+                }
+
+                for (const part of chunkArray([...rawMachineSerialsFromOrders], 60)) {
+                    if (part.length === 0 || cancelled) continue;
+                    const { data: m3 } = await supabase
+                        .from('machines')
+                        .select(machineSelectCols)
+                        .in('serial_number', part);
+                    (m3 || []).forEach((mm) => machinesById.set(mm.id, mm));
+                }
+
+                const nameMatchedCylinderIds = new Set();
+                if (custId) {
+                    const { data: c1 } = await supabase.from('cylinders').select('*').eq('customer_id', custId);
+                    (c1 || []).forEach((c) => {
+                        cylindersById.set(c.id, c);
+                        nameMatchedCylinderIds.add(c.id);
+                    });
+                }
+                if (nameTrim) {
+                    const { data: c2 } = await supabase.from('cylinders').select('*').eq('customer_name', nameTrim);
+                    (c2 || []).forEach((c) => {
+                        cylindersById.set(c.id, c);
+                        nameMatchedCylinderIds.add(c.id);
+                    });
+                    const esc = escapeIlikeOrFragment(nameTrim);
+                    const { data: c3 } = await supabase
+                        .from('cylinders')
+                        .select('*')
+                        .ilike('customer_name', `%${esc}%`);
+                    (c3 || []).forEach((c) => {
+                        cylindersById.set(c.id, c);
+                        nameMatchedCylinderIds.add(c.id);
+                    });
+                }
+                for (const part of chunkArray([...cylinderSerialRawFromOrders], 80)) {
+                    if (part.length === 0 || cancelled) continue;
+                    const { data: c4 } = await supabase.from('cylinders').select('*').in('serial_number', part);
+                    (c4 || []).forEach((c) => cylindersById.set(c.id, c));
+                }
+
+                const machineList = [...machinesById.values()].filter((m) => {
+                    if (nameMatchedMachineIds.has(m.id)) return true;
+                    const st = String(m.status || '').trim();
+                    if (MACHINE_STATUSES_ENRICH_CUSTOMER_FROM_ORDERS.has(st)) return true;
+                    const snKey = normalizeMachineSerialKey(m.serial_number);
+                    return machineSerialNormFromOrders.has(snKey);
+                });
+
+                const cylinderSerMatch = (c) => {
+                    const rs = String(c.serial_number || '').trim();
+                    return (
+                        cylinderSerialRawFromOrders.has(rs) ||
+                        cylinderSerialRawFromOrders.has(rs.replace(/\s+/g, ''))
+                    );
+                };
+                const cylinderList = [...cylindersById.values()].filter((c) => {
+                    if (nameMatchedCylinderIds.has(c.id)) return true;
+                    const st = String(c.status || '').trim();
+                    if (CYLINDER_STATUSES_AT_CUSTOMER.has(st)) return true;
+                    return cylinderSerMatch(c);
+                });
+
+                machineList.sort((a, b) =>
+                    String(a.serial_number || '').localeCompare(String(b.serial_number || ''), undefined, {
+                        sensitivity: 'base',
+                    }),
+                );
+                cylinderList.sort((a, b) =>
+                    String(a.serial_number || '').localeCompare(String(b.serial_number || ''), undefined, {
+                        sensitivity: 'base',
+                    }),
+                );
+
+                if (cancelled) return;
+                setCustomerMachines(machineList);
+                setCustomerCylinders(cylinderList);
+
+                const allSerialsRaw = [
+                    ...machineList.map((m) => m.serial_number),
+                    ...cylinderList.map((c) => c.serial_number),
+                ]
+                    .map((s) => String(s || '').trim())
+                    .filter(Boolean);
+                const uniqueSerials = [...new Set(allSerialsRaw)];
+                if (uniqueSerials.length === 0) {
+                    setMachineLogs([]);
+                    return;
+                }
+
+                const start = new Date(machineRange.from);
+                start.setHours(0, 0, 0, 0);
+                const end = new Date(machineRange.to);
+                end.setHours(23, 59, 59, 999);
+                const startIso = start.toISOString();
+                const endIso = end.toISOString();
+
+                const mergedLogs = [];
+                for (const part of chunkArray(uniqueSerials, 80)) {
+                    if (cancelled) break;
+                    const { data: logsChunk, error: errL } = await supabase
+                        .from('cylinder_logs')
+                        .select('id, serial_number, action, description, image_url, warehouse_id, created_at')
+                        .in('serial_number', part)
+                        .gte('created_at', startIso)
+                        .lte('created_at', endIso)
+                        .order('created_at', { ascending: false })
+                        .limit(800);
+
+                    if (errL) {
+                        console.warn('cylinder_logs chunk', errL);
+                        continue;
+                    }
+                    mergedLogs.push(...(logsChunk || []));
+                }
+                mergedLogs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                const capped = mergedLogs.slice(0, 800);
+                if (!cancelled) setMachineLogs(capped);
+            } catch (e) {
+                console.error('Error loading machines / cylinders / history:', e);
+                if (!cancelled) {
+                    setCustomerMachines([]);
+                    setCustomerCylinders([]);
+                    setMachineLogs([]);
+                }
+            } finally {
+                if (!cancelled) setMachinesHistoryLoading(false);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        customer?.id,
+        customer?.name,
+        customer?.phone,
+        customer?.invoice_company_name,
+        JSON.stringify(customer?.machines_in_use ?? null),
+        activeTab,
+        machineRange.from,
+        machineRange.to,
+    ]);
+
+    useEffect(() => {
+        setExpandedMachineSerial(null);
+        setExpandedCylinderSerial(null);
+        setCustomerCylinders([]);
+        setMachineRange(defaultMachineRange());
+    }, [customer?.id]);
 
     useEffect(() => {
         if (!customer) return undefined;
@@ -193,16 +618,33 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
 
             if (err2) throw err2;
 
-            const { data: cylData, error: err3 } = await supabase
-                .from('cylinders')
-                .select('*')
-                .eq('customer_id', customer.id);
-
-            if (err3) throw err3;
+            const cylById = new Map();
+            if (customer.id) {
+                const { data: cylByCustomerId, error: err3 } = await supabase
+                    .from('cylinders')
+                    .select('*')
+                    .eq('customer_id', customer.id);
+                if (err3) throw err3;
+                (cylByCustomerId || []).forEach((c) => cylById.set(c.id, c));
+            }
+            if (customer.name) {
+                const nt = String(customer.name).trim();
+                if (nt) {
+                    const { data: cEq } = await supabase.from('cylinders').select('*').eq('customer_name', nt);
+                    (cEq || []).forEach((c) => cylById.set(c.id, c));
+                    const esc = escapeIlikeOrFragment(nt);
+                    const { data: cLike } = await supabase
+                        .from('cylinders')
+                        .select('*')
+                        .ilike('customer_name', `%${esc}%`);
+                    (cLike || []).forEach((c) => cylById.set(c.id, c));
+                }
+            }
+            const mergedCylinders = [...cylById.values()];
 
             setOrders(ordersData || []);
             setTransactions(txData || []);
-            setCylinders(cylData || []);
+            setCylinders(mergedCylinders);
 
             const validOrders = (ordersData || []).filter(o =>
                 !['HUY_DON'].includes(o.status)
@@ -374,6 +816,17 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
         return new Date(dateStr).toLocaleDateString('vi-VN');
     };
 
+    const formatDateTime = (dateStr) => {
+        if (!dateStr) return '—';
+        return new Date(dateStr).toLocaleString('vi-VN', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    };
+
     return createPortal(
         <div className={clsx(
             "fixed inset-0 z-[100005] flex justify-end transition-all duration-300",
@@ -389,7 +842,7 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
 
             <div
                 className={clsx(
-                    "relative bg-slate-50 shadow-2xl w-full max-w-3xl overflow-hidden h-full flex flex-col border-l border-slate-200 animate-in slide-in-from-right duration-500",
+                    "relative bg-slate-50 shadow-2xl w-full max-w-4xl overflow-hidden h-full flex flex-col border-l border-slate-200 animate-in slide-in-from-right duration-500",
                     isClosing && "animate-out slide-out-to-right duration-300"
                 )}
                 onClick={e => e.stopPropagation()}
@@ -415,8 +868,9 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
                     </div>
 
                     <div className="flex items-center gap-6 mt-5 border-b border-slate-200 overflow-x-auto scrollbar-hide scroll-smooth">
-                        <button onClick={() => setActiveTab('overview')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'overview' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Tổng quan</button>
-                        <button onClick={() => setActiveTab('care_history')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'care_history' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Lịch sử chăm sóc ({careHistoryCount})</button>
+                        <button type="button" onClick={() => setActiveTab('overview')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'overview' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Tổng quan</button>
+                        <button type="button" onClick={() => setActiveTab('assets_history')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0 max-w-[220px] text-left sm:text-center sm:max-w-none", activeTab === 'assets_history' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Máy, vỏ bình & lịch sử</button>
+                        <button type="button" onClick={() => setActiveTab('care_history')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'care_history' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Lịch sử chăm sóc ({careHistoryCount})</button>
                     </div>
                 </div>
 
@@ -540,6 +994,265 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
                                                 </div>
                                                 <button type="submit" disabled={isSubmittingPayment} className="w-full py-3 bg-primary text-white font-black rounded-xl shadow-lg shadow-primary/20 hover:brightness-110 transition-all">Xác nhận Đã Nhận Tiền</button>
                                             </form>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {activeTab === 'assets_history' && (
+                                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                                    <div className="flex flex-col gap-3 border-b border-slate-100 pb-3 sm:flex-row sm:items-end sm:justify-between">
+                                        <h4 className="flex items-center gap-2 text-sm font-black text-slate-800 uppercase tracking-widest">
+                                            <Cpu className="w-4 h-4 shrink-0 text-indigo-600" />
+                                            Máy, vỏ bình & lịch sử
+                                        </h4>
+                                        <div className="flex flex-wrap items-end gap-2">
+                                            <div className="space-y-0.5">
+                                                <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400">
+                                                    Từ ngày
+                                                </label>
+                                                <input
+                                                    type="date"
+                                                    value={machineRange.from}
+                                                    onChange={(e) =>
+                                                        setMachineRange((r) => ({ ...r, from: e.target.value }))
+                                                    }
+                                                    className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold text-slate-800"
+                                                />
+                                            </div>
+                                            <div className="space-y-0.5">
+                                                <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400">
+                                                    Đến ngày
+                                                </label>
+                                                <input
+                                                    type="date"
+                                                    value={machineRange.to}
+                                                    onChange={(e) =>
+                                                        setMachineRange((r) => ({ ...r, to: e.target.value }))
+                                                    }
+                                                    className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold text-slate-800"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {!customer?.id &&
+                                    !(customer?.name && String(customer.name).trim()) ? (
+                                        <p className="text-sm font-medium text-slate-500 italic">
+                                            Cần mã khách hoặc tên khách để tra máy, vỏ bình và nhật ký.
+                                        </p>
+                                    ) : machinesHistoryLoading ? (
+                                        <p className="py-6 text-center text-sm font-bold text-slate-400">
+                                            Đang tải máy, vỏ bình & nhật ký…
+                                        </p>
+                                    ) : customerMachines.length === 0 && customerCylinders.length === 0 ? (
+                                        <p className="text-sm text-slate-600">
+                                            Chưa thấy máy hay vỏ bình gán cho khách này: kiểm tra tên/SĐT khớp{' '}
+                                            <span className="font-mono text-xs">
+                                                machines.customer_name / cylinders.customer_*
+                                            </span>
+                                            , serial trên các đơn đã hoàn thành, và khoảng ngày lọc nhật ký.
+                                        </p>
+                                    ) : (
+                                        <div
+                                            className={clsx(
+                                                'grid gap-6 lg:items-start',
+                                                customerMachines.length > 0 && customerCylinders.length > 0
+                                                    ? 'lg:grid-cols-2'
+                                                    : 'grid-cols-1',
+                                            )}
+                                        >
+                                            {customerMachines.length > 0 && (
+                                                <div className="min-w-0 space-y-2">
+                                                    <p className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                                        <Cpu className="h-3.5 w-3.5 text-indigo-600" /> Máy (
+                                                        {customerMachines.length})
+                                                    </p>
+                                                    {customerMachines.map((m) => {
+                                                        const logs = logsForAssetSerial(m.serial_number);
+                                                        const open = expandedMachineSerial === m.serial_number;
+                                                        return (
+                                                            <div
+                                                                key={m.id}
+                                                                className="overflow-hidden rounded-xl border border-slate-100 bg-slate-50/40"
+                                                            >
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() =>
+                                                                        setExpandedMachineSerial(
+                                                                            open ? null : m.serial_number,
+                                                                        )
+                                                                    }
+                                                                    className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-white"
+                                                                >
+                                                                    {open ? (
+                                                                        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+                                                                    ) : (
+                                                                        <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
+                                                                    )}
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <p className="truncate font-black text-slate-900">
+                                                                            {m.serial_number}
+                                                                        </p>
+                                                                        <p className="truncate text-[11px] font-bold text-slate-500">
+                                                                            {m.machine_type || '—'} · {m.status || '—'}
+                                                                            {m.warehouse ? ` · Kho ${m.warehouse}` : ''}
+                                                                        </p>
+                                                                    </div>
+                                                                    <span className="shrink-0 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-black text-slate-600">
+                                                                        {logs.length} sự kiện
+                                                                    </span>
+                                                                </button>
+                                                                {open && (
+                                                                    <div className="border-t border-slate-100 bg-white px-2 py-2">
+                                                                        {logs.length === 0 ? (
+                                                                            <p className="px-2 py-3 text-center text-xs font-medium italic text-slate-400">
+                                                                                Không có nhật ký trong khoảng thời gian đã
+                                                                                chọn.
+                                                                            </p>
+                                                                        ) : (
+                                                                            <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-100">
+                                                                                <table className="w-full text-left text-[11px]">
+                                                                                    <thead className="sticky top-0 bg-slate-50 text-[9px] font-black uppercase tracking-wider text-slate-400">
+                                                                                        <tr>
+                                                                                            <th className="px-2 py-1.5">
+                                                                                                Thời điểm
+                                                                                            </th>
+                                                                                            <th className="px-2 py-1.5">
+                                                                                                Hành động
+                                                                                            </th>
+                                                                                            <th className="px-2 py-1.5">
+                                                                                                Mô tả
+                                                                                            </th>
+                                                                                        </tr>
+                                                                                    </thead>
+                                                                                    <tbody className="divide-y divide-slate-50">
+                                                                                        {logs.map((log) => (
+                                                                                            <tr
+                                                                                                key={log.id}
+                                                                                                className="align-top text-slate-700"
+                                                                                            >
+                                                                                                <td className="whitespace-nowrap px-2 py-1.5 font-semibold text-slate-500">
+                                                                                                    {formatDateTime(
+                                                                                                        log.created_at,
+                                                                                                    )}
+                                                                                                </td>
+                                                                                                <td className="px-2 py-1.5 font-bold text-indigo-700">
+                                                                                                    {log.action || '—'}
+                                                                                                </td>
+                                                                                                <td className="max-w-[200px] px-2 py-1.5 break-words text-slate-600">
+                                                                                                    {log.description || '—'}
+                                                                                                </td>
+                                                                                            </tr>
+                                                                                        ))}
+                                                                                    </tbody>
+                                                                                </table>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                            {customerCylinders.length > 0 && (
+                                                <div className="min-w-0 space-y-2">
+                                                    <p className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                                        <Droplets className="h-3.5 w-3.5 text-sky-600" /> Vỏ bình (
+                                                        {customerCylinders.length})
+                                                    </p>
+                                                    {customerCylinders.map((cyl) => {
+                                                        const logs = logsForAssetSerial(cyl.serial_number);
+                                                        const open =
+                                                            expandedCylinderSerial === cyl.serial_number;
+                                                        return (
+                                                            <div
+                                                                key={cyl.id}
+                                                                className="overflow-hidden rounded-xl border border-slate-100 bg-sky-50/30"
+                                                            >
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() =>
+                                                                        setExpandedCylinderSerial(
+                                                                            open ? null : cyl.serial_number,
+                                                                        )
+                                                                    }
+                                                                    className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-white"
+                                                                >
+                                                                    {open ? (
+                                                                        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+                                                                    ) : (
+                                                                        <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
+                                                                    )}
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <p className="truncate font-black text-slate-900 font-mono text-sm">
+                                                                            {cyl.serial_number}
+                                                                        </p>
+                                                                        <p className="truncate text-[11px] font-bold text-slate-500">
+                                                                            {(cyl.volume &&
+                                                                                String(cyl.volume).trim()) ||
+                                                                                '—'}{' '}
+                                                                            · {cyl.status || '—'}
+                                                                        </p>
+                                                                    </div>
+                                                                    <span className="shrink-0 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-black text-slate-600">
+                                                                        {logs.length} sự kiện
+                                                                    </span>
+                                                                </button>
+                                                                {open && (
+                                                                    <div className="border-t border-slate-100 bg-white px-2 py-2">
+                                                                        {logs.length === 0 ? (
+                                                                            <p className="px-2 py-3 text-center text-xs font-medium italic text-slate-400">
+                                                                                Không có nhật ký trong khoảng thời gian đã
+                                                                                chọn.
+                                                                            </p>
+                                                                        ) : (
+                                                                            <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-100">
+                                                                                <table className="w-full text-left text-[11px]">
+                                                                                    <thead className="sticky top-0 bg-slate-50 text-[9px] font-black uppercase tracking-wider text-slate-400">
+                                                                                        <tr>
+                                                                                            <th className="px-2 py-1.5">
+                                                                                                Thời điểm
+                                                                                            </th>
+                                                                                            <th className="px-2 py-1.5">
+                                                                                                Hành động
+                                                                                            </th>
+                                                                                            <th className="px-2 py-1.5">
+                                                                                                Mô tả
+                                                                                            </th>
+                                                                                        </tr>
+                                                                                    </thead>
+                                                                                    <tbody className="divide-y divide-slate-50">
+                                                                                        {logs.map((log) => (
+                                                                                            <tr
+                                                                                                key={log.id}
+                                                                                                className="align-top text-slate-700"
+                                                                                            >
+                                                                                                <td className="whitespace-nowrap px-2 py-1.5 font-semibold text-slate-500">
+                                                                                                    {formatDateTime(
+                                                                                                        log.created_at,
+                                                                                                    )}
+                                                                                                </td>
+                                                                                                <td className="px-2 py-1.5 font-bold text-indigo-700">
+                                                                                                    {log.action || '—'}
+                                                                                                </td>
+                                                                                                <td className="max-w-[200px] px-2 py-1.5 break-words text-slate-600">
+                                                                                                    {log.description || '—'}
+                                                                                                </td>
+                                                                                            </tr>
+                                                                                        ))}
+                                                                                    </tbody>
+                                                                                </table>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>

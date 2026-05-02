@@ -11,6 +11,7 @@ import usePermissions from '../../hooks/usePermissions';
 import { useReports } from '../../hooks/useReports';
 import { supabase } from '../../supabase/config';
 import { isAdminRole, isWarehouseRole } from '../../utils/accessControl';
+import { stripDeliveryMediaFromNote } from '../../utils/orderNoteSanitize';
 import BarcodeScanner from '../Common/BarcodeScanner';
 import OrderFormReadOnlyView from './OrderFormReadOnlyView';
 import clsx from 'clsx';
@@ -1060,8 +1061,9 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 {/* Panel */}
                 <div
                     className={clsx(
-                        "relative bg-slate-50 shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col h-full border-l border-slate-200 animate-in slide-in-from-right duration-500",
-                        isClosing && "animate-out slide-out-to-right duration-300"
+                        'relative bg-slate-50 shadow-2xl w-full overflow-hidden flex flex-col h-full border-l border-slate-200 animate-in slide-in-from-right duration-500',
+                        isReadOnly ? 'max-w-6xl' : 'max-w-2xl',
+                        isClosing && 'animate-out slide-out-to-right duration-300'
                     )}
                     onClick={(e) => e.stopPropagation()}
                 >
@@ -1671,7 +1673,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                     <label className="text-[14px] font-semibold text-slate-800">Ghi chú</label>
                                     <textarea
                                         name="note"
-                                        value={formData.note}
+                                        value={isReadOnly ? stripDeliveryMediaFromNote(formData.note) : formData.note}
                                         onChange={handleChange}
                                         readOnly={isReadOnly}
                                         rows={3}

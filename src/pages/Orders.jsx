@@ -17,6 +17,7 @@ import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import {
     BarChart2,
     CheckCircle,
+    CheckCircle2,
     ChevronDown,
     ChevronLeft,
     ChevronRight,
@@ -68,6 +69,7 @@ import {
     isWarehouseRole as isWarehouseRoleHelper,
     normalizeRole as normalizeRoleKey,
 } from '../utils/accessControl';
+import { stripDeliveryMediaFromNote } from '../utils/orderNoteSanitize';
 
 // Register Chart.js components
 ChartJS.register(
@@ -445,8 +447,9 @@ const Orders = () => {
                 query = query.eq('delivery_unit', storageUserName);
             }
 
-            // Apply warehouse filter only for warehouse roles
-            if (!isAdmin && isWarehouseRole && department) {
+            // Kho (không phải thủ kho): lọc theo mã kho suy ra từ department.
+            // Thủ kho không dùng .eq ở đây — họ xem theo danh sách kho phụ trách (warehouses.manager_name) ở bước lọc client bên dưới; .eq sai format warehouse sẽ làm mất hết đơn.
+            if (!isAdmin && isWarehouseRole && department && !isThuKhoRole) {
                 // Logic: Extract warehouse code from department (e.g., "OCP1-CHS" -> "OCP1")
                 // We'll take the first part before the hyphen if it exists, otherwise use full string
                 const warehouseCode = department.includes('-') 
@@ -614,6 +617,10 @@ const Orders = () => {
         // Secondary sort: Newest first within same status
         return new Date(b.created_at) - new Date(a.created_at);
     });
+
+    /** Đơn trong hàng giao — hiện nút lối tắt giống trang Nhiệm vụ giao hàng. */
+    const isDeliveryQueueStatus = (orderStatus) =>
+        orderStatus === 'CHO_GIAO_HANG' || orderStatus === 'DANG_GIAO_HANG';
 
     // Calculate totals
     const filteredOrdersCount = filteredOrders.length;
@@ -1131,6 +1138,14 @@ const Orders = () => {
                 );
             case 'date':
                 return order.created_at ? new Date(order.created_at).toLocaleDateString('vi-VN') : '---';
+            case 'note': {
+                const cleaned = stripDeliveryMediaFromNote(order.note);
+                return (
+                    <span className="text-[13px] text-muted-foreground font-normal line-clamp-3 whitespace-pre-wrap" title={cleaned || undefined}>
+                        {cleaned || '—'}
+                    </span>
+                );
+            }
             default:
                 return order[key] || '—';
         }
@@ -1346,6 +1361,29 @@ const Orders = () => {
                                                 )}
                                             </div>
                                         </div>
+
+                                        {isDeliveryQueueStatus(order.status) && (
+                                            <div className="flex flex-wrap gap-1.5 mb-2">
+                                                <button
+                                                    type="button"
+                                                    title="Mở xác nhận giao hàng"
+                                                    onClick={() => navigate(`/nhiem-vu-giao-hang?focusOrderId=${order.id}`)}
+                                                    className="flex-1 min-w-[120px] px-2 py-2 rounded-lg bg-primary text-white text-[11px] font-bold shadow-sm inline-flex items-center justify-center gap-1"
+                                                >
+                                                    <CheckCircle2 size={14} />
+                                                    Giao hàng
+                                                </button>
+                                                <a
+                                                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.recipient_address || '')}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600"
+                                                    title="Bản đồ"
+                                                >
+                                                    <MapPin size={16} />
+                                                </a>
+                                            </div>
+                                        )}
 
                                         <div className="flex items-center justify-between pt-2.5 border-t border-border/70">
                                             <div className="flex flex-col">
@@ -1799,8 +1837,31 @@ const Orders = () => {
                                                     {renderCell(col.key, order)}
                                                 </td>
                                             ))}
-                                            <td className="sticky right-0 z-20 bg-white px-2 py-4 text-center shadow-[-6px_0_10px_-8px_rgba(15,23,42,0.25)] before:content-[''] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:bg-slate-300">
-                                                <div className="flex items-center justify-center gap-1">
+                                            <td className="sticky right-0 z-20 bg-white px-2 py-4 text-center shadow-[-6px_0_10px_-8px_rgba(15,23,42,0.25)] before:content-[''] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:bg-slate-300 min-w-[200px] max-w-[320px]">
+                                                <div className="flex flex-col items-stretch gap-1.5">
+                                                    {isDeliveryQueueStatus(order.status) && (
+                                                        <div className="flex flex-wrap items-center justify-center gap-1">
+                                                            <button
+                                                                type="button"
+                                                                title="Mở xác nhận giao hàng (Nhiệm vụ giao hàng)"
+                                                                onClick={() => navigate(`/nhiem-vu-giao-hang?focusOrderId=${order.id}`)}
+                                                                className="shrink-0 px-2 py-1.5 rounded-lg bg-primary text-white text-[11px] font-bold shadow-sm hover:opacity-95 inline-flex items-center gap-1"
+                                                            >
+                                                                <CheckCircle2 size={14} className="shrink-0" />
+                                                                Giao hàng
+                                                            </button>
+                                                            <a
+                                                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.recipient_address || '')}`}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                                                                title="Bản đồ"
+                                                            >
+                                                                <MapPin size={16} />
+                                                            </a>
+                                                        </div>
+                                                    )}
+                                                    <div className="flex items-center justify-center gap-1">
                                                     {/* Dropdown for All Actions */}
                                                     <div className="relative">
                                                         <button
@@ -1927,6 +1988,7 @@ const Orders = () => {
                                                             </div>,
                                                             document.body
                                                         )}
+                                                    </div>
                                                     </div>
                                                 </div>
                                             </td>

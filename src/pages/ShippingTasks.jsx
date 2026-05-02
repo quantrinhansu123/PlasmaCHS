@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
     Truck, 
     CheckCircle2, 
@@ -8,7 +8,6 @@ import {
     Search, 
     MapPin, 
     Phone, 
-    User,
     Package,
     PackageCheck,
     Clock,
@@ -19,7 +18,7 @@ import {
     LayoutGrid,
     List
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase/config';
 import { clsx } from 'clsx';
 import { toast } from 'react-toastify';
@@ -31,10 +30,13 @@ import {
     collectMachineSerialsForOrder,
     resolvedOrderCustomerAssetName,
 } from '../utils/orderMachineSerials';
+import { stripDeliveryMediaFromNote } from '../utils/orderNoteSanitize';
 
 /** Gộp đơn giao hàng + phiếu thu hồi vỏ cần shipper / tài xế xử lý */
 const ShippingTasks = () => {
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const focusOrderId = searchParams.get('focusOrderId');
     const { role } = usePermissions();
     const [tasks, setTasks] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -93,6 +95,7 @@ const ShippingTasks = () => {
                 });
             }
 
+            // Gộp 2 nguồn: orders (giao hàng) + cylinder_recoveries (phiếu thu hồi vỏ) — UI phân biệt theo task.kind.
             const merged = [
                 ...(orderData || []).map((o) => ({
                     kind: 'ORDER',
@@ -186,7 +189,7 @@ const ShippingTasks = () => {
         return collectMachineSerialsForOrder(order, items, rawCl);
     };
 
-    const openDeliveryConfirmModal = async (order) => {
+    const openDeliveryConfirmModal = useCallback(async (order) => {
         try {
             const { data, error } = await supabase
                 .from('order_items')
@@ -210,7 +213,29 @@ const ShippingTasks = () => {
             console.error(e);
             toast.error('❌ Không tải được chi tiết đơn để xác nhận mã máy: ' + (e?.message || ''));
         }
-    };
+    }, []);
+
+    /** Mở modal giao từ URL (?focusOrderId=) khi bấm «Giao hàng» trên trang Đơn hàng. */
+    useEffect(() => {
+        if (!focusOrderId || isLoading) return;
+        const task = tasks.find(
+            (t) => t.kind === 'ORDER' && String(t.order.id) === String(focusOrderId),
+        );
+        setSearchParams(
+            (prev) => {
+                const next = new URLSearchParams(prev);
+                next.delete('focusOrderId');
+                return next;
+            },
+            { replace: true },
+        );
+        if (task?.order) {
+            setActiveView('list');
+            void openDeliveryConfirmModal(task.order);
+        } else if (tasks.length > 0) {
+            toast.info('Đơn không nằm trong danh sách nhiệm vụ giao (trạng thái hoặc phân quyền tài xế).');
+        }
+    }, [focusOrderId, isLoading, tasks, setSearchParams, openDeliveryConfirmModal]);
 
     const parseCylinderSerialsFromOrder = (order) => {
         const fromAssigned = Array.isArray(order?.assigned_cylinders)
@@ -385,6 +410,8 @@ const ShippingTasks = () => {
             return (
                 order.order_code?.toLowerCase().includes(q) ||
                 order.customer_name?.toLowerCase().includes(q) ||
+                order.recipient_name?.toLowerCase().includes(q) ||
+                order.recipient_address?.toLowerCase().includes(q) ||
                 (order.recipient_phone || '').includes(searchTerm)
             );
         }
@@ -527,172 +554,215 @@ const ShippingTasks = () => {
                         </button>
                     </div>
                 ) : activeView === 'list' ? (
-                    filteredTasks.map((task) => {
-                        if (task.kind === 'ORDER') {
-                            const order = task.order;
-                            return (
-                        <div key={`ord-${order.id}`} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden active:scale-[0.98] transition-transform duration-200">
-                            <div className="p-4 border-b border-slate-100 flex justify-between items-start">
-                                <div>
-                                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                        <span className="text-[10px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-1.5 py-0.5 rounded-md uppercase">Giao hàng</span>
-                                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">#{order.order_code}</span>
-                                        <span className={clsx('px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase', getStatusBadge(order.status))}>
-                                            {getStatusLabel(order.status)}
-                                        </span>
-                                    </div>
-                                    <h3 className="text-[17px] font-extrabold text-slate-900 leading-tight">{order.recipient_name}</h3>
-                                </div>
-                                <div className="text-right">
-                                    <span className="text-[15px] font-bold text-primary">
-                                        {order.total_amount?.toLocaleString('vi-VN')}đ
-                                    </span>
-                                </div>
-                            </div>
-
-                            <div className="p-4 space-y-3">
-                                <div className="flex items-start gap-3">
-                                    <MapPin size={16} className="text-slate-400 mt-0.5" />
-                                    <p className="text-sm text-slate-600 font-medium line-clamp-2">{order.recipient_address}</p>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <Phone size={16} className="text-slate-400" />
-                                    <a href={`tel:${order.recipient_phone}`} className="text-sm text-primary font-bold">{order.recipient_phone}</a>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <Package size={16} className="text-slate-400" />
-                                    <p className="text-sm text-slate-600 font-medium">{order.product_type} - SL: {order.quantity}</p>
-                                </div>
-                                {order.note && (
-                                    <div className="flex items-start gap-3 p-2 bg-amber-50 rounded-lg border border-amber-100">
-                                        <AlertCircle size={14} className="text-amber-500 mt-0.5" />
-                                        <p className="text-[12px] text-amber-700 italic">{order.note}</p>
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 flex gap-2">
-                                <button 
-                                    type="button"
-                                    onClick={() => navigate('/thu-hoi-vo')}
-                                    className="flex-1 bg-white border border-teal-200 text-teal-600 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm active:bg-teal-50"
-                                >
-                                    <RefreshCw size={18} />
-                                    Thu hồi vỏ
-                                </button>
-                                <button 
-                                    type="button"
-                                    onClick={() => openDeliveryConfirmModal(order)}
-                                    className="flex-[1.5] bg-primary text-white py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md shadow-primary/20 active:bg-primary/90"
-                                >
-                                    <CheckCircle2 size={18} />
-                                    Giao hàng
-                                </button>
-                                <a 
-                                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.recipient_address)}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="w-12 h-10.5 bg-white border border-slate-200 rounded-xl flex items-center justify-center text-slate-600 shadow-sm active:bg-slate-100"
-                                >
-                                    <MapPin size={20} />
-                                </a>
-                            </div>
+                    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="w-full min-w-[960px] text-left text-[13px] border-collapse">
+                                <thead>
+                                    <tr className="bg-slate-50 text-slate-500 text-[11px] font-bold uppercase tracking-wide border-b border-slate-200">
+                                        <th className="py-3 pl-4 pr-2 min-w-[128px]">
+                                            <span className="block normal-case tracking-normal text-[10px] font-bold text-slate-400">Loại nhiệm vụ</span>
+                                            <span className="block text-[9px] font-semibold text-slate-400 normal-case tracking-tight mt-0.5">(bảng nguồn)</span>
+                                        </th>
+                                        <th className="py-3 px-2 whitespace-nowrap">Mã</th>
+                                        <th className="py-3 px-2 whitespace-nowrap">Trạng thái</th>
+                                        <th className="py-3 px-2 min-w-[140px]">Khách</th>
+                                        <th className="py-3 px-2 whitespace-nowrap">Đơn vị giao</th>
+                                        <th className="py-3 px-2 min-w-[160px]">Địa chỉ</th>
+                                        <th className="py-3 px-2 whitespace-nowrap">SĐT</th>
+                                        <th className="py-3 px-2 min-w-[120px]">Hàng / SL</th>
+                                        <th className="py-3 px-2 text-right whitespace-nowrap">Giá trị</th>
+                                        <th className="py-3 pr-4 pl-2 text-right min-w-[200px]">Thao tác</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {filteredTasks.map((task) => {
+                                        if (task.kind === 'ORDER') {
+                                            const order = task.order;
+                                            const orderNoteDisplay = stripDeliveryMediaFromNote(order.note);
+                                            return (
+                                                <tr
+                                                    key={`ord-${order.id}`}
+                                                    className="border-b border-slate-100 last:border-0 hover:bg-slate-50/80 align-top"
+                                                >
+                                                    <td className="py-3 pl-4 pr-2">
+                                                        <span className="inline-block text-[10px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-1.5 py-0.5 rounded-md uppercase whitespace-nowrap">
+                                                            Giao hàng
+                                                        </span>
+                                                        <span
+                                                            className="block text-[10px] text-slate-400 font-mono mt-1.5 leading-tight"
+                                                            title="Dữ liệu dòng này lấy từ bảng orders (đơn giao hàng)"
+                                                        >
+                                                            orders
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-3 px-2 font-bold text-slate-800 whitespace-nowrap">#{order.order_code}</td>
+                                                    <td className="py-3 px-2">
+                                                        <span className={clsx('inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase whitespace-nowrap', getStatusBadge(order.status))}>
+                                                            {getStatusLabel(order.status)}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-3 px-2 font-semibold text-slate-900">{order.recipient_name || '—'}</td>
+                                                    <td className="py-3 px-2 text-slate-600 max-w-[120px] truncate" title={(order.delivery_unit || '').trim() || undefined}>
+                                                        {(order.delivery_unit || '').trim() || '—'}
+                                                    </td>
+                                                    <td className="py-3 px-2 text-slate-600 max-w-[220px]">
+                                                        <span className="line-clamp-2" title={order.recipient_address}>{order.recipient_address || '—'}</span>
+                                                    </td>
+                                                    <td className="py-3 px-2 whitespace-nowrap">
+                                                        {order.recipient_phone ? (
+                                                            <a href={`tel:${order.recipient_phone}`} className="text-primary font-bold hover:underline">
+                                                                {order.recipient_phone}
+                                                            </a>
+                                                        ) : (
+                                                            '—'
+                                                        )}
+                                                    </td>
+                                                    <td className="py-3 px-2 text-slate-600">
+                                                        <span className="line-clamp-2">{order.product_type || '—'} — SL: {order.quantity ?? '—'}</span>
+                                                        {orderNoteDisplay ? (
+                                                            <span
+                                                                className="block text-[11px] text-amber-700 mt-0.5 line-clamp-1"
+                                                                title={orderNoteDisplay}
+                                                            >
+                                                                {orderNoteDisplay}
+                                                            </span>
+                                                        ) : null}
+                                                    </td>
+                                                    <td className="py-3 px-2 text-right font-bold text-primary tabular-nums whitespace-nowrap">
+                                                        {order.total_amount != null ? `${Number(order.total_amount).toLocaleString('vi-VN')}đ` : '—'}
+                                                    </td>
+                                                    <td className="py-3 pr-4 pl-2">
+                                                        <div className="flex flex-wrap items-center justify-end gap-1.5">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => openDeliveryConfirmModal(order)}
+                                                                className="shrink-0 px-2.5 py-1.5 rounded-lg bg-primary text-white text-[11px] font-bold shadow-sm hover:opacity-95"
+                                                            >
+                                                                Giao hàng
+                                                            </button>
+                                                            <a
+                                                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.recipient_address || '')}`}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                                                                title="Bản đồ"
+                                                            >
+                                                                <MapPin size={16} />
+                                                            </a>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        }
+                                        const r = task.recovery;
+                                        const c = r.customers || {};
+                                        const addr = c.address || '—';
+                                        const phone = c.phone || '—';
+                                        return (
+                                            <tr
+                                                key={`rec-${r.id}`}
+                                                className="border-b border-slate-100 last:border-0 bg-teal-50/30 hover:bg-teal-50/60 align-top"
+                                            >
+                                                <td className="py-3 pl-4 pr-2">
+                                                    <span className="inline-block text-[10px] font-bold text-white bg-teal-600 px-1.5 py-0.5 rounded-md uppercase whitespace-nowrap">
+                                                        Thu hồi vỏ
+                                                    </span>
+                                                    <span
+                                                        className="block text-[10px] text-slate-500 font-mono mt-1.5 leading-tight"
+                                                        title="Dữ liệu dòng này lấy từ bảng cylinder_recoveries (phiếu thu hồi vỏ)"
+                                                    >
+                                                        cylinder_recoveries
+                                                    </span>
+                                                </td>
+                                                <td className="py-3 px-2 font-bold text-teal-800 whitespace-nowrap">#{r.recovery_code}</td>
+                                                <td className="py-3 px-2">
+                                                    <span className={clsx('inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase whitespace-nowrap', getRecoveryStatusBadge(r.status))}>
+                                                        {getRecoveryStatusLabel(r.status)}
+                                                    </span>
+                                                </td>
+                                                <td className="py-3 px-2 font-semibold text-slate-900">{c.name || 'Khách hàng'}</td>
+                                                <td className="py-3 px-2 text-slate-600 max-w-[120px] truncate" title={(r.driver_name || '').trim() || undefined}>
+                                                    {(r.driver_name || '').trim() || '—'}
+                                                </td>
+                                                <td className="py-3 px-2 text-slate-600 max-w-[220px]">
+                                                    <span className="line-clamp-2" title={addr}>{addr}</span>
+                                                </td>
+                                                <td className="py-3 px-2 whitespace-nowrap">
+                                                    {phone !== '—' ? (
+                                                        <a href={`tel:${phone}`} className="text-primary font-bold hover:underline">
+                                                            {phone}
+                                                        </a>
+                                                    ) : (
+                                                        '—'
+                                                    )}
+                                                </td>
+                                                <td className="py-3 px-2 text-slate-600">
+                                                    Yêu cầu: <span className="font-bold">{r.requested_quantity ?? 0}</span> vỏ
+                                                    {r.notes ? (
+                                                        <span className="block text-[11px] text-amber-700 mt-0.5 line-clamp-1" title={r.notes}>
+                                                            {r.notes}
+                                                        </span>
+                                                    ) : null}
+                                                </td>
+                                                <td className="py-3 px-2 text-right text-slate-400">—</td>
+                                                <td className="py-3 pr-4 pl-2">
+                                                    <div className="flex flex-wrap items-center justify-end gap-1.5">
+                                                        <button
+                                                            type="button"
+                                                            title="Danh sách / module thu hồi vỏ (dòng này là phiếu cylinder_recoveries)"
+                                                            onClick={() => navigate('/thu-hoi-vo')}
+                                                            className="shrink-0 px-2.5 py-1.5 rounded-lg border border-teal-200 bg-white text-teal-700 text-[11px] font-bold hover:bg-teal-50"
+                                                        >
+                                                            Trang thu hồi vỏ
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => openRecoveryTask(r.id)}
+                                                            className="shrink-0 px-2.5 py-1.5 rounded-lg bg-teal-600 text-white text-[11px] font-bold shadow-sm hover:bg-teal-700"
+                                                        >
+                                                            Mở phiếu
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            title="Chốt phiếu thu hồi (đã có vỏ trên phiếu). Chưa có vỏ sẽ mở phiếu để nhập."
+                                                            onClick={(e) => {
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+                                                                completeRecoveryTask(r.id);
+                                                            }}
+                                                            disabled={!!completingRecoveryId}
+                                                            className={clsx(
+                                                                'shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1',
+                                                                completingRecoveryId === r.id
+                                                                    ? 'bg-emerald-500/90 text-white cursor-wait'
+                                                                    : completingRecoveryId
+                                                                        ? 'bg-emerald-600/40 text-white cursor-not-allowed'
+                                                                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                                            )}
+                                                        >
+                                                            {completingRecoveryId === r.id ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                                                            Hoàn thành
+                                                        </button>
+                                                        {addr && addr !== '—' ? (
+                                                            <a
+                                                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                                                                title="Bản đồ"
+                                                            >
+                                                                <MapPin size={16} />
+                                                            </a>
+                                                        ) : null}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
                         </div>
-                            );
-                        }
-                        const r = task.recovery;
-                        const c = r.customers || {};
-                        const addr = c.address || '—';
-                        const phone = c.phone || '—';
-                        return (
-                        <div key={`rec-${r.id}`} className="bg-white rounded-2xl border border-teal-200/80 shadow-sm overflow-hidden active:scale-[0.98] transition-transform duration-200 ring-1 ring-teal-100/60">
-                            <div className="p-4 border-b border-slate-100 flex justify-between items-start">
-                                <div>
-                                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                        <span className="text-[10px] font-bold text-white bg-teal-600 px-1.5 py-0.5 rounded-md uppercase">Thu hồi vỏ</span>
-                                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">#{r.recovery_code}</span>
-                                        <span className={clsx('px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase', getRecoveryStatusBadge(r.status))}>
-                                            {getRecoveryStatusLabel(r.status)}
-                                        </span>
-                                    </div>
-                                    <h3 className="text-[17px] font-extrabold text-slate-900 leading-tight">{c.name || 'Khách hàng'}</h3>
-                                </div>
-                                <div className="text-right">
-                                    <span className="text-[13px] font-bold text-teal-700">
-                                        Yêu cầu: {r.requested_quantity ?? 0} vỏ
-                                    </span>
-                                </div>
-                            </div>
-                            <div className="p-4 space-y-3">
-                                {r.driver_name && (
-                                    <div className="flex items-center gap-3">
-                                        <User size={16} className="text-slate-400" />
-                                        <p className="text-sm text-slate-600 font-medium">{r.driver_name}</p>
-                                    </div>
-                                )}
-                                <div className="flex items-start gap-3">
-                                    <MapPin size={16} className="text-slate-400 mt-0.5" />
-                                    <p className="text-sm text-slate-600 font-medium line-clamp-2">{addr}</p>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <Phone size={16} className="text-slate-400" />
-                                    <a href={`tel:${phone}`} className="text-sm text-primary font-bold">{phone}</a>
-                                </div>
-                                {r.notes && (
-                                    <div className="flex items-start gap-3 p-2 bg-amber-50 rounded-lg border border-amber-100">
-                                        <AlertCircle size={14} className="text-amber-500 mt-0.5" />
-                                        <p className="text-[12px] text-amber-700 italic">{r.notes}</p>
-                                    </div>
-                                )}
-                            </div>
-                            <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 flex flex-wrap gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => openRecoveryTask(r.id)}
-                                    className="flex-1 min-w-[130px] bg-teal-600 text-white py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md shadow-teal-600/20 active:bg-teal-700"
-                                >
-                                    <PackageCheck size={18} />
-                                    Mở phiếu
-                                </button>
-                                <button
-                                    type="button"
-                                    title="Chốt phiếu thu hồi (đã có vỏ trên phiếu). Chưa có vỏ sẽ mở phiếu để nhập."
-                                    onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        completeRecoveryTask(r.id);
-                                    }}
-                                    disabled={!!completingRecoveryId}
-                                    className={clsx(
-                                        'flex-1 min-w-[130px] py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md active:bg-emerald-700',
-                                        completingRecoveryId === r.id
-                                            ? 'bg-emerald-500/80 text-white shadow-emerald-600/20 cursor-wait'
-                                            : completingRecoveryId
-                                                ? 'bg-emerald-600/50 text-white/90 cursor-not-allowed shadow-emerald-600/15'
-                                                : 'bg-emerald-600 text-white shadow-emerald-600/25'
-                                    )}
-                                >
-                                    {completingRecoveryId === r.id ? (
-                                        <Loader2 size={18} className="animate-spin" />
-                                    ) : (
-                                        <CheckCircle2 size={18} />
-                                    )}
-                                    Hoàn thành
-                                </button>
-                                {addr && addr !== '—' && (
-                                    <a 
-                                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="w-12 min-h-[2.5rem] shrink-0 bg-white border border-slate-200 rounded-xl flex items-center justify-center text-slate-600 shadow-sm active:bg-slate-100"
-                                    >
-                                        <MapPin size={20} />
-                                    </a>
-                                )}
-                            </div>
-                        </div>
-                        );
-                    })
+                    </div>
                 ) : (
                     <div className="overflow-x-auto overflow-y-hidden">
                         <div className="grid grid-flow-col auto-cols-[280px] gap-3 min-h-full">
@@ -709,49 +779,93 @@ const ShippingTasks = () => {
                                             task.kind === 'ORDER' ? (
                                             <div
                                                 key={`k-ord-${task.order.id}`}
-                                                className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 cursor-pointer hover:bg-white hover:shadow-sm transition-all"
-                                                onClick={() => openDeliveryConfirmModal(task.order)}
+                                                className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 flex flex-col gap-2 hover:bg-white hover:shadow-sm transition-all"
                                             >
-                                                <div className="flex items-start justify-between gap-2">
-                                                    <p className="text-[12px] font-bold text-primary">#{task.order.order_code}</p>
-                                                    <span className={clsx('px-1.5 py-0.5 rounded-full text-[9px] font-bold border uppercase', getStatusBadge(task.order.status))}>
-                                                        {getStatusLabel(task.order.status)}
-                                                    </span>
+                                                <div>
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <p className="text-[12px] font-bold text-primary">#{task.order.order_code}</p>
+                                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[9px] font-bold border uppercase shrink-0', getStatusBadge(task.order.status))}>
+                                                            {getStatusLabel(task.order.status)}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-[10px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-1 py-0.5 rounded mt-1.5 inline-block uppercase">Giao hàng</p>
+                                                    <p className="text-[12px] font-bold text-slate-800 mt-1 line-clamp-2">{task.order.recipient_name || task.order.customer_name}</p>
+                                                    <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">{task.order.recipient_phone || '—'}</p>
                                                 </div>
-                                                <p className="text-[12px] font-bold text-slate-800 mt-1 line-clamp-2">{task.order.recipient_name || task.order.customer_name}</p>
-                                                <p className="text-[11px] text-slate-500 mt-1 line-clamp-1">{task.order.recipient_phone || '—'}</p>
+                                                <div className="flex flex-wrap items-stretch gap-1 pt-1.5 border-t border-slate-200/80">
+                                                    <button
+                                                        type="button"
+                                                        className="flex-1 min-w-[100px] py-1.5 rounded-md bg-primary text-white text-[10px] font-bold shadow-sm active:opacity-90"
+                                                        onClick={(e) => {
+                                                            e.preventDefault();
+                                                            e.stopPropagation();
+                                                            void openDeliveryConfirmModal(task.order);
+                                                        }}
+                                                    >
+                                                        Giao hàng
+                                                    </button>
+                                                    <a
+                                                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(task.order.recipient_address || '')}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 active:bg-slate-100"
+                                                        title="Bản đồ"
+                                                        onClick={(e) => e.stopPropagation()}
+                                                    >
+                                                        <MapPin size={16} />
+                                                    </a>
+                                                </div>
                                             </div>
                                             ) : (
                                             <div
                                                 key={`k-rec-${task.recovery.id}`}
-                                                className="bg-teal-50/80 border border-teal-200 rounded-lg overflow-hidden hover:bg-white hover:shadow-sm transition-all"
+                                                className="bg-teal-50/80 border border-teal-200 rounded-lg overflow-hidden hover:bg-white hover:shadow-sm transition-all flex flex-col"
                                             >
-                                                <button
-                                                    type="button"
-                                                    className="w-full text-left p-2.5 cursor-pointer"
-                                                    onClick={() => openRecoveryTask(task.recovery.id)}
-                                                >
+                                                <div className="p-2.5">
                                                     <div className="flex items-start justify-between gap-2">
                                                         <p className="text-[12px] font-bold text-teal-700">#{task.recovery.recovery_code}</p>
-                                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[9px] font-bold border uppercase', getRecoveryStatusBadge(task.recovery.status))}>
+                                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[9px] font-bold border uppercase shrink-0', getRecoveryStatusBadge(task.recovery.status))}>
                                                             {getRecoveryStatusLabel(task.recovery.status)}
                                                         </span>
                                                     </div>
                                                     <p className="text-[10px] font-bold text-teal-600 mt-0.5 uppercase">Thu hồi vỏ</p>
                                                     <p className="text-[12px] font-bold text-slate-800 mt-1 line-clamp-2">{(task.recovery.customers || {}).name || '—'}</p>
-                                                    <p className="text-[11px] text-slate-500 mt-1 line-clamp-1">{(task.recovery.customers || {}).phone || '—'}</p>
-                                                </button>
-                                                <div className="flex border-t border-teal-200/60">
+                                                    <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">{(task.recovery.customers || {}).phone || '—'}</p>
+                                                </div>
+                                                <div className="flex flex-wrap gap-1 p-2 pt-0 border-t border-teal-200/60">
+                                                    <button
+                                                        type="button"
+                                                        title="Danh sách thu hồi vỏ"
+                                                        className="shrink-0 px-1.5 py-1.5 rounded-md border border-teal-200 bg-white text-teal-700 text-[9px] font-bold leading-tight text-left max-w-[108px]"
+                                                        onClick={(e) => {
+                                                            e.preventDefault();
+                                                            e.stopPropagation();
+                                                            navigate('/thu-hoi-vo');
+                                                        }}
+                                                    >
+                                                        Trang thu hồi vỏ
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        className="shrink-0 px-2 py-1.5 rounded-md bg-teal-600 text-white text-[10px] font-bold shadow-sm"
+                                                        onClick={(e) => {
+                                                            e.preventDefault();
+                                                            e.stopPropagation();
+                                                            openRecoveryTask(task.recovery.id);
+                                                        }}
+                                                    >
+                                                        Mở phiếu
+                                                    </button>
                                                     <button
                                                         type="button"
                                                         title="Chốt phiếu từ nhiệm vụ (đã có vỏ). Chưa có vỏ sẽ mở phiếu."
                                                         className={clsx(
-                                                            'flex-1 py-2 text-[10px] font-bold flex items-center justify-center gap-1',
+                                                            'shrink-0 px-2 py-1.5 rounded-md text-[10px] font-bold flex items-center justify-center gap-1',
                                                             completingRecoveryId === task.recovery.id
-                                                                ? 'text-emerald-800 bg-emerald-100 cursor-wait'
+                                                                ? 'bg-emerald-500/90 text-white cursor-wait'
                                                                 : completingRecoveryId
-                                                                    ? 'text-teal-600/60 bg-teal-100/30 cursor-not-allowed'
-                                                                    : 'text-teal-800 bg-teal-100/50 hover:bg-teal-100'
+                                                                    ? 'bg-emerald-600/40 text-white cursor-not-allowed'
+                                                                    : 'bg-emerald-600 text-white active:bg-emerald-700'
                                                         )}
                                                         disabled={!!completingRecoveryId}
                                                         onClick={(e) => {
@@ -765,6 +879,22 @@ const ShippingTasks = () => {
                                                         ) : null}
                                                         Hoàn thành
                                                     </button>
+                                                    {(() => {
+                                                        const raw = String((task.recovery.customers || {}).address || '').trim();
+                                                        if (!raw || raw === '—') return null;
+                                                        return (
+                                                            <a
+                                                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(raw)}`}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600"
+                                                                title="Bản đồ"
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            >
+                                                                <MapPin size={16} />
+                                                            </a>
+                                                        );
+                                                    })()}
                                                 </div>
                                             </div>
                                             )
