@@ -190,6 +190,14 @@ const CreateGoodsIssue = () => {
             delete issuePayload.id; // Không gửi id trong payload
             delete issuePayload.created_at;
 
+            const uuidOrNull = (v) => {
+                if (v == null) return null;
+                const s = String(v).trim();
+                return s || null;
+            };
+            issuePayload.supplier_id = uuidOrNull(issuePayload.supplier_id);
+            issuePayload.warehouse_id = uuidOrNull(issuePayload.warehouse_id);
+
             let issueId;
 
             if (editIssue) {

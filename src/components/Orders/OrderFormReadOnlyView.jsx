@@ -2,7 +2,7 @@ import { AlertTriangle, Edit3, Package } from 'lucide-react';
 import {
     CUSTOMER_CATEGORIES,
     ORDER_TYPES,
-    ORDER_STATUSES,
+    getOrderStatusMeta,
     PRODUCT_TYPES
 } from '../../constants/orderConstants';
 import { stripDeliveryMediaFromNote } from '../../utils/orderNoteSanitize';
@@ -58,9 +58,7 @@ export default function OrderFormReadOnlyView({
           '—'
         : '—';
 
-    const statusLabel = order?.status
-        ? ORDER_STATUSES.find(s => s.id === order.status)?.label || order.status
-        : null;
+    const statusLabel = order?.status ? getOrderStatusMeta(order.status).label : null;
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 xl:gap-5 items-start">

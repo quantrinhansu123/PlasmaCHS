@@ -29,9 +29,30 @@ import InventorySearchableSelect from './InventorySearchableSelect';
 import { ISSUE_TYPES } from '../../constants/goodsIssueConstants';
 import { PRODUCT_TYPES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
+import usePermissions from '../../hooks/usePermissions';
 import { notificationService } from '../../utils/notificationService';
 
+/** goods_issues có thể lưu warehouses.id hoặc code/tên cũ — luôn map về dòng warehouses (UUID cylinders.warehouse_id). */
+function resolveWarehouseRowForForm(storedWarehouseId, warehousesList = []) {
+    const raw = String(storedWarehouseId || '').trim();
+    if (!raw || !warehousesList.length) return null;
+    const n = raw.toLowerCase();
+    return warehousesList.find(
+        (w) =>
+            String(w.id).toLowerCase() === n ||
+            String(w.code || '').trim().toLowerCase() === n ||
+            String(w.name || '').trim().toLowerCase() === n
+    ) || null;
+}
+
+/** machines.warehouse trong DB là mã/ngắn hoặc tên kho, không phải UUID. */
+function machineWarehouseCandidates(whRow) {
+    if (!whRow) return [];
+    return [...new Set([String(whRow.code || '').trim(), String(whRow.name || '').trim(), String(whRow.id || '').trim()].filter(Boolean))];
+}
+
 export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedType }) {
+    const { user } = usePermissions();
     const isEdit = !!issue;
     const [isLoading, setIsLoading] = useState(false);
     const [isClosing, setIsClosing] = useState(false);
@@ -89,10 +110,19 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
     }, [issue, forcedType]);
 
     useEffect(() => {
+        if (!warehousesList.length) return;
+        setFormData((prev) => {
+            const row = resolveWarehouseRowForForm(prev.warehouse_id, warehousesList);
+            if (!row || prev.warehouse_id === row.id) return prev;
+            return { ...prev, warehouse_id: row.id };
+        });
+    }, [warehousesList, issue?.id]);
+
+    useEffect(() => {
         if (formData.warehouse_id && ['TRA_VO', 'TRA_BINH_LOI', 'TRA_MAY'].includes(formData.issue_type)) {
             fetchInventory();
         }
-    }, [formData.warehouse_id, formData.issue_type]);
+    }, [formData.warehouse_id, formData.issue_type, warehousesList]);
 
     const fetchItems = async (issueId) => {
         const { data } = await supabase
@@ -146,7 +176,7 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
 
     const fetchWarehouses = async () => {
         try {
-            const { data } = await supabase.from('warehouses').select('id, name').eq('status', 'Đang hoạt động').order('name');
+            const { data } = await supabase.from('warehouses').select('id, name, code').eq('status', 'Đang hoạt động').order('name');
             if (data) {
                 setWarehousesList(data);
                 if (!isEdit && data.length > 0) {
@@ -170,19 +200,27 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
         // setIsInventoryPickerOpen(true); 
 
         try {
+            const whRow = resolveWarehouseRowForForm(formData.warehouse_id, warehousesList);
+
             if (formData.issue_type === 'TRA_MAY') {
-                const { data, error } = await supabase
+                const keys = machineWarehouseCandidates(whRow);
+                let mQuery = supabase
                     .from('machines')
                     .select('*')
-                    .eq('warehouse', formData.warehouse_id)
                     .not('status', 'in', '("thuộc khách hàng")');
+                const { data, error } =
+                    keys.length > 0
+                        ? await mQuery.in('warehouse', keys)
+                        : await mQuery.eq('warehouse', formData.warehouse_id);
                 if (error) throw error;
                 setInventoryItems(data || []);
             } else {
+                const cylinderWhId = whRow?.id || formData.warehouse_id;
+
                 let query = supabase
                     .from('cylinders')
                     .select('*')
-                    .eq('warehouse_id', formData.warehouse_id);
+                    .eq('warehouse_id', cylinderWhId);
 
                 // Return-empty cylinders should allow selecting all cylinders in the warehouse.
                 if (formData.issue_type !== 'TRA_VO') {
@@ -359,7 +397,19 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                 }
                 updateItemWithInventory(itemToUpdate.id, matchedMachine.serial_number);
             } else {
-                updateItem(itemToUpdate.id, 'item_code', normalizedCode);
+                const matchedCyl = inventoryItems.find(
+                    (i) => (i.serial_number || '').trim().toUpperCase() === normalizedCode.toUpperCase()
+                );
+                if (matchedCyl) {
+                    updateItemWithInventory(itemToUpdate.id, matchedCyl.serial_number);
+                } else {
+                    updateItem(itemToUpdate.id, 'item_code', normalizedCode);
+                    notificationService.add({
+                        title: 'Không có trong danh sách kho đã load',
+                        description: normalizedCode + ' — vẫn ghi tay; kiểm tra kho và quyền chọn đúng kho.',
+                        type: 'warning'
+                    });
+                }
             }
 
             setIsScannerOpen(false);
@@ -510,12 +560,18 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                 return;
             }
 
-            const normalizedWarehouse = (formData.warehouse_id || '').trim();
+            const whRowMv = resolveWarehouseRowForForm(formData.warehouse_id, warehousesList);
+            const machineWhAllowed = machineWarehouseCandidates(whRowMv);
             const dbMap = new Map((machineRows || []).map((m) => [String(m.serial_number || '').trim().toUpperCase(), m]));
             const invalidSerial = [...uniqueSerials].find((serial) => {
                 const machine = dbMap.get(serial);
                 if (!machine) return true;
-                if (String(machine.warehouse || '').trim() !== normalizedWarehouse) return true;
+                const mw = String(machine.warehouse || '').trim();
+                const ok =
+                    machineWhAllowed.length > 0
+                        ? machineWhAllowed.some((k) => mw === k || mw.toLowerCase() === String(k).toLowerCase())
+                        : mw === String(formData.warehouse_id || '').trim();
+                if (!ok) return true;
                 if (String(machine.status || '').toLowerCase().trim() === 'thuộc khách hàng') return true;
                 return false;
             });
@@ -531,6 +587,28 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
             const issuePayload = { ...formData };
             delete issuePayload.id;
             delete issuePayload.created_at;
+
+            const uuidOrNull = (v) => {
+                if (v == null) return null;
+                const s = String(v).trim();
+                return s || null;
+            };
+            issuePayload.supplier_id = uuidOrNull(issuePayload.supplier_id);
+            issuePayload.warehouse_id = uuidOrNull(issuePayload.warehouse_id);
+
+            const currentCreatorRaw =
+                user?.name ||
+                user?.email ||
+                localStorage.getItem('user_name') ||
+                sessionStorage.getItem('user_name') ||
+                '';
+            const currentCreator = String(currentCreatorRaw || '').trim();
+
+            if (!isEdit) {
+                issuePayload.created_by = currentCreator || 'Hệ thống';
+            } else {
+                delete issuePayload.created_by;
+            }
 
             let issueId;
 
@@ -619,7 +697,8 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                                     status: 'đã trả ncc',
                                     warehouse_id: null,
                                     customer_id: null,
-                                    customer_name: null
+                                    customer_name: null,
+                                    supplier_id: issuePayload.supplier_id
                                 })
                                 .in('id', cylinderIds);
                             if (cylinderStatusError) throw cylinderStatusError;
@@ -629,7 +708,7 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
             }
 
             // INVENTORY DEDUCTION: Deduct from warehouse inventory when creating a new goods issue
-            if (!isEdit) {
+            if (!isEdit && issuePayload.warehouse_id) {
                 // Group items by product type for inventory deduction
                 const itemsByType = {};
                 for (const item of validItems) {
@@ -644,7 +723,7 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                     const { data: invData } = await supabase
                         .from('inventory')
                         .select('id, quantity')
-                        .eq('warehouse_id', formData.warehouse_id)
+                        .eq('warehouse_id', issuePayload.warehouse_id)
                         .eq('item_type', itemType)
                         .ilike('item_name', itemName.trim())
                         .maybeSingle();

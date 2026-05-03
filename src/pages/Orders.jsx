@@ -13,19 +13,19 @@ import {
 import { clsx } from 'clsx';
 import MobilePageHeader from '../components/layout/MobilePageHeader';
 import MobilePagination from '../components/layout/MobilePagination';
-import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import {
     BarChart2,
     CheckCircle,
     CheckCircle2,
     ChevronDown,
     ChevronLeft,
-    ChevronRight,
     ClipboardCheck,
     Edit,
     Eye,
+    FileText,
     Filter,
-    List,
+    LayoutGrid,
+    ListFilter,
     MapPin,
     MoreVertical,
     Package,
@@ -34,6 +34,7 @@ import {
     Printer,
     Search,
     SlidersHorizontal,
+    Table2,
     Trash2,
     User,
     Warehouse,
@@ -57,7 +58,9 @@ import {
     ORDER_TYPES,
     PRODUCT_TYPES,
     STATUS_PRIORITY,
-    TABLE_COLUMNS
+    TABLE_COLUMNS,
+    getOrderStatusMeta,
+    resolveOrderStatusKey
 } from '../constants/orderConstants';
 import usePermissions from '../hooks/usePermissions';
 import useReports from '../hooks/useReports';
@@ -69,6 +72,7 @@ import {
     isWarehouseRole as isWarehouseRoleHelper,
     normalizeRole as normalizeRoleKey,
 } from '../utils/accessControl';
+import { deleteOrdersWithRollback } from '../utils/deleteOrderCascade';
 import { stripDeliveryMediaFromNote } from '../utils/orderNoteSanitize';
 
 // Register Chart.js components
@@ -93,6 +97,14 @@ const PIPELINE_ATTENTION_STATUSES = new Set([
     'DIEU_CHINH',
     'KHO_XU_LY'
 ]);
+
+/** Kanban: bỏ cột trạng thái nguồn — gộp thẻ sang cột đích (một bước) */
+const KANBAN_LANE_MERGE_FROM_TO = Object.freeze({
+    TRUONG_KD_XU_LY: 'CHO_CTY_DUYET',
+    KD_XU_LY: 'CHO_CTY_DUYET',
+    KHO_XU_LY: 'DA_DUYET',
+});
+const KANBAN_HIDDEN_LANE_IDS = new Set(Object.keys(KANBAN_LANE_MERGE_FROM_TO));
 
 const normalizeText = (value) =>
     String(value || '')
@@ -132,6 +144,25 @@ const getWarehouseKeyVariants = (value) => {
 };
 
 const HIDDEN_ORDER_COLUMNS = new Set(['department']);
+
+/** BottleTrack ERP — không dùng `primary` app (#3b82f6) để không lệch mock */
+const BT_PRIMARY = '#00288e';
+/** Cột desktop theo mock bảng (vẫn tôn trọng cột được bật trong Column picker) */
+const BOTTLETRACK_DESKTOP_TABLE_KEYS = [
+    'code',
+    'category',
+    'customer',
+    'recipient',
+    'type',
+    'product',
+    'quantity',
+    'cylinders',
+    'cylinder_debt',
+    'status',
+    'note',
+    'date',
+    'sales'
+];
 
 const isMachineProductType = (productType) => {
     const upper = String(productType || '').toUpperCase();
@@ -197,11 +228,15 @@ const collectCylinderSerialsFromOrder = (order) => {
     return [...new Set(out)];
 };
 
+const ORDERS_LIST_DISPLAY_MODE_KEY = 'orders_list_display_mode';
+
 const Orders = () => {
     const { role, department, user, loading: permissionsLoading } = usePermissions();
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
     const [searchTerm, setSearchTerm] = useState('');
+    /** Ô « Khách hàng » trong khối lọc (như HTML mock — bổ sung cho ô tìm trên toolbar) */
+    const [customerFilterHint, setCustomerFilterHint] = useState('');
     const [selectedOrder, setSelectedOrder] = useState(null);
     const [ordersToPrint, setOrdersToPrint] = useState(null);
     const [handoverToPrint, setHandoverToPrint] = useState(null);
@@ -251,6 +286,19 @@ const Orders = () => {
     });
     const [showColumnPicker, setShowColumnPicker] = useState(false);
     const columnPickerRef = useRef(null);
+    const [listDisplayMode, setListDisplayMode] = useState(() => {
+        try {
+            const saved = localStorage.getItem(ORDERS_LIST_DISPLAY_MODE_KEY);
+            if (saved === 'kanban' || saved === 'table') return saved;
+        } catch { /* ignore */ }
+        return 'table';
+    });
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(ORDERS_LIST_DISPLAY_MODE_KEY, listDisplayMode);
+        } catch { /* ignore */ }
+    }, [listDisplayMode]);
 
     useEffect(() => {
         setVisibleColumns((prev) => prev.filter((key) => !HIDDEN_ORDER_COLUMNS.has(key)));
@@ -262,6 +310,17 @@ const Orders = () => {
         .filter(key => visibleColumns.includes(key))
         .map(key => TABLE_COLUMNS.find(col => col.key === key))
         .filter(Boolean);
+    /** Desktop BottleTrack: thứ tự cột giống mock, chỉ gồm cột đang bật */
+    const desktopTableColumns = useMemo(
+        () =>
+            BOTTLETRACK_DESKTOP_TABLE_KEYS.map((key) =>
+                TABLE_COLUMNS.find((col) => col.key === key)
+            ).filter((col) => col && visibleColumns.includes(col.key)),
+        [visibleColumns]
+    );
+    /** Tránh bảng trống nếu người dùng tắt hết các cột BottleTrack */
+    const desktopColsForTable =
+        desktopTableColumns.length > 0 ? desktopTableColumns : visibleTableColumns;
     const visibleCount = visibleColumns.length;
     const totalCount = defaultColOrder.length;
 
@@ -581,9 +640,12 @@ const Orders = () => {
             (order.recipient_phone?.toLowerCase().includes(search))
         );
 
-        // Filter by status
-        const matchesStatus = selectedStatuses.length === 0 ||
-            selectedStatuses.includes(order.status);
+        // Filter by status (TU_CHOI legacy → Hủy đơn)
+        const matchesStatus =
+            selectedStatuses.length === 0 ||
+            selectedStatuses.some(
+                (sel) => resolveOrderStatusKey(sel) === resolveOrderStatusKey(order.status)
+            );
 
         // Filter by customer category
         const matchesCategory = selectedCustomerCategories.length === 0 ||
@@ -602,13 +664,20 @@ const Orders = () => {
         const matchesCustomer = selectedCustomers.length === 0 ||
             selectedCustomers.includes(order.customer_name);
 
+        const hint = normalizeText(customerFilterHint);
+        const matchesCustomerField =
+            !hint ||
+            normalizeText(order.customer_name).includes(hint) ||
+            normalizeText(order.order_code).includes(hint);
+
         return matchesSearch && matchesStatus && matchesCategory &&
-            matchesOrderType && matchesProductType && matchesCustomer;
+            matchesOrderType && matchesProductType && matchesCustomer &&
+            matchesCustomerField;
     });
 
     const sortedOrders = [...filteredOrders].sort((a, b) => {
-        const priorityA = STATUS_PRIORITY[a.status] || 99;
-        const priorityB = STATUS_PRIORITY[b.status] || 99;
+        const priorityA = STATUS_PRIORITY[resolveOrderStatusKey(a.status)] || 99;
+        const priorityB = STATUS_PRIORITY[resolveOrderStatusKey(b.status)] || 99;
 
         if (priorityA !== priorityB) {
             return priorityA - priorityB;
@@ -617,6 +686,52 @@ const Orders = () => {
         // Secondary sort: Newest first within same status
         return new Date(b.created_at) - new Date(a.created_at);
     });
+
+    /** Cột Kanban: đầy đủ mọi trạng thái trong ORDER_STATUSES (+ cột phụ cho mã không có trong danh mục) */
+    const kanbanColumns = useMemo(() => {
+        const byStatus = {};
+        sortedOrders.forEach((o) => {
+            let id = resolveOrderStatusKey(String(o.status ?? 'UNKNOWN'));
+            const mergeTo = KANBAN_LANE_MERGE_FROM_TO[id];
+            if (mergeTo) id = mergeTo;
+            if (!byStatus[id]) byStatus[id] = [];
+            byStatus[id].push(o);
+        });
+
+        const knownIds = new Set(
+            ORDER_STATUSES.filter((s) => s.id !== 'ALL').map((s) => s.id)
+        );
+
+        const orderedCfgs = ORDER_STATUSES.filter(
+            (s) => s.id !== 'ALL' && !KANBAN_HIDDEN_LANE_IDS.has(s.id)
+        ).sort(
+            (a, b) => (STATUS_PRIORITY[a.id] ?? 99) - (STATUS_PRIORITY[b.id] ?? 99)
+        );
+
+        const col = orderedCfgs.map((cfg) => ({
+            cfg,
+            orders: byStatus[cfg.id] ?? [],
+        }));
+
+        Object.keys(byStatus).forEach((id) => {
+            if (!knownIds.has(id)) {
+                const fallback = ORDER_STATUSES.find((s) => s.id === id);
+                col.push({
+                    cfg: fallback || { id, label: id, color: 'gray' },
+                    orders: byStatus[id],
+                });
+            }
+        });
+
+        col.sort((a, b) => (STATUS_PRIORITY[a.cfg.id] ?? 99) - (STATUS_PRIORITY[b.cfg.id] ?? 99));
+
+        return col;
+    }, [sortedOrders]);
+
+    const getOrderQuickQty = (order) =>
+        Array.isArray(order.order_items) && order.order_items.length > 0
+            ? order.order_items.reduce((s, it) => s + (Number(it.quantity) || 0), 0)
+            : Number(order.quantity) || 0;
 
     /** Đơn trong hàng giao — hiện nút lối tắt giống trang Nhiệm vụ giao hàng. */
     const isDeliveryQueueStatus = (orderStatus) =>
@@ -628,53 +743,46 @@ const Orders = () => {
         return sum + (order.total_amount || (order.quantity || 0) * (order.unit_price || 0));
     }, 0);
 
-    const filteredStatusCounts = useMemo(() => {
-        const map = {};
-        filteredOrders.forEach(o => {
-            map[o.status] = (map[o.status] || 0) + 1;
-        });
-        return map;
-    }, [filteredOrders]);
-
     const filteredPipelineCount = useMemo(
         () => filteredOrders.filter(o => PIPELINE_ATTENTION_STATUSES.has(o.status)).length,
         [filteredOrders]
     );
 
-    const statusChipsForStrip = useMemo(() => {
-        const known = ORDER_STATUSES.filter(s => s.id !== 'ALL').map(s => ({
-            id: s.id,
-            label: s.label,
-            color: s.color,
-            count: filteredStatusCounts[s.id] || 0
-        }));
-        const knownIds = new Set(known.map(s => s.id));
-        const extra = Object.entries(filteredStatusCounts)
-            .filter(([id]) => !knownIds.has(id))
-            .map(([id, count]) => ({
-                id,
-                label: id,
-                color: 'gray',
-                count
-            }));
-        return [...known, ...extra]
-            .filter(s => s.count > 0)
-            .sort((a, b) => (STATUS_PRIORITY[a.id] || 99) - (STATUS_PRIORITY[b.id] || 99));
-    }, [filteredStatusCounts]);
+    const getStatusConfig = (statusId) => getOrderStatusMeta(statusId);
 
-    const getStatusConfig = (statusId) => {
-        return ORDER_STATUSES.find(s => s.id === statusId) || ORDER_STATUSES[0];
-    };
-
+    /** Pill trạng thái như BottleTrack HTML mock (rounded-full border) */
     const getStatusBadgeClass = (statusColor) => clsx(
-        'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold',
-        statusColor === 'blue' && 'bg-blue-100 text-blue-700',
-        statusColor === 'yellow' && 'bg-amber-100 text-amber-700',
-        statusColor === 'orange' && 'bg-orange-100 text-orange-700',
-        statusColor === 'green' && 'bg-emerald-100 text-emerald-700',
-        statusColor === 'red' && 'bg-red-100 text-red-700',
-        statusColor === 'gray' && 'bg-muted text-muted-foreground',
-        !statusColor && 'bg-muted text-muted-foreground'
+        'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold whitespace-nowrap border',
+        statusColor === 'blue' && 'border-blue-200 bg-blue-100 text-blue-800',
+        statusColor === 'yellow' && 'border-amber-200 bg-amber-100 text-amber-800',
+        statusColor === 'orange' && 'border-orange-200 bg-orange-100 text-orange-800',
+        statusColor === 'green' && 'border-emerald-200 bg-emerald-100 text-emerald-800',
+        statusColor === 'red' && 'border-red-200 bg-red-100 text-red-800',
+        statusColor === 'gray' && 'border-slate-200 bg-slate-100 text-slate-700',
+        !statusColor && 'border-border bg-muted text-muted-foreground'
+    );
+
+    const getKanbanLaneHeaderClass = (statusColor) =>
+        clsx(
+            'shrink-0 rounded-t-xl border-b px-3 py-2.5',
+            statusColor === 'blue' && 'border-blue-100 bg-blue-50',
+            statusColor === 'yellow' && 'border-amber-100 bg-amber-50',
+            statusColor === 'orange' && 'border-orange-100 bg-orange-50',
+            statusColor === 'green' && 'border-emerald-100 bg-emerald-50',
+            statusColor === 'red' && 'border-rose-100 bg-rose-50',
+            statusColor === 'gray' && 'border-slate-200 bg-slate-50',
+            statusColor === 'indigo' && 'border-indigo-100 bg-indigo-50',
+            statusColor === 'purple' && 'border-violet-100 bg-violet-50',
+            statusColor === 'cyan' && 'border-cyan-100 bg-cyan-50',
+            !statusColor && 'border-slate-200 bg-white'
+        );
+
+    /** Global `button` (index.css) dùng padding 20px + height 40px — ô w-7 sẽ “nuốt” icon; bắt buộc ghi đè. */
+    const kanbanCardActionBtnClass = clsx(
+        '!flex !h-7 !w-7 !min-h-0 !shrink-0 !items-center !justify-center !p-0 !rounded-md',
+        '!border !border-slate-300 !bg-white !text-slate-700 !shadow-sm',
+        'transition hover:border-[#00288e]/40 hover:bg-[#00288e]/[0.08] hover:!text-[#00288e] active:scale-[0.96]',
+        '[&_svg]:block [&_svg]:shrink-0'
     );
 
     const getFilterButtonClass = (filterKey, isActive) => {
@@ -780,17 +888,27 @@ const Orders = () => {
         return warehouseValue;
     };
 
-    const hasActiveFilters = selectedStatuses.length > 0 || selectedCustomerCategories.length > 0 ||
-        selectedOrderTypes.length > 0 || selectedProductTypes.length > 0 || selectedCustomers.length > 0;
+    const hasActiveFilters =
+        selectedStatuses.length > 0 ||
+        selectedCustomerCategories.length > 0 ||
+        selectedOrderTypes.length > 0 ||
+        selectedProductTypes.length > 0 ||
+        selectedCustomers.length > 0 ||
+        !!customerFilterHint.trim();
 
-    const totalActiveFilters = selectedStatuses.length + selectedCustomerCategories.length +
-        selectedOrderTypes.length + selectedProductTypes.length + selectedCustomers.length;
+    const totalActiveFilters =
+        selectedStatuses.length +
+        selectedCustomerCategories.length +
+        selectedOrderTypes.length +
+        selectedProductTypes.length +
+        selectedCustomers.length +
+        (customerFilterHint.trim() ? 1 : 0);
 
     // Filter options for the modern FilterDropdown
     const statusOptions = ORDER_STATUSES.filter(s => s.id !== 'ALL').map(s => ({
         id: s.id,
         label: s.label,
-        count: orders.filter(o => o.status === s.id).length
+        count: orders.filter((o) => resolveOrderStatusKey(o.status) === s.id).length
     }));
 
     const categoryOptions = CUSTOMER_CATEGORIES.map(c => ({
@@ -888,18 +1006,25 @@ const Orders = () => {
     };
 
     const handleDeleteOrder = async (id, orderCode) => {
-        if (!window.confirm(`Bạn có chắc chắn muốn xóa đơn hàng ${orderCode} không?`)) {
+        if (
+            !window.confirm(
+                `Bạn có chắc muốn xóa đơn ${orderCode}?\n\nHệ thống sẽ hoàn tác tồn kho (xuất/nhập ghi theo đơn), trả bình/máy đã gán về trạng thái trước khi có đơn, rồi xóa dòng đơn và chi tiết.`,
+            )
+        ) {
             return;
         }
 
         try {
-            const { error } = await supabase
-                .from('orders')
-                .delete()
-                .eq('id', id);
-
-            if (error) throw error;
-            setSelectedIds(prev => prev.filter(i => i !== id));
+            const { deleted, failed } = await deleteOrdersWithRollback(supabase, [id]);
+            if (failed.length > 0) {
+                throw new Error(failed[0].message);
+            }
+            if (deleted === 0) {
+                alert('Không tìm thấy đơn để xóa (có thể đã bị xóa trước đó).');
+                fetchOrders();
+                return;
+            }
+            setSelectedIds((prev) => prev.filter((i) => i !== id));
             fetchOrders();
         } catch (error) {
             console.error('Error deleting order:', error);
@@ -910,21 +1035,35 @@ const Orders = () => {
     const handleBulkDelete = async () => {
         if (selectedIds.length === 0) return;
 
-        if (!window.confirm(`Bạn có chắc chắn muốn xóa ${selectedIds.length} đơn hàng đã chọn không?`)) {
+        if (
+            !window.confirm(
+                `Bạn có chắc muốn xóa ${selectedIds.length} đơn đã chọn?\n\nMỗi đơn sẽ được hoàn tác tồn kho, bình/máy gán, rồi xóa dữ liệu đơn.`,
+            )
+        ) {
             return;
         }
 
+        const idsToDelete = [...selectedIds];
+
         try {
-            const { error } = await supabase
-                .from('orders')
-                .delete()
-                .in('id', selectedIds);
+            const { deleted, failed } = await deleteOrdersWithRollback(supabase, idsToDelete);
 
-            if (error) throw error;
+            const failedSet = new Set(failed.map((f) => f.orderId));
+            const succeededIds = idsToDelete.filter((oid) => !failedSet.has(oid));
+            setSelectedIds((prev) => prev.filter((i) => !succeededIds.includes(i)));
 
-            setSelectedIds([]);
             fetchOrders();
-            alert('✅ Đã xóa các đơn hàng thành công!');
+
+            if (failed.length === 0) {
+                alert(`✅ Đã xóa ${deleted} đơn hàng (đã hoàn tác dữ liệu liên quan).`);
+                return;
+            }
+
+            const detail = failed.map((f) => `• ${f.orderId}: ${f.message}`).join('\n');
+            alert(
+                `Đã xóa thành công ${deleted}/${idsToDelete.length} đơn.\n` +
+                    `${failed.length} đơn gặp lỗi:\n${detail}`,
+            );
         } catch (error) {
             console.error('Error deleting orders:', error);
             alert('❌ Có lỗi xảy ra khi xóa danh sách đơn hàng: ' + error.message);
@@ -1036,7 +1175,7 @@ const Orders = () => {
         switch (key) {
             case 'code':
                 return (
-                    <span className="text-[13px] font-medium text-foreground">
+                    <span className="text-[13px] md:text-sm font-semibold md:font-bold text-foreground md:text-blue-700">
                         {order.order_code}
                     </span>
                 );
@@ -1047,7 +1186,11 @@ const Orders = () => {
                     </span>
                 );
             case 'customer':
-                return <span className="text-[13px] font-medium text-foreground">{order.customer_name}</span>;
+                return (
+                    <span className="text-[13px] md:text-sm font-medium md:font-semibold text-foreground">
+                        {order.customer_name}
+                    </span>
+                );
             case 'sales':
                 return <span className="text-[13px] text-muted-foreground font-medium">{order.ordered_by || '—'}</span>;
             case 'recipient':
@@ -1115,21 +1258,27 @@ const Orders = () => {
                     )
                 );
             }
-            case 'cylinder_debt':
+            case 'cylinder_debt': {
+                const debts = allCustomerDebts[order.customer_id] || [];
+                const total = debts.reduce((s, d) => s + (Number(d.balance) || 0), 0);
+                const tooltip = debts
+                    .map((d) => `${d.cylinder_type || '?'}:${d.balance}`)
+                    .join('; ');
+                if (debts.length === 0) {
+                    return <span className="text-slate-400 italic whitespace-nowrap">0</span>;
+                }
                 return (
-                    <div className="flex flex-col gap-0.5">
-                        {(allCustomerDebts[order.customer_id] || []).length > 0 ? (
-                            allCustomerDebts[order.customer_id].map((debt, idx) => (
-                                <div key={idx} className="flex items-center justify-between gap-2 whitespace-nowrap">
-                                    <span className="text-slate-500 font-medium">{debt.cylinder_type}:</span>
-                                    <span className="text-rose-600 font-bold">{debt.balance}</span>
-                                </div>
-                            ))
-                        ) : (
-                            <span className="text-slate-400 italic">Hết nợ</span>
+                    <span
+                        className={clsx(
+                            'inline-block whitespace-nowrap text-right font-semibold tabular-nums md:text-[13px]',
+                            total > 0 ? 'text-rose-600' : 'text-foreground'
                         )}
-                    </div>
+                        title={tooltip || undefined}
+                    >
+                        {formatNumber(total)}
+                    </span>
                 );
+            }
             case 'status':
                 return (
                     <span className={getStatusBadgeClass(status.color)}>
@@ -1151,19 +1300,161 @@ const Orders = () => {
         }
     };
 
-    return (
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5 pb-20 md:pb-0">
-            <PageViewSwitcher
-                activeView={activeView}
-                setActiveView={setActiveView}
-                views={[
-                    { id: 'list', label: 'Danh sách', icon: <List size={16} /> },
-                    { id: 'stats', label: 'Thống kê', icon: <BarChart2 size={16} /> },
-                ]}
-            />
+    const openCreateOrderForm = () => {
+        setOrderToEdit(null);
+        setIsFormModalOpen(true);
+    };
 
+    return (
+        <div
+            className={clsx(
+                'animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 pb-20',
+                activeView === 'list' ? 'md:bg-[#f7f9fb] md:px-6 md:pb-8' : 'md:px-1.5 md:pb-0'
+            )}
+        >
             {activeView === 'list' && (
-                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full">
+                <>
+                {/* Desktop: thanh điều khiển đầu trang — một hàng */}
+                <div className="hidden shrink-0 font-[family-name:Manrope,system-ui,sans-serif] md:-mt-1 md:mb-4 md:block">
+                    <div className="sticky top-0 z-30 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                        <div className="flex min-h-14 flex-nowrap items-center gap-3 overflow-x-auto px-5 py-3 sm:gap-4 sm:px-6 scrollbar-hide">
+                            <h2 className="shrink-0 text-base font-extrabold tracking-tight text-slate-900 sm:text-lg">
+                                Quản lý đơn hàng
+                            </h2>
+                            <div className="relative min-w-0 max-w-xl flex-1 md:max-w-md lg:max-w-lg">
+                                <Search
+                                    className="pointer-events-none absolute left-3 top-1/2 size-[18px] -translate-y-1/2 text-slate-400"
+                                    aria-hidden
+                                />
+                                <input
+                                    type="text"
+                                    placeholder="Tìm kiếm đơn hàng, khách hàng..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="w-full rounded-lg border-0 bg-slate-100 py-2 pl-10 pr-8 text-sm transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00288e]/25"
+                                />
+                                {searchTerm && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setSearchTerm('')}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                    >
+                                        <X size={14} />
+                                    </button>
+                                )}
+                            </div>
+                            <div
+                                className="ml-auto flex shrink-0 items-center gap-2"
+                                role="group"
+                                aria-label="Chế độ hiển thị"
+                            >
+                                <div className="flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+                                    <button
+                                        type="button"
+                                        title="Bảng"
+                                        aria-pressed={listDisplayMode === 'table'}
+                                        onClick={() => setListDisplayMode('table')}
+                                        className={clsx(
+                                            'flex h-9 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-bold transition-all sm:px-3 sm:text-[13px]',
+                                            listDisplayMode === 'table'
+                                                ? 'bg-white text-[#00288e] shadow-sm'
+                                                : 'text-slate-600 hover:text-slate-900'
+                                        )}
+                                    >
+                                        <Table2 size={16} className="shrink-0" aria-hidden />
+                                        <span className="hidden sm:inline">Bảng</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        title="Kanban"
+                                        aria-pressed={listDisplayMode === 'kanban'}
+                                        onClick={() => {
+                                            setListDisplayMode('kanban');
+                                            setShowColumnPicker(false);
+                                        }}
+                                        className={clsx(
+                                            'flex h-9 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-bold transition-all sm:px-3 sm:text-[13px]',
+                                            listDisplayMode === 'kanban'
+                                                ? 'bg-white text-[#00288e] shadow-sm'
+                                                : 'text-slate-600 hover:text-slate-900'
+                                        )}
+                                    >
+                                        <LayoutGrid size={16} className="shrink-0" aria-hidden />
+                                        <span className="hidden sm:inline">Kanban</span>
+                                    </button>
+                                </div>
+                                {listDisplayMode === 'table' && (
+                                    <div className="relative" ref={columnPickerRef}>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowColumnPicker((prev) => !prev)}
+                                            className={clsx(
+                                                'flex h-10 items-center gap-2 whitespace-nowrap rounded-lg border px-4 text-[13px] font-bold shadow-sm transition-colors',
+                                                showColumnPicker
+                                                    ? 'border-[#00288e]/40 bg-[#00288e]/5 text-[#00288e]'
+                                                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                                            )}
+                                        >
+                                            <SlidersHorizontal size={16} />
+                                            Cột ({visibleCount}/{totalCount})
+                                        </button>
+                                        {showColumnPicker && (
+                                            <ColumnPicker
+                                                columnOrder={columnOrder}
+                                                setColumnOrder={setColumnOrder}
+                                                visibleColumns={visibleColumns}
+                                                setVisibleColumns={setVisibleColumns}
+                                                defaultColOrder={defaultColOrder}
+                                                columnDefs={columnDefs}
+                                            />
+                                        )}
+                                    </div>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={openCreateOrderForm}
+                                    className="flex h-10 shrink-0 items-center gap-2 rounded-lg px-4 text-[13px] font-bold text-white shadow-sm transition hover:opacity-90 active:scale-[0.98]"
+                                    style={{ backgroundColor: BT_PRIMARY }}
+                                >
+                                    <Plus size={17} aria-hidden />
+                                    Thêm
+                                </button>
+                            </div>
+                        </div>
+                        {selectedIds.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-5 py-2.5 sm:px-6">
+                                <span className="mr-auto text-[12px] font-bold text-slate-600">
+                                    Đã chọn <span className="text-[#00288e]">{selectedIds.length}</span> đơn
+                                </span>
+                                <button
+                                    onClick={handleBulkPrint}
+                                    type="button"
+                                    className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-[13px] font-bold text-slate-700 shadow-sm hover:bg-slate-50"
+                                >
+                                    <Printer size={16} />
+                                    In {selectedIds.length} phiếu
+                                </button>
+                                <button
+                                    onClick={handleBulkDelete}
+                                    type="button"
+                                    className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-[13px] font-bold text-rose-600 shadow-sm hover:bg-rose-100"
+                                >
+                                    <Trash2 size={16} />
+                                    Xóa ({selectedIds.length})
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedIds([])}
+                                    className="text-[12px] font-bold text-slate-500 hover:text-slate-800"
+                                >
+                                    Bỏ chọn
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                <div className="flex flex-col flex-1 min-h-0 w-full rounded-2xl border border-border bg-white shadow-sm md:overflow-hidden md:rounded-xl md:border-slate-200 md:shadow-md">
                     <MobilePageHeader
                         searchTerm={searchTerm}
                         setSearchTerm={setSearchTerm}
@@ -1470,152 +1761,50 @@ const Orders = () => {
                         )}
                     </div>
 
-                    {/* ── DESKTOP TOOLBAR ── */}
-                    <div className="hidden md:block p-3 space-y-3">
-                        <div className="flex items-center justify-between gap-4">
-                            <div className="flex items-center gap-2 flex-1">
-                                <button
-                                    onClick={() => navigate(-1)}
-                                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground text-[12px] font-bold transition-all bg-white shadow-sm shrink-0"
-                                >
-                                    <ChevronLeft size={16} />
-                                    Quay lại
-                                </button>
-                                <div className="relative flex-1">
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
-                                    <input
-                                        type="text"
-                                        placeholder="Tìm kiếm . . ."
-                                        value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="w-full pl-10 pr-8 py-1.5 bg-muted/20 border border-border/80 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
-                                    />
-                                    {searchTerm && (
-                                        <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                                            <X size={14} />
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                {selectedIds.length > 0 && (
-                                    <div className="flex items-center gap-2 animate-in slide-in-from-right-4">
-                                        <button
-                                            onClick={handleBulkPrint}
-                                            className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-border bg-white text-muted-foreground text-[13px] font-bold hover:bg-muted/20 shadow-sm transition-all"
-                                        >
-                                            <Printer size={16} />
-                                            In {selectedIds.length} phiếu
-                                        </button>
-                                        <button
-                                            onClick={handleBulkDelete}
-                                            className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-600 text-[13px] font-bold hover:bg-rose-100 shadow-sm transition-all"
-                                        >
-                                            <Trash2 size={16} />
-                                            Xóa ({selectedIds.length})
-                                        </button>
-                                    </div>
-                                )}
-                                <div className="relative" ref={columnPickerRef}>
-                                    <button
-                                        onClick={() => setShowColumnPicker(prev => !prev)}
-                                        className={clsx(
-                                            'flex items-center gap-2 px-4 py-1.5 rounded-xl border text-[13px] font-bold transition-all bg-white shadow-sm',
-                                            showColumnPicker
-                                                ? 'border-primary bg-primary/5 text-primary'
-                                                : 'border-border text-muted-foreground hover:bg-muted/20'
-                                        )}
-                                    >
-                                        <SlidersHorizontal size={16} />
-                                        Cột ({visibleCount}/{totalCount})
-                                    </button>
-                                    {showColumnPicker && (
-                                        <ColumnPicker
-                                            columnOrder={columnOrder}
-                                            setColumnOrder={setColumnOrder}
-                                            visibleColumns={visibleColumns}
-                                            setVisibleColumns={setVisibleColumns}
-                                            defaultColOrder={defaultColOrder}
-                                            columnDefs={columnDefs}
-                                        />
-                                    )}
-                                </div>
-                                <button
-                                    onClick={() => {
-                                        setOrderToEdit(null);
-                                        setIsFormModalOpen(true);
-                                    }}
-                                    className="flex items-center gap-2 px-6 py-1.5 rounded-xl bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all"
-                                >
-                                    <Plus size={18} />
-                                    Thêm
-                                </button>
-                            </div>
+                    {/* ── DESKTOP TOOLBAR — BottleTrack ── */}
+                    <div className="hidden md:block border-b border-slate-200 p-6 pb-8">
+                        <div className="mb-6 flex flex-wrap gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-[11px] font-semibold text-slate-600 shadow-sm ring-1 ring-slate-100">
+                            <span className="inline-flex flex-wrap items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-800">
+                                <span className="text-slate-500">Đang hiển thị:</span>{' '}
+                                <strong className="tabular-nums text-[#00288e]">{filteredOrders.length}</strong>
+                                <span>/</span>
+                                <strong className="tabular-nums text-slate-600">{orders.length}</strong>
+                                <span className="text-slate-500 font-medium">đơn</span>
+                            </span>
+                            <span className="rounded-md bg-[#00288e]/7 px-2.5 py-1 font-bold text-[#00288e] ring-1 ring-[#00288e]/10">
+                                Giá trị lọc {formatNumber(totalAmount)}đ
+                            </span>
+                            <span className="rounded-md bg-amber-50 px-2.5 py-1 font-bold text-amber-900 ring-1 ring-amber-100">
+                                Chờ xử lý {filteredPipelineCount}
+                            </span>
                         </div>
 
-                        <div className="rounded-lg border border-slate-200/90 bg-gradient-to-br from-slate-50 to-white px-2 py-1.5 shadow-sm">
-                            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 -mx-0.5 px-0.5 custom-scrollbar whitespace-nowrap">
-                                <span className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[11px] font-bold text-slate-800 border border-slate-200 shadow-sm">
-                                    Hiển thị{' '}
-                                    <span className="text-primary tabular-nums">{filteredOrders.length}</span>
-                                    <span className="text-slate-400 font-semibold">/</span>
-                                    <span className="tabular-nums text-slate-600">{orders.length}</span>
-                                    <span className="text-slate-500 font-semibold">đơn</span>
-                                </span>
-                                <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-[11px] font-bold text-primary border border-primary/20">
-                                    Giá trị lọc{' '}
-                                    <span className="tabular-nums">{formatNumber(totalAmount)}</span> đ
-                                </span>
-                                <span
-                                    className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-900 border border-amber-200/80"
-                                    title="Chờ duyệt, điều chỉnh, kho hoặc KD xử lý"
-                                >
-                                    Chờ xử lý{' '}
-                                    <span className="tabular-nums">{filteredPipelineCount}</span>
-                                </span>
-                                {statusChipsForStrip.length === 0 ? (
-                                    <span className="text-[11px] text-muted-foreground italic px-1 py-0.5">
-                                        Không có đơn sau bộ lọc
-                                    </span>
-                                ) : (
-                                    statusChipsForStrip.map(s => (
-                                        <span
-                                            key={s.id}
-                                            title={`${s.label}: ${s.count} đơn`}
-                                            className={clsx(
-                                                getStatusBadgeClass(s.color),
-                                                'shrink-0 text-[9px] px-2 py-0.5 gap-1 border border-black/5'
-                                            )}
-                                        >
-                                            <span className="max-w-[min(10rem,28vw)] truncate">{s.label}</span>
-                                            <span className="tabular-nums font-black opacity-90">{s.count}</span>
-                                        </span>
-                                    ))
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Secondary Filters */}
-                        <div className="flex flex-wrap items-center gap-2" ref={listDropdownRef}>
-                            <div className="relative">
+                        {/* Bộ lọc — nhãn mock + trigger dạng select */}
+                        <div
+                            ref={listDropdownRef}
+                            className="flex flex-wrap items-end gap-x-5 gap-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+                        >
+                            <div className="relative min-w-[160px] flex-1 lg:min-w-[180px]">
+                                <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                                    Trạng thái
+                                </label>
                                 <button
+                                    type="button"
                                     onClick={() => {
                                         if (activeDropdown !== 'status') setFilterSearch('');
                                         setActiveDropdown(activeDropdown === 'status' ? null : 'status');
                                     }}
                                     className={clsx(
-                                        "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
-                                        getFilterButtonClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)
+                                        'flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-left text-sm font-medium shadow-sm hover:bg-white',
+                                        (activeDropdown === 'status' || selectedStatuses.length > 0) && 'border-[#00288e]/40 ring-2 ring-[#00288e]/15'
                                     )}
                                 >
-                                    <Filter size={14} className={getFilterIconClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)} />
-                                    Trạng thái
-                                    {selectedStatuses.length > 0 && (
-                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('status'))}>
-                                            {selectedStatuses.length}
-                                        </span>
-                                    )}
-                                    <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'status' ? "rotate-180" : "")} />
+                                    <span className="truncate">
+                                        {selectedStatuses.length === 0
+                                            ? 'Tất cả trạng thái'
+                                            : `${selectedStatuses.length} đã chọn`}
+                                    </span>
+                                    <ChevronDown size={18} className={clsx('shrink-0 opacity-70', activeDropdown === 'status' && 'rotate-180')} />
                                 </button>
                                 {activeDropdown === 'status' && (
                                     <FilterDropdown
@@ -1628,25 +1817,28 @@ const Orders = () => {
                                 )}
                             </div>
 
-                            <div className="relative">
+                            <div className="relative min-w-[160px] flex-1 lg:min-w-[180px]">
+                                <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                                    Loại khách
+                                </label>
                                 <button
+                                    type="button"
                                     onClick={() => {
                                         if (activeDropdown !== 'categories') setFilterSearch('');
                                         setActiveDropdown(activeDropdown === 'categories' ? null : 'categories');
                                     }}
                                     className={clsx(
-                                        "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
-                                        getFilterButtonClass('categories', activeDropdown === 'categories' || selectedCustomerCategories.length > 0)
+                                        'flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-left text-sm font-medium shadow-sm hover:bg-white',
+                                        (activeDropdown === 'categories' || selectedCustomerCategories.length > 0) &&
+                                            'border-[#00288e]/40 ring-2 ring-[#00288e]/15'
                                     )}
                                 >
-                                    <User size={14} className={getFilterIconClass('categories', activeDropdown === 'categories' || selectedCustomerCategories.length > 0)} />
-                                    Loại khách
-                                    {selectedCustomerCategories.length > 0 && (
-                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('categories'))}>
-                                            {selectedCustomerCategories.length}
-                                        </span>
-                                    )}
-                                    <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'categories' ? "rotate-180" : "")} />
+                                    <span className="truncate">
+                                        {selectedCustomerCategories.length === 0
+                                            ? 'Tất cả loại khách'
+                                            : `${selectedCustomerCategories.length} đã chọn`}
+                                    </span>
+                                    <ChevronDown size={18} className={clsx('shrink-0 opacity-70', activeDropdown === 'categories' && 'rotate-180')} />
                                 </button>
                                 {activeDropdown === 'categories' && (
                                     <FilterDropdown
@@ -1659,25 +1851,28 @@ const Orders = () => {
                                 )}
                             </div>
 
-                            <div className="relative">
+                            <div className="relative min-w-[160px] flex-1 lg:min-w-[180px]">
+                                <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                                    Loại đơn
+                                </label>
                                 <button
+                                    type="button"
                                     onClick={() => {
                                         if (activeDropdown !== 'orderTypes') setFilterSearch('');
                                         setActiveDropdown(activeDropdown === 'orderTypes' ? null : 'orderTypes');
                                     }}
                                     className={clsx(
-                                        "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
-                                        getFilterButtonClass('orderTypes', activeDropdown === 'orderTypes' || selectedOrderTypes.length > 0)
+                                        'flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-left text-sm font-medium shadow-sm hover:bg-white',
+                                        (activeDropdown === 'orderTypes' || selectedOrderTypes.length > 0) &&
+                                            'border-[#00288e]/40 ring-2 ring-[#00288e]/15'
                                     )}
                                 >
-                                    <Package size={14} className={getFilterIconClass('orderTypes', activeDropdown === 'orderTypes' || selectedOrderTypes.length > 0)} />
-                                    Loại đơn
-                                    {selectedOrderTypes.length > 0 && (
-                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('orderTypes'))}>
-                                            {selectedOrderTypes.length}
-                                        </span>
-                                    )}
-                                    <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'orderTypes' ? "rotate-180" : "")} />
+                                    <span className="truncate">
+                                        {selectedOrderTypes.length === 0
+                                            ? 'Tất cả loại đơn'
+                                            : `${selectedOrderTypes.length} đã chọn`}
+                                    </span>
+                                    <ChevronDown size={18} className={clsx('shrink-0 opacity-70', activeDropdown === 'orderTypes' && 'rotate-180')} />
                                 </button>
                                 {activeDropdown === 'orderTypes' && (
                                     <FilterDropdown
@@ -1690,25 +1885,28 @@ const Orders = () => {
                                 )}
                             </div>
 
-                            <div className="relative">
+                            <div className="relative min-w-[160px] flex-1 lg:min-w-[180px]">
+                                <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                                    Hàng hóa
+                                </label>
                                 <button
+                                    type="button"
                                     onClick={() => {
                                         if (activeDropdown !== 'productTypes') setFilterSearch('');
                                         setActiveDropdown(activeDropdown === 'productTypes' ? null : 'productTypes');
                                     }}
                                     className={clsx(
-                                        "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
-                                        getFilterButtonClass('productTypes', activeDropdown === 'productTypes' || selectedProductTypes.length > 0)
+                                        'flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-left text-sm font-medium shadow-sm hover:bg-white',
+                                        (activeDropdown === 'productTypes' || selectedProductTypes.length > 0) &&
+                                            'border-[#00288e]/40 ring-2 ring-[#00288e]/15'
                                     )}
                                 >
-                                    <Package size={14} className={getFilterIconClass('productTypes', activeDropdown === 'productTypes' || selectedProductTypes.length > 0)} />
-                                    Hàng hóa
-                                    {selectedProductTypes.length > 0 && (
-                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('productTypes'))}>
-                                            {selectedProductTypes.length}
-                                        </span>
-                                    )}
-                                    <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'productTypes' ? "rotate-180" : "")} />
+                                    <span className="truncate">
+                                        {selectedProductTypes.length === 0
+                                            ? 'Tất cả sản phẩm'
+                                            : `${selectedProductTypes.length} đã chọn`}
+                                    </span>
+                                    <ChevronDown size={18} className={clsx('shrink-0 opacity-70', activeDropdown === 'productTypes' && 'rotate-180')} />
                                 </button>
                                 {activeDropdown === 'productTypes' && (
                                     <FilterDropdown
@@ -1721,35 +1919,40 @@ const Orders = () => {
                                 )}
                             </div>
 
-                            <div className="relative">
-                                <button
-                                    onClick={() => {
-                                        if (activeDropdown !== 'customers') setFilterSearch('');
-                                        setActiveDropdown(activeDropdown === 'customers' ? null : 'customers');
-                                    }}
-                                    className={clsx(
-                                        "flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all",
-                                        getFilterButtonClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)
-                                    )}
-                                >
-                                    <User size={14} className={getFilterIconClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)} />
+                            <div className="relative min-w-[160px] flex-1 lg:min-w-[180px]">
+                                <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">
                                     Khách hàng
-                                    {selectedCustomers.length > 0 && (
-                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('customers'))}>
-                                            {selectedCustomers.length}
-                                        </span>
-                                    )}
-                                    <ChevronDown size={14} className={clsx("transition-transform", activeDropdown === 'customers' ? "rotate-180" : "")} />
-                                </button>
-                                {activeDropdown === 'customers' && (
-                                    <FilterDropdown
-                                        options={customerOptions}
-                                        selected={selectedCustomers}
-                                        setSelected={setSelectedCustomers}
-                                        filterSearch={filterSearch}
-                                        setFilterSearch={setFilterSearch}
-                                    />
+                                </label>
+                                <input
+                                    type="text"
+                                    value={customerFilterHint}
+                                    onChange={(e) => setCustomerFilterHint(e.target.value)}
+                                    placeholder="Tên KH hoặc Mã ĐH"
+                                    className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm shadow-sm outline-none placeholder:text-slate-400 focus:border-[#00288e]/40 focus:bg-white focus:ring-2 focus:ring-[#00288e]/15"
+                                />
+                                {selectedCustomers.length > 0 && (
+                                    <p className="mt-1 text-[11px] text-slate-500">
+                                        Đã chọn {selectedCustomers.length} khách từ bộ lọc đầy đủ ·{' '}
+                                        <button
+                                            type="button"
+                                            className="font-semibold text-[#00288e] hover:underline"
+                                            onClick={openMobileFilter}
+                                        >
+                                            mở bộ lọc
+                                        </button>
+                                    </p>
                                 )}
+                            </div>
+
+                            <div className="flex min-h-[3.625rem] items-end">
+                                <button
+                                    type="button"
+                                    onClick={openMobileFilter}
+                                    title="Bộ lọc đầy đủ (loại máy chủ, khách danh mục...)"
+                                    className="flex h-10 min-w-[2.75rem] items-center justify-center rounded-lg bg-slate-100 text-slate-700 transition-colors hover:bg-slate-200"
+                                >
+                                    <ListFilter size={22} aria-hidden />
+                                </button>
                             </div>
 
                             {hasActiveFilters && (
@@ -1760,6 +1963,7 @@ const Orders = () => {
                                         setSelectedOrderTypes([]);
                                         setSelectedProductTypes([]);
                                         setSelectedCustomers([]);
+                                        setCustomerFilterHint('');
                                     }}
                                     className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-red-300 text-red-500 text-[12px] font-bold hover:bg-red-50 transition-all"
                                 >
@@ -1770,99 +1974,91 @@ const Orders = () => {
                         </div>
                     </div>
 
-                    {/* Table Content Area */}
-                    <div className="hidden md:block flex-1 overflow-x-auto bg-white">
-                        <table className="w-full border-collapse">
-                            <thead className="bg-[#F1F5FF]">
-                                <tr>
-                                    <th className="px-4 py-3.5 w-10">
+                    {/* Desktop: bảng hoặc Kanban */}
+                    <div
+                        className={clsx(
+                            'scrollbar-hide hidden min-h-0 flex-1 md:block',
+                            listDisplayMode === 'kanban' && 'md:flex md:min-h-0 md:flex-col'
+                        )}
+                    >
+                        {listDisplayMode === 'table' ? (
+                            <div className="overflow-x-auto bg-white">
+                                <table className="w-full border-collapse text-left">
+                            <thead>
+                                <tr className="border-b border-slate-200 bg-slate-50">
+                                    <th className="px-4 py-4 w-10 whitespace-nowrap">
                                         <div className="flex items-center justify-center">
                                             <input
                                                 type="checkbox"
-                                                className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20"
+                                                className="h-4 w-4 rounded border-border text-primary focus:ring-primary/20"
                                                 checked={selectedIds.length === filteredOrders.length && filteredOrders.length > 0}
                                                 onChange={toggleSelectAll}
                                             />
                                         </div>
                                     </th>
-                                    {visibleTableColumns.map(col => (
+                                    {desktopColsForTable.map((col) => (
                                         <th
                                             key={col.key}
                                             className={clsx(
-                                                "px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide",
-                                                col.key === 'code' && 'border-l border-r border-primary/10'
+                                                'px-4 py-4 text-[12px] font-semibold uppercase tracking-wider text-slate-500 whitespace-nowrap',
+                                                (col.key === 'quantity' || col.key === 'cylinder_debt') && 'text-right'
                                             )}
                                         >
-                                            {col.label}
+                                            {col.key === 'sales' ? 'Nhân viên KD' : col.label}
                                         </th>
                                     ))}
-                                    <th className="sticky right-0 z-30 bg-[#F1F5FF] px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide shadow-[-6px_0_10px_-8px_rgba(15,23,42,0.35)] before:content-[''] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:bg-slate-300">Thao tác</th>
+                                    <th className="sticky right-0 z-30 whitespace-nowrap border-b border-slate-200 bg-slate-50 px-4 py-4 shadow-[-4px_0_4px_rgba(0,0,0,0.02)]" />
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-primary/10">
+                            <tbody className="divide-y divide-slate-100">
                                 {isLoading ? (
                                     <tr>
-                                        <td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center text-muted-foreground">
+                                        <td colSpan={desktopColsForTable.length + 2} className="px-4 py-16 text-center text-muted-foreground">
                                             Đang tải dữ liệu...
                                         </td>
                                     </tr>
                                 ) : sortedOrders.length === 0 ? (
                                     <tr>
-                                        <td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center text-muted-foreground">
+                                        <td colSpan={desktopColsForTable.length + 2} className="px-4 py-16 text-center text-muted-foreground">
                                             Không tìm thấy đơn hàng nào
                                         </td>
                                     </tr>
                                 ) : sortedOrders.map((order) => {
                                     const status = getStatusConfig(order.status);
                                     return (
-                                        <tr key={order.id} className={getRowStyle(order.customer_category, selectedIds.includes(order.id))}>
-                                            <td className="px-4 py-4 uppercase">
+                                        <tr
+                                            key={order.id}
+                                            className={clsx(
+                                                'transition-colors hover:bg-slate-50 group',
+                                                selectedIds.includes(order.id) && 'bg-blue-50/50'
+                                            )}
+                                        >
+                                            <td className="px-4 py-4 uppercase whitespace-nowrap">
                                                 <div className="flex items-center justify-center">
                                                     <input
                                                         type="checkbox"
-                                                        className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20"
+                                                        className="h-4 w-4 rounded border-border text-primary focus:ring-primary/20"
                                                         checked={selectedIds.includes(order.id)}
                                                         onChange={() => toggleSelect(order.id)}
                                                     />
                                                 </div>
                                             </td>
-                                            {visibleTableColumns.map(col => (
+                                            {desktopColsForTable.map((col) => (
                                                 <td
                                                     key={col.key}
                                                     className={clsx(
-                                                        "px-4 py-4",
-                                                        col.key === 'code' && 'border-l border-r border-primary/10'
+                                                        'px-4 py-4 text-sm whitespace-nowrap',
+                                                        col.key === 'note' && 'max-w-[12rem]',
+                                                        col.key === 'quantity' && 'text-right font-bold tabular-nums',
+                                                        col.key === 'cylinder_debt' && 'text-right',
+                                                        (col.key === 'sales' || col.key === 'recipient') && 'font-normal text-slate-900'
                                                     )}
                                                 >
                                                     {renderCell(col.key, order)}
                                                 </td>
                                             ))}
-                                            <td className="sticky right-0 z-20 bg-white px-2 py-4 text-center shadow-[-6px_0_10px_-8px_rgba(15,23,42,0.25)] before:content-[''] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:bg-slate-300 min-w-[200px] max-w-[320px]">
-                                                <div className="flex flex-col items-stretch gap-1.5">
-                                                    {isDeliveryQueueStatus(order.status) && (
-                                                        <div className="flex flex-wrap items-center justify-center gap-1">
-                                                            <button
-                                                                type="button"
-                                                                title="Mở xác nhận giao hàng (Nhiệm vụ giao hàng)"
-                                                                onClick={() => navigate(`/nhiem-vu-giao-hang?focusOrderId=${order.id}`)}
-                                                                className="shrink-0 px-2 py-1.5 rounded-lg bg-primary text-white text-[11px] font-bold shadow-sm hover:opacity-95 inline-flex items-center gap-1"
-                                                            >
-                                                                <CheckCircle2 size={14} className="shrink-0" />
-                                                                Giao hàng
-                                                            </button>
-                                                            <a
-                                                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.recipient_address || '')}`}
-                                                                target="_blank"
-                                                                rel="noopener noreferrer"
-                                                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                                                                title="Bản đồ"
-                                                            >
-                                                                <MapPin size={16} />
-                                                            </a>
-                                                        </div>
-                                                    )}
-                                                    <div className="flex items-center justify-center gap-1">
-                                                    {/* Dropdown for All Actions */}
+                                            <td className="sticky right-0 z-20 whitespace-nowrap bg-white px-4 py-4 shadow-[-4px_0_4px_rgba(0,0,0,0.02)] group-hover:bg-slate-50">
+                                                <div className="flex justify-end">
                                                     <div className="relative">
                                                         <button
                                                             onClick={(e) => {
@@ -1908,6 +2104,33 @@ const Orders = () => {
                                                                     <Eye className="w-4 h-4" />
                                                                     Xem đơn hàng
                                                                 </button>
+
+                                                                {isDeliveryQueueStatus(order.status) && (
+                                                                    <>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                navigate(`/nhiem-vu-giao-hang?focusOrderId=${order.id}`);
+                                                                                setActiveRowMenu(null);
+                                                                            }}
+                                                                            className="flex w-full items-center gap-3 px-4 py-2.5 text-[13px] font-bold text-primary transition-colors hover:bg-primary/5"
+                                                                        >
+                                                                            <CheckCircle2 className="h-4 w-4 shrink-0" />
+                                                                            Giao hàng
+                                                                        </button>
+                                                                        <a
+                                                                            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.recipient_address || '')}`}
+                                                                            target="_blank"
+                                                                            rel="noopener noreferrer"
+                                                                            onClick={() => setActiveRowMenu(null)}
+                                                                            className="flex w-full items-center gap-3 px-4 py-2.5 text-[13px] font-bold text-slate-700 transition-colors hover:bg-slate-50"
+                                                                        >
+                                                                            <MapPin className="h-4 w-4 shrink-0 text-slate-500" />
+                                                                            Mở bản đồ
+                                                                        </a>
+                                                                        <div className="mx-2 my-1 h-px bg-slate-100" />
+                                                                    </>
+                                                                )}
 
                                                                 {order.order_type === 'DNXM' && (
                                                                     <button
@@ -1989,7 +2212,6 @@ const Orders = () => {
                                                             document.body
                                                         )}
                                                     </div>
-                                                    </div>
                                                 </div>
                                             </td>
                                         </tr>
@@ -1997,47 +2219,237 @@ const Orders = () => {
                                 })}
                             </tbody>
                         </table>
-                    </div>
-
-                    {/* Footer / Pagination */}
-                    <div className="hidden md:flex px-4 py-4 border-t border-border items-center justify-between bg-muted/5">
-                        <div className="flex items-center gap-3 text-[12px] text-muted-foreground font-medium flex-wrap">
-                            <span>
-                                {filteredOrders.length > 0 ? `1–${filteredOrders.length}` : '0'} trong{' '}
-                                <span className="font-bold text-foreground tabular-nums">{filteredOrders.length}</span>
-                                <span className="text-slate-400"> / </span>
-                                <span className="font-bold text-foreground tabular-nums">{orders.length}</span> đơn
-                            </span>
-                            <div className="flex items-center gap-1">
-                                <span className="text-[11px] font-bold text-slate-300">│</span>
-                                <span className="text-primary font-bold tabular-nums">{formatNumber(totalAmount)} đ</span>
                             </div>
-                            <div className="flex items-center gap-1">
-                                <span className="text-[11px] font-bold text-slate-300">│</span>
-                                <span className="text-amber-700 font-bold">
-                                    Chờ xử lý: <span className="tabular-nums">{filteredPipelineCount}</span>
-                                </span>
+                        ) : (
+                            <div className="flex min-h-0 flex-1 flex-col border-t border-slate-100 bg-slate-50/60 px-2 py-3 md:min-h-[calc(100vh-13.75rem)] sm:px-4">
+                                {isLoading ? (
+                                    <div className="flex h-40 items-center justify-center text-[13px] text-slate-500">
+                                        Đang tải dữ liệu...
+                                    </div>
+                                ) : sortedOrders.length === 0 ? (
+                                    <div className="flex h-40 items-center justify-center text-[13px] text-slate-500">
+                                        Không tìm thấy đơn hàng nào
+                                    </div>
+                                ) : (
+                                    <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto pb-2 sm:gap-4">
+                                        {kanbanColumns.map(({ cfg, orders: laneOrders }) => (
+                                            <div
+                                                key={cfg.id}
+                                                className="flex w-[17.5rem] shrink-0 flex-col self-stretch overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm sm:w-72"
+                                            >
+                                                <div className={getKanbanLaneHeaderClass(cfg.color)}>
+                                                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                                                        {cfg.label}
+                                                    </p>
+                                                    <p className="text-lg font-extrabold leading-tight text-slate-900 tabular-nums">
+                                                        {laneOrders.length}
+                                                    </p>
+                                                </div>
+                                                <div className="custom-scrollbar flex min-h-[12rem] flex-1 flex-col gap-2 overflow-y-auto overscroll-contain p-2 pr-1">
+                                                    {laneOrders.length === 0 ? (
+                                                        <div className="flex flex-1 items-center justify-center px-2 py-6 text-center text-[12px] leading-snug text-slate-400">
+                                                            Không có đơn
+                                                        </div>
+                                                    ) : (
+                                                        laneOrders.map((order) => (
+                                                            <div
+                                                                key={order.id}
+                                                                className={clsx(
+                                                                    'shrink-0 rounded-lg border border-slate-200 bg-white p-2 shadow-sm ring-1 ring-slate-100/80 transition hover:border-[#00288e]/35 hover:ring-[#00288e]/12',
+                                                                    selectedIds.includes(order.id) &&
+                                                                        'border-[#00288e]/40 bg-blue-50/50 ring-[#00288e]/18'
+                                                                )}
+                                                            >
+                                                                <div className="flex gap-1.5">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        className="mt-1 h-3.5 w-3.5 shrink-0 rounded border-border text-primary focus:ring-primary/20"
+                                                                        checked={selectedIds.includes(order.id)}
+                                                                        onChange={() => toggleSelect(order.id)}
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                        aria-label="Chọn đơn"
+                                                                    />
+                                                                    <div className="min-w-0 flex-1 space-y-1">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleViewOrder(order)}
+                                                                            className="block w-full min-w-0 text-left"
+                                                                        >
+                                                                            <span className="block truncate text-[12px] font-bold leading-tight text-[#00288e]">
+                                                                                {order.order_code}
+                                                                            </span>
+                                                                            <span className="mt-px block truncate text-[11px] font-medium leading-snug text-slate-800">
+                                                                                {order.customer_name || '—'}
+                                                                            </span>
+                                                                        </button>
+                                                                        <div className="flex min-w-0 items-center gap-1 truncate text-[10px] leading-none text-slate-500">
+                                                                            <span className="shrink-0 font-semibold tabular-nums text-slate-600">
+                                                                                SL {formatNumber(getOrderQuickQty(order))}
+                                                                            </span>
+                                                                            <span className="shrink-0 text-slate-300">·</span>
+                                                                            <span className="min-w-0 truncate">
+                                                                                {getLabel(ORDER_TYPES, order.order_type)}
+                                                                            </span>
+                                                                        </div>
+                                                                        <div className="flex flex-wrap gap-1 border-t border-slate-100 pt-1.5">
+                                                                            <button
+                                                                                type="button"
+                                                                                title="Xem đơn"
+                                                                                className={kanbanCardActionBtnClass}
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    handleViewOrder(order);
+                                                                                }}
+                                                                            >
+                                                                                <Eye size={14} strokeWidth={2.35} className="text-inherit" />
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                title="Sửa đơn"
+                                                                                className={clsx(
+                                                                                    kanbanCardActionBtnClass,
+                                                                                    'hover:text-amber-700'
+                                                                                )}
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    handleEditOrder(order);
+                                                                                }}
+                                                                            >
+                                                                                <Edit size={14} strokeWidth={2.35} className="text-inherit" />
+                                                                            </button>
+                                                                            {isDeliveryQueueStatus(order.status) && (
+                                                                                <>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        title="Giao hàng"
+                                                                                        className={clsx(
+                                                                                            kanbanCardActionBtnClass,
+                                                                                            'text-primary hover:border-primary/30 hover:bg-primary/5'
+                                                                                        )}
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            navigate(`/nhiem-vu-giao-hang?focusOrderId=${order.id}`);
+                                                                                        }}
+                                                                                    >
+                                                                                        <CheckCircle2 size={14} strokeWidth={2.35} className="text-inherit" />
+                                                                                    </button>
+                                                                                    <a
+                                                                                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.recipient_address || '')}`}
+                                                                                        target="_blank"
+                                                                                        rel="noopener noreferrer"
+                                                                                        title="Bản đồ"
+                                                                                        className={kanbanCardActionBtnClass}
+                                                                                        onClick={(e) => e.stopPropagation()}
+                                                                                    >
+                                                                                        <MapPin size={14} strokeWidth={2.35} className="text-inherit" />
+                                                                                    </a>
+                                                                                </>
+                                                                            )}
+                                                                            {order.order_type === 'DNXM' && (
+                                                                                <>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        title="Xem phiếu ĐNXM"
+                                                                                        className={clsx(
+                                                                                            kanbanCardActionBtnClass,
+                                                                                            'text-blue-600 hover:text-blue-700'
+                                                                                        )}
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            navigate(`/de-nghi-xuat-may/tao?orderId=${order.id}&viewOnly=true`);
+                                                                                        }}
+                                                                                    >
+                                                                                        <FileText size={14} strokeWidth={2.35} className="text-inherit" />
+                                                                                    </button>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        title="Sửa phiếu ĐNXM"
+                                                                                        className={clsx(
+                                                                                            kanbanCardActionBtnClass,
+                                                                                            'text-orange-600 hover:text-orange-700'
+                                                                                        )}
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            navigate(`/de-nghi-xuat-may/tao?orderId=${order.id}`);
+                                                                                        }}
+                                                                                    >
+                                                                                        <Edit size={14} strokeWidth={2.35} className="text-inherit" />
+                                                                                    </button>
+                                                                                </>
+                                                                            )}
+                                                                            <button
+                                                                                type="button"
+                                                                                title="Thao tác đơn hàng"
+                                                                                className={clsx(
+                                                                                    kanbanCardActionBtnClass,
+                                                                                    'text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800'
+                                                                                )}
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    setSelectedOrder(order);
+                                                                                    setIsActionModalOpen(true);
+                                                                                }}
+                                                                            >
+                                                                                <Package size={14} strokeWidth={2.35} className="text-inherit" />
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                title="In phiếu xuất kho"
+                                                                                className={kanbanCardActionBtnClass}
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    handlePrint(order);
+                                                                                }}
+                                                                            >
+                                                                                <Printer size={14} strokeWidth={2.35} className="text-inherit" />
+                                                                            </button>
+                                                                            {(isMachineProductType(order.product_type) ||
+                                                                                isMachineProductType(order.product_type_2)) && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    title="In biên bản bàn giao"
+                                                                                    className={clsx(
+                                                                                        kanbanCardActionBtnClass,
+                                                                                        'text-green-700 hover:border-green-300 hover:bg-green-50'
+                                                                                    )}
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation();
+                                                                                        handleHandoverPrint(order);
+                                                                                    }}
+                                                                                >
+                                                                                    <ClipboardCheck size={14} strokeWidth={2.35} className="text-inherit" />
+                                                                                </button>
+                                                                            )}
+                                                                            <button
+                                                                                type="button"
+                                                                                title="Xóa đơn"
+                                                                                className={clsx(
+                                                                                    kanbanCardActionBtnClass,
+                                                                                    'hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600'
+                                                                                )}
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    handleDeleteOrder(order.id, order.order_code);
+                                                                                }}
+                                                                            >
+                                                                                <Trash2 size={14} strokeWidth={2.35} className="text-inherit" />
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        ))
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
-                        </div>
-                        <div className="flex items-center gap-1">
-                            <button className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-20" disabled>
-                                <ChevronLeft size={16} />
-                                <ChevronLeft size={16} className="-ml-2.5" />
-                            </button>
-                            <button className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-20" disabled>
-                                <ChevronLeft size={16} />
-                            </button>
-                            <div className="w-8 h-8 rounded-lg bg-primary text-white flex items-center justify-center text-[12px] font-bold shadow-md shadow-primary/25">1</div>
-                            <button className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-20" disabled>
-                                <ChevronRight size={16} />
-                            </button>
-                            <button className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-20" disabled>
-                                <ChevronRight size={16} />
-                                <ChevronRight size={16} className="-ml-2.5" />
-                            </button>
-                        </div>
+                        )}
                     </div>
                 </div>
+                </>
             )}
 
             {activeView === 'stats' && (
@@ -2046,7 +2458,8 @@ const Orders = () => {
                         {/* Mobile Header */}
                         <div className="md:hidden flex items-center gap-2 p-3 border-b border-border">
                             <button
-                                onClick={() => navigate(-1)}
+                                type="button"
+                                onClick={() => setActiveView('list')}
                                 className="p-2 rounded-xl border border-border bg-white text-muted-foreground shrink-0"
                             >
                                 <ChevronLeft size={18} />
@@ -2072,11 +2485,12 @@ const Orders = () => {
                         <div className="hidden md:block p-4 border-b border-border" ref={statsDropdownRef}>
                             <div className="flex flex-wrap items-center gap-2">
                                 <button
-                                    onClick={() => navigate(-1)}
+                                    type="button"
+                                    onClick={() => setActiveView('list')}
                                     className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground text-[12px] font-bold transition-all bg-white shadow-sm shrink-0"
                                 >
                                     <ChevronLeft size={16} />
-                                    Quay lại
+                                    Danh sách đơn
                                 </button>
 
                                 <div className="relative">
@@ -2242,6 +2656,7 @@ const Orders = () => {
                                             setSelectedOrderTypes([]);
                                             setSelectedProductTypes([]);
                                             setSelectedCustomers([]);
+                                            setCustomerFilterHint('');
                                         }}
                                         className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-red-300 text-red-500 text-[12px] font-bold hover:bg-red-50 transition-all"
                                     >

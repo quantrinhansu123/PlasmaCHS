@@ -32,6 +32,6 @@ export const TABLE_COLUMNS = [
     { key: 'items_summary', label: 'Mặt hàng' },
     { key: 'amount', label: 'Tổng giá trị' },
     { key: 'deliverer', label: 'Người giao' },
-    { key: 'deliverer_address', label: 'Địa chỉ giao' },
+    { key: 'deliverer_address', label: 'Địa chỉ giao hàng' },
     { key: 'status', label: 'Trạng thái' },
 ];

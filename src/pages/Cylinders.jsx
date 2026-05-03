@@ -24,6 +24,7 @@ import {
     Edit,
     Eye,
     Filter,
+    LayoutGrid,
     List,
     MoreVertical,
     Plus,
@@ -35,7 +36,7 @@ import {
     Warehouse,
     X
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -62,6 +63,85 @@ ChartJS.register(
     ChartLegend
 );
 
+function locationLabelHash(label) {
+    const s = String(label || '');
+    let h = 0;
+    for (let i = 0; i < s.length; i += 1) {
+        h = (h * 31 + s.charCodeAt(i)) | 0;
+    }
+    return Math.abs(h);
+}
+
+function getLocationKanbanColumnHeaderClass(label) {
+    if (!label || label === '—') return 'bg-slate-100 text-slate-800 border-slate-200';
+    const palettes = [
+        'bg-indigo-50 text-indigo-900 border-indigo-100',
+        'bg-emerald-50 text-emerald-900 border-emerald-100',
+        'bg-violet-50 text-violet-900 border-violet-100',
+        'bg-amber-50 text-amber-900 border-amber-100',
+        'bg-sky-50 text-sky-900 border-sky-100',
+        'bg-rose-50 text-rose-900 border-rose-100',
+    ];
+    return palettes[locationLabelHash(label) % palettes.length];
+}
+
+function getLocationKanbanCardAccentClass(label) {
+    if (!label || label === '—') return 'border-l-slate-400';
+    const accents = [
+        'border-l-indigo-400',
+        'border-l-emerald-400',
+        'border-l-violet-400',
+        'border-l-amber-400',
+        'border-l-sky-400',
+        'border-l-rose-400',
+    ];
+    return accents[locationLabelHash(label) % accents.length];
+}
+
+function getStatusKanbanColumnHeaderClass(statusId) {
+    switch (statusId) {
+        case 'sẵn sàng':
+            return 'bg-emerald-50 text-emerald-900 border-emerald-100';
+        case 'đang sử dụng':
+        case 'đã sử dụng':
+        case 'thuộc khách hàng':
+            return 'bg-sky-50 text-sky-900 border-sky-100';
+        case 'đang vận chuyển':
+            return 'bg-indigo-50 text-indigo-900 border-indigo-100';
+        case 'chờ nạp':
+        case 'bình rỗng':
+            return 'bg-amber-50 text-amber-900 border-amber-100';
+        case 'hỏng':
+            return 'bg-rose-50 text-rose-900 border-rose-100';
+        case 'đã trả ncc':
+            return 'bg-orange-50 text-orange-900 border-orange-100';
+        default:
+            return 'bg-slate-50 text-slate-800 border-slate-200';
+    }
+}
+
+function getStatusKanbanCardAccentClass(statusId) {
+    switch (statusId) {
+        case 'sẵn sàng':
+            return 'border-l-emerald-400';
+        case 'đang sử dụng':
+        case 'đã sử dụng':
+        case 'thuộc khách hàng':
+            return 'border-l-sky-400';
+        case 'đang vận chuyển':
+            return 'border-l-indigo-400';
+        case 'chờ nạp':
+        case 'bình rỗng':
+            return 'border-l-amber-400';
+        case 'hỏng':
+            return 'border-l-rose-400';
+        case 'đã trả ncc':
+            return 'border-l-orange-400';
+        default:
+            return 'border-l-slate-400';
+    }
+}
+
 const TABLE_COLUMNS = [
     { key: 'serial_number', label: 'Mã RFID (Serial)' },
     { key: 'cylinder_code', label: 'Mã bình khắc' },
@@ -83,6 +163,8 @@ const Cylinders = () => {
     const canManageCylinders = isAdminRole(role);
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
+    /** Kanban: nhóm cột theo vị trí (cột «Vị trí») hoặc theo trạng thái — chọn bằng sổ xuống trên view Kanban */
+    const [kanbanGroupBy, setKanbanGroupBy] = useState('location');
     const [selectedIds, setSelectedIds] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [cylinders, setCylinders] = useState([]);
@@ -101,6 +183,8 @@ const Cylinders = () => {
     const [uniqueCustomers, setUniqueCustomers] = useState([]);
     const [uniqueVolumes, setUniqueVolumes] = useState([]);
     const [uniqueWarehouses, setUniqueWarehouses] = useState([]);
+    /** id → name: dùng khi join suppliers trên cylinders trả null (RLS/legacy) */
+    const [supplierIdToName, setSupplierIdToName] = useState({});
 
     const EMPTY_WAREHOUSE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -231,6 +315,15 @@ const Cylinders = () => {
             // Fetch unique warehouses
             const { data: whData } = await supabase.from('warehouses').select('id, name').order('name');
             if (whData) setUniqueWarehouses(whData);
+
+            const { data: supRows } = await supabase.from('suppliers').select('id, name');
+            if (supRows?.length) {
+                const map = {};
+                supRows.forEach((s) => {
+                    map[s.id] = s.name;
+                });
+                setSupplierIdToName(map);
+            }
         } catch (err) {
             console.error('Error fetching filter options:', err);
         }
@@ -360,7 +453,7 @@ const Cylinders = () => {
         try {
             let query = supabase
                 .from('cylinders')
-                .select('*, warehouses(id, name), customers(name)', { count: 'exact' });
+                .select('*, warehouses(id, name), customers(name), suppliers(id, name)', { count: 'exact' });
 
             // Apply Filters (Server-side)
             if (searchTerm) {
@@ -658,10 +751,22 @@ const Cylinders = () => {
         return item ? item.label : status;
     };
 
+    const resolveCylinderNccSupplierName = (cylinder) => {
+        const fromJoin = cylinder?.suppliers?.name;
+        if (fromJoin) return fromJoin;
+        const sid = cylinder?.supplier_id;
+        if (sid && supplierIdToName[sid]) return supplierIdToName[sid];
+        return null;
+    };
+
     const getCurrentLocation = (cylinder) => {
         const warehouseName = cylinder?.warehouses?.name;
         const customerName = cylinder?.customers?.name || cylinder?.customer_name?.split(' / ')[0];
         const customerDepartment = cylinder?.customer_name?.split(' / ')[1];
+
+        if (cylinder?.status === 'đã trả ncc') {
+            return resolveCylinderNccSupplierName(cylinder) || '—';
+        }
 
         if (cylinder?.status === 'sẵn sàng' && warehouseName) {
             return `Kho: ${warehouseName}`;
@@ -921,12 +1026,218 @@ const Cylinders = () => {
         }
 
         if (status === 'đã trả ncc') {
-            return 'NCC';
+            return resolveCylinderNccSupplierName(cylinder) || '—';
         }
 
         // Fallback
         return cylinder.customer_name?.split(' / ')[1] || cylinder.warehouses?.name || '—';
     };
+
+    const cylinderKanbanColumns = useMemo(() => {
+        if (kanbanGroupBy === 'status') {
+            const byStatus = new Map();
+            cylinders.forEach((c) => {
+                const sid = c.status || '__unknown__';
+                if (!byStatus.has(sid)) byStatus.set(sid, []);
+                byStatus.get(sid).push(c);
+            });
+            const order = CYLINDER_STATUSES.map((s) => s.id);
+            const entries = [...byStatus.entries()];
+            entries.sort((a, b) => {
+                const [ak] = a;
+                const [bk] = b;
+                const ia = order.indexOf(ak);
+                const ib = order.indexOf(bk);
+                if (ia === -1 && ib === -1) return String(ak).localeCompare(String(bk), 'vi', { sensitivity: 'base' });
+                if (ia === -1) return 1;
+                if (ib === -1) return -1;
+                return ia - ib;
+            });
+            return entries.map(([statusId, items]) => ({
+                id: statusId,
+                label: getStatusLabel(statusId),
+                items,
+                groupBy: 'status',
+            }));
+        }
+
+        const byLabel = new Map();
+        cylinders.forEach((c) => {
+            const label = getLocationDisplay(c);
+            if (!byLabel.has(label)) byLabel.set(label, []);
+            byLabel.get(label).push(c);
+        });
+        const cols = [...byLabel.entries()]
+            .sort((a, b) => {
+                const [ak] = a;
+                const [bk] = b;
+                if (ak === '—' && bk !== '—') return 1;
+                if (bk === '—' && ak !== '—') return -1;
+                return ak.localeCompare(bk, 'vi', { sensitivity: 'base' });
+            })
+            .map(([label, items]) => ({ id: label, label, items, groupBy: 'location' }));
+        return cols;
+    }, [cylinders, supplierIdToName, kanbanGroupBy]);
+
+    const renderCylinderBoardFilters = () => (
+        <>
+            <div className="relative">
+                <button
+                    type="button"
+                    onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
+                    className={clsx(
+                        'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
+                        getFilterButtonClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)
+                    )}
+                >
+                    <Filter size={14} className={getFilterIconClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)} />
+                    Trạng thái
+                    {selectedStatuses.length > 0 && (
+                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('status'))}>
+                            {selectedStatuses.length}
+                        </span>
+                    )}
+                    <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'status' ? 'rotate-180' : '')} />
+                </button>
+                {activeDropdown === 'status' && (
+                    <FilterDropdown
+                        options={statusOptions}
+                        selected={selectedStatuses}
+                        setSelected={setSelectedStatuses}
+                        filterSearch={filterSearch}
+                        setFilterSearch={setFilterSearch}
+                    />
+                )}
+            </div>
+
+            <div className="relative">
+                <button
+                    type="button"
+                    onClick={() => setActiveDropdown(activeDropdown === 'volume' ? null : 'volume')}
+                    className={clsx(
+                        'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
+                        getFilterButtonClass('volume', activeDropdown === 'volume' || selectedVolumes.length > 0)
+                    )}
+                >
+                    <ActivitySquare size={14} className={getFilterIconClass('volume', activeDropdown === 'volume' || selectedVolumes.length > 0)} />
+                    Thể tích
+                    {selectedVolumes.length > 0 && (
+                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('volume'))}>
+                            {selectedVolumes.length}
+                        </span>
+                    )}
+                    <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'volume' ? 'rotate-180' : '')} />
+                </button>
+                {activeDropdown === 'volume' && (
+                    <FilterDropdown
+                        options={volumeOptions}
+                        selected={selectedVolumes}
+                        setSelected={setSelectedVolumes}
+                        filterSearch={filterSearch}
+                        setFilterSearch={setFilterSearch}
+                    />
+                )}
+            </div>
+
+            <div className="relative">
+                <button
+                    type="button"
+                    onClick={() => setActiveDropdown(activeDropdown === 'customers' ? null : 'customers')}
+                    className={clsx(
+                        'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
+                        getFilterButtonClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)
+                    )}
+                >
+                    <User size={14} className={getFilterIconClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)} />
+                    Khách hàng
+                    {selectedCustomers.length > 0 && (
+                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('customers'))}>
+                            {selectedCustomers.length}
+                        </span>
+                    )}
+                    <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'customers' ? 'rotate-180' : '')} />
+                </button>
+                {activeDropdown === 'customers' && (
+                    <FilterDropdown
+                        options={customerOptions}
+                        selected={selectedCustomers}
+                        setSelected={setSelectedCustomers}
+                        filterSearch={filterSearch}
+                        setFilterSearch={setFilterSearch}
+                    />
+                )}
+            </div>
+
+            <div className="relative">
+                <button
+                    type="button"
+                    onClick={() => setActiveDropdown(activeDropdown === 'warehouses' ? null : 'warehouses')}
+                    className={clsx(
+                        'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
+                        getFilterButtonClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)
+                    )}
+                >
+                    <Warehouse size={14} className={getFilterIconClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)} />
+                    Kho
+                    {selectedWarehouses.length > 0 && (
+                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('warehouses'))}>
+                            {selectedWarehouses.length}
+                        </span>
+                    )}
+                    <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'warehouses' ? 'rotate-180' : '')} />
+                </button>
+                {activeDropdown === 'warehouses' && (
+                    <FilterDropdown
+                        options={warehouseOptions}
+                        selected={selectedWarehouses}
+                        setSelected={setSelectedWarehouses}
+                        filterSearch={filterSearch}
+                        setFilterSearch={setFilterSearch}
+                    />
+                )}
+            </div>
+
+            <div className="relative">
+                <button
+                    type="button"
+                    onClick={() => setActiveDropdown(activeDropdown === 'categories' ? null : 'categories')}
+                    className={clsx(
+                        'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
+                        getFilterButtonClass('categories', activeDropdown === 'categories' || selectedCategories.length > 0)
+                    )}
+                >
+                    <ActivitySquare size={14} className={getFilterIconClass('categories', activeDropdown === 'categories' || selectedCategories.length > 0)} />
+                    Phân loại
+                    {selectedCategories.length > 0 && (
+                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('categories'))}>
+                            {selectedCategories.length}
+                        </span>
+                    )}
+                    <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'categories' ? 'rotate-180' : '')} />
+                </button>
+                {activeDropdown === 'categories' && (
+                    <FilterDropdown
+                        options={categoryOptions}
+                        selected={selectedCategories}
+                        setSelected={setSelectedCategories}
+                        filterSearch={filterSearch}
+                        setFilterSearch={setFilterSearch}
+                    />
+                )}
+            </div>
+
+            {hasActiveFilters && (
+                <button
+                    type="button"
+                    onClick={clearAllFilters}
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-red-300 text-red-500 text-[12px] font-bold hover:bg-red-50 transition-all"
+                >
+                    <X size={14} />
+                    Xóa bộ lọc
+                </button>
+            )}
+        </>
+    );
 
     return (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5">
@@ -935,6 +1246,7 @@ const Cylinders = () => {
                 setActiveView={setActiveView}
                 views={[
                     { id: 'list', label: 'Danh sách', icon: <List size={16} /> },
+                    { id: 'kanban', label: 'Kanban', icon: <LayoutGrid size={16} /> },
                     { id: 'stats', label: 'Thống kê', icon: <BarChart2 size={16} /> },
                 ]}
             />
@@ -1241,155 +1553,7 @@ const Cylinders = () => {
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2" ref={dropdownRef}>
-                            <div className="relative">
-                                <button
-                                    onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
-                                    className={clsx(
-                                        'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        getFilterButtonClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)
-                                    )}
-                                >
-                                    <Filter size={14} className={getFilterIconClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)} />
-                                    Trạng thái
-                                    {selectedStatuses.length > 0 && (
-                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('status'))}>
-                                            {selectedStatuses.length}
-                                        </span>
-                                    )}
-                                    <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'status' ? 'rotate-180' : '')} />
-                                </button>
-                                {activeDropdown === 'status' && (
-                                    <FilterDropdown
-                                        options={statusOptions}
-                                        selected={selectedStatuses}
-                                        setSelected={setSelectedStatuses}
-                                        filterSearch={filterSearch}
-                                        setFilterSearch={setFilterSearch}
-                                    />
-                                )}
-                            </div>
-
-                            <div className="relative">
-                                <button
-                                    onClick={() => setActiveDropdown(activeDropdown === 'volume' ? null : 'volume')}
-                                    className={clsx(
-                                        'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        getFilterButtonClass('volume', activeDropdown === 'volume' || selectedVolumes.length > 0)
-                                    )}
-                                >
-                                    <ActivitySquare size={14} className={getFilterIconClass('volume', activeDropdown === 'volume' || selectedVolumes.length > 0)} />
-                                    Thể tích
-                                    {selectedVolumes.length > 0 && (
-                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('volume'))}>
-                                            {selectedVolumes.length}
-                                        </span>
-                                    )}
-                                    <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'volume' ? 'rotate-180' : '')} />
-                                </button>
-                                {activeDropdown === 'volume' && (
-                                    <FilterDropdown
-                                        options={volumeOptions}
-                                        selected={selectedVolumes}
-                                        setSelected={setSelectedVolumes}
-                                        filterSearch={filterSearch}
-                                        setFilterSearch={setFilterSearch}
-                                    />
-                                )}
-                            </div>
-
-                            <div className="relative">
-                                <button
-                                    onClick={() => setActiveDropdown(activeDropdown === 'customers' ? null : 'customers')}
-                                    className={clsx(
-                                        'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        getFilterButtonClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)
-                                    )}
-                                >
-                                    <User size={14} className={getFilterIconClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)} />
-                                    Khách hàng
-                                    {selectedCustomers.length > 0 && (
-                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('customers'))}>
-                                            {selectedCustomers.length}
-                                        </span>
-                                    )}
-                                    <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'customers' ? 'rotate-180' : '')} />
-                                </button>
-                                {activeDropdown === 'customers' && (
-                                    <FilterDropdown
-                                        options={customerOptions}
-                                        selected={selectedCustomers}
-                                        setSelected={setSelectedCustomers}
-                                        filterSearch={filterSearch}
-                                        setFilterSearch={setFilterSearch}
-                                    />
-                                )}
-                            </div>
-
-                            <div className="relative">
-                                <button
-                                    onClick={() => setActiveDropdown(activeDropdown === 'warehouses' ? null : 'warehouses')}
-                                    className={clsx(
-                                        'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        getFilterButtonClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)
-                                    )}
-                                >
-                                    <Warehouse size={14} className={getFilterIconClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)} />
-                                    Kho
-                                    {selectedWarehouses.length > 0 && (
-                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('warehouses'))}>
-                                            {selectedWarehouses.length}
-                                        </span>
-                                    )}
-                                    <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'warehouses' ? 'rotate-180' : '')} />
-                                </button>
-                                {activeDropdown === 'warehouses' && (
-                                    <FilterDropdown
-                                        options={warehouseOptions}
-                                        selected={selectedWarehouses}
-                                        setSelected={setSelectedWarehouses}
-                                        filterSearch={filterSearch}
-                                        setFilterSearch={setFilterSearch}
-                                    />
-                                )}
-                            </div>
-
-                            <div className="relative">
-                                <button
-                                    onClick={() => setActiveDropdown(activeDropdown === 'categories' ? null : 'categories')}
-                                    className={clsx(
-                                        'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        getFilterButtonClass('categories', activeDropdown === 'categories' || selectedCategories.length > 0)
-                                    )}
-                                >
-                                    <ActivitySquare size={14} className={getFilterIconClass('categories', activeDropdown === 'categories' || selectedCategories.length > 0)} />
-                                    Phân loại
-                                    {selectedCategories.length > 0 && (
-                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('categories'))}>
-                                            {selectedCategories.length}
-                                        </span>
-                                    )}
-                                    <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'categories' ? 'rotate-180' : '')} />
-                                </button>
-                                {activeDropdown === 'categories' && (
-                                    <FilterDropdown
-                                        options={categoryOptions}
-                                        selected={selectedCategories}
-                                        setSelected={setSelectedCategories}
-                                        filterSearch={filterSearch}
-                                        setFilterSearch={setFilterSearch}
-                                    />
-                                )}
-                            </div>
-
-                            {hasActiveFilters && (
-                                <button
-                                    onClick={clearAllFilters}
-                                    className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-red-300 text-red-500 text-[12px] font-bold hover:bg-red-50 transition-all"
-                                >
-                                    <X size={14} />
-                                    Xóa bộ lọc
-                                </button>
-                            )}
+                            {renderCylinderBoardFilters()}
                         </div>
                     </div>
 
@@ -1568,6 +1732,295 @@ const Cylinders = () => {
                 </div>
             )}
 
+            {activeView === 'kanban' && (
+                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full overflow-hidden">
+                    <div className="md:hidden flex items-center gap-2 p-3 border-b border-border sticky top-0 bg-white/95 backdrop-blur-md z-[40]">
+                        <button
+                            type="button"
+                            onClick={() => navigate(-1)}
+                            className="p-2 rounded-xl border border-border bg-white text-muted-foreground shrink-0"
+                        >
+                            <ChevronLeft size={18} />
+                        </button>
+                        <div className="relative flex-1 min-w-0">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={15} />
+                            <input
+                                type="text"
+                                placeholder="Tìm RFID, thể tích..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="w-full pl-9 pr-8 py-2.5 bg-muted/30 border border-border/80 rounded-xl text-[13px] font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/15"
+                            />
+                            {searchTerm && (
+                                <button
+                                    type="button"
+                                    onClick={() => setSearchTerm('')}
+                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground p-1"
+                                >
+                                    <X size={14} />
+                                </button>
+                            )}
+                        </div>
+                        <button
+                            type="button"
+                            onClick={openMobileFilter}
+                            className={clsx(
+                                'relative p-2 rounded-xl border shrink-0 transition-all',
+                                hasActiveFilters ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-white text-muted-foreground'
+                            )}
+                        >
+                            <Filter size={18} />
+                            {hasActiveFilters && (
+                                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-white text-[9px] font-bold flex items-center justify-center">
+                                    {totalActiveFilters}
+                                </span>
+                            )}
+                        </button>
+                    </div>
+
+                    <div className="md:hidden px-3 py-2 border-b border-border bg-white">
+                        <label htmlFor="kanban-group-by-mobile" className="block text-[10px] font-black text-muted-foreground uppercase tracking-wider mb-1.5">
+                            Nhóm cột Kanban
+                        </label>
+                        <select
+                            id="kanban-group-by-mobile"
+                            value={kanbanGroupBy}
+                            onChange={(e) => setKanbanGroupBy(e.target.value)}
+                            className="w-full h-10 rounded-xl border border-border bg-muted/25 px-3 text-[13px] font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        >
+                            <option value="location">Theo vị trí (cột Vị trí)</option>
+                            <option value="status">Theo trạng thái</option>
+                        </select>
+                    </div>
+
+                    <div className="hidden md:flex flex-col p-4 border-b border-border gap-3 shrink-0" ref={dropdownRef}>
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-3 flex-1 min-w-0">
+                                <button
+                                    type="button"
+                                    onClick={() => navigate(-1)}
+                                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground text-[12px] font-bold transition-all bg-white shadow-sm shrink-0"
+                                >
+                                    <ChevronLeft size={16} />
+                                    Quay lại
+                                </button>
+                                <div className="relative flex-1 min-w-[200px] max-w-md">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15} />
+                                    <input
+                                        type="text"
+                                        placeholder="Tìm RFID, thể tích, khách..."
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        className="w-full pl-9 pr-9 py-2 bg-muted/30 border border-border/80 rounded-xl text-[13px] font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/15"
+                                    />
+                                    {searchTerm && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setSearchTerm('')}
+                                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground p-1"
+                                        >
+                                            <X size={14} />
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setSelectedCylinder(null);
+                                    setIsFormModalOpen(true);
+                                }}
+                                className="flex items-center gap-2 px-5 py-2.5 h-10 rounded-xl bg-primary text-white text-[13px] font-black shadow-lg shadow-primary/20 shrink-0"
+                            >
+                                <Plus size={18} />
+                                Thêm
+                            </button>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3">
+                            <span className="text-[11px] font-black text-muted-foreground uppercase tracking-wider shrink-0">
+                                Nhóm cột
+                            </span>
+                            <select
+                                value={kanbanGroupBy}
+                                onChange={(e) => setKanbanGroupBy(e.target.value)}
+                                className="h-10 min-w-[220px] rounded-xl border border-border bg-white px-3 text-[13px] font-bold text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                                aria-label="Chọn nhóm cột Kanban: vị trí hoặc trạng thái"
+                            >
+                                <option value="location">Theo vị trí (cột Vị trí)</option>
+                                <option value="status">Theo trạng thái</option>
+                            </select>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            {renderCylinderBoardFilters()}
+                        </div>
+                    </div>
+
+                    <div className="flex-1 min-h-[min(480px,calc(100vh-280px))] overflow-x-auto overflow-y-hidden p-2 md:p-4">
+                        {isLoading ? (
+                            <div className="flex flex-col items-center justify-center py-20 gap-3 h-full">
+                                <div className="w-10 h-10 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
+                                <p className="text-[13px] font-medium text-muted-foreground">Đang tải bình…</p>
+                            </div>
+                        ) : cylinders.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-16 text-center px-6 text-muted-foreground">
+                                <ActivitySquare size={48} className="opacity-35 mb-3" />
+                                <p className="text-[14px] font-bold">Không có bình trên trang này</p>
+                                <p className="text-[12px] mt-1">Thử đổi tìm kiếm, bộ lọc hoặc trang.</p>
+                            </div>
+                        ) : (
+                            <div className="flex gap-4 h-full min-h-[min(440px,calc(100vh-300px))] pb-2">
+                                {cylinderKanbanColumns.map((col) => (
+                                    <div
+                                        key={col.id}
+                                        className="flex flex-col w-[min(92vw,280px)] sm:w-[min(260px,calc((100vw-4rem)/4))] shrink-0 rounded-2xl border border-border bg-muted/40 overflow-hidden"
+                                    >
+                                        <div
+                                            className={clsx(
+                                                'px-3 py-2.5 border-b font-black text-[11px] uppercase tracking-wide flex items-start justify-between gap-2',
+                                                col.groupBy === 'status'
+                                                    ? getStatusKanbanColumnHeaderClass(col.id)
+                                                    : getLocationKanbanColumnHeaderClass(col.label)
+                                            )}
+                                        >
+                                            <span className="break-words leading-snug" title={col.label}>{col.label}</span>
+                                            <span className="shrink-0 px-2 py-0.5 rounded-lg bg-white/70 text-[11px] font-black tabular-nums border border-black/5">
+                                                {col.items.length}
+                                            </span>
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto p-2 space-y-2.5 min-h-0 custom-scrollbar bg-white/60">
+                                            {col.items.length === 0 ? (
+                                                <p className="text-[11px] font-semibold text-muted-foreground text-center py-8 px-2">Trống</p>
+                                            ) : (
+                                                col.items.map((cylinder) => (
+                                                    <div
+                                                        key={cylinder.id}
+                                                        className={clsx(
+                                                            'rounded-xl border border-border bg-white p-3 shadow-sm border-l-4 space-y-2',
+                                                            col.groupBy === 'status'
+                                                                ? getStatusKanbanCardAccentClass(col.id)
+                                                                : getLocationKanbanCardAccentClass(col.label)
+                                                        )}
+                                                    >
+                                                        <div className="flex items-start justify-between gap-2">
+                                                            <p className="text-[13px] font-black font-mono text-foreground truncate">{cylinder.serial_number}</p>
+                                                            {kanbanGroupBy === 'location' && (
+                                                                <span className={clsx('shrink-0 inline-flex px-2 py-0.5 rounded-full text-[9px] font-black border', getStatusBadgeClass(cylinder.status))}>
+                                                                    {getStatusLabel(cylinder.status)}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <p className="text-[11px] font-bold text-muted-foreground truncate">{cylinder.volume || '—'} · {cylinder.category || '—'}</p>
+                                                        {kanbanGroupBy === 'status' ? (
+                                                            <p className="text-[11px] font-bold text-primary leading-snug line-clamp-2" title={getLocationDisplay(cylinder)}>
+                                                                Vị trí: {getLocationDisplay(cylinder)}
+                                                            </p>
+                                                        ) : (
+                                                            <p className="text-[11px] font-semibold text-foreground truncate" title={cylinder.warehouses?.name || ''}>
+                                                                Kho: {cylinder.warehouses?.name || '—'}
+                                                            </p>
+                                                        )}
+                                                        <div className="flex items-center justify-end gap-1 pt-1 border-t border-border/50">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleViewCylinder(cylinder)}
+                                                                className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                                                                title="Chi tiết"
+                                                            >
+                                                                <Eye size={15} />
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleEditCylinder(cylinder)}
+                                                                className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
+                                                                title="Sửa"
+                                                            >
+                                                                <Edit size={15} />
+                                                            </button>
+                                                            {canManageCylinders && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleDeleteCylinder(cylinder.id, cylinder.serial_number)}
+                                                                    className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+                                                                    title="Xóa"
+                                                                >
+                                                                    <Trash2 size={15} />
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {!isLoading && (
+                        <div className="md:hidden border-t border-border shrink-0">
+                            <MobilePagination
+                                currentPage={currentPage}
+                                setCurrentPage={setCurrentPage}
+                                pageSize={pageSize}
+                                setPageSize={setPageSize}
+                                totalRecords={totalRecords}
+                            />
+                        </div>
+                    )}
+
+                    <div className="hidden md:flex px-4 py-3 border-t border-border items-center justify-between bg-muted/5 text-[12px] text-muted-foreground">
+                        <span>
+                            Kanban theo{' '}
+                            <span className="font-black text-foreground">
+                                {kanbanGroupBy === 'status' ? 'trạng thái' : 'vị trí'}
+                            </span>
+                            {' · '}
+                            Trang {currentPage}
+                            {totalRecords > 0 ? ` (${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, totalRecords)} / ${totalRecords})` : ''}
+                        </span>
+                        <div className="flex items-center gap-1">
+                            <button
+                                type="button"
+                                onClick={() => setCurrentPage(1)}
+                                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-20"
+                                disabled={currentPage === 1}
+                                title="Trang đầu"
+                            >
+                                <ChevronLeft size={16} />
+                                <ChevronLeft size={16} className="-ml-2.5" />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-20"
+                                disabled={currentPage === 1}
+                            >
+                                <ChevronLeft size={16} />
+                            </button>
+                            <span className="px-2 py-1 rounded-lg bg-primary text-white text-[11px] font-black">{currentPage}</span>
+                            <button
+                                type="button"
+                                onClick={() => setCurrentPage((p) => Math.min(Math.ceil(totalRecords / pageSize) || 1, p + 1))}
+                                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-20"
+                                disabled={currentPage >= Math.ceil(totalRecords / pageSize)}
+                            >
+                                <ChevronRight size={16} />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setCurrentPage(Math.ceil(totalRecords / pageSize) || 1)}
+                                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-20"
+                                disabled={currentPage >= Math.ceil(totalRecords / pageSize)}
+                            >
+                                <ChevronRight size={16} />
+                                <ChevronRight size={16} className="-ml-2.5" />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {activeView === 'stats' && (
                 <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col w-full">
                     <div className="space-y-0">
@@ -1598,162 +2051,14 @@ const Cylinders = () => {
                         <div className="hidden md:block p-4 border-b border-border" ref={dropdownRef}>
                             <div className="flex flex-wrap items-center gap-2">
                                 <button
+                                    type="button"
                                     onClick={() => navigate(-1)}
                                     className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground text-[12px] font-bold transition-all bg-white shadow-sm shrink-0"
                                 >
                                     <ChevronLeft size={16} />
                                     Quay lại
                                 </button>
-
-                                <div className="relative">
-                                    <button
-                                        onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
-                                        className={clsx(
-                                            'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            getFilterButtonClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)
-                                        )}
-                                    >
-                                        <Filter size={14} className={getFilterIconClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)} />
-                                        Trạng thái
-                                        {selectedStatuses.length > 0 && (
-                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('status'))}>
-                                                {selectedStatuses.length}
-                                            </span>
-                                        )}
-                                        <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'status' ? 'rotate-180' : '')} />
-                                    </button>
-                                    {activeDropdown === 'status' && (
-                                        <FilterDropdown
-                                            options={statusOptions}
-                                            selected={selectedStatuses}
-                                            setSelected={setSelectedStatuses}
-                                            filterSearch={filterSearch}
-                                            setFilterSearch={setFilterSearch}
-                                        />
-                                    )}
-                                </div>
-
-                                <div className="relative">
-                                    <button
-                                        onClick={() => setActiveDropdown(activeDropdown === 'volume' ? null : 'volume')}
-                                        className={clsx(
-                                            'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            getFilterButtonClass('volume', activeDropdown === 'volume' || selectedVolumes.length > 0)
-                                        )}
-                                    >
-                                        <ActivitySquare size={14} className={getFilterIconClass('volume', activeDropdown === 'volume' || selectedVolumes.length > 0)} />
-                                        Thể tích
-                                        {selectedVolumes.length > 0 && (
-                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('volume'))}>
-                                                {selectedVolumes.length}
-                                            </span>
-                                        )}
-                                        <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'volume' ? 'rotate-180' : '')} />
-                                    </button>
-                                    {activeDropdown === 'volume' && (
-                                        <FilterDropdown
-                                            options={volumeOptions}
-                                            selected={selectedVolumes}
-                                            setSelected={setSelectedVolumes}
-                                            filterSearch={filterSearch}
-                                            setFilterSearch={setFilterSearch}
-                                        />
-                                    )}
-                                </div>
-
-                                <div className="relative">
-                                    <button
-                                        onClick={() => setActiveDropdown(activeDropdown === 'customers' ? null : 'customers')}
-                                        className={clsx(
-                                            'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            getFilterButtonClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)
-                                        )}
-                                    >
-                                        <User size={14} className={getFilterIconClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)} />
-                                        Khách hàng
-                                        {selectedCustomers.length > 0 && (
-                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('customers'))}>
-                                                {selectedCustomers.length}
-                                            </span>
-                                        )}
-                                        <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'customers' ? 'rotate-180' : '')} />
-                                    </button>
-                                    {activeDropdown === 'customers' && (
-                                        <FilterDropdown
-                                            options={customerOptions}
-                                            selected={selectedCustomers}
-                                            setSelected={setSelectedCustomers}
-                                            filterSearch={filterSearch}
-                                            setFilterSearch={setFilterSearch}
-                                        />
-                                    )}
-                                </div>
-
-                                <div className="relative">
-                                    <button
-                                        onClick={() => setActiveDropdown(activeDropdown === 'warehouses' ? null : 'warehouses')}
-                                        className={clsx(
-                                            'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            getFilterButtonClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)
-                                        )}
-                                    >
-                                        <Warehouse size={14} className={getFilterIconClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)} />
-                                        Kho
-                                        {selectedWarehouses.length > 0 && (
-                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('warehouses'))}>
-                                                {selectedWarehouses.length}
-                                            </span>
-                                        )}
-                                        <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'warehouses' ? 'rotate-180' : '')} />
-                                    </button>
-                                    {activeDropdown === 'warehouses' && (
-                                        <FilterDropdown
-                                            options={warehouseOptions}
-                                            selected={selectedWarehouses}
-                                            setSelected={setSelectedWarehouses}
-                                            filterSearch={filterSearch}
-                                            setFilterSearch={setFilterSearch}
-                                        />
-                                    )}
-                                </div>
-
-                                <div className="relative">
-                                    <button
-                                        onClick={() => setActiveDropdown(activeDropdown === 'categories' ? null : 'categories')}
-                                        className={clsx(
-                                            'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            getFilterButtonClass('categories', activeDropdown === 'categories' || selectedCategories.length > 0)
-                                        )}
-                                    >
-                                        <ActivitySquare size={14} className={getFilterIconClass('categories', activeDropdown === 'categories' || selectedCategories.length > 0)} />
-                                        Phân loại
-                                        {selectedCategories.length > 0 && (
-                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('categories'))}>
-                                                {selectedCategories.length}
-                                            </span>
-                                        )}
-                                        <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'categories' ? 'rotate-180' : '')} />
-                                    </button>
-                                    {activeDropdown === 'categories' && (
-                                        <FilterDropdown
-                                            options={categoryOptions}
-                                            selected={selectedCategories}
-                                            setSelected={setSelectedCategories}
-                                            filterSearch={filterSearch}
-                                            setFilterSearch={setFilterSearch}
-                                        />
-                                    )}
-                                </div>
-
-                                {hasActiveFilters && (
-                                    <button
-                                        onClick={clearAllFilters}
-                                        className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-red-300 text-red-500 text-[12px] font-bold hover:bg-red-50 transition-all"
-                                    >
-                                        <X size={14} />
-                                        Xóa bộ lọc
-                                    </button>
-                                )}
+                                {renderCylinderBoardFilters()}
                             </div>
                         </div>
 

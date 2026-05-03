@@ -1,22 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
-    Truck, 
-    CheckCircle2, 
-    Camera, 
-    X, 
-    ChevronLeft, 
-    Search, 
-    MapPin, 
-    Phone, 
-    Package,
+import {
+    Truck,
+    CheckCircle2,
+    Camera,
+    X,
+    ChevronLeft,
+    Search,
     PackageCheck,
-    Clock,
-    AlertCircle,
-    Image as ImageIcon,
     Loader2,
-    RefreshCw,
     LayoutGrid,
-    List
+    List,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase/config';
@@ -25,20 +18,26 @@ import { toast } from 'react-toastify';
 import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import usePermissions from '../hooks/usePermissions';
 import { isShipperRole, isAdminRole } from '../utils/accessControl';
-import { tryQuickCompleteRecovery } from '../utils/cylinderRecoveryCompletion';
 import {
     collectMachineSerialsForOrder,
     resolvedOrderCustomerAssetName,
 } from '../utils/orderMachineSerials';
-import { stripDeliveryMediaFromNote } from '../utils/orderNoteSanitize';
+/** Chỉ các đơn này còn được mở modal «Xác nhận giao hàng». */
+const ORDER_STATUSES_NEED_DELIVERY_CONFIRM = ['CHO_GIAO_HANG', 'DANG_GIAO_HANG'];
 
-/** Gộp đơn giao hàng + phiếu thu hồi vỏ cần shipper / tài xế xử lý */
+/** Luồng giao/trả/đối soát đang và đã qua tay giao — chưa bao gồm HOAN_THANH (đơn có gán đơn vị giao mới vào được). */
+const ORDER_STATUSES_PIPELINE_NO_SUCCESS_PREFIX = ['CHO_GIAO_HANG', 'DANG_GIAO_HANG', 'CHO_DOI_SOAT', 'DOI_SOAT_THAT_BAI', 'TRA_HANG'];
+
+const giaoHangActionBtnCls =
+    'shrink-0 rounded-lg border border-primary bg-primary px-3 py-2 text-[11px] font-bold text-white shadow-sm hover:opacity-95 !h-auto !min-h-0';
+
+/** Chỉ đơn giao hàng (`orders`) — không gộp phiếu thu hồi vỏ. */
 const ShippingTasks = () => {
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
     const focusOrderId = searchParams.get('focusOrderId');
     const { role } = usePermissions();
-    const [tasks, setTasks] = useState([]);
+    const [orders, setOrders] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedOrder, setSelectedOrder] = useState(null);
@@ -51,9 +50,6 @@ const ShippingTasks = () => {
     const [machineChecklist, setMachineChecklist] = useState({});
     /** Dòng order_items của đơn đang mở modal giao — cần để gom mã máy giống OrderStatusUpdater */
     const [shippingOrderItems, setShippingOrderItems] = useState([]);
-    /** Tách khỏi isLoading (giao hàng / tải trang) để nút Hoàn thành thu hồi luôn bấm được */
-    const [completingRecoveryId, setCompletingRecoveryId] = useState(null);
-
     useEffect(() => {
         fetchShippingTasks();
     }, [role]);
@@ -67,51 +63,24 @@ const ShippingTasks = () => {
                 '';
             const shipperOnly = isShipperRole(role) && !isAdminRole(role);
 
-            let orderQuery = supabase
-                .from('orders')
-                .select('*')
-                .in('status', ['CHO_GIAO_HANG', 'DANG_GIAO_HANG'])
-                .order('created_at', { ascending: false });
-            if (shipperOnly && storageUserName) {
-                orderQuery = orderQuery.eq('delivery_unit', storageUserName);
+            const shipperKey = String(storageUserName || '').trim();
+            const pipelineCsv = ORDER_STATUSES_PIPELINE_NO_SUCCESS_PREFIX.join(',');
+            /** Admin/giám sát: không tải mọi đơn HOAN_THANH toàn DB — chỉ đơn từng gán đơn vị giao. Shipper luôn lọc theo delivery_unit (kể cả đã HOAN_THANH). */
+            let orderQuery = supabase.from('orders').select('*');
+            if (shipperOnly) {
+                orderQuery = orderQuery
+                    .in('status', [...ORDER_STATUSES_PIPELINE_NO_SUCCESS_PREFIX, 'HOAN_THANH'])
+                    .eq('delivery_unit', shipperKey || '__NO_SHIPPER_NAME__');
+            } else {
+                orderQuery = orderQuery.or(
+                    `status.in.(${pipelineCsv}),and(status.eq.HOAN_THANH,delivery_unit.not.is.null)`,
+                );
             }
+            orderQuery = orderQuery.order('created_at', { ascending: false });
             const { data: orderData, error: orderError } = await orderQuery;
             if (orderError) throw orderError;
 
-            const { data: recoveryData, error: recoveryError } = await supabase
-                .from('cylinder_recoveries')
-                .select('*, customers(name, phone, address)')
-                .in('status', ['CHO_PHAN_CONG', 'DANG_THU_HOI'])
-                .order('created_at', { ascending: false });
-
-            if (recoveryError) throw recoveryError;
-
-            let recoveries = recoveryData || [];
-            if (shipperOnly && storageUserName) {
-                const token = storageUserName.trim();
-                recoveries = recoveries.filter((r) => {
-                    const d = (r.driver_name || '').trim();
-                    return d && d.includes(token);
-                });
-            }
-
-            // Gộp 2 nguồn: orders (giao hàng) + cylinder_recoveries (phiếu thu hồi vỏ) — UI phân biệt theo task.kind.
-            const merged = [
-                ...(orderData || []).map((o) => ({
-                    kind: 'ORDER',
-                    id: o.id,
-                    sortAt: o.created_at,
-                    order: o,
-                })),
-                ...recoveries.map((r) => ({
-                    kind: 'RECOVERY',
-                    id: r.id,
-                    sortAt: r.created_at,
-                    recovery: r,
-                })),
-            ].sort((a, b) => new Date(b.sortAt) - new Date(a.sortAt));
-
-            setTasks(merged);
+            setOrders(orderData || []);
         } catch (error) {
             console.error('Error fetching delivery tasks:', error);
             toast.error('❌ Không thể tải danh sách nhiệm vụ: ' + error.message);
@@ -218,9 +187,7 @@ const ShippingTasks = () => {
     /** Mở modal giao từ URL (?focusOrderId=) khi bấm «Giao hàng» trên trang Đơn hàng. */
     useEffect(() => {
         if (!focusOrderId || isLoading) return;
-        const task = tasks.find(
-            (t) => t.kind === 'ORDER' && String(t.order.id) === String(focusOrderId),
-        );
+        const order = orders.find((o) => String(o.id) === String(focusOrderId));
         setSearchParams(
             (prev) => {
                 const next = new URLSearchParams(prev);
@@ -229,13 +196,19 @@ const ShippingTasks = () => {
             },
             { replace: true },
         );
-        if (task?.order) {
+        if (order) {
             setActiveView('list');
-            void openDeliveryConfirmModal(task.order);
-        } else if (tasks.length > 0) {
+            if (ORDER_STATUSES_NEED_DELIVERY_CONFIRM.includes(order.status)) {
+                void openDeliveryConfirmModal(order);
+            } else {
+                toast.info(
+                    'Đơn đã không còn ở bước xác nhận giao; vẫn hiển thị trong danh sách để tra cứu.',
+                );
+            }
+        } else if (orders.length > 0) {
             toast.info('Đơn không nằm trong danh sách nhiệm vụ giao (trạng thái hoặc phân quyền tài xế).');
         }
-    }, [focusOrderId, isLoading, tasks, setSearchParams, openDeliveryConfirmModal]);
+    }, [focusOrderId, isLoading, orders, setSearchParams, openDeliveryConfirmModal]);
 
     const parseCylinderSerialsFromOrder = (order) => {
         const fromAssigned = Array.isArray(order?.assigned_cylinders)
@@ -404,37 +377,23 @@ const ShippingTasks = () => {
     };
 
     const q = searchTerm.toLowerCase();
-    const filteredTasks = tasks.filter((task) => {
-        if (task.kind === 'ORDER') {
-            const order = task.order;
-            return (
-                order.order_code?.toLowerCase().includes(q) ||
-                order.customer_name?.toLowerCase().includes(q) ||
-                order.recipient_name?.toLowerCase().includes(q) ||
-                order.recipient_address?.toLowerCase().includes(q) ||
-                (order.recipient_phone || '').includes(searchTerm)
-            );
-        }
-        const r = task.recovery;
-        const c = r.customers;
+    const filteredOrders = orders.filter((order) => {
         return (
-            r.recovery_code?.toLowerCase().includes(q) ||
-            (c?.name || '').toLowerCase().includes(q) ||
-            (c?.phone || '').includes(searchTerm)
+            !searchTerm ||
+            order.order_code?.toLowerCase().includes(q) ||
+            order.customer_name?.toLowerCase().includes(q) ||
+            order.recipient_name?.toLowerCase().includes(q) ||
+            order.recipient_address?.toLowerCase().includes(q) ||
+            (order.recipient_phone || '').includes(searchTerm)
         );
     });
 
-    const getShipperColumnKey = (task) => {
-        if (task.kind === 'ORDER') {
-            return (task.order.delivery_unit || '').trim() || 'Chưa phân công';
-        }
-        return (task.recovery.driver_name || '').trim() || 'Chưa phân công';
-    };
+    const getShipperColumnKey = (order) => (order.delivery_unit || '').trim() || 'Chưa phân công';
 
-    const kanbanByShipper = filteredTasks.reduce((acc, task) => {
-        const shipperName = getShipperColumnKey(task);
+    const kanbanByShipper = filteredOrders.reduce((acc, order) => {
+        const shipperName = getShipperColumnKey(order);
         if (!acc[shipperName]) acc[shipperName] = [];
-        acc[shipperName].push(task);
+        acc[shipperName].push(order);
         return acc;
     }, {});
 
@@ -444,6 +403,10 @@ const ShippingTasks = () => {
         switch (status) {
             case 'CHO_GIAO_HANG': return 'bg-amber-100 text-amber-700 border-amber-200';
             case 'DANG_GIAO_HANG': return 'bg-blue-100 text-blue-700 border-blue-200';
+            case 'CHO_DOI_SOAT': return 'bg-cyan-100 text-cyan-800 border-cyan-200';
+            case 'DOI_SOAT_THAT_BAI': return 'bg-rose-100 text-rose-800 border-rose-200';
+            case 'HOAN_THANH': return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+            case 'TRA_HANG': return 'bg-red-100 text-red-800 border-red-200';
             default: return 'bg-slate-100 text-slate-700 border-slate-200';
         }
     };
@@ -452,41 +415,11 @@ const ShippingTasks = () => {
         switch (status) {
             case 'CHO_GIAO_HANG': return 'Chờ giao';
             case 'DANG_GIAO_HANG': return 'Đang giao';
+            case 'CHO_DOI_SOAT': return 'Chờ đối soát';
+            case 'DOI_SOAT_THAT_BAI': return 'Đối soát thất bại';
+            case 'HOAN_THANH': return 'Hoàn thành';
+            case 'TRA_HANG': return 'Trả hàng';
             default: return status;
-        }
-    };
-
-    const getRecoveryStatusBadge = (status) => {
-        switch (status) {
-            case 'CHO_PHAN_CONG': return 'bg-blue-100 text-blue-700 border-blue-200';
-            case 'DANG_THU_HOI': return 'bg-amber-100 text-amber-700 border-amber-200';
-            default: return 'bg-slate-100 text-slate-700 border-slate-200';
-        }
-    };
-
-    const getRecoveryStatusLabel = (status) => {
-        switch (status) {
-            case 'CHO_PHAN_CONG': return 'Chờ phân công';
-            case 'DANG_THU_HOI': return 'Đang thu hồi';
-            default: return status;
-        }
-    };
-
-    const openRecoveryTask = (recoveryId) => {
-        navigate(`/thu-hoi-vo?recovery=${recoveryId}`);
-    };
-
-    /** Hoàn thành từ Nhiệm vụ giao hàng: chốt nhanh nếu đã có vỏ; không thì mở phiếu (hoanThanh=1) */
-    const completeRecoveryTask = async (recoveryId) => {
-        if (completingRecoveryId) return;
-        setCompletingRecoveryId(recoveryId);
-        try {
-            const res = await tryQuickCompleteRecovery(supabase, recoveryId, {
-                onNeedOpenForm: () => navigate(`/thu-hoi-vo?recovery=${recoveryId}&hoanThanh=1`),
-            });
-            if (res?.ok) await fetchShippingTasks();
-        } finally {
-            setCompletingRecoveryId(null);
         }
     };
 
@@ -505,7 +438,10 @@ const ShippingTasks = () => {
                     </button>
                     <div>
                         <h1 className="text-xl font-bold text-slate-900">Nhiệm vụ giao hàng</h1>
-                        <p className="text-[11px] text-slate-500 font-semibold mt-0.5">Giao hàng + thu hồi vỏ bình</p>
+                        <p className="text-[11px] text-slate-500 font-semibold mt-0.5">
+                            Đơn giao hàng (bảng <span className="font-mono text-slate-600">orders</span>) — chỉ thao tác «Giao hàng» để
+                            mở phiếu xác nhận, chụp ảnh và tích từng mã máy; lưu trực tiếp vào đơn.
+                        </p>
                     </div>
                 </div>
 
@@ -534,18 +470,21 @@ const ShippingTasks = () => {
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-4 pb-24 space-y-4">
-                {isLoading && tasks.length === 0 ? (
+                {isLoading && orders.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-20 gap-3">
                         <Loader2 className="animate-spin text-primary" size={32} />
                         <p className="text-slate-500 font-medium">Đang tải danh sách nhiệm vụ...</p>
                     </div>
-                ) : filteredTasks.length === 0 ? (
+                ) : filteredOrders.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-20 text-center px-6">
                         <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
                             <Truck size={32} className="text-slate-400" />
                         </div>
                         <h3 className="text-lg font-bold text-slate-800">Không có nhiệm vụ nào</h3>
-                        <p className="text-slate-500 text-sm mt-1">Không có đơn cần giao hoặc phiếu thu hồi vỏ đang xử lý.</p>
+                        <p className="text-slate-500 text-sm mt-1">
+                            Thử làm mới trang hoặc bỏ ô tìm kiếm. Chỉ hiển thị đơn được gán cho bạn trong luồng giao hàng (
+                            <span className="font-mono">orders</span>).
+                        </p>
                         <button 
                             onClick={fetchShippingTasks}
                             className="mt-6 text-primary font-bold text-sm bg-primary/10 px-6 py-2 rounded-full"
@@ -571,194 +510,93 @@ const ShippingTasks = () => {
                                         <th className="py-3 px-2 whitespace-nowrap">SĐT</th>
                                         <th className="py-3 px-2 min-w-[120px]">Hàng / SL</th>
                                         <th className="py-3 px-2 text-right whitespace-nowrap">Giá trị</th>
-                                        <th className="py-3 pr-4 pl-2 text-right min-w-[200px]">Thao tác</th>
+                                        <th className="py-3 pr-4 pl-2 text-right min-w-[160px]">Thao tác</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {filteredTasks.map((task) => {
-                                        if (task.kind === 'ORDER') {
-                                            const order = task.order;
-                                            const orderNoteDisplay = stripDeliveryMediaFromNote(order.note);
-                                            return (
-                                                <tr
-                                                    key={`ord-${order.id}`}
-                                                    className="border-b border-slate-100 last:border-0 hover:bg-slate-50/80 align-top"
+                                    {filteredOrders.map((order) => (
+                                        <tr
+                                            key={order.id}
+                                            className="border-b border-slate-100 last:border-0 hover:bg-slate-50/80 align-top"
+                                        >
+                                            <td className="py-3 pl-4 pr-2">
+                                                <span className="inline-block text-[10px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-1.5 py-0.5 rounded-md uppercase whitespace-nowrap">
+                                                    Giao hàng
+                                                </span>
+                                                <span
+                                                    className="block text-[10px] text-slate-400 font-mono mt-1.5 leading-tight"
+                                                    title="Dòng dữ liệu từ bảng orders"
                                                 >
-                                                    <td className="py-3 pl-4 pr-2">
-                                                        <span className="inline-block text-[10px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-1.5 py-0.5 rounded-md uppercase whitespace-nowrap">
-                                                            Giao hàng
-                                                        </span>
-                                                        <span
-                                                            className="block text-[10px] text-slate-400 font-mono mt-1.5 leading-tight"
-                                                            title="Dữ liệu dòng này lấy từ bảng orders (đơn giao hàng)"
+                                                    orders
+                                                </span>
+                                            </td>
+                                            <td className="py-3 px-2 font-bold text-slate-800 whitespace-nowrap">
+                                                #{order.order_code}
+                                            </td>
+                                            <td className="py-3 px-2">
+                                                <span
+                                                    className={clsx(
+                                                        'inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase whitespace-nowrap',
+                                                        getStatusBadge(order.status),
+                                                    )}
+                                                >
+                                                    {getStatusLabel(order.status)}
+                                                </span>
+                                            </td>
+                                            <td className="py-3 px-2 font-semibold text-slate-900">
+                                                {order.recipient_name || '—'}
+                                            </td>
+                                            <td
+                                                className="py-3 px-2 text-slate-600 max-w-[120px] truncate"
+                                                title={(order.delivery_unit || '').trim() || undefined}
+                                            >
+                                                {(order.delivery_unit || '').trim() || '—'}
+                                            </td>
+                                            <td className="py-3 px-2 text-slate-600 max-w-[220px]">
+                                                <span className="line-clamp-2" title={order.recipient_address}>
+                                                    {order.recipient_address || '—'}
+                                                </span>
+                                            </td>
+                                            <td className="py-3 px-2 whitespace-nowrap">
+                                                {order.recipient_phone ? (
+                                                    <a
+                                                        href={`tel:${order.recipient_phone}`}
+                                                        className="text-primary font-bold hover:underline"
+                                                    >
+                                                        {order.recipient_phone}
+                                                    </a>
+                                                ) : (
+                                                    '—'
+                                                )}
+                                            </td>
+                                            <td className="py-3 px-2 text-slate-600 whitespace-nowrap">
+                                                {order.product_type || '—'} — SL: {order.quantity ?? '—'}
+                                            </td>
+                                            <td className="py-3 px-2 text-right font-bold text-primary tabular-nums whitespace-nowrap">
+                                                {order.total_amount != null
+                                                    ? `${Number(order.total_amount).toLocaleString('vi-VN')}đ`
+                                                    : '—'}
+                                            </td>
+                                            <td className="py-3 pr-4 pl-2">
+                                                <div className="flex flex-wrap items-center justify-end gap-1.5 ml-auto">
+                                                    {ORDER_STATUSES_NEED_DELIVERY_CONFIRM.includes(order.status) ? (
+                                                        <button
+                                                            type="button"
+                                                            title="Mở phiếu xác nhận giao — ảnh + tích mã máy; lưu vào orders"
+                                                            onClick={() => openDeliveryConfirmModal(order)}
+                                                            className={giaoHangActionBtnCls}
                                                         >
-                                                            orders
-                                                        </span>
-                                                    </td>
-                                                    <td className="py-3 px-2 font-bold text-slate-800 whitespace-nowrap">#{order.order_code}</td>
-                                                    <td className="py-3 px-2">
-                                                        <span className={clsx('inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase whitespace-nowrap', getStatusBadge(order.status))}>
+                                                            Giao hàng
+                                                        </button>
+                                                    ) : (
+                                                        <span className="max-w-[140px] shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-center text-[10px] font-bold uppercase leading-tight text-slate-500">
                                                             {getStatusLabel(order.status)}
                                                         </span>
-                                                    </td>
-                                                    <td className="py-3 px-2 font-semibold text-slate-900">{order.recipient_name || '—'}</td>
-                                                    <td className="py-3 px-2 text-slate-600 max-w-[120px] truncate" title={(order.delivery_unit || '').trim() || undefined}>
-                                                        {(order.delivery_unit || '').trim() || '—'}
-                                                    </td>
-                                                    <td className="py-3 px-2 text-slate-600 max-w-[220px]">
-                                                        <span className="line-clamp-2" title={order.recipient_address}>{order.recipient_address || '—'}</span>
-                                                    </td>
-                                                    <td className="py-3 px-2 whitespace-nowrap">
-                                                        {order.recipient_phone ? (
-                                                            <a href={`tel:${order.recipient_phone}`} className="text-primary font-bold hover:underline">
-                                                                {order.recipient_phone}
-                                                            </a>
-                                                        ) : (
-                                                            '—'
-                                                        )}
-                                                    </td>
-                                                    <td className="py-3 px-2 text-slate-600">
-                                                        <span className="line-clamp-2">{order.product_type || '—'} — SL: {order.quantity ?? '—'}</span>
-                                                        {orderNoteDisplay ? (
-                                                            <span
-                                                                className="block text-[11px] text-amber-700 mt-0.5 line-clamp-1"
-                                                                title={orderNoteDisplay}
-                                                            >
-                                                                {orderNoteDisplay}
-                                                            </span>
-                                                        ) : null}
-                                                    </td>
-                                                    <td className="py-3 px-2 text-right font-bold text-primary tabular-nums whitespace-nowrap">
-                                                        {order.total_amount != null ? `${Number(order.total_amount).toLocaleString('vi-VN')}đ` : '—'}
-                                                    </td>
-                                                    <td className="py-3 pr-4 pl-2">
-                                                        <div className="flex flex-wrap items-center justify-end gap-1.5">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => openDeliveryConfirmModal(order)}
-                                                                className="shrink-0 px-2.5 py-1.5 rounded-lg bg-primary text-white text-[11px] font-bold shadow-sm hover:opacity-95"
-                                                            >
-                                                                Giao hàng
-                                                            </button>
-                                                            <a
-                                                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.recipient_address || '')}`}
-                                                                target="_blank"
-                                                                rel="noopener noreferrer"
-                                                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                                                                title="Bản đồ"
-                                                            >
-                                                                <MapPin size={16} />
-                                                            </a>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        }
-                                        const r = task.recovery;
-                                        const c = r.customers || {};
-                                        const addr = c.address || '—';
-                                        const phone = c.phone || '—';
-                                        return (
-                                            <tr
-                                                key={`rec-${r.id}`}
-                                                className="border-b border-slate-100 last:border-0 bg-teal-50/30 hover:bg-teal-50/60 align-top"
-                                            >
-                                                <td className="py-3 pl-4 pr-2">
-                                                    <span className="inline-block text-[10px] font-bold text-white bg-teal-600 px-1.5 py-0.5 rounded-md uppercase whitespace-nowrap">
-                                                        Thu hồi vỏ
-                                                    </span>
-                                                    <span
-                                                        className="block text-[10px] text-slate-500 font-mono mt-1.5 leading-tight"
-                                                        title="Dữ liệu dòng này lấy từ bảng cylinder_recoveries (phiếu thu hồi vỏ)"
-                                                    >
-                                                        cylinder_recoveries
-                                                    </span>
-                                                </td>
-                                                <td className="py-3 px-2 font-bold text-teal-800 whitespace-nowrap">#{r.recovery_code}</td>
-                                                <td className="py-3 px-2">
-                                                    <span className={clsx('inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase whitespace-nowrap', getRecoveryStatusBadge(r.status))}>
-                                                        {getRecoveryStatusLabel(r.status)}
-                                                    </span>
-                                                </td>
-                                                <td className="py-3 px-2 font-semibold text-slate-900">{c.name || 'Khách hàng'}</td>
-                                                <td className="py-3 px-2 text-slate-600 max-w-[120px] truncate" title={(r.driver_name || '').trim() || undefined}>
-                                                    {(r.driver_name || '').trim() || '—'}
-                                                </td>
-                                                <td className="py-3 px-2 text-slate-600 max-w-[220px]">
-                                                    <span className="line-clamp-2" title={addr}>{addr}</span>
-                                                </td>
-                                                <td className="py-3 px-2 whitespace-nowrap">
-                                                    {phone !== '—' ? (
-                                                        <a href={`tel:${phone}`} className="text-primary font-bold hover:underline">
-                                                            {phone}
-                                                        </a>
-                                                    ) : (
-                                                        '—'
                                                     )}
-                                                </td>
-                                                <td className="py-3 px-2 text-slate-600">
-                                                    Yêu cầu: <span className="font-bold">{r.requested_quantity ?? 0}</span> vỏ
-                                                    {r.notes ? (
-                                                        <span className="block text-[11px] text-amber-700 mt-0.5 line-clamp-1" title={r.notes}>
-                                                            {r.notes}
-                                                        </span>
-                                                    ) : null}
-                                                </td>
-                                                <td className="py-3 px-2 text-right text-slate-400">—</td>
-                                                <td className="py-3 pr-4 pl-2">
-                                                    <div className="flex flex-wrap items-center justify-end gap-1.5">
-                                                        <button
-                                                            type="button"
-                                                            title="Danh sách / module thu hồi vỏ (dòng này là phiếu cylinder_recoveries)"
-                                                            onClick={() => navigate('/thu-hoi-vo')}
-                                                            className="shrink-0 px-2.5 py-1.5 rounded-lg border border-teal-200 bg-white text-teal-700 text-[11px] font-bold hover:bg-teal-50"
-                                                        >
-                                                            Trang thu hồi vỏ
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => openRecoveryTask(r.id)}
-                                                            className="shrink-0 px-2.5 py-1.5 rounded-lg bg-teal-600 text-white text-[11px] font-bold shadow-sm hover:bg-teal-700"
-                                                        >
-                                                            Mở phiếu
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            title="Chốt phiếu thu hồi (đã có vỏ trên phiếu). Chưa có vỏ sẽ mở phiếu để nhập."
-                                                            onClick={(e) => {
-                                                                e.preventDefault();
-                                                                e.stopPropagation();
-                                                                completeRecoveryTask(r.id);
-                                                            }}
-                                                            disabled={!!completingRecoveryId}
-                                                            className={clsx(
-                                                                'shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1',
-                                                                completingRecoveryId === r.id
-                                                                    ? 'bg-emerald-500/90 text-white cursor-wait'
-                                                                    : completingRecoveryId
-                                                                        ? 'bg-emerald-600/40 text-white cursor-not-allowed'
-                                                                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                                                            )}
-                                                        >
-                                                            {completingRecoveryId === r.id ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                                                            Hoàn thành
-                                                        </button>
-                                                        {addr && addr !== '—' ? (
-                                                            <a
-                                                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`}
-                                                                target="_blank"
-                                                                rel="noopener noreferrer"
-                                                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                                                                title="Bản đồ"
-                                                            >
-                                                                <MapPin size={16} />
-                                                            </a>
-                                                        ) : null}
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
                                 </tbody>
                             </table>
                         </div>
@@ -766,138 +604,68 @@ const ShippingTasks = () => {
                 ) : (
                     <div className="overflow-x-auto overflow-y-hidden">
                         <div className="grid grid-flow-col auto-cols-[280px] gap-3 min-h-full">
-                            {shipperColumns.map(([shipperName, shipperTasks]) => (
-                                <div key={shipperName} className="rounded-xl border border-slate-200 bg-white flex flex-col min-h-0">
+                            {shipperColumns.map(([shipperName, shipperOrders]) => (
+                                <div
+                                    key={shipperName}
+                                    className="rounded-xl border border-slate-200 bg-white flex flex-col min-h-0"
+                                >
                                     <div className="px-3 py-2.5 border-b border-slate-100 flex items-center justify-between">
                                         <p className="text-[12px] font-bold text-slate-700 truncate pr-2">{shipperName}</p>
                                         <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[11px] font-bold">
-                                            {shipperTasks.length}
+                                            {shipperOrders.length}
                                         </span>
                                     </div>
                                     <div className="p-2.5 space-y-2 overflow-y-auto min-h-0">
-                                        {shipperTasks.map((task) => (
-                                            task.kind === 'ORDER' ? (
+                                        {shipperOrders.map((order) => (
                                             <div
-                                                key={`k-ord-${task.order.id}`}
+                                                key={order.id}
                                                 className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 flex flex-col gap-2 hover:bg-white hover:shadow-sm transition-all"
                                             >
                                                 <div>
                                                     <div className="flex items-start justify-between gap-2">
-                                                        <p className="text-[12px] font-bold text-primary">#{task.order.order_code}</p>
-                                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[9px] font-bold border uppercase shrink-0', getStatusBadge(task.order.status))}>
-                                                            {getStatusLabel(task.order.status)}
+                                                        <p className="text-[12px] font-bold text-primary">
+                                                            #{order.order_code}
+                                                        </p>
+                                                        <span
+                                                            className={clsx(
+                                                                'px-1.5 py-0.5 rounded-full text-[9px] font-bold border uppercase shrink-0',
+                                                                getStatusBadge(order.status),
+                                                            )}
+                                                        >
+                                                            {getStatusLabel(order.status)}
                                                         </span>
                                                     </div>
-                                                    <p className="text-[10px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-1 py-0.5 rounded mt-1.5 inline-block uppercase">Giao hàng</p>
-                                                    <p className="text-[12px] font-bold text-slate-800 mt-1 line-clamp-2">{task.order.recipient_name || task.order.customer_name}</p>
-                                                    <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">{task.order.recipient_phone || '—'}</p>
+                                                    <p className="text-[10px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-1 py-0.5 rounded mt-1.5 inline-block uppercase">
+                                                        orders
+                                                    </p>
+                                                    <p className="text-[12px] font-bold text-slate-800 mt-1 line-clamp-2">
+                                                        {order.recipient_name || order.customer_name}
+                                                    </p>
+                                                    <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">
+                                                        {order.recipient_phone || '—'}
+                                                    </p>
                                                 </div>
                                                 <div className="flex flex-wrap items-stretch gap-1 pt-1.5 border-t border-slate-200/80">
-                                                    <button
-                                                        type="button"
-                                                        className="flex-1 min-w-[100px] py-1.5 rounded-md bg-primary text-white text-[10px] font-bold shadow-sm active:opacity-90"
-                                                        onClick={(e) => {
-                                                            e.preventDefault();
-                                                            e.stopPropagation();
-                                                            void openDeliveryConfirmModal(task.order);
-                                                        }}
-                                                    >
-                                                        Giao hàng
-                                                    </button>
-                                                    <a
-                                                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(task.order.recipient_address || '')}`}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 active:bg-slate-100"
-                                                        title="Bản đồ"
-                                                        onClick={(e) => e.stopPropagation()}
-                                                    >
-                                                        <MapPin size={16} />
-                                                    </a>
-                                                </div>
-                                            </div>
-                                            ) : (
-                                            <div
-                                                key={`k-rec-${task.recovery.id}`}
-                                                className="bg-teal-50/80 border border-teal-200 rounded-lg overflow-hidden hover:bg-white hover:shadow-sm transition-all flex flex-col"
-                                            >
-                                                <div className="p-2.5">
-                                                    <div className="flex items-start justify-between gap-2">
-                                                        <p className="text-[12px] font-bold text-teal-700">#{task.recovery.recovery_code}</p>
-                                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[9px] font-bold border uppercase shrink-0', getRecoveryStatusBadge(task.recovery.status))}>
-                                                            {getRecoveryStatusLabel(task.recovery.status)}
+                                                    {ORDER_STATUSES_NEED_DELIVERY_CONFIRM.includes(order.status) ? (
+                                                        <button
+                                                            type="button"
+                                                            title="Phiếu xác nhận giao — ảnh + mã máy; ghi vào orders"
+                                                            className="flex-1 min-w-[100px] py-1.5 rounded-md bg-primary text-white text-[10px] font-bold shadow-sm active:opacity-90 !h-auto"
+                                                            onClick={(e) => {
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+                                                                void openDeliveryConfirmModal(order);
+                                                            }}
+                                                        >
+                                                            Giao hàng
+                                                        </button>
+                                                    ) : (
+                                                        <span className="w-full min-w-0 flex items-center justify-center py-1.5 rounded-md border border-slate-200 bg-slate-50 text-slate-600 text-[9px] font-bold text-center leading-tight uppercase">
+                                                            {getStatusLabel(order.status)}
                                                         </span>
-                                                    </div>
-                                                    <p className="text-[10px] font-bold text-teal-600 mt-0.5 uppercase">Thu hồi vỏ</p>
-                                                    <p className="text-[12px] font-bold text-slate-800 mt-1 line-clamp-2">{(task.recovery.customers || {}).name || '—'}</p>
-                                                    <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">{(task.recovery.customers || {}).phone || '—'}</p>
-                                                </div>
-                                                <div className="flex flex-wrap gap-1 p-2 pt-0 border-t border-teal-200/60">
-                                                    <button
-                                                        type="button"
-                                                        title="Danh sách thu hồi vỏ"
-                                                        className="shrink-0 px-1.5 py-1.5 rounded-md border border-teal-200 bg-white text-teal-700 text-[9px] font-bold leading-tight text-left max-w-[108px]"
-                                                        onClick={(e) => {
-                                                            e.preventDefault();
-                                                            e.stopPropagation();
-                                                            navigate('/thu-hoi-vo');
-                                                        }}
-                                                    >
-                                                        Trang thu hồi vỏ
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        className="shrink-0 px-2 py-1.5 rounded-md bg-teal-600 text-white text-[10px] font-bold shadow-sm"
-                                                        onClick={(e) => {
-                                                            e.preventDefault();
-                                                            e.stopPropagation();
-                                                            openRecoveryTask(task.recovery.id);
-                                                        }}
-                                                    >
-                                                        Mở phiếu
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        title="Chốt phiếu từ nhiệm vụ (đã có vỏ). Chưa có vỏ sẽ mở phiếu."
-                                                        className={clsx(
-                                                            'shrink-0 px-2 py-1.5 rounded-md text-[10px] font-bold flex items-center justify-center gap-1',
-                                                            completingRecoveryId === task.recovery.id
-                                                                ? 'bg-emerald-500/90 text-white cursor-wait'
-                                                                : completingRecoveryId
-                                                                    ? 'bg-emerald-600/40 text-white cursor-not-allowed'
-                                                                    : 'bg-emerald-600 text-white active:bg-emerald-700'
-                                                        )}
-                                                        disabled={!!completingRecoveryId}
-                                                        onClick={(e) => {
-                                                            e.preventDefault();
-                                                            e.stopPropagation();
-                                                            completeRecoveryTask(task.recovery.id);
-                                                        }}
-                                                    >
-                                                        {completingRecoveryId === task.recovery.id ? (
-                                                            <Loader2 size={12} className="animate-spin shrink-0" />
-                                                        ) : null}
-                                                        Hoàn thành
-                                                    </button>
-                                                    {(() => {
-                                                        const raw = String((task.recovery.customers || {}).address || '').trim();
-                                                        if (!raw || raw === '—') return null;
-                                                        return (
-                                                            <a
-                                                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(raw)}`}
-                                                                target="_blank"
-                                                                rel="noopener noreferrer"
-                                                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600"
-                                                                title="Bản đồ"
-                                                                onClick={(e) => e.stopPropagation()}
-                                                            >
-                                                                <MapPin size={16} />
-                                                            </a>
-                                                        );
-                                                    })()}
+                                                    )}
                                                 </div>
                                             </div>
-                                            )
                                         ))}
                                     </div>
                                 </div>
@@ -912,7 +680,14 @@ const ShippingTasks = () => {
                 <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
                     <div className="bg-white w-full max-w-lg rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-10 duration-500">
                         <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white rounded-t-3xl z-10">
-                            <h2 className="text-xl font-bold text-slate-900">Xác nhận giao hàng</h2>
+                            <div>
+                                <h2 className="text-xl font-bold text-slate-900">Phiếu xác nhận giao hàng</h2>
+                                <p className="text-[11px] font-semibold text-slate-500 mt-1 leading-snug">
+                                    Dữ liệu được ghi vào bảng nguồn{' '}
+                                    <span className="font-mono text-slate-700">orders</span>: ảnh (URL/base64/ghi chú),
+                                    <span className="font-mono text-slate-700"> delivery_checklist</span> theo từng mã máy đã tích.
+                                </p>
+                            </div>
                             <button
                                 type="button"
                                 onClick={() => {
@@ -920,7 +695,7 @@ const ShippingTasks = () => {
                                     setShippingOrderItems([]);
                                     setSelectedOrder(null);
                                 }}
-                                className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400"
+                                className="shrink-0 self-start mt-0.5 p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400"
                             >
                                 <X size={20} />
                             </button>
@@ -996,7 +771,14 @@ const ShippingTasks = () => {
 
                             {deliveryStatus === 'HOAN_THANH' && selectedOrder && shipModMachineSerials.length > 0 && (
                                 <div className="animate-in fade-in slide-in-from-top-2 duration-300">
-                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Tích xác nhận mã máy đã giao</p>
+                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">
+                                        Xác nhận từng mã máy trên đơn
+                                    </p>
+                                    <p className="text-[11px] text-slate-500 mb-3">
+                                        Bắt buộc tích đủ trước khi xác nhận. Lưu dưới dạng{' '}
+                                        <span className="font-mono text-slate-700">MAY:{'<mã_máy>'}</span> trong{' '}
+                                        <span className="font-mono">orders.delivery_checklist</span>.
+                                    </p>
                                     <div className="space-y-2 max-h-44 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
                                         {shipModMachineSerials.map((serial) => (
                                             <label key={serial} className="flex items-center gap-2 text-sm font-semibold text-slate-700">
@@ -1053,6 +835,7 @@ const ShippingTasks = () => {
                     </div>
                 </div>
             )}
+
         </div>
     );
 };

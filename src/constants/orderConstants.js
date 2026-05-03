@@ -46,7 +46,6 @@ export const ORDER_STATUSES = [
     { id: 'KD_XU_LY', label: 'Kinh doanh xử lý', color: 'purple' },
     { id: 'DIEU_CHINH', label: 'Điều chỉnh', color: 'orange' },
     { id: 'KHO_XU_LY', label: 'Kho xử lý', color: 'emerald' },
-    { id: 'TU_CHOI', label: 'Từ chối', color: 'red' },
     { id: 'DA_DUYET', label: 'Đã báo xuất (Chờ giao)', color: 'indigo' },
     { id: 'CHO_GIAO_HANG', label: 'Chờ giao hàng', color: 'indigo' },
     { id: 'DANG_GIAO_HANG', label: 'Đang giao hàng', color: 'purple' },
@@ -64,7 +63,6 @@ export const STATUS_PRIORITY = {
     'KD_XU_LY': 4,
     'DIEU_CHINH': 5,
     'KHO_XU_LY': 6,
-    'TU_CHOI': 7,
     'DA_DUYET': 8,
     'CHO_GIAO_HANG': 9,
     'DANG_GIAO_HANG': 10,
@@ -74,6 +72,24 @@ export const STATUS_PRIORITY = {
     'TRA_HANG': 14,
     'HUY_DON': 15
 };
+
+/** Giá trị legacy trong DB — UI coi là Hủy đơn (không hiển thị riêng "Từ chối"). */
+export const ORDER_STATUS_DISPLAY_ALIASES = Object.freeze({
+    TU_CHOI: 'HUY_DON',
+});
+
+export function resolveOrderStatusKey(statusId) {
+    const id = statusId === null || statusId === undefined ? '' : String(statusId);
+    return ORDER_STATUS_DISPLAY_ALIASES[id] || id;
+}
+
+export function getOrderStatusMeta(statusId) {
+    const key = resolveOrderStatusKey(statusId);
+    const row = ORDER_STATUSES.find((s) => s.id === key);
+    if (row) return row;
+    const raw = statusId === null || statusId === undefined ? '' : String(statusId);
+    return { id: raw || key, label: raw || key, color: 'gray' };
+}
 
 export const TABLE_COLUMNS = [
     { key: 'code', label: 'Mã ĐH' },

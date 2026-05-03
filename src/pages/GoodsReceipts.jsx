@@ -312,7 +312,7 @@ const GoodsReceipts = () => {
             'Ghi chú phiếu',
             'Người nhận hàng',
             'Người giao hàng',
-            'Địa chỉ người giao',
+            'Địa chỉ giao hàng (địa chỉ kho nhận)',
             'Loại hàng (MAY/BINH/VAT_TU)',
             'Tên hàng hóa',
             'Mã serial (nếu có)',
@@ -331,7 +331,7 @@ const GoodsReceipts = () => {
                 'Ghi chú phiếu': 'Nhập hàng đợt 1',
                 'Người nhận hàng': 'Nguyễn Văn A',
                 'Người giao hàng': 'Trần Văn B',
-                'Địa chỉ người giao': '123 Đường ABC, Quận 1, TP.HCM',
+                'Địa chỉ giao hàng (địa chỉ kho nhận)': 'Số nhà… theo kho HN',
                 'Loại hàng (MAY/BINH/VAT_TU)': 'BINH',
                 'Tên hàng hóa': 'Bình Oxy 40L',
                 'Mã serial (nếu có)': 'OXY40-001',
@@ -348,7 +348,7 @@ const GoodsReceipts = () => {
                 'Ghi chú phiếu': 'Nhập hàng đợt 1',
                 'Người nhận hàng': 'Nguyễn Văn A',
                 'Người giao hàng': 'Trần Văn B',
-                'Địa chỉ người giao': '123 Đường ABC, Quận 1, TP.HCM',
+                'Địa chỉ giao hàng (địa chỉ kho nhận)': 'Số nhà… theo kho HN',
                 'Loại hàng (MAY/BINH/VAT_TU)': 'BINH',
                 'Tên hàng hóa': 'Bình Oxy 40L',
                 'Mã serial (nếu có)': 'OXY40-002',
@@ -397,7 +397,11 @@ const GoodsReceipts = () => {
                         note: row['Ghi chú phiếu']?.toString() || '',
                         received_by: row['Người nhận hàng']?.toString() || '',
                         deliverer_name: row['Người giao hàng']?.toString() || '',
-                        deliverer_address: row['Địa chỉ người giao']?.toString() || '',
+                        deliverer_address:
+                            row['Địa chỉ giao hàng (địa chỉ kho nhận)']?.toString()
+                            || row['Địa chỉ giao hàng']?.toString()
+                            || row['Địa chỉ người giao']?.toString()
+                            || '',
 
                         item_type: row['Loại hàng (MAY/BINH/VAT_TU)']?.toString().toUpperCase() || 'VAT_TU',
                         item_name: row['Tên hàng hóa']?.toString() || '',
@@ -601,6 +605,7 @@ const GoodsReceipts = () => {
                                     warehouse_id: receipt.warehouse_id,
                                     customer_id: null,
                                     customer_name: null,
+                                    supplier_id: null,
                                 })
                                 .eq('id', existingCyl.id);
                             if (cylSyncError) throw new Error(`Không thể cập nhật bình ${normalizedSerial}: ${cylSyncError.message}`);
@@ -616,6 +621,7 @@ const GoodsReceipts = () => {
                                     volume: item.item_name, // e.g. "Bình 4L", "Bình oxi"
                                     customer_id: null,
                                     customer_name: null,
+                                    supplier_id: null,
                                 });
                             if (cylInsertError) throw new Error(`Không thể tạo mới bình ${normalizedSerial}: ${cylInsertError.message}`);
                         }

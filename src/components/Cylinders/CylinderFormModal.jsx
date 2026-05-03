@@ -1,4 +1,4 @@
-import { Activity, ActivitySquare, Calendar, Camera, Gauge, Hash, Save, Scale, ScanLine, Settings2, Tag, User, Warehouse, Wind, Wrench, X } from 'lucide-react';
+import { Activity, ActivitySquare, Building2, Calendar, Camera, Gauge, Hash, Save, Scale, ScanLine, Settings2, Tag, User, Warehouse, Wind, Wrench, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import clsx from 'clsx';
@@ -40,6 +40,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
         customer_id: '',
         department: '',
         warehouse_id: '',
+        supplier_id: '',
         cylinder_code: '',
         expiry_date: ''
     };
@@ -47,6 +48,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
     const [formData, setFormData] = useState(defaultState);
     const [customersList, setCustomersList] = useState([]);
     const [warehousesList, setWarehousesList] = useState([]);
+    const [suppliersList, setSuppliersList] = useState([]);
 
     useEffect(() => {
         const fetchCustomers = async () => {
@@ -74,7 +76,9 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                     setWarehousesList(data);
                     // Default to first warehouse if not editing
                     if (!isEdit && data.length > 0) {
-                        setFormData(prev => !prev.warehouse_id ? { ...prev, warehouse_id: data[0].id } : prev);
+                        setFormData(prev => (!prev.warehouse_id && prev.status !== 'đã trả ncc')
+                            ? { ...prev, warehouse_id: data[0].id }
+                            : prev);
                     }
                 }
             } catch (err) {
@@ -82,8 +86,21 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             }
         };
 
+        const fetchSuppliers = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('suppliers')
+                    .select('id, name')
+                    .order('name');
+                if (!error && data) setSuppliersList(data);
+            } catch (err) {
+                console.error('Error fetching suppliers:', err);
+            }
+        };
+
         fetchCustomers();
         fetchWarehouses();
+        fetchSuppliers();
     }, [isEdit]);
 
     useEffect(() => {
@@ -102,6 +119,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                 customer_id: cylinder.customer_id || '',
                 department: cDept || '',
                 warehouse_id: cylinder.warehouse_id || '',
+                supplier_id: cylinder.supplier_id || '',
                 cylinder_code: cylinder.cylinder_code || '',
                 expiry_date: cylinder.expiry_date || ''
             });
@@ -110,7 +128,13 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
+        setFormData((prev) => {
+            const next = { ...prev, [name]: value };
+            if (name === 'status' && value !== 'đã trả ncc') {
+                next.supplier_id = '';
+            }
+            return next;
+        });
     };
 
     const handleNumericChange = (field, value) => {
@@ -158,9 +182,11 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             return;
         }
 
-        if (!formData.warehouse_id) {
-            setErrorMsg('Vui lòng chọn Kho quản lý.');
-            return;
+        if (formData.status !== 'đã trả ncc') {
+            if (!formData.warehouse_id) {
+                setErrorMsg('Vui lòng chọn Kho quản lý.');
+                return;
+            }
         }
 
         setIsLoading(true);
@@ -186,6 +212,12 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             payload.customer_id = payload.customer_id || null;
             payload.expiry_date = payload.expiry_date || null;
             payload.cylinder_code = payload.cylinder_code || null;
+            payload.warehouse_id = payload.warehouse_id && String(payload.warehouse_id).trim()
+                ? String(payload.warehouse_id).trim()
+                : null;
+            payload.supplier_id = payload.supplier_id && String(payload.supplier_id).trim()
+                ? String(payload.supplier_id).trim()
+                : null;
             // Remove local only field
             delete payload.department;
 
@@ -309,6 +341,26 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                                 </select>
                             </div>
 
+                            {formData.status === 'đã trả ncc' && (
+                                <div className="space-y-1.5 md:col-span-2">
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                        <Building2 className="w-4 h-4 text-primary/60" />
+                                        NCC nhận vỏ
+                                    </label>
+                                    <select
+                                        name="supplier_id"
+                                        value={formData.supplier_id || ''}
+                                        onChange={handleChange}
+                                        className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-[14px] font-bold text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white transition-all shadow-sm"
+                                    >
+                                        <option value="">-- Chọn NCC --</option>
+                                        {suppliersList.map((s) => (
+                                            <option key={s.id} value={s.id}>{s.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
                             <div className="space-y-1.5">
                                 <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
                                     <Tag className="w-4 h-4 text-primary/60" />
@@ -359,13 +411,17 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                             <div className="space-y-1.5">
                                 <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
                                     <Warehouse className="w-4 h-4 text-primary/60" />
-                                    Kho quản lý <span className="text-red-500">*</span>
+                                    Kho quản lý {formData.status !== 'đã trả ncc' && <span className="text-red-500">*</span>}
                                 </label>
                                 <select
                                     name="warehouse_id"
                                     value={formData.warehouse_id || ''}
                                     onChange={handleChange}
-                                    className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-[14px] font-bold text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white transition-all shadow-sm"
+                                    disabled={formData.status === 'đã trả ncc'}
+                                    className={clsx(
+                                        'w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-[14px] font-bold text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white transition-all shadow-sm',
+                                        formData.status === 'đã trả ncc' && 'opacity-60 cursor-not-allowed text-slate-500'
+                                    )}
                                 >
                                     <option value="">-- Chọn kho --</option>
                                     {warehousesList.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}

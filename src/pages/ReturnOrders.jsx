@@ -53,7 +53,11 @@ ChartJS.register(
     ChartLegend
 );
 
-import { ORDER_STATUSES, PRODUCT_TYPES, CUSTOMER_CATEGORIES } from '../constants/orderConstants';
+import {
+    CUSTOMER_CATEGORIES,
+    PRODUCT_TYPES,
+    getOrderStatusMeta,
+} from '../constants/orderConstants';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
@@ -278,9 +282,7 @@ const ReturnOrders = () => {
     const totalRecords = filteredOrders.length;
     const paginatedOrders = filteredOrders.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
-    const getStatusLabel = (statusId) => {
-        return ORDER_STATUSES.find(s => s.id === statusId)?.label || statusId;
-    };
+    const getStatusLabel = (statusId) => getOrderStatusMeta(statusId).label;
 
     const getProductLabel = (productId) => {
         return PRODUCT_TYPES.find(p => p.id === productId)?.label || productId;

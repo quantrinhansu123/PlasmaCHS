@@ -119,7 +119,7 @@ const getFilterIconClass = (key, active) => {
 
 const getTransferStatusClass = (status) => {
     if (status === 'DA_DUYET') return 'px-2 py-1 rounded-lg text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase';
-    if (status === 'TU_CHOI') return 'px-2 py-1 rounded-lg text-[10px] font-black bg-rose-50 text-rose-700 border border-rose-200 uppercase';
+    if (status === 'HUY_DON' || status === 'TU_CHOI') return 'px-2 py-1 rounded-lg text-[10px] font-black bg-rose-50 text-rose-700 border border-rose-200 uppercase';
     return 'px-2 py-1 rounded-lg text-[10px] font-black bg-amber-50 text-amber-700 border border-amber-200 uppercase';
 };
 

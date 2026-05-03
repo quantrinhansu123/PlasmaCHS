@@ -19,11 +19,36 @@ import clsx from 'clsx';
 const READY_CYLINDER_STATUS = 'sẵn sàng';
 const isReadyCylinderStatus = (status) => String(status || '').trim().toLowerCase() === READY_CYLINDER_STATUS;
 
-/** Bình trong kho phải khớp loại sản phẩm đơn (theo volume). */
+/** Chuẩn hoá warehouses theo giá trị orders.warehouse (thường là code VD: VP, DN). cylinders.warehouse_id là UUID FK. */
+function resolveWarehouseRecord(warehouseOrderValue, warehouseList = []) {
+    const raw = String(warehouseOrderValue || '').trim();
+    if (!raw || !warehouseList?.length) return null;
+    const normalized = raw.toLowerCase();
+    return warehouseList.find((w) => {
+        const code = String(w?.code || '').trim().toLowerCase();
+        const id = String(w?.id || '').trim().toLowerCase();
+        const name = String(w?.name || '').trim().toLowerCase();
+        return normalized === code || normalized === id || normalized === name;
+    }) || null;
+}
+
+/** Bình trong kho phải khớp loại sản phẩm đơn (theo volume). Không nhầm 40L ↔ 4L. */
 function cylinderVolumeMatchesProduct(volume, productType) {
-    const vol = (volume || '').toLowerCase();
-    if (productType === 'BINH_4L') return vol.includes('4l') || vol.includes('4 l');
-    if (productType === 'BINH_8L') return vol.includes('8l') || vol.includes('8 l');
+    const raw = String(volume ?? '').trim();
+    const vol = raw.toLowerCase();
+    const compact = vol.replace(/\s+/g, '');
+
+    if (productType === 'BINH_4L') {
+        if (!vol) return false;
+        if (/\b40\s*l(ít|$|\/|,|\))/i.test(vol) || compact.includes('40l')) return false;
+        if (/\b(14|24|34|143)\s*l\b/i.test(vol)) return false;
+        if (/bình\s*4\s*l|binh\s*4\s*l/i.test(vol)) return true;
+        if (/\b4\s*l(ít|$|\/|,|\)|\s|cga)/i.test(vol)) return true;
+        return compact.includes('4l');
+    }
+    if (productType === 'BINH_8L') {
+        return vol.includes('8l') || vol.includes('8 l');
+    }
     if (productType === 'BINH_3LC') return vol.includes('3lc') || vol.includes('3 lc');
     if (productType?.startsWith('BINH')) return true;
     return false;
@@ -215,7 +240,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         setCylinderDebt(debt || []);
     };
 
-    const updateStockOptions = async (warehouseId) => {
+    const updateStockOptions = async (warehouseId, warehouseListOverride = null) => {
         if (!warehouseId) {
             setAvailableProductTypes(PRODUCT_TYPES);
             return;
@@ -223,6 +248,9 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
 
         setIsFetchingStock(true);
         try {
+            const whList = warehouseListOverride ?? warehousesList;
+            const whRow = resolveWarehouseRecord(warehouseId, whList);
+
             // 1. Fetch Machine counts
             const { data: machines, error: mErr } = await supabase
                 .from('machines')
@@ -232,14 +260,17 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
             
             if (mErr) throw mErr;
 
-            // 2. Fetch Cylinder counts
-            const { data: cylinders, error: cErr } = await supabase
-                .from('cylinders')
-                .select('volume')
-                .eq('warehouse_id', warehouseId)
-                .eq('status', 'sẵn sàng');
-            
-            if (cErr) throw cErr;
+            // 2. Fetch Cylinder counts (warehouse_id trong DB là UUID của bảng warehouses)
+            let cylinders = [];
+            if (whRow?.id) {
+                const { data: cylData, error: cErr } = await supabase
+                    .from('cylinders')
+                    .select('volume')
+                    .eq('warehouse_id', whRow.id)
+                    .eq('status', 'sẵn sàng');
+                if (cErr) throw cErr;
+                cylinders = cylData || [];
+            }
 
             // Count occurrences
             const mCounts = {};
@@ -249,11 +280,11 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
             });
 
             const cCounts = {};
-            cylinders?.forEach(c => {
+            cylinders?.forEach((c) => {
                 const vol = c.volume || '';
-                if (vol.includes('4L')) cCounts['BINH_4L'] = (cCounts['BINH_4L'] || 0) + 1;
-                else if (vol.includes('8L')) cCounts['BINH_8L'] = (cCounts['BINH_8L'] || 0) + 1;
-                else if (vol.includes('3LC')) cCounts['BINH_3LC'] = (cCounts['BINH_3LC'] || 0) + 1;
+                if (cylinderVolumeMatchesProduct(vol, 'BINH_4L')) cCounts.BINH_4L = (cCounts.BINH_4L || 0) + 1;
+                else if (cylinderVolumeMatchesProduct(vol, 'BINH_8L')) cCounts.BINH_8L = (cCounts.BINH_8L || 0) + 1;
+                else if (cylinderVolumeMatchesProduct(vol, 'BINH_3LC')) cCounts.BINH_3LC = (cCounts.BINH_3LC || 0) + 1;
             });
 
             // Map static PRODUCT_TYPES to their stock counts
@@ -318,13 +349,13 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                     
                     setFormData(prev => {
                         const newWh = resolveWarehouseCode(prev.warehouse, finalWarehouses) || defaultWh;
-                        updateStockOptions(newWh);
+                        updateStockOptions(newWh, finalWarehouses);
                         return { ...prev, warehouse: newWh };
                     });
                 } else if (isEdit && order.warehouse) {
                     const editWhCode = resolveWarehouseCode(order.warehouse, finalWarehouses);
                     if (editWhCode) {
-                        updateStockOptions(editWhCode);
+                        updateStockOptions(editWhCode, finalWarehouses);
                     }
                 }
             }
@@ -342,31 +373,45 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
             }
             setIsFetchingCyls(true);
             try {
-                const warehouseCandidates = getWarehouseLookupValues(formData.warehouse, warehousesList);
+                const whRow = resolveWarehouseRecord(formData.warehouse, warehousesList);
                 let loadedCylinders = [];
-                let latestError = null;
 
-                for (const warehouseKey of warehouseCandidates) {
+                if (whRow?.id) {
                     const { data, error } = await supabase
                         .from('cylinders')
                         .select('serial_number, volume, status, warehouse_id')
-                        .eq('warehouse_id', warehouseKey)
+                        .eq('warehouse_id', whRow.id)
                         .eq('status', 's\u1eb5n s\u00e0ng')
                         .order('serial_number', { ascending: true })
                         .limit(5000);
+                    if (error) throw error;
+                    loadedCylinders = data || [];
+                } else if (warehousesList.length === 0) {
+                    loadedCylinders = [];
+                } else {
+                    const warehouseCandidates = getWarehouseLookupValues(formData.warehouse, warehousesList);
+                    let latestError = null;
+                    for (const warehouseKey of warehouseCandidates) {
+                        const { data, error } = await supabase
+                            .from('cylinders')
+                            .select('serial_number, volume, status, warehouse_id')
+                            .eq('warehouse_id', warehouseKey)
+                            .eq('status', 's\u1eb5n s\u00e0ng')
+                            .order('serial_number', { ascending: true })
+                            .limit(5000);
 
-                    if (error) {
-                        latestError = error;
-                        continue;
+                        if (error) {
+                            latestError = error;
+                            continue;
+                        }
+                        if (Array.isArray(data) && data.length > 0) {
+                            loadedCylinders = data;
+                            break;
+                        }
                     }
-
-                    if (Array.isArray(data) && data.length > 0) {
-                        loadedCylinders = data;
-                        break;
-                    }
+                    if (loadedCylinders.length === 0 && latestError) throw latestError;
                 }
 
-                if (loadedCylinders.length === 0 && latestError) throw latestError;
                 if (!cancelled) setWarehouseReadyCylinders(loadedCylinders);
             } catch (e) {
                 console.error('loadWarehouseCylinders', e);

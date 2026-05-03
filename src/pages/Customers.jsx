@@ -1193,62 +1193,6 @@ const Customers = () => {
         }
     };
 
-    const handleExportTransactionsBulk = async () => {
-        const targetIds = selectedIds.length > 0 ? selectedIds : filteredCustomers.map(c => c.id);
-
-        if (targetIds.length === 0) {
-            alert('Không có khách hàng nào để xuất giao dịch!');
-            return;
-        }
-
-        const confirmMsg = selectedIds.length > 0
-            ? `Bạn muốn sao lưu lịch sử giao dịch cho ${selectedIds.length} khách hàng đã chọn?`
-            : `Bạn muốn sao lưu toàn bộ lịch sử giao dịch cho ${filteredCustomers.length} khách hàng đang hiển thị?`;
-
-        if (!window.confirm(confirmMsg)) return;
-
-        setIsLoading(true);
-        try {
-            const { data, error } = await supabase
-                .from('customer_transactions')
-                .select('*')
-                .in('customer_id', targetIds)
-                .order('transaction_date', { ascending: false });
-
-            if (error) throw error;
-
-            if (!data || data.length === 0) {
-                alert('Không tìm thấy giao dịch nào để sao lưu!');
-                setIsLoading(false);
-                return;
-            }
-
-            const exportData = data.map(tx => ({
-                'Tên Khách Hàng': tx.customer_name,
-                'Mã Giao Dịch': tx.transaction_code,
-                'Ngày': tx.transaction_date,
-                'Loại': tx.transaction_type === 'THU' ? 'Thu (Khách trả)' : 'Chi (Hoàn tiền)',
-                'Số Tiền': tx.amount,
-                'Hình Thức': tx.payment_method === 'TIEN_MAT' ? 'Tiền mặt' : 'Chuyển khoản',
-                'Ghi Chú': tx.note,
-                'Người Lập': tx.created_by
-            }));
-
-            const ws = XLSX.utils.json_to_sheet(exportData);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'Lịch sử Thu Chi');
-            XLSX.writeFile(wb, `SaoLuu_GD_KhachHang_${new Date().toISOString().split('T')[0]}.xlsx`);
-
-            alert(`✅ Đã sao lưu thành công ${data.length} giao dịch.`);
-            setShowMoreActions(false);
-        } catch (error) {
-            console.error('Error exporting transactions:', error);
-            alert('❌ Lỗi khi sao lưu giao dịch: ' + error.message);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
     const handleExportCustomers = () => {
         if (filteredCustomers.length === 0) {
             alert('Không có khách hàng nào để xuất!');
@@ -1552,17 +1496,6 @@ const Customers = () => {
                                                     className="hidden"
                                                 />
                                             </label>
-
-                                            <div
-                                                role="button"
-                                                onClick={() => { handleExportTransactionsBulk(); setShowMoreActions(false); }}
-                                                className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-emerald-600 hover:bg-emerald-50 transition-colors border-t border-slate-50 mt-1 pt-2 cursor-pointer"
-                                            >
-                                                <div className="w-5 flex justify-center flex-shrink-0">
-                                                    <Download size={18} className="text-emerald-500" />
-                                                </div>
-                                                Sao lưu Giao dịch
-                                            </div>
 
                                             <div
                                                 role="button"
@@ -1904,14 +1837,6 @@ const Customers = () => {
                                 >
                                     <Download size={16} className="shrink-0" />
                                     <span>Xuất Excel</span>
-                                </button>
-
-                                <button
-                                    onClick={handleExportTransactionsBulk}
-                                    className="flex items-center gap-2 px-4 py-2 h-10 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-all text-[13px] font-bold shadow-sm"
-                                >
-                                    <Download size={16} className="shrink-0" />
-                                    <span>Sao lưu GD</span>
                                 </button>
 
                                 <button

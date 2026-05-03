@@ -178,23 +178,21 @@ export default function CylinderRecoveryFormModal({
         }
     }, [formData.customer_id, customers]);
 
+    /** Cùng nguồn với trang Đơn vị vận chuyển: bảng shippers, cột name (Đơn vị vận chuyển). */
     const fetchShippers = async () => {
-        const { data: internalShippers } = await supabase
-            .from('app_users')
-            .select('name')
-            .eq('role', 'Shipper')
-            .eq('status', 'Hoạt động');
-
-        const { data: externalShippers } = await supabase
+        const { data, error } = await supabase
             .from('shippers')
             .select('name')
-            .eq('status', 'Đang hoạt động');
+            .eq('status', 'Đang hoạt động')
+            .order('name');
 
-        const combined = [
-            ...(internalShippers?.map(u => `[Nội bộ] ${u.name}`) || []),
-            ...(externalShippers?.map(s => `[Đối tác] ${s.name}`) || [])
-        ];
-        setShippers(combined);
+        if (error) {
+            console.error('fetchShippers:', error);
+            setShippers([]);
+            return;
+        }
+        const names = [...new Set((data || []).map((s) => String(s.name || '').trim()).filter(Boolean))];
+        setShippers(names);
     };
 
     const fetchItems = async (recoveryId) => {
@@ -962,7 +960,7 @@ export default function CylinderRecoveryFormModal({
                                     <div className="space-y-1.5">
                                         <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
                                             <Truck className="w-4 h-4 text-primary/70" />
-                                            Nhân viên vận chuyển
+                                            Đơn vị vận chuyển
                                         </label>
                                         <div className="relative group">
                                             <Truck className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary/50 group-focus-within:text-primary transition-colors z-10" />
@@ -977,7 +975,7 @@ export default function CylinderRecoveryFormModal({
                                                         status: (prev.status === 'CHO_PHAN_CONG' && name) ? 'DANG_THU_HOI' : prev.status
                                                     }));
                                                 }}
-                                                placeholder="Chọn Shipper"
+                                                placeholder="Chọn đơn vị vận chuyển"
                                                 disabled={isReadOnly}
                                                 className={clsx(
                                                     "w-full h-12 pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold transition-all",
@@ -985,8 +983,8 @@ export default function CylinderRecoveryFormModal({
                                                 )}
                                             />
                                             <datalist id="shipper-list">
-                                                {shippers.map((name, idx) => (
-                                                    <option key={idx} value={name} />
+                                                {shippers.map((name) => (
+                                                    <option key={name} value={name} />
                                                 ))}
                                             </datalist>
                                         </div>

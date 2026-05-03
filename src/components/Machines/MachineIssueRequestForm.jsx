@@ -809,23 +809,23 @@ Ghi chú: ${formData.notes}`,
     };
 
     const handleRejectStatus = async () => {
-        if (!window.confirm('Bạn có thực sự muốn TỪ CHỐI phiếu đề nghị xuất máy này?')) return;
+        if (!window.confirm('Bạn có chắc muốn HỦY phiếu đề nghị xuất máy này? (Trạng thái: Hủy đơn)')) return;
         
         setIsSaving(true);
         try {
             const { error } = await supabase.from('orders').update({
-                status: 'TU_CHOI',
+                status: 'HUY_DON',
                 updated_at: new Date().toISOString()
             }).eq('id', editOrderId);
 
             if (error) throw error;
             
-            setFormData(prev => ({ ...prev, status: 'TU_CHOI' }));
-            toast.error('Đã từ chối phiếu đề xuất.');
+            setFormData(prev => ({ ...prev, status: 'HUY_DON' }));
+            toast.error('Đã hủy phiếu đề xuất.');
 
             notificationService.add({
-                title: `❌ ĐNXM bị từ chối`,
-                description: `Phiếu ĐNXM${formData.orangeNumber || ''} - KH: ${formData.customerName} đã bị từ chối • Thực hiện bởi: ${currentActorName}.`,
+                title: `❌ ĐNXM đã hủy`,
+                description: `Phiếu ĐNXM${formData.orangeNumber || ''} - KH: ${formData.customerName} đã chuyển sang Hủy đơn • Thực hiện bởi: ${currentActorName}.`,
                 type: 'warning',
                 link: `/de-nghi-xuat-may/tao?orderId=${editOrderId}&viewOnly=true`
             });
@@ -1334,7 +1334,7 @@ Ghi chú: ${formData.notes}`,
                                     </button>
                                 )}
 
-                                {/* Nút Từ chối */}
+                                {/* Hủy phiếu → status HUY_DON */}
                                 {canApprove && ['CHO_DUYET', 'CHO_CTY_DUYET', 'KHO_XU_LY'].includes(formData.status) && (
                                     <button
                                         onClick={handleRejectStatus}
@@ -1342,7 +1342,7 @@ Ghi chú: ${formData.notes}`,
                                         className="flex items-center justify-center gap-2 bg-rose-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-rose-700 transition-all font-bold text-sm disabled:opacity-50"
                                     >
                                         {isSaving ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" /> : <EyeOff size={18} />}
-                                        TỪ CHỐI
+                                        HỦY PHIẾU
                                     </button>
                                 )}
                             </div>

@@ -1,7 +1,6 @@
 import { clsx } from 'clsx';
 import MobilePageHeader from '../components/layout/MobilePageHeader';
 import MobilePagination from '../components/layout/MobilePagination';
-import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import {
     ArcElement,
     BarElement,
@@ -16,42 +15,38 @@ import {
 } from 'chart.js';
 import { Bar as BarChartJS } from 'react-chartjs-2';
 import {
+    BarChart2,
+    ChevronDown,
     ChevronLeft,
     ChevronRight,
     Edit,
+    Eye,
     FileText,
+    LayoutGrid,
     List,
+    ListFilter,
     Monitor,
+    Package,
     Plus,
     Search,
+    Table2,
     Trash2,
-    X,
-    BarChart2,
-    Calendar,
+    TrendingUp,
+    Truck,
     User,
-    Eye,
-    CheckCircle,
-    Package,
-    ChevronDown,
+    X,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useEffect, useState, cloneElement, useRef } from 'react';
+import { useEffect, useState, cloneElement, useRef, useMemo } from 'react';
 import { toast } from 'react-toastify';
 import { supabase } from '../supabase/config';
-import { ORDER_STATUSES } from '../constants/orderConstants';
-import { notificationService } from '../utils/notificationService';
 import OrderStatusUpdater from '../components/Orders/OrderStatusUpdater';
+import { deleteOrdersWithRollback } from '../utils/deleteOrderCascade';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import usePermissions from '../hooks/usePermissions';
-import {
-    isAdminRole,
-    isLeadSaleRole,
-    isSalesRole,
-    isShipperRole,
-    isWarehouseRole,
-    normalizeRole,
-} from '../utils/accessControl';
+import { isAdminRole } from '../utils/accessControl';
+import { resolveOrderStatusKey } from '../constants/orderConstants';
 
 const getApprovedQuantityFromRequest = (request) => {
     const directApproved = parseInt(request?.quantityApproved ?? request?.quantity_approved, 10);
@@ -128,9 +123,24 @@ ChartJS.register(
     ChartLegend
 );
 
+const BT_PRIMARY = '#00288e';
+const BT_PRIMARY_CONTAINER = '#1e40af';
+const DNXM_PAGE_HERO_IMAGE =
+    'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=1600&q=80&auto=format&fit=crop';
+
+const DNXM_LIST_DISPLAY_MODE_KEY = 'dnxm_list_display_mode';
+
+/** Trạng thái cần xử lý trên phiếu ĐNXM — đếm nhanh */
+const MACHINE_REQ_PIPELINE_STATUSES = new Set(['CHO_DUYET', 'CHO_CTY_DUYET', 'KHO_XU_LY']);
+
+const formatNumberBt = (num) => {
+    if (num == null || Number.isNaN(Number(num))) return '0';
+    return String(num).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+};
+
 export default function MachineRequests() {
     const navigate = useNavigate();
-    const { role, department, user, loading: permissionsLoading } = usePermissions();
+    const { role } = usePermissions();
     const isAdmin = isAdminRole(role);
     const [requests, setRequests] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -157,7 +167,32 @@ export default function MachineRequests() {
 
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [filterSearch, setFilterSearch] = useState('');
-    
+    const listDropdownRef = useRef(null);
+
+    const [listDisplayMode, setListDisplayMode] = useState(() => {
+        try {
+            const saved = localStorage.getItem(DNXM_LIST_DISPLAY_MODE_KEY);
+            if (saved === 'kanban' || saved === 'table') return saved;
+        } catch { /* ignore */ }
+        return 'table';
+    });
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(DNXM_LIST_DISPLAY_MODE_KEY, listDisplayMode);
+        } catch { /* ignore */ }
+    }, [listDisplayMode]);
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (listDropdownRef.current && !listDropdownRef.current.contains(event.target)) {
+                setActiveDropdown(null);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
     // States for View Order Modal
     const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
     const [orderToView, setOrderToView] = useState(null);
@@ -169,7 +204,6 @@ export default function MachineRequests() {
         { id: 'KHO_XU_LY', label: 'Chờ Kho duyệt' },
         { id: 'DA_DUYET', label: 'Đã duyệt' },
         { id: 'HOAN_THANH', label: 'Hoàn thành' },
-        { id: 'TU_CHOI', label: 'Từ chối' },
         { id: 'HUY_DON', label: 'Hủy đơn' },
     ];
 
@@ -220,12 +254,18 @@ export default function MachineRequests() {
         }
     };
 
-    const filteredRequests = requests.filter(r => {
+    const dnxmOrders = useMemo(() => requests.filter(isMachineRequestOrder), [requests]);
+
+    const filteredRequests = dnxmOrders.filter((r) => {
         const matchesSearch = (r.order_code || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
             (r.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
             (r.ordered_by || '').toLowerCase().includes(searchTerm.toLowerCase());
         
-        const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(r.status);
+        const matchesStatus =
+            selectedStatuses.length === 0 ||
+            selectedStatuses.some(
+                (sel) => resolveOrderStatusKey(sel) === resolveOrderStatusKey(r.status)
+            );
         const matchesCustomer = selectedCustomers.length === 0 || selectedCustomers.includes(r.customer_name);
 
         const rDate = new Date(r.created_at).getTime();
@@ -241,17 +281,42 @@ export default function MachineRequests() {
         return matchesSearch && matchesStatus && matchesCustomer && matchesDate;
     });
 
-    const uniqueCustomers = Array.from(new Set(requests.map(r => r.customer_name).filter(Boolean)));
+    const dnxmMonthStats = useMemo(() => {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = now.getMonth();
+        const startThis = new Date(y, m, 1).getTime();
+        const endThis = new Date(y, m + 1, 0, 23, 59, 59, 999).getTime();
+        const startPrev = new Date(y, m - 1, 1).getTime();
+        const endPrev = new Date(y, m, 0, 23, 59, 59, 999).getTime();
+        let thisMonth = 0;
+        let prevMonth = 0;
+        dnxmOrders.forEach((r) => {
+            const t = new Date(r.created_at).getTime();
+            if (t >= startThis && t <= endThis) thisMonth += 1;
+            else if (t >= startPrev && t <= endPrev) prevMonth += 1;
+        });
+        const pct =
+            prevMonth > 0 ? Math.round(((thisMonth - prevMonth) / prevMonth) * 100) : null;
+        return { thisMonth, prevMonth, pct };
+    }, [dnxmOrders]);
+
+    const pipelineAttentionCount = useMemo(
+        () => dnxmOrders.filter((r) => MACHINE_REQ_PIPELINE_STATUSES.has(r.status)).length,
+        [dnxmOrders]
+    );
+
+    const uniqueCustomers = Array.from(new Set(dnxmOrders.map((r) => r.customer_name).filter(Boolean)));
     const customerOptions = uniqueCustomers.map(c => ({
         id: c,
         label: c,
-        count: requests.filter(o => o.customer_name === c).length
+        count: dnxmOrders.filter(o => o.customer_name === c).length
     }));
 
     const statusOptions = COMMON_STATUSES.filter(s => s.id !== 'ALL').map(s => ({
         id: s.id,
         label: s.label,
-        count: requests.filter(o => o.status === s.id).length
+        count: dnxmOrders.filter((o) => resolveOrderStatusKey(o.status) === s.id).length
     }));
     const kanbanStatuses = COMMON_STATUSES.filter((s) => s.id !== 'ALL');
 
@@ -273,10 +338,23 @@ export default function MachineRequests() {
     };
 
     const handleDelete = async (id, code) => {
-        if (!window.confirm(`Bạn có chắc muốn xóa phiếu đề nghị ${code}?`)) return;
+        if (
+            !window.confirm(
+                `Xóa phiếu ${code}?\nTồn kho và bình/máy gán theo đơn (nếu có) sẽ được hoàn tác trước khi xóa.`,
+            )
+        ) {
+            return;
+        }
         try {
-            const { error } = await supabase.from('orders').delete().eq('id', id);
-            if (error) throw error;
+            const { deleted, failed } = await deleteOrdersWithRollback(supabase, [id]);
+            if (failed.length > 0) {
+                throw new Error(failed[0].message);
+            }
+            if (deleted === 0) {
+                toast.info('Phiếu không còn trên hệ thống.');
+                fetchData();
+                return;
+            }
             toast.success(`Đã xóa phiếu ${code}`);
             fetchData();
         } catch (error) {
@@ -286,17 +364,29 @@ export default function MachineRequests() {
 
     const handleBulkDelete = async () => {
         if (!selectedRequestIds.length) return;
-        if (!window.confirm(`Bạn có chắc muốn xóa ${selectedRequestIds.length} phiếu đề nghị?`)) return;
+        if (
+            !window.confirm(
+                `Xóa ${selectedRequestIds.length} phiếu?\nHoàn tác tồn kho và tài sản gán cho từng đơn trước khi xóa.`,
+            )
+        ) {
+            return;
+        }
+        const ids = [...selectedRequestIds];
         try {
-            const { error } = await supabase
-                .from('orders')
-                .delete()
-                .in('id', selectedRequestIds);
-
-            if (error) throw error;
-            toast.success(`Đã xóa ${selectedRequestIds.length} phiếu`);
-            setSelectedRequestIds([]);
+            const { deleted, failed } = await deleteOrdersWithRollback(supabase, ids);
+            const failedSet = new Set(failed.map((f) => f.orderId));
+            const succeededIds = ids.filter((oid) => !failedSet.has(oid));
+            setSelectedRequestIds((prev) => prev.filter((x) => !succeededIds.includes(x)));
             fetchData();
+            if (failed.length === 0) {
+                toast.success(`Đã xóa ${deleted} phiếu (đã hoàn tác dữ liệu liên quan).`);
+                return;
+            }
+            toast.warning(
+                `Xóa được ${deleted}/${ids.length} phiếu. ${failed.length} lỗi — xem console.`,
+                { autoClose: 8000 },
+            );
+            console.warn('[ĐNXM bulk delete]', failed);
         } catch (error) {
             toast.error('Lỗi xóa phiếu: ' + error.message);
         }
@@ -311,7 +401,7 @@ export default function MachineRequests() {
 
     const getChartData = () => {
         const customerData = {};
-        requests.forEach(r => {
+        dnxmOrders.forEach((r) => {
             const name = r.customer_name || 'Không rõ';
             customerData[name] = (customerData[name] || 0) + getApprovedQuantityFromRequest(r);
         });
@@ -333,11 +423,11 @@ export default function MachineRequests() {
     };
 
     const getStatusInfo = (status) => {
-        switch (status) {
+        const key = resolveOrderStatusKey(status);
+        switch (key) {
             case 'CHO_DUYET': return { label: 'Chờ Lead duyệt', colorCls: 'bg-yellow-50 text-yellow-700 border-yellow-200' };
             case 'CHO_CTY_DUYET': return { label: 'Chờ Công ty duyệt', colorCls: 'bg-orange-50 text-orange-700 border-orange-200' };
             case 'KHO_XU_LY': return { label: 'Chờ Kho duyệt', colorCls: 'bg-cyan-50 text-cyan-700 border-cyan-200' };
-            case 'TU_CHOI': return { label: 'Từ chối', colorCls: 'bg-rose-50 text-rose-700 border-rose-200' };
             case 'DA_DUYET': return { label: 'Đã duyệt', colorCls: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
             case 'CHO_GIAO_HANG': return { label: 'Chờ giao hàng', colorCls: 'bg-amber-50 text-amber-700 border-amber-200' };
             case 'DANG_GIAO_HANG': return { label: 'Đang giao hàng', colorCls: 'bg-sky-50 text-sky-700 border-sky-200' };
@@ -348,24 +438,246 @@ export default function MachineRequests() {
             case 'DOI_SOAT_THAT_BAI': return { label: 'Đối soát thất bại', colorCls: 'bg-red-50 text-red-700 border-red-200' };
             case 'DIEU_CHINH': return { label: 'Điều chỉnh', colorCls: 'bg-orange-50 text-orange-700 border-orange-200' };
             default:
-                return { label: status || 'Không rõ', colorCls: 'bg-slate-50 text-slate-700 border-slate-200' };
+                return { label: key || status || 'Không rõ', colorCls: 'bg-slate-50 text-slate-700 border-slate-200' };
         }
     };
 
     return (
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5">
-            <PageViewSwitcher
-                activeView={activeView}
-                setActiveView={setActiveView}
-                views={[
-                    { id: 'list', label: 'Danh sách', icon: <List size={16} /> },
-                    { id: 'kanban', label: 'Kanban', icon: <Calendar size={16} /> },
-                    { id: 'stats', label: 'Thống kê', icon: <BarChart2 size={16} /> },
-                ]}
-            />
+        <div
+            className={clsx(
+                'animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 pb-20',
+                activeView === 'list' ? 'md:bg-[#f7f9fb] md:px-6 md:pb-8' : 'md:px-1.5 md:pb-0'
+            )}
+        >
+            <div className="mb-2 flex shrink-0 gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm md:hidden">
+                <button
+                    type="button"
+                    onClick={() => setActiveView('list')}
+                    className={clsx(
+                        'flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5 text-[12px] font-bold transition-all',
+                        activeView === 'list' ? 'bg-[#00288e] text-white shadow-sm' : 'text-slate-600'
+                    )}
+                >
+                    <List size={15} aria-hidden />
+                    Danh sách
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setActiveView('stats')}
+                    className={clsx(
+                        'flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5 text-[12px] font-bold transition-all',
+                        activeView === 'stats' ? 'bg-[#00288e] text-white shadow-sm' : 'text-slate-600'
+                    )}
+                >
+                    <BarChart2 size={15} aria-hidden />
+                    Thống kê
+                </button>
+            </div>
 
             {activeView === 'list' && (
-                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full mb-2 md:mb-0">
+                <>
+                    <div className="hidden shrink-0 font-[family-name:Manrope,system-ui,sans-serif] md:-mt-1 md:mb-4 md:block">
+                        <div className="sticky top-0 z-30 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                            <div className="flex min-h-14 flex-nowrap items-center gap-3 overflow-x-auto px-5 py-3 sm:gap-4 sm:px-6 scrollbar-hide">
+                                <h2 className="shrink-0 text-base font-extrabold tracking-tight text-slate-900 sm:text-lg">
+                                    Quản lý đề nghị xuất máy
+                                </h2>
+                                <div className="relative min-w-0 max-w-xl flex-1 md:max-w-md lg:max-w-lg">
+                                    <Search
+                                        className="pointer-events-none absolute left-3 top-1/2 size-[18px] -translate-y-1/2 text-slate-400"
+                                        aria-hidden
+                                    />
+                                    <input
+                                        type="text"
+                                        placeholder="Tìm mã phiếu, khách hàng, người yêu cầu..."
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        className="w-full rounded-lg border-0 bg-slate-100 py-2 pl-10 pr-8 text-sm transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00288e]/25"
+                                    />
+                                    {searchTerm && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setSearchTerm('')}
+                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                        >
+                                            <X size={14} />
+                                        </button>
+                                    )}
+                                </div>
+                                <div
+                                    className="ml-auto flex shrink-0 items-center gap-2"
+                                    role="group"
+                                    aria-label="Chế độ hiển thị"
+                                >
+                                    <div className="flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+                                        <button
+                                            type="button"
+                                            title="Bảng"
+                                            aria-pressed={listDisplayMode === 'table'}
+                                            onClick={() => setListDisplayMode('table')}
+                                            className={clsx(
+                                                'flex h-9 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-bold transition-all sm:px-3 sm:text-[13px]',
+                                                listDisplayMode === 'table'
+                                                    ? 'bg-white text-[#00288e] shadow-sm'
+                                                    : 'text-slate-600 hover:text-slate-900'
+                                            )}
+                                        >
+                                            <Table2 size={16} className="shrink-0" aria-hidden />
+                                            <span className="hidden sm:inline">Bảng</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            title="Kanban"
+                                            aria-pressed={listDisplayMode === 'kanban'}
+                                            onClick={() => setListDisplayMode('kanban')}
+                                            className={clsx(
+                                                'flex h-9 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-bold transition-all sm:px-3 sm:text-[13px]',
+                                                listDisplayMode === 'kanban'
+                                                    ? 'bg-white text-[#00288e] shadow-sm'
+                                                    : 'text-slate-600 hover:text-slate-900'
+                                            )}
+                                        >
+                                            <LayoutGrid size={16} className="shrink-0" aria-hidden />
+                                            <span className="hidden sm:inline">Kanban</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            {selectedRequestIds.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-5 py-2.5 sm:px-6">
+                                    <span className="mr-auto text-[12px] font-bold text-slate-600">
+                                        Đã chọn{' '}
+                                        <span className="text-[#00288e]">{selectedRequestIds.length}</span> phiếu
+                                    </span>
+                                    {isAdmin ? (
+                                        <button
+                                            type="button"
+                                            onClick={handleBulkDelete}
+                                            className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-[13px] font-bold text-rose-600 shadow-sm hover:bg-rose-100"
+                                        >
+                                            <Trash2 size={16} />
+                                            Xóa ({selectedRequestIds.length})
+                                        </button>
+                                    ) : (
+                                        <span className="text-[12px] font-bold text-slate-500">
+                                            Chỉ Admin được xóa hàng loạt
+                                        </span>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedRequestIds([])}
+                                        className="text-[12px] font-bold text-slate-500 hover:text-slate-800"
+                                    >
+                                        Bỏ chọn
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="machine-dnxm-bt-page hidden pb-6 pt-2 font-[family-name:Manrope,system-ui,sans-serif] md:block">
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="min-w-0 flex-1 space-y-2">
+                                <nav className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
+                                    <button
+                                        type="button"
+                                        className="transition-colors hover:text-[#00288e]"
+                                        onClick={() => navigate('/')}
+                                    >
+                                        Trang chủ
+                                    </button>
+                                    <ChevronRight size={14} className="shrink-0 text-slate-400" aria-hidden />
+                                    <span className="font-semibold text-[#00288e]">Kho &amp; Máy</span>
+                                    <ChevronRight size={14} className="shrink-0 text-slate-400" aria-hidden />
+                                    <span className="font-bold text-slate-900">Đề nghị xuất máy</span>
+                                </nav>
+                                <h1 className="text-[1.875rem] font-bold leading-snug tracking-[-0.02em] text-[#191c1e]">
+                                    Đề nghị xuất máy
+                                </h1>
+                            </div>
+                            <div className="flex shrink-0 flex-wrap items-center justify-end gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveView('stats')}
+                                    className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                                >
+                                    Thống kê
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => navigate('/de-nghi-xuat-may/tao')}
+                                    className="flex items-center justify-center gap-2 rounded-lg px-6 py-2.5 text-sm font-bold text-white shadow-sm transition hover:opacity-90 active:scale-[0.98]"
+                                    style={{ backgroundColor: BT_PRIMARY }}
+                                >
+                                    <Plus size={18} aria-hidden />
+                                    Tạo đề nghị
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-3">
+                            <div className="group relative col-span-1 h-48 overflow-hidden rounded-xl shadow-sm md:col-span-2">
+                                <img
+                                    src={DNXM_PAGE_HERO_IMAGE}
+                                    alt=""
+                                    className="absolute inset-0 size-full object-cover transition-transform duration-700 group-hover:scale-105"
+                                />
+                                <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-r from-[#00288e]/80 via-[#00288e]/50 to-transparent p-6">
+                                    <p className="text-[13px] font-semibold uppercase tracking-wider text-white/80">
+                                        Xuất máy &amp; bàn giao
+                                    </p>
+                                    <h3 className="mt-1 text-xl font-bold text-white sm:text-2xl">
+                                        Theo dõi phiếu ĐNXM và luồng duyệt
+                                    </h3>
+                                </div>
+                            </div>
+
+                            <div
+                                className="relative flex flex-col justify-between overflow-hidden rounded-xl border border-[#00288e]/20 p-6 shadow-sm"
+                                style={{ backgroundColor: BT_PRIMARY_CONTAINER, borderColor: `${BT_PRIMARY}33` }}
+                            >
+                                <div className="relative z-[1]">
+                                    <p className="text-[13px] font-bold uppercase tracking-widest text-[#a8b8ff]/90">
+                                        Phiếu mới tháng này
+                                    </p>
+                                    <p className="mt-2 text-4xl font-extrabold tabular-nums text-[#dde1ff]">
+                                        {formatNumberBt(dnxmMonthStats.thisMonth)}
+                                    </p>
+                                    <p className="mt-2 text-[11px] font-medium text-white/65">
+                                        Tổng phiếu ĐNXM: {formatNumberBt(dnxmOrders.length)}
+                                    </p>
+                                </div>
+                                <div className="relative z-[1] mt-4 flex flex-wrap items-center gap-2 text-[13px] font-bold">
+                                    {dnxmMonthStats.pct != null ? (
+                                        <>
+                                            <TrendingUp
+                                                size={18}
+                                                className={
+                                                    dnxmMonthStats.pct >= 0 ? 'text-green-400' : 'text-rose-400'
+                                                }
+                                                aria-hidden
+                                            />
+                                            <span
+                                                className={
+                                                    dnxmMonthStats.pct >= 0 ? 'text-[#ccfbf1]' : 'text-rose-200'
+                                                }
+                                            >
+                                                {dnxmMonthStats.pct >= 0 ? '+' : ''}
+                                                {dnxmMonthStats.pct}% so với tháng trước
+                                            </span>
+                                        </>
+                                    ) : (
+                                        <span className="text-[#dde1ff]/80">Không có dữ liệu so sánh</span>
+                                    )}
+                                </div>
+                                <div className="pointer-events-none absolute -bottom-10 -right-8 opacity-[0.10]" aria-hidden>
+                                    <Monitor className="size-[160px] text-[#dde1ff]" strokeWidth={1.25} />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex min-h-0 w-full flex-1 flex-col rounded-2xl border border-border bg-white shadow-sm md:overflow-hidden md:rounded-xl md:border-slate-200 md:shadow-md">
                     <MobilePageHeader
                         searchTerm={searchTerm}
                         setSearchTerm={setSearchTerm}
@@ -375,15 +687,18 @@ export default function MachineRequests() {
                         totalActiveFilters={totalActiveFilters}
                         summary={
                             <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-1.5 -mx-0.5 px-0.5">
-                                <span className="bg-emerald-100 text-emerald-700 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap shadow-sm">
-                                    Tổng hiển thị: {totalRecords} / {requests.length}
+                                <span className="rounded-xl bg-emerald-100 px-3.5 py-2 text-xs font-bold whitespace-nowrap text-emerald-700 shadow-sm">
+                                    Tổng hiển thị: {totalRecords} / {dnxmOrders.length}
+                                </span>
+                                <span className="rounded-xl bg-amber-100 px-3 py-1.5 text-[11px] font-bold whitespace-nowrap text-amber-900 shadow-sm ring-1 ring-amber-200/70">
+                                    Chờ xử lý {pipelineAttentionCount}
                                 </span>
                             </div>
                         }
                         actions={
                             <button
                                 onClick={() => navigate('/de-nghi-xuat-may/tao')}
-                                className="p-2.5 rounded-xl bg-primary text-white shadow-lg shadow-primary/30 active:scale-95 transition-all"
+                                className="rounded-xl bg-primary p-2.5 text-white shadow-lg shadow-primary/30 transition-all active:scale-95"
                             >
                                 <Plus size={22} />
                             </button>
@@ -391,7 +706,7 @@ export default function MachineRequests() {
                     />
 
                     {selectedRequestIds.length > 0 && (
-                        <div className="mx-3 md:mx-4 mb-2 md:mb-3 mt-1 bg-slate-50 border border-slate-200 rounded-xl p-2 flex items-center justify-between gap-3">
+                        <div className="mx-3 mb-2 mt-1 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-2 md:hidden">
                             <div className="text-[12px] text-slate-700 font-bold">
                                 Đã chọn <span className="text-primary">{selectedRequestIds.length}</span> phiếu
                             </div>
@@ -486,108 +801,157 @@ export default function MachineRequests() {
                     </div>
 
                     {/* Desktop View */}
-                    <div className="hidden md:flex flex-col flex-1 min-h-0">
-                        {/* Desktop Toolbar */}
-                        <div className="p-4 border-b border-border/50 shrink-0">
-                            <div className="flex items-center justify-between gap-4">
-                                <div className="flex items-center gap-2 flex-1">
+                    <div className="hidden min-h-0 flex-1 flex-col font-[family-name:Manrope,system-ui,sans-serif] md:flex">
+                        <div className="shrink-0 border-b border-slate-200 p-6 pb-8">
+                            <div className="mb-6 flex flex-wrap gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-[11px] font-semibold text-slate-600 shadow-sm ring-1 ring-slate-100">
+                                <span className="inline-flex flex-wrap items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-800">
+                                    <span className="text-slate-500">Đang hiển thị:</span>{' '}
+                                    <strong className="tabular-nums text-[#00288e]">{totalRecords}</strong>
+                                    <span>/</span>
+                                    <strong className="tabular-nums text-slate-600">{dnxmOrders.length}</strong>
+                                    <span className="font-medium text-slate-500">phiếu</span>
+                                </span>
+                                <span className="rounded-md bg-amber-50 px-2.5 py-1 font-bold text-amber-900 ring-1 ring-amber-100">
+                                    Chờ xử lý {pipelineAttentionCount}
+                                </span>
+                            </div>
+
+                            <div
+                                ref={listDropdownRef}
+                                className="flex flex-wrap items-end gap-x-5 gap-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+                            >
+                                <div className="relative min-w-[160px] flex-1 lg:min-w-[180px]">
+                                    <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                                        Trạng thái
+                                    </label>
                                     <button
-                                        onClick={() => navigate(-1)}
-                                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground text-[12px] font-bold transition-all bg-white shadow-sm shrink-0"
+                                        type="button"
+                                        onClick={() => {
+                                            if (activeDropdown !== 'status') setFilterSearch('');
+                                            setActiveDropdown(activeDropdown === 'status' ? null : 'status');
+                                        }}
+                                        className={clsx(
+                                            'flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-left text-sm font-medium shadow-sm hover:bg-white',
+                                            (activeDropdown === 'status' || selectedStatuses.length > 0) &&
+                                                'border-[#00288e]/40 ring-2 ring-[#00288e]/15'
+                                        )}
                                     >
-                                        <ChevronLeft size={16} />
-                                        Quay lại
+                                        <span className="truncate">
+                                            {selectedStatuses.length === 0
+                                                ? 'Tất cả trạng thái'
+                                                : `${selectedStatuses.length} đã chọn`}
+                                        </span>
+                                        <ChevronDown
+                                            size={18}
+                                            className={clsx('shrink-0 opacity-70', activeDropdown === 'status' && 'rotate-180')}
+                                        />
                                     </button>
-                                    <div className="relative flex-1">
-                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
-                                        <input
-                                            type="text"
-                                            placeholder="Tìm kiếm đãi nghị xuất máy . . ."
-                                            value={searchTerm}
-                                            onChange={(e) => setSearchTerm(e.target.value)}
-                                            className="w-full pl-10 pr-8 py-1.5 bg-muted/20 border border-border/80 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
+                                    {activeDropdown === 'status' && (
+                                        <FilterDropdown
+                                            options={statusOptions}
+                                            selected={selectedStatuses}
+                                            setSelected={setSelectedStatuses}
+                                            filterSearch={filterSearch}
+                                            setFilterSearch={setFilterSearch}
+                                            showSearch={false}
                                         />
-                                        {searchTerm && (
-                                            <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-rose-500 transition-colors">
-                                                <X size={14} />
-                                            </button>
-                                        )}
-                                    </div>
-                                    <div className="flex items-center gap-1.5 ml-2">
-                                        <input
-                                            type="date"
-                                            value={fromDate}
-                                            onChange={(e) => setFromDate(e.target.value)}
-                                            className="px-3 py-1.5 rounded-xl border border-slate-200 text-[13px] text-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white shadow-sm font-medium"
-                                            title="Từ ngày"
-                                        />
-                                        <span className="text-slate-400 text-[13px] font-bold">—</span>
-                                        <input
-                                            type="date"
-                                            value={toDate}
-                                            onChange={(e) => setToDate(e.target.value)}
-                                            className="px-3 py-1.5 rounded-xl border border-slate-200 text-[13px] text-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white shadow-sm font-medium"
-                                            title="Đến ngày"
-                                        />
-                                    </div>
-                                    <div className="relative ml-2">
-                                        <button
-                                            onClick={() => setActiveDropdown(activeDropdown === 'customers' ? null : 'customers')}
-                                            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[13px] font-bold transition-all ${selectedCustomers.length > 0 ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white text-muted-foreground border-border hover:text-foreground'}`}
-                                        >
-                                            <User size={14} />
-                                            Khách hàng
-                                            {selectedCustomers.length > 0 && (
-                                                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-600 text-white font-bold">{selectedCustomers.length}</span>
-                                            )}
-                                            <ChevronDown size={14} className={activeDropdown === 'customers' ? 'rotate-180' : ''} />
-                                        </button>
-                                        {activeDropdown === 'customers' && (
-                                            <FilterDropdown
-                                                options={customerOptions}
-                                                selected={selectedCustomers}
-                                                setSelected={setSelectedCustomers}
-                                                filterSearch={filterSearch}
-                                                setFilterSearch={setFilterSearch}
-                                                showSearch={true}
-                                            />
-                                        )}
-                                    </div>
-                                    <div className="relative ml-2">
-                                        <button
-                                            onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
-                                            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[13px] font-bold transition-all ${selectedStatuses.length > 0 ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white text-muted-foreground border-border hover:text-foreground'}`}
-                                        >
-                                            <List size={14} />
-                                            Trạng thái
-                                            {selectedStatuses.length > 0 && (
-                                                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-blue-600 text-white font-bold">{selectedStatuses.length}</span>
-                                            )}
-                                            <ChevronDown size={14} className={activeDropdown === 'status' ? 'rotate-180' : ''} />
-                                        </button>
-                                        {activeDropdown === 'status' && (
-                                            <FilterDropdown
-                                                options={statusOptions}
-                                                selected={selectedStatuses}
-                                                setSelected={setSelectedStatuses}
-                                                filterSearch={filterSearch}
-                                                setFilterSearch={setFilterSearch}
-                                                showSearch={false}
-                                            />
-                                        )}
-                                    </div>
+                                    )}
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <button onClick={() => navigate('/de-nghi-xuat-may/tao')} className="flex items-center gap-2 px-6 h-10 rounded-lg bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all active:scale-95">
-                                        <Plus size={18} />
-                                        Tạo đề nghị
+
+                                <div className="relative min-w-[160px] flex-1 lg:min-w-[180px]">
+                                    <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                                        Khách hàng
+                                    </label>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (activeDropdown !== 'customers') setFilterSearch('');
+                                            setActiveDropdown(activeDropdown === 'customers' ? null : 'customers');
+                                        }}
+                                        className={clsx(
+                                            'flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-left text-sm font-medium shadow-sm hover:bg-white',
+                                            (activeDropdown === 'customers' || selectedCustomers.length > 0) &&
+                                                'border-[#00288e]/40 ring-2 ring-[#00288e]/15'
+                                        )}
+                                    >
+                                        <span className="truncate">
+                                            {selectedCustomers.length === 0
+                                                ? 'Tất cả khách hàng'
+                                                : `${selectedCustomers.length} đã chọn`}
+                                        </span>
+                                        <ChevronDown
+                                            size={18}
+                                            className={clsx('shrink-0 opacity-70', activeDropdown === 'customers' && 'rotate-180')}
+                                        />
+                                    </button>
+                                    {activeDropdown === 'customers' && (
+                                        <FilterDropdown
+                                            options={customerOptions}
+                                            selected={selectedCustomers}
+                                            setSelected={setSelectedCustomers}
+                                            filterSearch={filterSearch}
+                                            setFilterSearch={setFilterSearch}
+                                            showSearch={true}
+                                        />
+                                    )}
+                                </div>
+
+                                <div className="relative min-w-[140px]">
+                                    <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                                        Từ ngày
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={fromDate}
+                                        onChange={(e) => setFromDate(e.target.value)}
+                                        className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm shadow-sm outline-none focus:border-[#00288e]/40 focus:bg-white focus:ring-2 focus:ring-[#00288e]/15"
+                                    />
+                                </div>
+                                <div className="relative min-w-[140px]">
+                                    <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                                        Đến ngày
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={toDate}
+                                        onChange={(e) => setToDate(e.target.value)}
+                                        className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm shadow-sm outline-none focus:border-[#00288e]/40 focus:bg-white focus:ring-2 focus:ring-[#00288e]/15"
+                                    />
+                                </div>
+
+                                <div className="flex min-h-[3.625rem] items-end">
+                                    <button
+                                        type="button"
+                                        onClick={openMobileFilter}
+                                        title="Bộ lọc đầy đủ"
+                                        className="flex h-10 min-w-[2.75rem] items-center justify-center rounded-lg bg-slate-100 text-slate-700 transition-colors hover:bg-slate-200"
+                                    >
+                                        <ListFilter size={22} aria-hidden />
                                     </button>
                                 </div>
+
+                                {hasActiveFilters && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setSelectedStatuses([]);
+                                            setSelectedCustomers([]);
+                                            setFromDate('');
+                                            setToDate('');
+                                        }}
+                                        className="flex items-center gap-2 rounded-xl border border-dashed border-red-300 px-3 py-2 text-[12px] font-bold text-red-500 transition-all hover:bg-red-50"
+                                    >
+                                        <X size={14} />
+                                        Xóa bộ lọc
+                                    </button>
+                                )}
                             </div>
                         </div>
 
-                        <div className="flex-1 overflow-auto custom-scrollbar">
-                            <table className="w-full text-left border-collapse">
+                        {listDisplayMode === 'table' ? (
+                            <>
+                        <div className="custom-scrollbar min-h-0 flex-1 overflow-auto">
+                            <table className="w-full border-collapse text-left">
                                 <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur shadow-sm">
                                     <tr>
                                         <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider w-10">
@@ -669,11 +1033,10 @@ export default function MachineRequests() {
                             </table>
                         </div>
 
-                        {/* Desktop Pagination */}
-                        <div className="hidden md:flex items-center justify-between p-3 border-t border-border bg-slate-50/50 mt-auto">
-                            <div className="flex items-center gap-3 text-[12px] text-muted-foreground font-medium">
-                                <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded font-bold">
-                                    Tổng hiển thị: {totalRecords} / {requests.length}
+                        <div className="mt-auto flex items-center justify-between border-t border-border bg-slate-50/50 p-3">
+                            <div className="flex items-center gap-3 text-[12px] font-medium text-muted-foreground">
+                                <span className="rounded bg-emerald-100 px-3 py-1 font-bold text-emerald-700">
+                                    Tổng hiển thị: {totalRecords} / {dnxmOrders.length}
                                 </span>
                                 <span>
                                     {totalRecords > 0 ? `${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, totalRecords)}` : '0'} / {totalRecords}
@@ -681,8 +1044,9 @@ export default function MachineRequests() {
                             </div>
                             <div className="flex items-center gap-1">
                                 <button
+                                    type="button"
                                     onClick={() => setCurrentPage(1)}
-                                    className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-20"
+                                    className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted disabled:opacity-20"
                                     disabled={currentPage === 1}
                                     title="Trang đầu"
                                 >
@@ -690,28 +1054,33 @@ export default function MachineRequests() {
                                     <ChevronLeft size={16} className="-ml-2.5" />
                                 </button>
                                 <button
-                                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                                    className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-20"
+                                    type="button"
+                                    onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                                    className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted disabled:opacity-20"
                                     disabled={currentPage === 1}
                                     title="Trang trước"
                                 >
                                     <ChevronLeft size={16} />
                                 </button>
-                                <div className="w-8 h-8 rounded-lg bg-primary text-white flex items-center justify-center text-[12px] font-bold shadow-md shadow-primary/25">
+                                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-[12px] font-bold text-white shadow-md shadow-primary/25">
                                     {currentPage}
                                 </div>
                                 <button
-                                    onClick={() => setCurrentPage(prev => Math.min(Math.ceil(totalRecords / pageSize), prev + 1))}
-                                    className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-20"
-                                    disabled={currentPage >= Math.ceil(totalRecords / pageSize)}
+                                    type="button"
+                                    onClick={() =>
+                                        setCurrentPage((prev) => Math.min(Math.ceil(totalRecords / pageSize || 1), prev + 1))
+                                    }
+                                    className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted disabled:opacity-20"
+                                    disabled={currentPage >= Math.ceil(totalRecords / pageSize || 1)}
                                     title="Trang sau"
                                 >
                                     <ChevronRight size={16} />
                                 </button>
                                 <button
-                                    onClick={() => setCurrentPage(Math.ceil(totalRecords / pageSize))}
-                                    className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-20"
-                                    disabled={currentPage >= Math.ceil(totalRecords / pageSize)}
+                                    type="button"
+                                    onClick={() => setCurrentPage(Math.ceil(totalRecords / pageSize || 1))}
+                                    className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted disabled:opacity-20"
+                                    disabled={currentPage >= Math.ceil(totalRecords / pageSize || 1)}
                                     title="Trang cuối"
                                 >
                                     <ChevronRight size={16} />
@@ -719,6 +1088,102 @@ export default function MachineRequests() {
                                 </button>
                             </div>
                         </div>
+                            </>
+                        ) : (
+                            <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden p-4">
+                                <div className="grid min-h-[420px] grid-flow-col gap-4 auto-cols-[320px] lg:auto-cols-[360px]">
+                                    {kanbanStatuses.map((status) => {
+                                        const statusRequests = filteredRequests.filter((r) => r.status === status.id);
+                                        return (
+                                            <div key={status.id} className="flex min-h-0 flex-col rounded-xl border border-border bg-slate-50/60">
+                                                <div className="flex items-center justify-between border-b border-border/60 px-3 py-2.5">
+                                                    <span className="text-[12px] font-bold text-slate-700">{status.label}</span>
+                                                    <span className="rounded-full border border-border bg-white px-2 py-0.5 text-[11px] font-bold text-slate-600">
+                                                        {statusRequests.length}
+                                                    </span>
+                                                </div>
+                                                <div className="min-h-0 space-y-3 overflow-y-auto p-3">
+                                                    {statusRequests.length === 0 ? (
+                                                        <div className="py-6 text-center text-[12px] italic text-muted-foreground">
+                                                            Trống
+                                                        </div>
+                                                    ) : (
+                                                        statusRequests.map((r) => (
+                                                            <div
+                                                                key={r.id}
+                                                                className="flex min-h-[140px] w-full flex-col justify-between rounded-xl border border-border bg-white p-3.5 transition-all hover:border-primary/30 hover:shadow-md"
+                                                            >
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)}
+                                                                    className="text-left"
+                                                                >
+                                                                    <div className="text-[13px] font-extrabold text-primary">
+                                                                        {r.order_code || '—'}
+                                                                    </div>
+                                                                    <div className="mt-1.5 line-clamp-2 text-[14px] font-bold text-foreground">
+                                                                        {r.customer_name || '—'}
+                                                                    </div>
+                                                                </button>
+
+                                                                <div className="pt-3">
+                                                                    <div className="text-[12px] text-muted-foreground">
+                                                                        Kho: {r.warehouse || extractWarehouseFromNote(r.note) || '—'}
+                                                                    </div>
+                                                                    <div className="mt-1 text-[12px] text-muted-foreground">
+                                                                        YC: {r.ordered_by || '—'} • SL:{' '}
+                                                                        {getApprovedQuantityFromRequest(r)}
+                                                                    </div>
+                                                                </div>
+
+                                                                <div className="mt-3 flex items-center justify-end gap-1.5 border-t border-slate-100 pt-3">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() =>
+                                                                            navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)
+                                                                        }
+                                                                        className="rounded-lg p-1.5 text-slate-400 transition-all hover:bg-primary/10 hover:text-primary"
+                                                                        title="Xem chi tiết"
+                                                                    >
+                                                                        <Eye size={16} />
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleViewAsOrder(r)}
+                                                                        className="rounded-lg p-1.5 text-slate-400 transition-all hover:bg-emerald-50 hover:text-emerald-500"
+                                                                        title="Thao tác Đơn hàng"
+                                                                    >
+                                                                        <Package size={16} />
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() =>
+                                                                            navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)
+                                                                        }
+                                                                        className="rounded-lg p-1.5 text-slate-400 transition-all hover:bg-amber-50 hover:text-amber-500"
+                                                                        title="Chỉnh sửa"
+                                                                    >
+                                                                        <Edit size={16} />
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleDelete(r.id, r.order_code)}
+                                                                        className="rounded-lg p-1.5 text-slate-400 transition-all hover:bg-rose-50 hover:text-rose-500"
+                                                                        title="Xóa"
+                                                                    >
+                                                                        <Trash2 size={16} />
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ))
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {!loading && (
@@ -730,96 +1195,19 @@ export default function MachineRequests() {
                             totalRecords={totalRecords}
                         />
                     )}
-                </div>
-            )}
-
-            {activeView === 'kanban' && (
-                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full mb-2 md:mb-0">
-                    <div className="p-3 md:p-4 border-b border-border/60 flex items-center gap-2">
-                        <button
-                            onClick={() => navigate(-1)}
-                            className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground text-[12px] font-bold transition-all bg-white shadow-sm shrink-0"
-                        >
-                            <ChevronLeft size={16} />
-                            Quay lại
-                        </button>
-                        <div className="relative flex-1">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
-                            <input
-                                type="text"
-                                placeholder="Tìm trong Kanban..."
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-full pl-10 pr-8 py-1.5 bg-muted/20 border border-border/80 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
-                            />
-                        </div>
                     </div>
-
-                    <div className="flex-1 overflow-x-auto overflow-y-hidden p-3 md:p-4">
-                        <div className="grid grid-flow-col auto-cols-[320px] md:auto-cols-[360px] gap-4 min-h-full">
-                            {kanbanStatuses.map((status) => {
-                                const statusRequests = filteredRequests.filter((r) => r.status === status.id);
-                                return (
-                                    <div key={status.id} className="rounded-xl border border-border bg-slate-50/60 flex flex-col min-h-0">
-                                        <div className="px-3 py-2.5 border-b border-border/60 flex items-center justify-between">
-                                            <span className="text-[12px] font-bold text-slate-700">{status.label}</span>
-                                            <span className="px-2 py-0.5 rounded-full bg-white border border-border text-[11px] font-bold text-slate-600">
-                                                {statusRequests.length}
-                                            </span>
-                                        </div>
-                                        <div className="p-3 space-y-3 overflow-y-auto min-h-0">
-                                            {statusRequests.length === 0 ? (
-                                                <div className="text-[12px] text-muted-foreground italic text-center py-6">Trống</div>
-                                            ) : (
-                                                statusRequests.map((r) => (
-                                                    <div
-                                                        key={r.id}
-                                                        className="w-full rounded-xl border border-border bg-white p-3.5 min-h-[140px] flex flex-col justify-between hover:shadow-md hover:border-primary/30 transition-all"
-                                                    >
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)}
-                                                            className="text-left"
-                                                        >
-                                                            <div className="text-[13px] font-extrabold text-primary">{r.order_code || '—'}</div>
-                                                            <div className="text-[14px] font-bold text-foreground mt-1.5 line-clamp-2">{r.customer_name || '—'}</div>
-                                                        </button>
-
-                                                        <div className="pt-3">
-                                                            <div className="text-[12px] text-muted-foreground">
-                                                                Kho: {r.warehouse || extractWarehouseFromNote(r.note) || '—'}
-                                                            </div>
-                                                            <div className="text-[12px] text-muted-foreground mt-1">
-                                                                YC: {r.ordered_by || '—'} • SL: {getApprovedQuantityFromRequest(r)}
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-end gap-1.5">
-                                                            <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-all" title="Xem chi tiết"><Eye size={16} /></button>
-                                                            <button onClick={() => handleViewAsOrder(r)} className="p-1.5 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 rounded-lg transition-all" title="Thao tác Đơn hàng"><Package size={16} /></button>
-                                                            <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)} className="p-1.5 text-slate-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-all" title="Chỉnh sửa"><Edit size={16} /></button>
-                                                            <button onClick={() => handleDelete(r.id, r.order_code)} className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all" title="Xóa"><Trash2 size={16} /></button>
-                                                        </div>
-                                                    </div>
-                                                ))
-                                            )}
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                </div>
+                </>
             )}
 
             {activeView === 'stats' && (
-                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full mb-2 md:mb-0">
+                <div className="flex min-h-0 w-full flex-1 flex-col rounded-2xl border border-border bg-white shadow-sm mb-2 md:mb-0 md:rounded-xl md:border-slate-200 md:shadow-md">
                     <div className="space-y-0">
                         {/* Mobile Header */}
-                        <div className="md:hidden flex items-center gap-2 p-3 border-b border-border">
+                        <div className="flex items-center gap-2 border-b border-border p-3 md:hidden">
                             <button
-                                onClick={() => navigate(-1)}
-                                className="p-2 rounded-xl border border-border bg-white text-muted-foreground shrink-0"
+                                type="button"
+                                onClick={() => setActiveView('list')}
+                                className="shrink-0 rounded-xl border border-border bg-white p-2 text-muted-foreground"
                             >
                                 <ChevronLeft size={18} />
                             </button>
@@ -828,14 +1216,24 @@ export default function MachineRequests() {
                         </div>
 
                         {/* Desktop Header */}
-                        <div className="hidden md:block p-4 border-b border-border">
-                            <div className="flex items-center gap-2">
+                        <div className="hidden border-b border-border p-4 md:block">
+                            <div className="flex flex-wrap items-center gap-2">
                                 <button
-                                    onClick={() => navigate(-1)}
-                                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground text-[12px] font-bold transition-all bg-white shadow-sm shrink-0"
+                                    type="button"
+                                    onClick={() => setActiveView('list')}
+                                    className="flex shrink-0 items-center gap-2 rounded-lg border border-border bg-white px-3 py-1.5 text-[12px] font-bold text-muted-foreground shadow-sm transition-all hover:bg-muted"
                                 >
                                     <ChevronLeft size={16} />
-                                    Quay lại
+                                    Danh sách phiếu
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => navigate('/de-nghi-xuat-may/tao')}
+                                    className="flex items-center gap-2 rounded-lg px-5 py-2 text-[13px] font-bold text-white shadow-sm transition-opacity hover:opacity-90"
+                                    style={{ backgroundColor: BT_PRIMARY }}
+                                >
+                                    <Plus size={17} aria-hidden />
+                                    Tạo đề nghị
                                 </button>
                             </div>
                         </div>
@@ -843,8 +1241,8 @@ export default function MachineRequests() {
                         {/* Stats Content */}
                         <div className="w-full px-3 md:px-4 pt-4 md:pt-5 pb-5 md:pb-6 space-y-5 flex-1 overflow-y-auto bg-slate-50/30">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
-                                <StatCard icon={<FileText />} label="Tổng số phiếu" value={requests.length} color="blue" />
-                                <StatCard icon={<Monitor />} label="Máy đề nghị" value={requests.reduce((acc, r) => acc + getApprovedQuantityFromRequest(r), 0)} color="emerald" />
+                                <StatCard icon={<FileText />} label="Tổng số phiếu" value={dnxmOrders.length} color="blue" />
+                                <StatCard icon={<Monitor />} label="Máy đề nghị" value={dnxmOrders.reduce((acc, r) => acc + getApprovedQuantityFromRequest(r), 0)} color="emerald" />
                             </div>
 
                             <div className="mt-6 bg-white border border-border rounded-2xl p-5 md:p-6 shadow-sm">

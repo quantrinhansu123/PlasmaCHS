@@ -61,6 +61,8 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
     const [warehouseIdToName, setWarehouseIdToName] = useState({});
     /** Dòng đang mở chi tiết trong cột Nhập & điều chuyển */
     const [expandedImportKey, setExpandedImportKey] = useState(null);
+    /** Tên NCC khi bình đã trả NCC (resolve từ join hoặc suppliers theo supplier_id) */
+    const [returnedNccName, setReturnedNccName] = useState(() => cylinder?.suppliers?.name || null);
 
     const resolveWarehouseName = useCallback((warehouseValue, warehouseMap = {}) => {
         if (!warehouseValue) return '—';
@@ -70,6 +72,32 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
     useEffect(() => {
         setExpandedImportKey(null);
     }, [cylinder?.id]);
+
+    useEffect(() => {
+        const fromJoin = cylinder?.suppliers?.name;
+        if (fromJoin) {
+            setReturnedNccName(fromJoin);
+            return;
+        }
+        const sid = cylinder?.supplier_id;
+        if (!sid) {
+            setReturnedNccName(null);
+            return;
+        }
+        let cancelled = false;
+        supabase
+            .from('suppliers')
+            .select('name')
+            .eq('id', sid)
+            .maybeSingle()
+            .then(({ data }) => {
+                if (cancelled) return;
+                setReturnedNccName(data?.name || null);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [cylinder?.id, cylinder?.supplier_id, cylinder?.suppliers?.name]);
 
     useEffect(() => {
         if (!cylinder) return;
@@ -209,7 +237,9 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                 ? { data: [] }
                 : await supabase
                     .from('goods_issue_items')
-                    .select('*, goods_issues!inner(issue_code, supplier_id, warehouse_id, issue_date, status)')
+                    .select(
+                        '*, goods_issues!inner(issue_code, supplier_id, warehouse_id, issue_date, status, suppliers(name))'
+                    )
                     .in('item_code', receiptSerials);
 
             // 3b. Nhật ký hệ thống (trigger / xuất nhập / máy giao…)
@@ -407,12 +437,14 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
             (issueItems || []).forEach(ii => {
                 const gi = ii.goods_issues;
                 const whName = resolveWarehouseName(gi.warehouse_id, warehouseMap);
+                const nccName = gi?.suppliers?.name || null;
                 events.push({
                     date: gi.issue_date || ii.created_at,
                     type: 'TRA_NCC',
-                    label: 'Trả về NCC',
-                    location: `Kho ${whName} → NCC`,
-                    rawLocation: 'NCC',
+                    label: nccName ? `Trả về ${nccName}` : 'Trả về NCC',
+                    location: nccName ? `Kho ${whName} → ${nccName}` : `Kho ${whName} → (chưa rõ NCC)`,
+                    rawLocation: `Kho ${whName}`,
+                    supplierName: nccName,
                     code: gi.issue_code,
                     status: gi.status,
                     icon: 'supplier',
@@ -647,7 +679,11 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                 whLabel = resolveWarehouseName(String(ev.rawLocation).slice(4).trim(), wm);
             }
             let shortTitle = `Nhập về kho ${whLabel}`;
-            if (ev.type === 'TRA_NCC') shortTitle = `Trả NCC · từ kho ${whLabel}`;
+            if (ev.type === 'TRA_NCC') {
+                shortTitle = ev.supplierName
+                    ? `${ev.supplierName} · từ kho ${whLabel}`
+                    : `Chưa rõ NCC · từ kho ${whLabel}`;
+            }
             if (ev.type === 'DIEU_CHUYEN') shortTitle = `Điều chuyển · kho ${whLabel}`;
             if (ev.type === 'LOG') shortTitle = ev.label || 'Ghi nhận hệ thống';
             rows.push({
@@ -771,7 +807,9 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                                             return cylinder.customers?.name || cylinder.customer_name?.split(' / ')[0] || '—';
                                         }
                                         if (status === 'đang vận chuyển') return '—';
-                                        if (status === 'đã trả ncc') return 'NCC';
+                                        if (status === 'đã trả ncc') {
+                                            return returnedNccName || '—';
+                                        }
                                         if (['sẵn sàng', 'bình rỗng', 'chờ nạp', 'hỏng'].includes(status)) {
                                             return warehouseName || cylinder.warehouses?.name || '—';
                                         }

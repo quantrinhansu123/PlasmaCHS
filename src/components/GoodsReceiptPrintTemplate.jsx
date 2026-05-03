@@ -349,7 +349,7 @@ const ReceiptItem = ({ receipt, items, warehousesList }) => {
                 </div>
                 {receipt.deliverer_address && (
                     <div style={S.infoRow}>
-                        <span style={S.infoLabel}>- Địa chỉ người giao:</span>
+                        <span style={S.infoLabel}>- Địa chỉ giao hàng:</span>
                         <span style={S.infoValue}>{receipt.deliverer_address}</span>
                     </div>
                 )}

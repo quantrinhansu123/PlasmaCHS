@@ -102,25 +102,82 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
         return normalizedStatus === 'sẵn sàng' && !hasCustomer && !hasWarehouse;
     };
 
+    /** UUID NCC đang chọn trên phiếu (khớp tên ↔ bảng suppliers) — dùng gợi ý vỏ đã trả NCC trên /binh */
+    const getReceiptSupplierId = () => {
+        const name = String(formData.supplier_name || '').trim();
+        if (!name) return null;
+        const row = suppliers.find((s) => String(s.name || '').trim() === name);
+        return row?.id ?? null;
+    };
+
+    /** Khớp loại dòng (vd. Bình 4L) với cột volume trên cylinders */
+    const binhVolumeMatchesProductLine = (cylinderVolume, itemName) => {
+        const name = String(itemName || '').toLowerCase();
+        const vol = String(cylinderVolume || '').toLowerCase();
+        if (!name || name === 'sản phẩm khác...') return true;
+        if (name.includes('4l') || name.includes('bình 4')) return vol.includes('4l') || vol.includes('bình 4');
+        if (name.includes('8l') || name.includes('bình 8')) return vol.includes('8l') || vol.includes('bình 8');
+        return true;
+    };
+
+    /** Vỏ đang ở NCC (đã trả ncc + supplier_id) — cùng logic hiển thị vị trí trên /binh */
+    const isCylinderReturnedAtSelectedNcc = (option, supplierId, itemName) => {
+        if (!supplierId || !option?.supplier_id) return false;
+        if (String(option.supplier_id) !== String(supplierId)) return false;
+        const st = (option.status || '').toLowerCase();
+        if (st !== 'đã trả ncc') return false;
+        return binhVolumeMatchesProductLine(option.volume, itemName);
+    };
+
+    /**
+     * Gợi ý RFID: (BINH) vỏ sẵn sàng ở kho + vỏ đã trả đúng NCC đã chọn (theo dõi trên /binh); vẫn gõ tay mã mới bất kỳ.
+     * (MAY) chỉ máy sẵn sàng như cũ.
+     */
     const getSerialSuggestions = (type, currentValue, itemIdx, serialIdx) => {
         const normalizedCurrent = normalizeSerial(currentValue);
         const sourceOptions = type === 'MAY' ? machineOptions : cylinderOptions;
+        const item = items[itemIdx];
 
         const selectedInForm = new Set();
-        items.forEach((item, i) => {
-            (item.assigned_serials || []).forEach((serialEntry, si) => {
+        items.forEach((it, i) => {
+            (it.assigned_serials || []).forEach((serialEntry, si) => {
                 if (i === itemIdx && si === serialIdx) return;
                 const serial = normalizeSerial(typeof serialEntry === 'string' ? serialEntry : serialEntry?.serial);
                 if (serial) selectedInForm.add(serial);
             });
         });
 
-        return sourceOptions
-            .filter(option => isAvailableSerialOption(option, type))
-            .map(option => normalizeSerial(option.serial_number))
-            .filter(serial => !selectedInForm.has(serial))
-            .filter(serial => !normalizedCurrent || serial.includes(normalizedCurrent))
-            .slice(0, 20);
+        const pushUnique = (acc, serial, source) => {
+            const sn = normalizeSerial(serial);
+            if (!sn || selectedInForm.has(sn)) return;
+            if (normalizedCurrent && !sn.includes(normalizedCurrent)) return;
+            if (acc.some((r) => r.serial === sn)) return;
+            acc.push({ serial: sn, source });
+        };
+
+        const rows = [];
+
+        if (type === 'BINH') {
+            const supplierId = getReceiptSupplierId();
+            sourceOptions.forEach((option) => {
+                if (isCylinderReturnedAtSelectedNcc(option, supplierId, item?.item_name)) {
+                    pushUnique(rows, option.serial_number, 'return_ncc');
+                }
+            });
+            sourceOptions.forEach((option) => {
+                if (isAvailableSerialOption(option, type)) {
+                    pushUnique(rows, option.serial_number, 'ready');
+                }
+            });
+            return rows.slice(0, 20);
+        }
+
+        sourceOptions.forEach((option) => {
+            if (isAvailableSerialOption(option, type)) {
+                pushUnique(rows, option.serial_number, 'ready');
+            }
+        });
+        return rows.slice(0, 20);
     };
 
     const handleClose = useCallback(() => {
@@ -236,8 +293,8 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
             try {
                 const [suppliersRes, warehousesRes, cylindersRes, machinesRes] = await Promise.all([
                     supabase.from('suppliers').select('id, name, address, phone').order('name'),
-                    supabase.from('warehouses').select('id, name, manager_name').eq('status', 'Đang hoạt động').order('name'),
-                    supabase.from('cylinders').select('serial_number, status, warehouse_id, customer_name').order('serial_number'),
+                    supabase.from('warehouses').select('id, name, manager_name, address').eq('status', 'Đang hoạt động').order('name'),
+                    supabase.from('cylinders').select('serial_number, status, warehouse_id, customer_name, supplier_id, volume').order('serial_number'),
                     supabase.from('machines').select('serial_number, status, warehouse, customer_name').order('serial_number')
                 ]);
 
@@ -250,7 +307,16 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                 if (warehousesRes.data) {
                     setWarehousesList(warehousesRes.data);
                     if (!isEdit && warehousesRes.data.length > 0) {
-                        setFormData(prev => !prev.warehouse_id ? { ...prev, warehouse_id: warehousesRes.data[0].id } : prev);
+                        setFormData((prev) => {
+                            if (prev.warehouse_id) return prev;
+                            const w0 = warehousesRes.data[0];
+                            return {
+                                ...prev,
+                                warehouse_id: w0.id,
+                                received_by: (w0.manager_name || '').trim(),
+                                deliverer_address: (w0.address || '').trim(),
+                            };
+                        });
                     }
                 }
                 if (cylindersRes.data) {
@@ -665,11 +731,9 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                                 value={formData.supplier_name || ''}
                                                 onChange={(e) => {
                                                     const val = e.target.value;
-                                                    const supplier = suppliers.find(s => s.name === val);
-                                                    setFormData(prev => ({ 
-                                                        ...prev, 
+                                                    setFormData(prev => ({
+                                                        ...prev,
                                                         supplier_name: val,
-                                                        deliverer_address: supplier ? `${supplier.address || ''}${supplier.phone ? (supplier.address ? ' - ' : '') + supplier.phone : ''}` : prev.deliverer_address
                                                     }));
                                                 }}
                                                 className={clsx(
@@ -696,10 +760,15 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                                 onChange={(e) => {
                                                     const val = e.target.value;
                                                     const warehouse = warehousesList.find(w => w.id === val);
-                                                    setFormData(prev => ({ 
-                                                        ...prev, 
+                                                    setFormData(prev => ({
+                                                        ...prev,
                                                         warehouse_id: val,
-                                                        received_by: warehouse ? warehouse.manager_name : prev.received_by
+                                                        received_by: warehouse
+                                                            ? (warehouse.manager_name || '').trim()
+                                                            : prev.received_by,
+                                                        deliverer_address: warehouse
+                                                            ? (warehouse.address || '').trim()
+                                                            : prev.deliverer_address,
                                                     }));
                                                 }}
                                                 className={clsx(
@@ -766,15 +835,20 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                     </div>
 
                                     <div className="md:col-span-2 space-y-1.5">
-                                        <label className="flex items-center gap-2 text-sm font-bold !text-slate-700 ml-1">
-                                            <PenLine className="w-4 h-4 text-primary" />
-                                            Địa chỉ người giao
+                                        <label className="flex flex-col gap-0.5 text-sm font-bold !text-slate-700 ml-1">
+                                            <span className="flex items-center gap-2">
+                                                <PenLine className="w-4 h-4 text-primary" />
+                                                Địa chỉ giao hàng
+                                            </span>
+                                            <span className="text-[11px] font-semibold text-slate-500 normal-case pl-6">
+                                                Tự điền theo địa chỉ kho nhận
+                                            </span>
                                         </label>
                                         <input
                                             disabled={isReadOnly}
                                             value={formData.deliverer_address || ''}
                                             onChange={(e) => setFormData(prev => ({ ...prev, deliverer_address: e.target.value }))}
-                                            placeholder="Địa chỉ/Số điện thoại người giao"
+                                            placeholder="Địa chỉ kho nhận (giao hàng đến)"
                                             className={clsx(
                                                 "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] transition-all outline-none",
                                                 isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
@@ -783,15 +857,20 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                     </div>
 
                                     <div className="space-y-1.5">
-                                        <label className="flex items-center gap-2 text-sm font-bold !text-slate-700 ml-1">
-                                            <User className="w-4 h-4 text-primary" />
-                                            Người nhận hàng
+                                        <label className="flex flex-col gap-0.5 text-sm font-bold !text-slate-700 ml-1">
+                                            <span className="flex items-center gap-2">
+                                                <User className="w-4 h-4 text-primary" />
+                                                Người nhận hàng
+                                            </span>
+                                            <span className="text-[11px] font-semibold text-slate-500 normal-case pl-6">
+                                                Tự điền theo thủ kho kho nhận
+                                            </span>
                                         </label>
                                         <input
                                             disabled={isReadOnly}
                                             value={formData.received_by || ''}
                                             onChange={(e) => setFormData(prev => ({ ...prev, received_by: e.target.value }))}
-                                            placeholder="Tên người nhận"
+                                            placeholder="Thủ kho kho nhận"
                                             className={clsx(
                                                 "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] transition-all outline-none",
                                                 isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
@@ -981,10 +1060,17 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                                 {/* Multi-Serial Input Grid */}
                                                 {(formData.receipt_type === 'BINH' || formData.receipt_type === 'MAY') && item.quantity > 0 && (
                                                     <div className="pt-4 border-t border-slate-100 col-span-full">
-                                                        <div className="flex items-center justify-between mb-3 px-1">
-                                                            <label className="text-[12px] font-black text-primary flex items-center gap-2">
-                                                                <ScanLine className="w-4 h-4" /> Gán mã RFID cho {item.item_name} ({item.assigned_serials?.length || 0})
-                                                            </label>
+                                                        <div className="flex items-center justify-between mb-3 px-1 gap-2">
+                                                            <div className="min-w-0">
+                                                                <label className="text-[12px] font-black text-primary flex items-center gap-2">
+                                                                    <ScanLine className="w-4 h-4 shrink-0" /> Gán mã RFID cho {item.item_name} ({item.assigned_serials?.length || 0})
+                                                                </label>
+                                                                {formData.receipt_type === 'BINH' && (
+                                                                    <p className="text-[10px] font-semibold text-slate-500 mt-1 leading-snug pl-6">
+                                                                        Gõ mã RFID mới hoặc chọn gợi ý: vỏ <span className="font-bold text-orange-700">đã trả NCC</span> đúng nhà cung cấp đã chọn (như trên /binh), và vỏ <span className="font-bold text-emerald-700">sẵn sàng</span> tại kho.
+                                                                    </p>
+                                                                )}
+                                                            </div>
                                                             {!isReadOnly && (
                                                                 <button
                                                                     type="button"
@@ -1000,6 +1086,10 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                                                 const dropKey = `it-${idx}-ser-${sIdx}`;
                                                                 const currentVal = (typeof ser === 'string' ? ser : (ser?.serial || ''));
                                                                 const suggestions = getSerialSuggestions(formData.receipt_type, currentVal, idx, sIdx);
+                                                                const filteredSuggestions = suggestions.filter((row) => {
+                                                                    const q = normalizeSerial(currentVal);
+                                                                    return !q || row.serial.includes(q);
+                                                                });
                                                                 const isOpen = activeSerialDropdown === dropKey;
 
                                                                 return (
@@ -1030,22 +1120,28 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                                                         </div>
                                                                         {isOpen && !isReadOnly && (
                                                                             <div className="absolute z-[100] left-0 right-0 top-11 bg-white border border-primary/20 rounded-xl shadow-2xl max-h-48 overflow-y-auto">
-                                                                                {suggestions.filter(s => s.includes(currentVal.toUpperCase())).slice(0, 20).map(s => (
+                                                                                {filteredSuggestions.map((row) => (
                                                                                     <button
-                                                                                        key={s}
+                                                                                        key={`${row.serial}-${row.source}`}
                                                                                         type="button"
                                                                                         onMouseDown={(e) => {
                                                                                             e.preventDefault();
-                                                                                            handleSerialChange(idx, sIdx, s);
+                                                                                            handleSerialChange(idx, sIdx, row.serial);
                                                                                             setActiveSerialDropdown(null);
                                                                                         }}
-                                                                                        className="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-primary/5 transition-colors border-b border-slate-50 last:border-0"
+                                                                                        className="w-full flex items-center justify-between gap-2 px-4 py-2 text-left hover:bg-primary/5 transition-colors border-b border-slate-50 last:border-0"
                                                                                     >
-                                                                                        <span className="text-[13px] font-mono font-bold text-primary">{s}</span>
+                                                                                        <span className="text-[13px] font-mono font-bold text-primary truncate">{row.serial}</span>
+                                                                                        {row.source === 'return_ncc' && (
+                                                                                            <span className="shrink-0 text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-orange-50 text-orange-700 border border-orange-200">Đã trả NCC</span>
+                                                                                        )}
+                                                                                        {row.source === 'ready' && (
+                                                                                            <span className="shrink-0 text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">Sẵn kho</span>
+                                                                                        )}
                                                                                     </button>
                                                                                 ))}
-                                                                                {suggestions.filter(s => s.includes(currentVal.toUpperCase())).length === 0 && (
-                                                                                    <div className="px-4 py-3 text-xs text-slate-400 italic">Không có mã phù hợp</div>
+                                                                                {filteredSuggestions.length === 0 && (
+                                                                                    <div className="px-4 py-3 text-xs text-slate-400 italic">Không có mã gợi ý — bạn vẫn có thể nhập mã RFID mới.</div>
                                                                                 )}
                                                                             </div>
                                                                         )}

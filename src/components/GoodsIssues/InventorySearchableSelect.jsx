@@ -42,10 +42,12 @@ const InventorySearchableSelect = ({
         const blocked = new Set(excludedSerials.filter(Boolean));
         blocked.delete(value);
 
-        const filtered = items.filter(item => 
-            item.serial_number?.toLowerCase().includes(searchTerm.toLowerCase()) &&
-            !blocked.has(item.serial_number)
-        );
+        const st = searchTerm.toLowerCase();
+        const filtered = items.filter((item) => {
+            const serialStr = item.serial_number != null ? String(item.serial_number) : '';
+            const matchesSearch = serialStr.toLowerCase().includes(st);
+            return matchesSearch && !blocked.has(serialStr);
+        });
 
         return filtered.reduce((acc, item) => {
             const key = isMachine ? (item.machine_type || "Khác") : (item.volume || "Khác");
@@ -55,8 +57,8 @@ const InventorySearchableSelect = ({
         }, {});
     }, [items, searchTerm, isMachine, excludedSerials, value]);
 
-    const selectedItem = useMemo(() => 
-        items.find(i => i.serial_number === value), 
+    const selectedItem = useMemo(
+        () => items.find((i) => String(i.serial_number ?? '') === String(value ?? '')),
         [items, value]
     );
 
