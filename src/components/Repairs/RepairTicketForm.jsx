@@ -7,6 +7,12 @@ import { ERROR_LEVELS } from '../../constants/repairConstants';
 import usePermissions from '../../hooks/usePermissions';
 import { supabase } from '../../supabase/config';
 import { notificationService } from '../../utils/notificationService';
+import {
+    appendRepairTicketImageFiles,
+    normalizeRepairTicketImages,
+    uploadRepairTicketImages,
+} from '../../utils/repairTicketImages';
+import RepairTicketImageThumb from './RepairTicketImageThumb';
 
 export default function RepairTicketForm({ ticket, initialCustomer, onClose, onSuccess, fullPage = false }) {
     const { role, user } = usePermissions();
@@ -83,6 +89,7 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
     // Image Upload states
     const [newDetailFiles, setNewDetailFiles] = useState([]);
     const [newTechFiles, setNewTechFiles] = useState([]);
+    const techFileInputRef = useRef(null);
 
     useEffect(() => {
         fetchMasterData();
@@ -96,12 +103,12 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                 machineName: ticket.machine_name || '',
                 errorTypeId: ticket.error_type_id || '',
                 errorDetails: ticket.error_details || '',
-                detailImages: ticket.error_images || [],
+                detailImages: normalizeRepairTicketImages(ticket.error_images),
                 salesId: ticket.sales_id || '',
                 technicianId: ticket.technician_id || '',
                 cskhId: ticket.cskh_id || ticket.created_by || '',
                 technicalFeedback: ticket.technical_feedback || '',
-                technicalImages: ticket.technical_images || [],
+                technicalImages: normalizeRepairTicketImages(ticket.technical_images),
                 status: ticket.status || 'Mới',
                 errorCategory: ticket.loai_loi || '',
                 expectedCompletionDate: ticket.expected_completion_date || '',
@@ -362,30 +369,26 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
         }
     };
 
-    // File Upload Handlers
-    const uploadImagesToStorage = async (files) => {
-        const urls = [];
-        for (const file of files) {
-            const fileExt = file.name.split('.').pop();
-            const fileName = `${Math.random()}.${fileExt}`;
-            const filePath = `${Date.now()}_${fileName}`;
-
-            const { data, error } = await supabase.storage
-                .from('repair-tickets')
-                .upload(filePath, file);
-
-            if (error) {
-                console.error("Lỗi upload ảnh:", error);
-                continue;
-            }
-
-            const { data: publicUrlData } = supabase.storage
-                .from('repair-tickets')
-                .getPublicUrl(filePath);
-
-            urls.push(publicUrlData.publicUrl);
+    const uploadSelectedImages = async (files, folder) => {
+        const { urls, failures, fallbackWarnings } = await uploadRepairTicketImages(files, { folder });
+        if (fallbackWarnings.length > 0) {
+            toast.warn(
+                `Bucket ảnh chưa sẵn sàng. Đã lưu ${fallbackWarnings.length} ảnh dạng tạm để tiếp tục.`,
+            );
+        }
+        if (failures.length > 0) {
+            toast.warn(`Chỉ tải được ${urls.length}/${files.length} ảnh.`);
+        }
+        if (urls.length === 0 && files.length > 0) {
+            const firstError = failures[0]?.error;
+            throw new Error(firstError?.message || 'Không tải được ảnh nào. Vui lòng thử lại.');
         }
         return urls;
+    };
+
+    const handleTechImageSelect = (fileList) => {
+        if (!fileList?.length) return;
+        setNewTechFiles((prev) => appendRepairTicketImageFiles(prev, fileList));
     };
 
     const handleSubmit = async (e) => {
@@ -403,13 +406,19 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
             // Upload selected files
             let newDetailImgUrls = formData.detailImages;
             if (newDetailFiles.length > 0) {
-                const urls = await uploadImagesToStorage(newDetailFiles);
+                const urls = await uploadSelectedImages(
+                    newDetailFiles,
+                    `error/${ticket?.id || 'new'}`
+                );
                 newDetailImgUrls = [...newDetailImgUrls, ...urls];
             }
 
             let newTechImgUrls = formData.technicalImages;
             if (newTechFiles.length > 0) {
-                const urls = await uploadImagesToStorage(newTechFiles);
+                const urls = await uploadSelectedImages(
+                    newTechFiles,
+                    `technical/${ticket?.id || 'new'}`
+                );
                 newTechImgUrls = [...newTechImgUrls, ...urls];
             }
 
@@ -785,10 +794,13 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                     <div className="flex flex-wrap gap-4">
                                         {/* Existing Images */}
                                         {formData.detailImages.map((img, idx) => (
-                                            <div key={`od-${idx}`} className="relative w-24 h-24 rounded-2xl overflow-hidden border border-slate-100 shadow-sm transition-transform hover:scale-105">
-                                                <img src={img} alt="detail" className="w-full h-full object-cover" />
-                                                <button type="button" onClick={() => removeImage('detail', idx)} className="absolute top-1.5 right-1.5 p-1.5 bg-rose-600 text-white rounded-lg shadow-lg hover:bg-rose-700 transition-colors"><Trash2 size={12} /></button>
-                                            </div>
+                                            <RepairTicketImageThumb
+                                                key={`od-${idx}`}
+                                                src={img}
+                                                alt={`Chi tiết ${idx + 1}`}
+                                                className="h-24 w-24 rounded-2xl border border-slate-100 shadow-sm transition-transform hover:scale-105"
+                                                onRemove={() => removeImage('detail', idx)}
+                                            />
                                         ))}
                                         {/* File Previews */}
                                         {newDetailFiles.map((file, idx) => (
@@ -803,7 +815,10 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                             <Camera size={24} />
                                             <span className="text-[11px] font-black mt-2 uppercase">Thêm ảnh</span>
                                             <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => {
-                                                if (e.target.files) setNewDetailFiles(prev => [...prev, ...Array.from(e.target.files)]);
+                                                if (e.target.files?.length) {
+                                                    setNewDetailFiles((prev) => appendRepairTicketImageFiles(prev, e.target.files));
+                                                }
+                                                e.target.value = '';
                                             }} />
                                         </label>
                                     </div>
@@ -878,10 +893,13 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                 <label className="text-[14px] font-bold text-primary flex items-center gap-1.5"><ImageIcon className="w-4 h-4 text-primary/80" />Hình ảnh xử lý kỹ thuật</label>
                                 <div className="flex flex-wrap gap-4">
                                     {formData.technicalImages.map((img, idx) => (
-                                        <div key={`ot-${idx}`} className="relative w-24 h-24 rounded-2xl overflow-hidden border border-slate-100 shadow-sm transition-transform hover:scale-105">
-                                            <img src={img} alt="tech" className="w-full h-full object-cover" />
-                                            <button type="button" onClick={() => removeImage('tech', idx)} className="absolute top-1.5 right-1.5 p-1.5 bg-rose-600 text-white rounded-lg shadow-lg hover:bg-rose-700 transition-colors"><Trash2 size={12} /></button>
-                                        </div>
+                                        <RepairTicketImageThumb
+                                            key={`ot-${idx}`}
+                                            src={img}
+                                            alt={`Kỹ thuật ${idx + 1}`}
+                                            className="h-24 w-24 rounded-2xl border border-slate-100 shadow-sm transition-transform hover:scale-105"
+                                            onRemove={() => removeImage('tech', idx)}
+                                        />
                                     ))}
                                     {newTechFiles.map((file, idx) => (
                                         <div key={`nt-${idx}`} className="relative w-24 h-24 rounded-2xl overflow-hidden border-2 border-primary/20 shadow-sm transition-transform hover:scale-105">
@@ -889,13 +907,25 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                             <button type="button" onClick={() => setNewTechFiles(prev => prev.filter((_, i) => i !== idx))} className="absolute top-1.5 right-1.5 p-1.5 bg-rose-600 text-white rounded-lg shadow-lg hover:bg-rose-700 transition-colors"><Trash2 size={12} /></button>
                                         </div>
                                     ))}
-                                    <label className="w-24 h-24 flex flex-col items-center justify-center border-2 border-dashed border-primary/20 rounded-2xl bg-primary/5 text-primary/60 hover:border-primary/40 hover:text-primary cursor-pointer transition-all">
+                                    <button
+                                        type="button"
+                                        onClick={() => techFileInputRef.current?.click()}
+                                        className="w-24 h-24 flex flex-col items-center justify-center border-2 border-dashed border-primary/20 rounded-2xl bg-primary/5 text-primary/60 hover:border-primary/40 hover:text-primary cursor-pointer transition-all"
+                                    >
                                         <Camera size={24} />
                                         <span className="text-[11px] font-black mt-2 uppercase">Thêm ảnh</span>
-                                        <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => {
-                                            if (e.target.files) setNewTechFiles(prev => [...prev, ...Array.from(e.target.files)]);
-                                        }} />
-                                    </label>
+                                    </button>
+                                    <input
+                                        ref={techFileInputRef}
+                                        type="file"
+                                        multiple
+                                        accept="image/*"
+                                        className="hidden"
+                                        onChange={(e) => {
+                                            handleTechImageSelect(e.target.files);
+                                            e.target.value = '';
+                                        }}
+                                    />
                                 </div>
                             </div>
                         </div>

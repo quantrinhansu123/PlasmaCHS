@@ -1,4 +1,5 @@
 import React from 'react';
+import { COMPANY_PRINT_ADDRESS_LINES } from '../constants/companyPrintAddress';
 
 const numberToVietnameseWords = (num) => {
     if (!num || num === 0) return 'Không';
@@ -315,7 +316,7 @@ const ReceiptItem = ({ receipt, items, warehousesList }) => {
             <div style={S.header}>
                 <div style={S.headerLeft}>
                     <div style={S.companyName}>CÔNG TY TNHH DỊCH VỤ Y TẾ CỘNG ĐỒNG CHS</div>
-                    <div style={S.companyInfo}>Hải âu 02 - 57 Vinhomes Ocean Park,<br />Xã Đa Tốn, Huyện Gia Lâm, Thành phố Hà Nội, Việt Nam</div>
+                    <div style={S.companyInfo}>{COMPANY_PRINT_ADDRESS_LINES[0]}<br />{COMPANY_PRINT_ADDRESS_LINES[1]}</div>
                     <div style={S.companyInfo}>Mã số thuế: 0110517351</div>
                     <div style={S.companyInfo}>Tel: 0981 878 423</div>
                 </div>

@@ -138,6 +138,17 @@ const Customers = () => {
     };
     const role = normalizeRole(rawRole);
     const isAdminOrManager = isAdminRole(role);
+    const currentUserNames = useMemo(() => {
+        const storageUserName =
+            localStorage.getItem('user_name') || sessionStorage.getItem('user_name') || '';
+        return [
+            ...new Set(
+                [user?.name, user?.username, storageUserName]
+                    .map((value) => String(value || '').trim())
+                    .filter(Boolean)
+            ),
+        ];
+    }, [user]);
     const location = useLocation();
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
@@ -209,6 +220,7 @@ const Customers = () => {
         { key: 'address', label: 'Địa chỉ' },
         { key: 'legal_rep', label: 'Người đại diện pháp luật' },
         { key: 'managed_by', label: 'Nhân viên phụ trách' },
+        { key: 'warehouse_id', label: 'Kho phụ trách' },
         { key: 'category', label: 'Loại khách hàng' },
         { key: 'care_assigned_at', label: 'Ngày đăng ký' },
         { key: 'care_expiry_date', label: 'Ngày hết hạn' },
@@ -223,8 +235,50 @@ const Customers = () => {
         { key: 'care_by', label: 'KD chăm sóc' },
     ];
 
-    /** Trang đăng ký lead: không hiển thị các cột tồn vỏ/máy (chưa phải khách thành công). */
-    const LEAD_HIDDEN_COLUMN_KEYS = ['current_cylinders', 'current_machines', 'borrowed_cylinders'];
+    /** Trang đăng ký lead: ẩn cột tồn vỏ/máy và các cột CS/hóa đơn không cần trên bảng lead. */
+    const LEAD_HIDDEN_COLUMN_KEYS = [
+        'current_cylinders',
+        'current_machines',
+        'borrowed_cylinders',
+        'invoice_email',
+        'care_assigned_at',
+        'care_expiry_date',
+        'days_left',
+        'care_status',
+    ];
+    /** Danh sách khách hàng: chỉ khách Thành công, ẩn cột trạng thái và các cột CS. */
+    const CUSTOMER_LIST_HIDDEN_COLUMN_KEYS = [
+        'status',
+        'care_assigned_at',
+        'care_expiry_date',
+        'days_left',
+        'care_status',
+        'success_at',
+    ];
+    const hiddenColumnKeys =
+        filterType === 'lead' ? LEAD_HIDDEN_COLUMN_KEYS : CUSTOMER_LIST_HIDDEN_COLUMN_KEYS;
+    const canActOnLeadCustomer = useCallback(
+        (customer) => {
+            if (filterType !== 'lead') return true;
+            if (isAdminOrManager) return true;
+            if (!customer) return false;
+            const assignees = [
+                String(customer.care_by || '').trim(),
+                String(customer.managed_by || '').trim(),
+            ].filter(Boolean);
+            if (assignees.length === 0) return false;
+            return currentUserNames.some((name) => assignees.includes(name));
+        },
+        [filterType, isAdminOrManager, currentUserNames]
+    );
+    const canChangeLeadCustomerStatus = useCallback(
+        (customer) => {
+            if (!canActOnLeadCustomer(customer)) return false;
+            if (isAdminOrManager || customer?.status !== 'Thành công') return true;
+            return false;
+        },
+        [canActOnLeadCustomer, isAdminOrManager]
+    );
 
     const CUSTOMER_CATEGORIES = [
         { id: 'BV', label: 'Bệnh viện' },
@@ -269,15 +323,35 @@ const Customers = () => {
     const [showColumnPicker, setShowColumnPicker] = useState(false);
     const visibleTableColumns = columnOrder
         .filter(key => visibleColumns.includes(key))
-        .filter(key => filterType !== 'lead' || !LEAD_HIDDEN_COLUMN_KEYS.includes(key))
+        .filter(key => !hiddenColumnKeys.includes(key))
         .map(key => TABLE_COLUMNS_DEF.find(col => col.key === key))
         .filter(Boolean);
-    const pickerDisplayKeys =
-        filterType === 'lead'
-            ? defaultColOrder.filter((k) => !LEAD_HIDDEN_COLUMN_KEYS.includes(k))
-            : defaultColOrder;
+    const pickerDisplayKeys = defaultColOrder.filter((k) => !hiddenColumnKeys.includes(k));
     const visibleCount = visibleColumns.filter((k) => pickerDisplayKeys.includes(k)).length;
     const totalCount = pickerDisplayKeys.length;
+
+    const warehouseLabelMap = useMemo(() => {
+        const map = new Map();
+        for (const warehouse of warehousesList) {
+            const name = String(warehouse?.name || '').trim();
+            if (!name) continue;
+            const id = String(warehouse?.id || '').trim();
+            const code = String(warehouse?.code || '').trim();
+            if (id) map.set(id, name);
+            if (code) map.set(code, name);
+            map.set(name.toLowerCase(), name);
+        }
+        return map;
+    }, [warehousesList]);
+
+    const getCustomerWarehouseLabel = useCallback(
+        (warehouseValue) => {
+            const raw = String(warehouseValue || '').trim();
+            if (!raw) return '—';
+            return warehouseLabelMap.get(raw) || warehouseLabelMap.get(raw.toLowerCase()) || raw;
+        },
+        [warehouseLabelMap]
+    );
 
     useEffect(() => {
         fetchWarehouses();
@@ -360,6 +434,7 @@ const Customers = () => {
             } else {
                 query = appendCustomerTextSearch(query, debouncedSearchTerm);
                 query = query
+                    .eq('status', 'Thành công')
                     .order('created_at', { ascending: false });
             }
 
@@ -513,7 +588,7 @@ const Customers = () => {
 
     const fetchWarehouses = async () => {
         try {
-            const { data } = await supabase.from('warehouses').select('id, name, manager_name, branch_office').eq('status', 'Đang hoạt động').order('name');
+            const { data } = await supabase.from('warehouses').select('id, name, code, manager_name, branch_office').eq('status', 'Đang hoạt động').order('name');
             if (data) {
                 setWarehousesList(data);
             }
@@ -639,15 +714,17 @@ const Customers = () => {
                       selectedManagedBy.length === 0 || selectedManagedBy.includes(c.managed_by);
                   const matchesCareBy = selectedCareBy.length === 0 || selectedCareBy.includes(c.care_by);
                   const matchesStatus =
-                      selectedStatuses.length === 0 ||
-                      selectedStatuses.some((s) => {
-                          if (s === 'Chưa thành công') {
-                              if (c.status === 'Chưa thành công') return true;
-                              if (filterType === 'lead' && (c.status == null || c.status === '')) return true;
-                              return false;
-                          }
-                          return c.status === s;
-                      });
+                      filterType !== 'lead'
+                          ? c.status === 'Thành công'
+                          : selectedStatuses.length === 0 ||
+                            selectedStatuses.some((s) => {
+                                if (s === 'Chưa thành công') {
+                                    if (c.status === 'Chưa thành công') return true;
+                                    if (c.status == null || c.status === '') return true;
+                                    return false;
+                                }
+                                return c.status === s;
+                            });
 
         const matchesDate = (() => {
             if (!fromDate && !toDate) return true;
@@ -676,8 +753,20 @@ const Customers = () => {
     const totalMachines = filteredCustomers.reduce((sum, c) => sum + (c.current_machines || 0), 0);
     const totalBorrowed = filteredCustomers.reduce((sum, c) => sum + (c.borrowed_cylinders || 0), 0);
 
-    const hasActiveFilters = selectedCategories.length > 0 || selectedManagedBy.length > 0 || selectedCareBy.length > 0 || selectedStatuses.length > 0 || !!fromDate || !!toDate;
-    const totalActiveFilters = selectedCategories.length + selectedManagedBy.length + selectedCareBy.length + selectedStatuses.length + (fromDate ? 1 : 0) + (toDate ? 1 : 0);
+    const hasActiveFilters =
+        selectedCategories.length > 0 ||
+        selectedManagedBy.length > 0 ||
+        selectedCareBy.length > 0 ||
+        (filterType === 'lead' && selectedStatuses.length > 0) ||
+        !!fromDate ||
+        !!toDate;
+    const totalActiveFilters =
+        selectedCategories.length +
+        selectedManagedBy.length +
+        selectedCareBy.length +
+        (filterType === 'lead' ? selectedStatuses.length : 0) +
+        (fromDate ? 1 : 0) +
+        (toDate ? 1 : 0);
 
     const managedByNames = filterType === 'lead' ? leadDistinctManagedBy : uniqueManagedBy;
     const careByNames = filterType === 'lead' ? leadDistinctCareBy : uniqueCareBy;
@@ -714,6 +803,10 @@ const Customers = () => {
     }, [filterType, customers]);
 
     const handleEditCustomer = (customer) => {
+        if (filterType === 'lead' && !canActOnLeadCustomer(customer)) {
+            alert('❌ Bạn không có quyền chỉnh sửa lead này.');
+            return;
+        }
         setSelectedCustomer(customer);
         setIsFormModalOpen(true);
     };
@@ -756,6 +849,14 @@ const Customers = () => {
     }, [location.search]);
 
     const handleDeleteCustomer = async (id, name) => {
+        if (filterType === 'lead') {
+            const customerRow = customers.find((c) => c.id === id);
+            if (!canActOnLeadCustomer(customerRow)) {
+                alert('❌ Bạn không có quyền xóa lead này.');
+                return;
+            }
+        }
+
         if (!window.confirm(`Bạn có chắc chắn muốn xóa hệ thống khách hàng "${name}" không? Toàn bộ dữ liệu liên quan sẽ bị xóa và không thể khôi phục.`)) {
             return;
         }
@@ -870,6 +971,14 @@ const Customers = () => {
             return;
         }
 
+        if (filterType === 'lead') {
+            const customerRow = customers.find((c) => c.id === id);
+            if (!canChangeLeadCustomerStatus(customerRow)) {
+                alert('❌ Bạn không có quyền cập nhật trạng thái lead này.');
+                return;
+            }
+        }
+
         if (filterType === 'lead' && newStatus === 'Thành công') {
             const selectedCustomerRow = customers.find((c) => c.id === id);
             setStatusApprovalModal({
@@ -921,16 +1030,26 @@ const Customers = () => {
 
 
     const toggleSelectOne = (id) => {
+        if (filterType === 'lead') {
+            const customerRow = customers.find((c) => c.id === id);
+            if (!canActOnLeadCustomer(customerRow)) return;
+        }
         setSelectedIds(prev =>
             prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
         );
     };
 
+    const selectableLeadCustomers = useMemo(() => {
+        if (filterType !== 'lead' || isAdminOrManager) return filteredCustomers;
+        return filteredCustomers.filter((customer) => canActOnLeadCustomer(customer));
+    }, [filterType, isAdminOrManager, filteredCustomers, canActOnLeadCustomer]);
+
     const toggleSelectAll = () => {
-        if (selectedIds.length === filteredCustomers.length && filteredCustomers.length > 0) {
+        const selectableRows = filterType === 'lead' && !isAdminOrManager ? selectableLeadCustomers : filteredCustomers;
+        if (selectedIds.length === selectableRows.length && selectableRows.length > 0) {
             setSelectedIds([]);
         } else {
-            setSelectedIds(filteredCustomers.map(c => c.id));
+            setSelectedIds(selectableRows.map(c => c.id));
         }
     };
 
@@ -1056,6 +1175,12 @@ const Customers = () => {
                 return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{c.legal_rep || '—'}</td>;
             case 'managed_by':
                 return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{c.managed_by || '—'}</td>;
+            case 'warehouse_id':
+                return (
+                    <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">
+                        {getCustomerWarehouseLabel(c.warehouse_id)}
+                    </td>
+                );
             case 'category':
                 return (
                     <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">
@@ -1103,14 +1228,17 @@ const Customers = () => {
             case 'status': {
                 const statusValue =
                     c.status === 'Thành công' ? 'Thành công' : 'Chưa thành công';
+                const canEditStatus = filterType !== 'lead' || canChangeLeadCustomerStatus(c);
                 return (
                     <td key={colKey} className="px-4 py-4 text-sm relative z-10">
                         <select
                             value={statusValue}
                             onChange={(e) => handleStatusChange(c.id, e.target.value)}
                             onMouseDown={(e) => e.stopPropagation()}
+                            disabled={!canEditStatus}
                             className={clsx(
-                                'customer-status-select max-w-full min-w-[10.5rem] min-h-9 px-2 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider border border-slate-200/80 focus:ring-2 focus:ring-primary/20 outline-none cursor-pointer transition-all appearance-auto',
+                                'customer-status-select max-w-full min-w-[10.5rem] min-h-9 px-2 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider border border-slate-200/80 focus:ring-2 focus:ring-primary/20 outline-none transition-all appearance-auto',
+                                canEditStatus ? 'cursor-pointer' : 'cursor-not-allowed opacity-60',
                                 c.status === 'Thành công'
                                     ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
                                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
@@ -1561,6 +1689,8 @@ const Customers = () => {
                         ) : (
                             filteredCustomers.map((c) => {
                                 const leadStt = filterType === 'lead' ? getLeadCreationStt(c.id) : null;
+                                const canActLeadRow = canActOnLeadCustomer(c);
+                                const canChangeLeadStatus = canChangeLeadCustomerStatus(c);
                                 return (
                                 <div key={c.id} className={clsx(
                                     "rounded-2xl border-2 shadow-sm transition-all duration-300 relative active:scale-[0.98] overflow-hidden group shrink-0",
@@ -1592,7 +1722,11 @@ const Customers = () => {
                                                             e.stopPropagation();
                                                             toggleSelectOne(c.id);
                                                         }}
-                                                        className="w-5 h-5 rounded-lg border-slate-300 text-primary focus:ring-primary/20 transition-all cursor-pointer shadow-sm"
+                                                        disabled={filterType === 'lead' && !canActLeadRow}
+                                                        className={clsx(
+                                                            'w-5 h-5 rounded-lg border-slate-300 text-primary focus:ring-primary/20 transition-all shadow-sm',
+                                                            filterType === 'lead' && !canActLeadRow ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'
+                                                        )}
                                                     />
                                                 </div>
                                                 <div className="min-w-0 pr-10">
@@ -1664,7 +1798,7 @@ const Customers = () => {
                                                 >
                                                     <Eye size={16} /> Chi tiết
                                                 </button>
-                                                {isAdminOrManager && (
+                                                {(filterType === 'lead' ? canActLeadRow : isAdminOrManager) && (
                                                     <button
                                                         type="button"
                                                         onClick={() => handleEditCustomer(c)}
@@ -1676,7 +1810,7 @@ const Customers = () => {
                                             </div>
                                             
                                             <div className="flex items-center gap-2">
-                                                {filterType === 'lead' && (
+                                                {filterType === 'lead' && canChangeLeadStatus && (
                                                     <button
                                                         type="button"
                                                         onClick={() => handleStatusChange(c.id, c.status === 'Thành công' ? 'Chưa thành công' : 'Thành công')}
@@ -1715,17 +1849,19 @@ const Customers = () => {
                                                     
                                                     {activeDropdown === `more-mobile-${c.id}` && (
                                                         <div className="absolute right-0 bottom-full mb-2 w-52 bg-white rounded-2xl shadow-xl border border-slate-200 z-[100] overflow-hidden animate-in fade-in slide-in-from-bottom-2">
-                                                            <button
-                                                                onClick={() => {
-                                                                    handleStatusChange(c.id, c.status === 'Thành công' ? 'Chưa thành công' : 'Thành công');
-                                                                    setActiveDropdown(null);
-                                                                }}
-                                                                className="w-full flex items-center gap-3 px-4 py-3 text-[13px] font-bold text-slate-600 hover:bg-slate-50 border-b border-slate-100 transition-colors"
-                                                            >
-                                                                {c.status === 'Thành công' ? <ToggleRight size={18} className="text-emerald-500" /> : <ToggleLeft size={18} className="text-slate-400" />}
-                                                                Trạng thái: {c.status || 'Chưa xác định'}
-                                                            </button>
-                                                            {isAdminOrManager && (
+                                                            {filterType === 'lead' && canChangeLeadStatus && (
+                                                                <button
+                                                                    onClick={() => {
+                                                                        handleStatusChange(c.id, c.status === 'Thành công' ? 'Chưa thành công' : 'Thành công');
+                                                                        setActiveDropdown(null);
+                                                                    }}
+                                                                    className="w-full flex items-center gap-3 px-4 py-3 text-[13px] font-bold text-slate-600 hover:bg-slate-50 border-b border-slate-100 transition-colors"
+                                                                >
+                                                                    {c.status === 'Thành công' ? <ToggleRight size={18} className="text-emerald-500" /> : <ToggleLeft size={18} className="text-slate-400" />}
+                                                                    Trạng thái: {c.status || 'Chưa xác định'}
+                                                                </button>
+                                                            )}
+                                                            {(filterType === 'lead' ? canActLeadRow : isAdminOrManager) && (
                                                                 <button
                                                                     onClick={() => {
                                                                         handleDeleteCustomer(c.id, c.name);
@@ -1862,40 +1998,6 @@ const Customers = () => {
                             </div>
                         </div>
 
-                        {filterType === 'lead' && (
-                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-stretch">
-                                <div className="lg:col-span-4 xl:col-span-3">
-                                    <div className="rounded-2xl border-2 border-primary/25 bg-gradient-to-br from-primary/[0.12] to-primary/[0.04] px-5 py-4 shadow-sm h-full flex flex-col justify-center min-h-[5.5rem]">
-                                        <p className="text-[11px] font-bold text-primary uppercase tracking-wider">Tổng đơn (theo bộ lọc)</p>
-                                        <p className="text-4xl font-black text-foreground tabular-nums tracking-tight mt-1 leading-none">
-                                            {isLoading ? '…' : formatNumber(totalRecords)}
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="lg:col-span-8 xl:col-span-9 flex flex-wrap items-end gap-3 rounded-xl border border-border/80 bg-muted/10 px-4 py-3">
-                                    <Calendar size={18} className="text-primary shrink-0 mb-2 opacity-80" aria-hidden />
-                                    <div className="flex flex-col gap-1 min-w-[155px] flex-1 sm:flex-none">
-                                        <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide">Ngày tạo — Từ ngày</span>
-                                        <input
-                                            type="date"
-                                            value={leadCreatedFrom}
-                                            onChange={(e) => setLeadCreatedFrom(e.target.value)}
-                                            className="w-full px-3 py-2 rounded-xl border border-border bg-white text-[13px] font-medium focus:outline-none focus:ring-2 focus:ring-primary/15"
-                                        />
-                                    </div>
-                                    <div className="flex flex-col gap-1 min-w-[155px] flex-1 sm:flex-none">
-                                        <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide">Đến ngày</span>
-                                        <input
-                                            type="date"
-                                            value={leadCreatedTo}
-                                            onChange={(e) => setLeadCreatedTo(e.target.value)}
-                                            className="w-full px-3 py-2 rounded-xl border border-border bg-white text-[13px] font-medium focus:outline-none focus:ring-2 focus:ring-primary/15"
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
                         <div className="flex flex-wrap items-center gap-2" ref={dropdownRef}>
                             <div className="relative">
                                 <button
@@ -1983,7 +2085,8 @@ const Customers = () => {
                                 </div>
                             )}
 
-                            <div className="relative">
+                            {filterType === 'lead' && (
+                                <div className="relative">
                                 <button
                                     onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
                                     className={clsx(
@@ -2011,23 +2114,46 @@ const Customers = () => {
                                     />
                                 )}
                             </div>
+                            )}
 
                             <div className="flex items-center gap-1.5 ml-1">
-                                <input
-                                    type="date"
-                                    value={fromDate}
-                                    onChange={(e) => setFromDate(e.target.value)}
-                                    className="px-3 py-2 rounded-xl border border-slate-200 text-[13px] text-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white shadow-sm font-medium"
-                                    title="Từ ngày"
-                                />
-                                <span className="text-slate-400 text-[13px] font-bold">—</span>
-                                <input
-                                    type="date"
-                                    value={toDate}
-                                    onChange={(e) => setToDate(e.target.value)}
-                                    className="px-3 py-2 rounded-xl border border-slate-200 text-[13px] text-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white shadow-sm font-medium"
-                                    title="Đến ngày"
-                                />
+                                {filterType === 'lead' ? (
+                                    <>
+                                        <input
+                                            type="date"
+                                            value={leadCreatedFrom}
+                                            onChange={(e) => setLeadCreatedFrom(e.target.value)}
+                                            className="px-3 py-2 rounded-xl border border-slate-200 text-[13px] text-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white shadow-sm font-medium"
+                                            title="Ngày tạo từ"
+                                        />
+                                        <span className="text-slate-400 text-[13px] font-bold">—</span>
+                                        <input
+                                            type="date"
+                                            value={leadCreatedTo}
+                                            onChange={(e) => setLeadCreatedTo(e.target.value)}
+                                            className="px-3 py-2 rounded-xl border border-slate-200 text-[13px] text-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white shadow-sm font-medium"
+                                            title="Ngày tạo đến"
+                                        />
+                                    </>
+                                ) : (
+                                    <>
+                                        <input
+                                            type="date"
+                                            value={fromDate}
+                                            onChange={(e) => setFromDate(e.target.value)}
+                                            className="px-3 py-2 rounded-xl border border-slate-200 text-[13px] text-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white shadow-sm font-medium"
+                                            title="Từ ngày"
+                                        />
+                                        <span className="text-slate-400 text-[13px] font-bold">—</span>
+                                        <input
+                                            type="date"
+                                            value={toDate}
+                                            onChange={(e) => setToDate(e.target.value)}
+                                            className="px-3 py-2 rounded-xl border border-slate-200 text-[13px] text-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white shadow-sm font-medium"
+                                            title="Đến ngày"
+                                        />
+                                    </>
+                                )}
                             </div>
 
                             {hasActiveFilters && (
@@ -2054,7 +2180,14 @@ const Customers = () => {
                                     <th className="px-4 py-3.5 text-center border-r border-primary/30">
                                         <input
                                             type="checkbox"
-                                            checked={selectedIds.length === filteredCustomers.length && filteredCustomers.length > 0}
+                                            checked={
+                                                (filterType === 'lead' && !isAdminOrManager
+                                                    ? selectedIds.length === selectableLeadCustomers.length
+                                                    : selectedIds.length === filteredCustomers.length) &&
+                                                (filterType === 'lead' && !isAdminOrManager
+                                                    ? selectableLeadCustomers.length > 0
+                                                    : filteredCustomers.length > 0)
+                                            }
                                             onChange={toggleSelectAll}
                                             className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
                                         />
@@ -2092,7 +2225,10 @@ const Customers = () => {
                                         </td>
                                     </tr>
                                 ) : (
-                                    filteredCustomers.map((c) => (
+                                    filteredCustomers.map((c) => {
+                                        const canActLeadRow = canActOnLeadCustomer(c);
+                                        const canChangeLeadStatus = canChangeLeadCustomerStatus(c);
+                                        return (
                                         <tr 
                                             key={c.id} 
                                             className={clsx(
@@ -2106,7 +2242,11 @@ const Customers = () => {
                                                     type="checkbox"
                                                     checked={selectedIds.includes(c.id)}
                                                     onChange={() => toggleSelectOne(c.id)}
-                                                    className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20 transition-all cursor-pointer"
+                                                    disabled={filterType === 'lead' && !canActLeadRow}
+                                                    className={clsx(
+                                                        'w-4 h-4 rounded border-border text-primary focus:ring-primary/20 transition-all',
+                                                        filterType === 'lead' && !canActLeadRow ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'
+                                                    )}
                                                 />
                                             </td>
                                             {visibleTableColumns.map((col) => renderCustomerTableCell(c, col.key))}
@@ -2122,7 +2262,7 @@ const Customers = () => {
                                                             <FilePlus size={16} className="w-4 h-4" />
                                                         </button>
                                                     )}
-                                                   {filterType === 'lead' && (
+                                                   {filterType === 'lead' && canChangeLeadStatus && (
                                                         <button
                                                             type="button"
                                                             onClick={() =>
@@ -2150,26 +2290,31 @@ const Customers = () => {
                                                     >
                                                         <Eye className="w-4 h-4 pointer-events-none" />
                                                     </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleEditCustomer(c)}
-                                                        className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50 shrink-0 min-w-9 min-h-9 inline-flex items-center justify-center"
-                                                        title="Chỉnh sửa"
-                                                    >
-                                                        <Edit className="w-4 h-4 pointer-events-none" />
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleDeleteCustomer(c.id, c.name)}
-                                                        className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50 shrink-0 min-w-9 min-h-9 inline-flex items-center justify-center"
-                                                        title="Xóa"
-                                                    >
-                                                        <Trash2 className="w-4 h-4 pointer-events-none" />
-                                                    </button>
+                                                    {(filterType !== 'lead' || canActLeadRow) && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleEditCustomer(c)}
+                                                            className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50 shrink-0 min-w-9 min-h-9 inline-flex items-center justify-center"
+                                                            title="Chỉnh sửa"
+                                                        >
+                                                            <Edit className="w-4 h-4 pointer-events-none" />
+                                                        </button>
+                                                    )}
+                                                    {(filterType !== 'lead' || canActLeadRow) && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleDeleteCustomer(c.id, c.name)}
+                                                            className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50 shrink-0 min-w-9 min-h-9 inline-flex items-center justify-center"
+                                                            title="Xóa"
+                                                        >
+                                                            <Trash2 className="w-4 h-4 pointer-events-none" />
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </td>
                                         </tr>
-                                    ))
+                                        );
+                                    })
                                 )}
                             </tbody>
                         </table>
@@ -2356,8 +2501,7 @@ const Customers = () => {
                                                     columnItems.map((c) => {
                                                         const lockedForNonAdmin =
                                                             filterType === 'lead' &&
-                                                            c?.status === 'Thành công' &&
-                                                            !isAdminOrManager;
+                                                            !canChangeLeadCustomerStatus(c);
 
                                                         return (
                                                             <div
@@ -2774,15 +2918,19 @@ const Customers = () => {
                             selectedValues: pendingCareBy,
                             onSelectionChange: setPendingCareBy,
                         },
-                        {
-                            id: 'status',
-                            label: 'Trạng thái',
-                            icon: <List size={16} className="text-primary" />,
-                            options: statusOptions,
-                            selectedValues: pendingStatuses,
-                            onSelectionChange: setPendingStatuses,
-                            searchable: false,
-                        },
+                        ...(filterType === 'lead'
+                            ? [
+                                  {
+                                      id: 'status',
+                                      label: 'Trạng thái',
+                                      icon: <List size={16} className="text-primary" />,
+                                      options: statusOptions,
+                                      selectedValues: pendingStatuses,
+                                      onSelectionChange: setPendingStatuses,
+                                      searchable: false,
+                                  },
+                              ]
+                            : []),
                     ]}
                 />
             )}

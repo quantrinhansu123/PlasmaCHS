@@ -46,6 +46,7 @@ import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import usePermissions from '../hooks/usePermissions';
 import { isAdminRole } from '../utils/accessControl';
+import { scopeOrdersForWarehouseAccess } from '../utils/orderWarehouseScope';
 import { resolveOrderStatusKey } from '../constants/orderConstants';
 
 const getApprovedQuantityFromRequest = (request) => {
@@ -140,7 +141,7 @@ const formatNumberBt = (num) => {
 
 export default function MachineRequests() {
     const navigate = useNavigate();
-    const { role } = usePermissions();
+    const { role, user, department } = usePermissions();
     const isAdmin = isAdminRole(role);
     const [requests, setRequests] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -209,7 +210,7 @@ export default function MachineRequests() {
 
     useEffect(() => {
         fetchData();
-    }, []);
+    }, [role, department, user?.name, user?.username, user?.chi_nhanh]);
 
     // Mobile filter handlers
     const closeMobileFilter = () => {
@@ -238,15 +239,21 @@ export default function MachineRequests() {
     const fetchData = async () => {
         setLoading(true);
         try {
-            let query = supabase
+            const { data, error } = await supabase
                 .from('orders')
-                .select('*');
+                .select('*')
+                .order('created_at', { ascending: false });
 
-            const { data, error } = await query.order('created_at', { ascending: false });
-            
             if (error) throw error;
 
-            setRequests(data || []);
+            const { orders: scopedOrders } = await scopeOrdersForWarehouseAccess(data || [], {
+                role,
+                department,
+                user,
+                isAdmin: isAdminRole(role),
+            });
+
+            setRequests(scopedOrders);
         } catch (error) {
             toast.error('Lỗi tải dữ liệu: ' + error.message);
         } finally {
@@ -476,7 +483,7 @@ export default function MachineRequests() {
 
             {activeView === 'list' && (
                 <>
-                    <div className="hidden shrink-0 font-[family-name:Manrope,system-ui,sans-serif] md:-mt-1 md:mb-4 md:block">
+                    <div className="hidden shrink-0 font-[family-name:Manrope,system-ui,sans-serif] md:-mt-1 md:mb-2 md:block">
                         <div className="sticky top-0 z-30 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                             <div className="flex min-h-14 flex-nowrap items-center gap-3 overflow-x-auto px-5 py-3 sm:gap-4 sm:px-6 scrollbar-hide">
                                 <h2 className="shrink-0 text-base font-extrabold tracking-tight text-slate-900 sm:text-lg">
@@ -575,9 +582,9 @@ export default function MachineRequests() {
                         </div>
                     </div>
 
-                    <div className="machine-dnxm-bt-page hidden pb-6 pt-2 font-[family-name:Manrope,system-ui,sans-serif] md:block">
-                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                            <div className="min-w-0 flex-1 space-y-2">
+                    <div className="machine-dnxm-bt-page hidden pb-2 pt-1 font-[family-name:Manrope,system-ui,sans-serif] md:block">
+                        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="min-w-0 flex-1 space-y-1">
                                 <nav className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
                                     <button
                                         type="button"
@@ -591,7 +598,7 @@ export default function MachineRequests() {
                                     <ChevronRight size={14} className="shrink-0 text-slate-400" aria-hidden />
                                     <span className="font-bold text-slate-900">Đề nghị xuất máy</span>
                                 </nav>
-                                <h1 className="text-[1.875rem] font-bold leading-snug tracking-[-0.02em] text-[#191c1e]">
+                                <h1 className="text-2xl font-bold leading-snug tracking-[-0.02em] text-[#191c1e]">
                                     Đề nghị xuất máy
                                 </h1>
                             </div>
@@ -615,39 +622,39 @@ export default function MachineRequests() {
                             </div>
                         </div>
 
-                        <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-3">
-                            <div className="group relative col-span-1 h-48 overflow-hidden rounded-xl shadow-sm md:col-span-2">
+                        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+                            <div className="group relative h-28 overflow-hidden rounded-xl shadow-sm">
                                 <img
                                     src={DNXM_PAGE_HERO_IMAGE}
                                     alt=""
                                     className="absolute inset-0 size-full object-cover transition-transform duration-700 group-hover:scale-105"
                                 />
-                                <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-r from-[#00288e]/80 via-[#00288e]/50 to-transparent p-6">
-                                    <p className="text-[13px] font-semibold uppercase tracking-wider text-white/80">
+                                <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-r from-[#00288e]/80 via-[#00288e]/50 to-transparent p-4">
+                                    <p className="text-[11px] font-semibold uppercase tracking-wider text-white/80">
                                         Xuất máy &amp; bàn giao
                                     </p>
-                                    <h3 className="mt-1 text-xl font-bold text-white sm:text-2xl">
+                                    <h3 className="mt-0.5 text-base font-bold text-white sm:text-lg">
                                         Theo dõi phiếu ĐNXM và luồng duyệt
                                     </h3>
                                 </div>
                             </div>
 
                             <div
-                                className="relative flex flex-col justify-between overflow-hidden rounded-xl border border-[#00288e]/20 p-6 shadow-sm"
+                                className="relative flex min-h-28 flex-col justify-between overflow-hidden rounded-xl border border-[#00288e]/20 p-4 shadow-sm"
                                 style={{ backgroundColor: BT_PRIMARY_CONTAINER, borderColor: `${BT_PRIMARY}33` }}
                             >
                                 <div className="relative z-[1]">
-                                    <p className="text-[13px] font-bold uppercase tracking-widest text-[#a8b8ff]/90">
+                                    <p className="text-[11px] font-bold uppercase tracking-widest text-[#a8b8ff]/90">
                                         Phiếu mới tháng này
                                     </p>
-                                    <p className="mt-2 text-4xl font-extrabold tabular-nums text-[#dde1ff]">
+                                    <p className="mt-1 text-3xl font-extrabold tabular-nums text-[#dde1ff]">
                                         {formatNumberBt(dnxmMonthStats.thisMonth)}
                                     </p>
-                                    <p className="mt-2 text-[11px] font-medium text-white/65">
+                                    <p className="mt-1 text-[10px] font-medium text-white/65">
                                         Tổng phiếu ĐNXM: {formatNumberBt(dnxmOrders.length)}
                                     </p>
                                 </div>
-                                <div className="relative z-[1] mt-4 flex flex-wrap items-center gap-2 text-[13px] font-bold">
+                                <div className="relative z-[1] mt-2 flex flex-wrap items-center gap-1.5 text-[11px] font-bold">
                                     {dnxmMonthStats.pct != null ? (
                                         <>
                                             <TrendingUp
@@ -670,8 +677,8 @@ export default function MachineRequests() {
                                         <span className="text-[#dde1ff]/80">Không có dữ liệu so sánh</span>
                                     )}
                                 </div>
-                                <div className="pointer-events-none absolute -bottom-10 -right-8 opacity-[0.10]" aria-hidden>
-                                    <Monitor className="size-[160px] text-[#dde1ff]" strokeWidth={1.25} />
+                                <div className="pointer-events-none absolute -bottom-6 -right-4 opacity-[0.08]" aria-hidden>
+                                    <Monitor className="size-[96px] text-[#dde1ff]" strokeWidth={1.25} />
                                 </div>
                             </div>
                         </div>
@@ -802,8 +809,8 @@ export default function MachineRequests() {
 
                     {/* Desktop View */}
                     <div className="hidden min-h-0 flex-1 flex-col font-[family-name:Manrope,system-ui,sans-serif] md:flex">
-                        <div className="shrink-0 border-b border-slate-200 p-6 pb-8">
-                            <div className="mb-6 flex flex-wrap gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-[11px] font-semibold text-slate-600 shadow-sm ring-1 ring-slate-100">
+                        <div className="shrink-0 border-b border-slate-200 p-4 pb-4">
+                            <div className="mb-3 flex flex-wrap gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-[11px] font-semibold text-slate-600 shadow-sm ring-1 ring-slate-100">
                                 <span className="inline-flex flex-wrap items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-800">
                                     <span className="text-slate-500">Đang hiển thị:</span>{' '}
                                     <strong className="tabular-nums text-[#00288e]">{totalRecords}</strong>
@@ -818,7 +825,7 @@ export default function MachineRequests() {
 
                             <div
                                 ref={listDropdownRef}
-                                className="flex flex-wrap items-end gap-x-5 gap-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+                                className="flex flex-wrap items-end gap-x-4 gap-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
                             >
                                 <div className="relative min-w-[160px] flex-1 lg:min-w-[180px]">
                                     <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">

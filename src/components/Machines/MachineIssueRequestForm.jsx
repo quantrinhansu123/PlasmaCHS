@@ -12,6 +12,7 @@ import {
     isWarehouseRole as isWarehouseRoleHelper,
     normalizeRole,
 } from '../../utils/accessControl';
+import { COMPANY_PRINT_ADDRESS_LINES } from '../../constants/companyPrintAddress';
 import MachineHandoverPrintTemplate from '../MachineHandoverPrintTemplate';
 import GoodsIssuePrintTemplate from '../GoodsIssues/GoodsIssuePrintTemplate';
 import Combobox from '../ui/Combobox';
@@ -43,8 +44,6 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
     const isWarehouseRole = isWarehouseRoleHelper(role);
     const isSalesRole = isSalesRoleHelper(role);
     
-    // Authorization check for Machine Code
-    const canEditMachineCode = isAdminRole || isWarehouseRole;
     const canEditApprovedQuantity = !isSalesRole;
 
     const [formData, setFormData] = useState({
@@ -101,8 +100,6 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
 
     // Chống race condition khi đổi kho nhanh
     const readyMachinesLoadReqIdRef = useRef(0);
-
-    const [isMachineCodePickerOpen, setIsMachineCodePickerOpen] = useState(false);
 
     const parseMachineCodes = (value) =>
         (value || '')
@@ -171,6 +168,30 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
         const allowed = new Set([...staticAllowed, ...dynamicAllowed]);
 
         return allowed.has(candidate) ? candidate : null;
+    };
+
+    const resolveWarehouseFromCustomer = (customer) => {
+        if (!customer?.warehouse_id) return '';
+        const resolved = resolveWarehouseCode(String(customer.warehouse_id).trim());
+        return resolved || String(customer.warehouse_id).trim();
+    };
+
+    const getWarehouseLabel = (value) => {
+        if (!value) return '—';
+        const resolved = resolveWarehouseCode(value);
+        const row = warehouseList.find(
+            (warehouse) => warehouse.code === resolved || String(warehouse.id) === String(value)
+        );
+        if (row?.name) {
+            return row.code ? `${row.name} (${row.code})` : row.name;
+        }
+        return resolved || value;
+    };
+
+    const getProductLabel = (value) => {
+        if (!value) return '—';
+        const match = availableProducts.find((product) => product.value === value);
+        return match?.label || value;
     };
 
     const [editOrderId, setEditOrderId] = useState(null);
@@ -349,16 +370,16 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
         }
     }, [formData.machineType, availableMachineCodesByType, availableProducts]);
 
-    // Auto-fill logic when phone changes — ONLY for NEW orders.
-    // When editing an existing order (editOrderId is set), the customer data
-    // is already loaded from the orders table and must NOT be overwritten
-    // by a phone lookup, which could return a different customer entirely.
+    // Auto-fill khách hàng theo SĐT; kho luôn lấy từ hồ sơ khách cùng SĐT.
     useEffect(() => {
-        // Skip auto-fill entirely when editing an existing order
-        if (editOrderId) return;
-
         const fetchCustomerData = async () => {
-            if (!formData.phone || formData.phone.length < 8) return;
+            if (!formData.phone || formData.phone.length < 8) {
+                if (!editOrderId) {
+                    setFacilities([]);
+                    setFormData((prev) => (prev.warehouse ? { ...prev, warehouse: '' } : prev));
+                }
+                return;
+            }
 
             setIsSearching(true);
             try {
@@ -368,38 +389,49 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
                     .eq('phone', formData.phone);
 
                 if (data && data.length > 0 && !error) {
+                    const matchedCustomer = formData.customerId
+                        ? data.find((customer) => customer.id === formData.customerId) || data[0]
+                        : data[0];
+                    const warehouseCode = resolveWarehouseFromCustomer(matchedCustomer);
+
                     setFacilities(data);
+
+                    if (editOrderId) {
+                        setFormData((prev) => (
+                            prev.warehouse === warehouseCode ? prev : { ...prev, warehouse: warehouseCode }
+                        ));
+                        return;
+                    }
+
                     if (data.length === 1) {
                         const customer = data[0];
-                        setFormData(prev => ({
+                        setFormData((prev) => ({
                             ...prev,
                             customerId: customer.id || prev.customerId,
-                            // Ưu tiên hiển thị Người đại diện theo yêu cầu nghiệp vụ
                             customerName: customer.legal_rep || customer.representative || customer.name || '',
                             facilityName: customer.agency_name || customer.invoice_company_name || customer.name || '',
                             placementAddress: customer.address || '',
                             machineManager: customer.managed_by || prev.machineManager,
-                            warehouse: customer.warehouse_id || prev.warehouse
+                            warehouse: warehouseCode,
                         }));
-                    } else {
-                        // Multiple facilities found, let user pick
-                        setIsFacilityDropdownOpen(true);
-                        // Auto-fill common data from first one
-                        const first = data[0];
-                        setFormData(prev => ({
-                            ...prev,
-                            customerId: first.id || prev.customerId,
-                            // Ưu tiên hiển thị Người đại diện theo yêu cầu nghiệp vụ
-                            customerName: first.legal_rep || first.representative || first.name || '',
-                            machineManager: first.managed_by || prev.machineManager,
-                            warehouse: first.warehouse_id || prev.warehouse
-                        }));
+                        return;
                     }
-                } else {
-                    setFacilities([]);
+
+                    setIsFacilityDropdownOpen(true);
+                    setFormData((prev) => ({
+                        ...prev,
+                        customerId: matchedCustomer.id || prev.customerId,
+                        customerName: matchedCustomer.legal_rep || matchedCustomer.representative || matchedCustomer.name || '',
+                        machineManager: matchedCustomer.managed_by || prev.machineManager,
+                        warehouse: warehouseCode,
+                    }));
+                    return;
                 }
+
+                setFacilities([]);
+                setFormData((prev) => (prev.warehouse ? { ...prev, warehouse: '' } : prev));
             } catch (error) {
-                console.log("Customer not found for auto-fill");
+                console.log('Customer not found for auto-fill');
             } finally {
                 setIsSearching(false);
             }
@@ -407,7 +439,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
 
         const timeoutId = setTimeout(fetchCustomerData, 600);
         return () => clearTimeout(timeoutId);
-    }, [formData.phone, editOrderId]);
+    }, [formData.phone, formData.customerId, editOrderId, warehouseList]);
 
     const handleFacilitySelect = (facility) => {
         setFormData(prev => ({
@@ -418,7 +450,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
             facilityName: facility.agency_name || facility.invoice_company_name || facility.name || '',
             placementAddress: facility.address || '',
             machineManager: facility.managed_by || prev.machineManager,
-            warehouse: facility.warehouse_id || prev.warehouse
+            warehouse: resolveWarehouseFromCustomer(facility),
         }));
         setIsFacilityDropdownOpen(false);
     };
@@ -602,7 +634,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
                 .join(', ');
 
             // Map ĐNXM fields to orders table
-            const safeMachineCode = canEditMachineCode ? formData.machineCode : '';
+            const safeMachineCode = parseMachineCodes(formData.machineCode).join(', ');
             const safeQuantityApproved = canEditApprovedQuantity ? formData.quantityApproved : '';
             const warehouseCodeForOrder = sanitizeWarehouseForOrder(formData.warehouse);
 
@@ -746,17 +778,21 @@ Ghi chú: ${formData.notes}`,
 
         if (!window.confirm(confirmMsg)) return;
 
-        // Specially Handle level 2 -> 3: Assign Warehouse — Show a proper modal instead of window.prompt
         if (formData.status === 'CHO_CTY_DUYET') {
-            // Fetch with code so we can store the short code (HN/TP.HCM/TH/DN) into orders.warehouse
-            const { data: whs } = await supabase.from('warehouses').select('id, name, code').order('name');
-            if (whs && whs.length > 0) {
-                setWarehouseList(whs);
-                setPendingNextStatus(nextStatus);
-                setPendingApproveData({ nextStatus, successMsg, notifTitle, notifDesc });
-                setShowWarehouseModal(true);
-                return; // Will resume in handleWarehouseSelected
+            const warehouseCodeForOrder = sanitizeWarehouseForOrder(formData.warehouse);
+            if (!warehouseCodeForOrder) {
+                toast.error('Khách hàng chưa có kho quản lý theo SĐT. Vui lòng cập nhật kho trong hồ sơ khách hàng.');
+                return;
             }
+
+            await executeApprove({
+                nextStatus,
+                successMsg,
+                notifTitle,
+                notifDesc,
+                assignedWarehouse: warehouseCodeForOrder,
+            });
+            return;
         }
 
         await executeApprove({ nextStatus, successMsg, notifTitle, notifDesc, assignedWarehouse: formData.warehouse });
@@ -1047,37 +1083,16 @@ Ghi chú: ${formData.notes}`,
 
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="col-span-2">
-                                            <label className="block text-sm font-medium text-foreground mb-1.5">Kho</label>
-                                        <select
-                                            value={formData.warehouse}
-                                            onChange={(e) => handleInputChange('warehouse', e.target.value)}
-                                            className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                                        >
-                                            <option value="">-- Chọn kho --</option>
-                                            {warehouseList.map((wh) => {
-                                                // Use code (HN/TP.HCM/TH/DN) as value so it matches orders.warehouse constraint
-                                                const whValue = wh.code || wh.name;
-                                                return (
-                                                    <option key={wh.id} value={whValue}>
-                                                        {wh.name}{wh.code ? ` (${wh.code})` : ''}
-                                                    </option>
-                                                );
-                                            })}
-                                        </select>
+                                        <label className="mb-1.5 block text-sm font-medium text-muted-foreground">Kho</label>
+                                        <div className="w-full rounded-lg border border-border/50 bg-muted/50 px-4 py-2 text-sm font-semibold text-slate-800">
+                                            {getWarehouseLabel(formData.warehouse)}
+                                        </div>
                                     </div>
                                     <div className="col-span-2">
-                                        <label className="block text-sm font-medium text-foreground mb-1.5">Sản phẩm (sẵn sàng trong kho)</label>
-                                        <select
-                                            value={formData.product}
-                                            onChange={(e) => handleInputChange('product', e.target.value)}
-                                            disabled={!formData.warehouse}
-                                            className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
-                                        >
-                                            <option value="">-- Chọn sản phẩm --</option>
-                                            {availableProducts.map((product) => (
-                                                <option key={product.value} value={product.value}>{product.label}</option>
-                                            ))}
-                                        </select>
+                                        <label className="mb-1.5 block text-sm font-medium text-muted-foreground">Sản phẩm (sẵn sàng trong kho)</label>
+                                        <div className="w-full rounded-lg border border-border/50 bg-muted/50 px-4 py-2 text-sm font-semibold text-slate-800">
+                                            {getProductLabel(formData.product)}
+                                        </div>
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-foreground mb-1.5">Số lượng yêu cầu</label>
@@ -1108,97 +1123,16 @@ Ghi chú: ${formData.notes}`,
                                     )}
                                     {!isSalesRole && (
                                         <div className="md:col-span-2">
-                                            <label className={clsx(
-                                                "block text-sm font-medium mb-1.5",
-                                                canEditMachineCode ? "text-foreground" : "text-muted-foreground"
-                                            )}>
-                                                Mã máy {!canEditMachineCode && <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded ml-1 text-muted-foreground font-normal">(Chỉ Admin/Kho)</span>}
+                                            <label className="mb-1.5 block text-sm font-medium text-muted-foreground">
+                                                Mã máy
                                             </label>
                                             <div className="space-y-2">
-                                                <div className="flex items-center justify-between gap-3">
-                                                    <div className="text-[12px] font-bold text-slate-600">
-                                                        Đã chọn: {selectedMachineCodes.length}{maxSelectableCodes ? ` / ${maxSelectableCodes}` : ''}
-                                                    </div>
-                                                    <button
-                                                        type="button"
-                                                        disabled={!canEditMachineCode}
-                                                        onClick={() => setIsMachineCodePickerOpen((v) => !v)}
-                                                        className={clsx(
-                                                            "px-3 py-1.5 rounded-xl border text-[12px] font-bold transition-all",
-                                                            canEditMachineCode
-                                                                ? "bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-700"
-                                                                : "bg-muted/50 border-border/50 text-muted-foreground cursor-not-allowed"
-                                                        )}
-                                                    >
-                                                        {isMachineCodePickerOpen ? 'Đóng danh sách' : 'Chọn từ máy sẵn sàng'}
-                                                    </button>
+                                                <p className="text-[12px] font-bold text-slate-600">
+                                                    Đã chọn: {selectedMachineCodes.length}{maxSelectableCodes ? ` / ${maxSelectableCodes}` : ''}
+                                                </p>
+                                                <div className="w-full rounded-lg border border-border/50 bg-muted/50 px-4 py-2 font-mono text-sm font-semibold text-slate-800">
+                                                    {formData.machineCode?.trim() || '—'}
                                                 </div>
-
-                                                <input
-                                                    type="text"
-                                                    value={formData.machineCode}
-                                                    readOnly
-                                                    placeholder={canEditMachineCode ? "Chọn tickbox để lấy mã máy (phân cách bởi dấu phẩy)" : "Chưa được gán mã"}
-                                                    className={clsx(
-                                                        "w-full px-4 py-2 border rounded-lg focus:outline-none transition-all",
-                                                        canEditMachineCode
-                                                            ? "bg-background border-border focus:ring-2 focus:ring-primary/20"
-                                                            : "bg-muted/50 border-border/50 text-muted-foreground cursor-not-allowed italic font-normal"
-                                                    )}
-                                                />
-
-                                                {isMachineCodePickerOpen && canEditMachineCode && (
-                                                    <div className="bg-white border border-slate-200 rounded-xl p-3">
-                                                        {availableMachineCodes.length === 0 ? (
-                                                            <div className="text-[12px] text-muted-foreground italic">
-                                                                Không có mã máy <b>sẵn sàng</b> trong kho này.
-                                                            </div>
-                                                        ) : (
-                                                            <div className="max-h-56 overflow-y-auto custom-scrollbar space-y-2">
-                                                                {availableMachineCodes.map((serial) => {
-                                                                    const checked = selectedMachineCodes.includes(serial);
-                                                                    return (
-                                                                        <label
-                                                                            key={serial}
-                                                                            className={clsx(
-                                                                                "flex items-center justify-between gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-all",
-                                                                                checked
-                                                                                    ? "bg-emerald-50 border-emerald-200"
-                                                                                    : "bg-slate-50 border-slate-200 hover:bg-slate-100"
-                                                                            )}
-                                                                        >
-                                                                            <span className="flex items-center gap-2 min-w-0">
-                                                                                <input
-                                                                                    type="checkbox"
-                                                                                    checked={checked}
-                                                                                    disabled={!checked && !!maxSelectableCodes && selectedMachineCodes.length >= maxSelectableCodes}
-                                                                                    onChange={(e) => {
-                                                                                        const nextChecked = e.target.checked;
-                                                                                        if (nextChecked && maxSelectableCodes && selectedMachineCodes.length >= maxSelectableCodes) {
-                                                                                            toast.warning(`Chỉ được gán tối đa ${maxSelectableCodes} mã máy theo SL phê duyệt.`);
-                                                                                            return;
-                                                                                        }
-                                                                                        const nextArr = nextChecked
-                                                                                            ? [...new Set([...selectedMachineCodes, serial])]
-                                                                                            : selectedMachineCodes.filter((s) => s !== serial);
-                                                                                        handleInputChange('machineCode', nextArr.join(', '));
-                                                                                    }}
-                                                                                    className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500/20 cursor-pointer"
-                                                                                />
-                                                                                <span className="font-mono font-bold text-[12px] text-slate-800 truncate">
-                                                                                    {serial}
-                                                                                </span>
-                                                                            </span>
-                                                                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
-                                                                                sẵn sàng
-                                                                            </span>
-                                                                        </label>
-                                                                    );
-                                                                })}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                )}
                                             </div>
                                         </div>
                                     )}
@@ -1470,8 +1404,8 @@ Ghi chú: ${formData.notes}`,
                         <div className="flex justify-between items-start mb-6">
                             <div className="text-sm text-center">
                                 <h2 className="font-bold text-blue-800 uppercase print:text-black">CÔNG TY TNHH DỊCH VỤ Y TẾ CỘNG ĐỒNG CHS</h2>
-                                <p>Hải Âu 02-57 Vinhomes Ocean Park,</p>
-                                <p>Xã Gia Lâm, TP Hà Nội</p>
+                                <p>{COMPANY_PRINT_ADDRESS_LINES[0]}</p>
+                                <p>{COMPANY_PRINT_ADDRESS_LINES[1]}</p>
                             </div>
                             <div className="flex items-start gap-3">
                                 <div className="flex flex-col items-center">

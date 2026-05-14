@@ -52,6 +52,92 @@ function chunkArray(arr, size) {
     return out;
 }
 
+function extractTransferHistoryImages(note = '', handoverImageUrl = '') {
+    const imgs = [];
+    if (handoverImageUrl) imgs.push(handoverImageUrl);
+    const noteStr = String(note || '');
+    for (const pattern of [/\[Ảnh Bàn Giao\]:\s*(.+)/i, /\[Anh Kho Nhan\]:\s*(.+)/i]) {
+        const match = noteStr.match(pattern);
+        if (!match?.[1]) continue;
+        const url = match[1].trim().split(/\s/)[0];
+        if (url && !imgs.includes(url)) imgs.push(url);
+    }
+    return imgs;
+}
+
+function formatTransferRoute(fromName, toName) {
+    const from = fromName || '—';
+    const to = toName || '—';
+    return `${from} → ${to}`;
+}
+
+function getTransferStatusLabel(status) {
+    const map = {
+        CHO_DUYET: 'Chờ duyệt',
+        DA_DUYET: 'Đã duyệt',
+        TU_CHOI: 'Từ chối',
+        DONE: 'Đã chuyển',
+    };
+    return map[status] || status || '—';
+}
+
+function getTransferStatusCls(status) {
+    const map = {
+        CHO_DUYET: 'bg-amber-50 text-amber-700 border-amber-200',
+        DA_DUYET: 'bg-blue-50 text-blue-700 border-blue-200',
+        TU_CHOI: 'bg-red-50 text-red-700 border-red-200',
+        DONE: 'bg-blue-50 text-blue-700 border-blue-200',
+    };
+    return map[status] || 'bg-slate-50 text-slate-700 border-slate-200';
+}
+
+function mapTransferRequestToRecord(row, whMap) {
+    const fromName = whMap[row.from_warehouse_id] || row.from_warehouse_id || '—';
+    const toName = whMap[row.to_warehouse_id] || row.to_warehouse_id || '—';
+    const status = String(row.status || 'CHO_DUYET').trim().toUpperCase();
+    return {
+        id: row.id,
+        type: 'LUAN_CHUYEN',
+        code: row.transfer_code,
+        date: row.approved_at || row.created_at,
+        customerName: formatTransferRoute(fromName, toName),
+        executor: row.approved_by || row.created_by || 'Nội bộ',
+        quantity: row.total_quantity || 0,
+        status,
+        statusLabel: getTransferStatusLabel(status),
+        statusCls: getTransferStatusCls(status),
+        images: extractTransferHistoryImages(row.note, row.handover_image_url),
+        shippingFee: null,
+        note: row.note || '',
+        rawOrder: null,
+        luanChuyenSource: 'request',
+    };
+}
+
+function mapTransferTransactionToRecord(tx) {
+    const noteStr = tx.note || '';
+    const destMatch = noteStr.match(/Điều chuyển tới (.+?)\./);
+    const routeMatch = noteStr.match(/sang (.+)$/i);
+    const destination = destMatch?.[1] || routeMatch?.[1] || '—';
+    return {
+        id: tx.id,
+        type: 'LUAN_CHUYEN',
+        code: tx.reference_code,
+        date: tx.created_at,
+        customerName: destination,
+        executor: 'Nội bộ',
+        quantity: tx.quantity_changed || 0,
+        status: 'DONE',
+        statusLabel: getTransferStatusLabel('DONE'),
+        statusCls: getTransferStatusCls('DONE'),
+        images: extractTransferHistoryImages(noteStr),
+        shippingFee: null,
+        note: noteStr,
+        rawOrder: null,
+        luanChuyenSource: 'transaction',
+    };
+}
+
 export default function DeliveryHistory() {
     const navigate = useNavigate();
     const [records, setRecords] = useState([]);
@@ -127,7 +213,7 @@ export default function DeliveryHistory() {
         setLoading(true);
         try {
             // Fetch all 3 sources + lookup tables in parallel
-            const [ordersRes, recoveriesRes, transfersRes, customersRes, warehousesRes] = await Promise.all([
+            const [ordersRes, recoveriesRes, transfersRes, transferRequestsRes, customersRes, warehousesRes] = await Promise.all([
                 // 1. Delivery orders
                 supabase.from('orders').select('*')
                     .or('delivery_unit.not.is.null,status.in.(CHO_GIAO_HANG,DANG_GIAO_HANG,CHO_DOI_SOAT,DOI_SOAT_THAT_BAI,HOAN_THANH,TRA_HANG)')
@@ -135,10 +221,13 @@ export default function DeliveryHistory() {
                 // 2. Cylinder recoveries
                 supabase.from('cylinder_recoveries').select('*')
                     .order('created_at', { ascending: false }),
-                // 3. Inventory transfers (only OUT to avoid duplicates)
+                // 3. Legacy inventory transfer logs (OUT only)
                 supabase.from('inventory_transactions').select('*')
                     .eq('transaction_type', 'OUT')
                     .like('reference_code', 'TRF%')
+                    .order('created_at', { ascending: false }),
+                // 4. Transfer requests (current luân chuyển workflow)
+                supabase.from('inventory_transfer_requests').select('*')
                     .order('created_at', { ascending: false }),
                 // Lookups
                 supabase.from('customers').select('id, name'),
@@ -198,32 +287,14 @@ export default function DeliveryHistory() {
             });
 
             // -- Inventory transfers (Luân chuyển)
-            (transfersRes.data || []).forEach(t => {
-                // Extract destination from note: "Điều chuyển tới Kho X. ..."
-                const noteStr = t.note || '';
-                const destMatch = noteStr.match(/Điều chuyển tới (.+?)\./);
-                const destination = destMatch ? destMatch[1] : '—';
-
-                // Extract image URL if stored in note
-                const imgMatch = noteStr.match(/\[Ảnh Bàn Giao\]: (.+)/);
-                const imgs = imgMatch ? [imgMatch[1].trim()] : [];
-
-                unified.push({
-                    id: t.id,
-                    type: 'LUAN_CHUYEN',
-                    code: t.reference_code,
-                    date: t.created_at,
-                    customerName: destination,
-                    executor: 'Nội bộ',
-                    quantity: t.quantity_changed || 0,
-                    status: 'DONE',
-                    statusLabel: 'Đã chuyển',
-                    statusCls: 'bg-blue-50 text-blue-700 border-blue-200',
-                    images: imgs,
-                    shippingFee: null,
-                    note: noteStr,
-                    rawOrder: null,
-                });
+            const transferCodesFromRequests = new Set();
+            (transferRequestsRes.data || []).forEach((row) => {
+                unified.push(mapTransferRequestToRecord(row, whMap));
+                if (row.transfer_code) transferCodesFromRequests.add(row.transfer_code);
+            });
+            (transfersRes.data || []).forEach((t) => {
+                if (t.reference_code && transferCodesFromRequests.has(t.reference_code)) return;
+                unified.push(mapTransferTransactionToRecord(t));
             });
 
             // Sort all by date descending
@@ -365,10 +436,19 @@ export default function DeliveryHistory() {
         }
         setBulkDeleting(true);
         try {
-            const byType = { GIAO_HANG: [], THU_HOI_VO: [], LUAN_CHUYEN: [] };
+            const byType = { GIAO_HANG: [], THU_HOI_VO: [], LUAN_CHUYEN_REQ: [], LUAN_CHUYEN_TX: [] };
             for (const key of selectedRowKeys) {
                 const p = parseRowKey(key);
-                if (p && byType[p.type]) byType[p.type].push(p.id);
+                if (!p) continue;
+                if (p.type === 'GIAO_HANG' || p.type === 'THU_HOI_VO') {
+                    byType[p.type].push(p.id);
+                    continue;
+                }
+                if (p.type === 'LUAN_CHUYEN') {
+                    const rec = records.find((r) => r.type === 'LUAN_CHUYEN' && String(r.id) === String(p.id));
+                    if (rec?.luanChuyenSource === 'transaction') byType.LUAN_CHUYEN_TX.push(p.id);
+                    else byType.LUAN_CHUYEN_REQ.push(p.id);
+                }
             }
 
             for (const chunk of chunkArray(byType.GIAO_HANG, 80)) {
@@ -390,7 +470,13 @@ export default function DeliveryHistory() {
                 if (error) throw error;
             }
 
-            for (const chunk of chunkArray(byType.LUAN_CHUYEN, 80)) {
+            for (const chunk of chunkArray(byType.LUAN_CHUYEN_REQ, 80)) {
+                if (chunk.length === 0) continue;
+                const { error } = await supabase.from('inventory_transfer_requests').delete().in('id', chunk);
+                if (error) throw error;
+            }
+
+            for (const chunk of chunkArray(byType.LUAN_CHUYEN_TX, 80)) {
                 if (chunk.length === 0) continue;
                 const { error } = await supabase.from('inventory_transactions').delete().in('id', chunk);
                 if (error) throw error;
@@ -432,7 +518,9 @@ export default function DeliveryHistory() {
     const totalGiaoHang = filteredRecords.filter(r => r.type === 'GIAO_HANG').length;
     const totalThuHoi = filteredRecords.filter(r => r.type === 'THU_HOI_VO').length;
     const totalLuanChuyen = filteredRecords.filter(r => r.type === 'LUAN_CHUYEN').length;
-    const totalCompleted = filteredRecords.filter(r => r.status === 'HOAN_THANH' || r.status === 'DONE').length;
+    const totalCompleted = filteredRecords.filter((r) =>
+        r.status === 'HOAN_THANH' || r.status === 'DONE' || r.status === 'DA_DUYET',
+    ).length;
 
     const handleViewAsOrder = (r) => {
         if (r.rawOrder) {

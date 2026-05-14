@@ -1,7 +1,6 @@
-import clsx from 'clsx';
+﻿import clsx from 'clsx';
 import {
     Camera,
-    CheckCircle2,
     ChevronDown,
     Clock,
     Edit3,
@@ -10,18 +9,16 @@ import {
     PackageMinus,
     Plus,
     Save,
-    ScanLine,
     Trash2,
     User,
     X,
     LayoutGrid,
     StickyNote,
     Calendar,
-    Search,
-    CheckSquare,
-    Square
+    Truck,
+    PenLine
 } from 'lucide-react';
-import { useCallback, useEffect, useState, useRef, useMemo } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import BarcodeScanner from '../Common/BarcodeScanner';
 import InventoryPickerModal from './InventoryPickerModal';
@@ -51,9 +48,10 @@ function machineWarehouseCandidates(whRow) {
     return [...new Set([String(whRow.code || '').trim(), String(whRow.name || '').trim(), String(whRow.id || '').trim()].filter(Boolean))];
 }
 
-export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedType }) {
+export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedType, prefill = null }) {
     const { user } = usePermissions();
     const isEdit = !!issue;
+    const isTransportEditable = !issue || ['CHO_DUYET', 'DA_XUAT'].includes(issue.status);
     const [isLoading, setIsLoading] = useState(false);
     const [isClosing, setIsClosing] = useState(false);
     const [suppliers, setSuppliers] = useState([]);
@@ -63,8 +61,7 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
     const [isInventoryPickerOpen, setIsInventoryPickerOpen] = useState(false);
     const [inventoryItems, setInventoryItems] = useState([]);
     const [isInventoryLoading, setIsInventoryLoading] = useState(false);
-    const [inventorySearchTerm, setInventorySearchTerm] = useState('');
-    const [selectedInventoryIds, setSelectedInventoryIds] = useState([]);
+    const [deliverers, setDeliverers] = useState([]);
     const [manualReturnType, setManualReturnType] = useState('BINH_4L');
     const [manualReturnQty, setManualReturnQty] = useState('1');
 
@@ -75,8 +72,12 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
         supplier_id: '',
         warehouse_id: '',
         notes: '',
+        deliverer_name: '',
+        deliverer_name_manual: '',
+        deliverer_address: '',
+        received_by: '',
         total_items: 0,
-        status: 'HOAN_THANH'
+        status: 'DA_XUAT'
     });
 
     const [items, setItems] = useState([
@@ -93,6 +94,7 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
     useEffect(() => {
         loadSuppliers();
         fetchWarehouses();
+        loadDeliverers();
         if (issue) {
             const { id, created_at, ...editData } = issue;
             setFormData(editData);
@@ -109,6 +111,24 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
         }
     }, [issue, forcedType]);
 
+    // Prefill create form from external navigation
+    useEffect(() => {
+        if (issue) return;
+        if (!prefill) return;
+        setFormData((prev) => {
+            const next = { ...prev };
+            const note = prefill.notes ?? prefill.note;
+            if (note && !String(next.notes || '').trim()) next.notes = String(note);
+            const supplierId = prefill.supplier_id ?? prefill.supplierId;
+            if (supplierId && !String(next.supplier_id || '').trim()) next.supplier_id = String(supplierId);
+            const warehouseId = prefill.warehouse_id ?? prefill.warehouseId;
+            if (warehouseId && !String(next.warehouse_id || '').trim()) next.warehouse_id = String(warehouseId);
+            const issueType = prefill.issue_type ?? prefill.type;
+            if (issueType && !String(next.issue_type || '').trim()) next.issue_type = String(issueType);
+            return next;
+        });
+    }, [issue, prefill]);
+
     useEffect(() => {
         if (!warehousesList.length) return;
         setFormData((prev) => {
@@ -117,6 +137,17 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
             return { ...prev, warehouse_id: row.id };
         });
     }, [warehousesList, issue?.id]);
+
+    useEffect(() => {
+        if (!formData.supplier_id || !suppliers.length) return;
+        const supplier = suppliers.find((s) => String(s.id) === String(formData.supplier_id));
+        const nextAddress = String(supplier?.address || '').trim();
+        if (!nextAddress) return;
+        setFormData((prev) => {
+            if (prev.deliverer_address === nextAddress) return prev;
+            return { ...prev, deliverer_address: nextAddress };
+        });
+    }, [formData.supplier_id, suppliers]);
 
     useEffect(() => {
         if (formData.warehouse_id && ['TRA_VO', 'TRA_BINH_LOI', 'TRA_MAY'].includes(formData.issue_type)) {
@@ -166,9 +197,47 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
         try {
             const { data, error } = await supabase
                 .from('suppliers')
-                .select('id, name')
+                .select('id, name, address')
                 .order('name');
             if (!error && data) setSuppliers(data);
+        } catch (e) {
+            console.error(e);
+        }
+    };
+
+    const loadDeliverers = async () => {
+        try {
+            const [shippersRes, usersRes] = await Promise.all([
+                supabase.from('shippers').select('id, name, status').order('name'),
+                supabase.from('app_users').select('id, name, role, status').order('name'),
+            ]);
+
+            if (shippersRes.error) console.error('Lỗi tải đơn vị vận chuyển:', shippersRes.error);
+            if (usersRes.error) console.error('Lỗi tải nhân viên giao hàng:', usersRes.error);
+
+            const shipperOptions = (shippersRes.data || [])
+                .filter((s) => !s.status || s.status === 'Đang hoạt động')
+                .map((s) => ({
+                    id: `s_${s.id}`,
+                    name: String(s.name || '').trim(),
+                    type: 'SHIPPER_CO_DINH',
+                }))
+                .filter((s) => s.name);
+
+            const userOptions = (usersRes.data || [])
+                .filter((u) => {
+                    if (u.status && u.status !== 'Hoạt động') return false;
+                    const role = String(u.role || '').trim().toLowerCase();
+                    return role === 'shipper' || role.includes('giao');
+                })
+                .map((u) => ({
+                    id: `u_${u.id}`,
+                    name: String(u.name || '').trim(),
+                    type: 'USER_SHIPPER',
+                }))
+                .filter((u) => u.name);
+
+            setDeliverers([...shipperOptions, ...userOptions]);
         } catch (e) {
             console.error(e);
         }
@@ -267,55 +336,6 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
         }
     };
 
-    const toggleInventoryItem = (inventoryItem) => {
-        const isSelected = items.some(it => it.item_id === inventoryItem.id);
-        
-        if (isSelected) {
-            // Remove
-            setItems(items.filter(it => it.item_id !== inventoryItem.id));
-        } else {
-            // Add
-            const productType = mapToProductType(inventoryItem);
-            const newItem = {
-                id: Date.now() + Math.random(),
-                item_type: productType,
-                item_id: inventoryItem.id,
-                item_code: inventoryItem.serial_number,
-                quantity: 1,
-                _search: ''
-            };
-            
-            // Remove any empty row if it's the only one
-            if (items.length === 1 && !items[0].item_code) {
-                setItems([newItem]);
-            } else {
-                setItems([...items, newItem]);
-            }
-        }
-    };
-
-    const addInventoryItemIfMissing = useCallback((inventoryItem) => {
-        const alreadySelected = items.some(it => it.item_id === inventoryItem.id);
-        if (alreadySelected) return false;
-
-        const productType = mapToProductType(inventoryItem);
-        const newItem = {
-            id: Date.now() + Math.random(),
-            item_type: productType,
-            item_id: inventoryItem.id,
-            item_code: inventoryItem.serial_number,
-            quantity: 1,
-            _search: ''
-        };
-
-        if (items.length === 1 && !items[0].item_code && !items[0].item_id) {
-            setItems([newItem]);
-        } else {
-            setItems(prev => [...prev, newItem]);
-        }
-        return true;
-    }, [items, mapToProductType]);
-
     const handleConfirmInventorySelection = (selectedIds) => {
         const selectedItems = inventoryItems.filter(item => selectedIds.includes(item.id));
         if (selectedItems.length === 0) {
@@ -350,16 +370,6 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
         setItems([...currentValidItems, ...newItems]);
         setIsInventoryPickerOpen(false);
     };
-
-    const filteredInventory = useMemo(() => {
-        if (!inventorySearchTerm) return inventoryItems;
-        const s = inventorySearchTerm.toLowerCase();
-        return inventoryItems.filter(item => 
-            item.serial_number?.toLowerCase().includes(s) || 
-            item.machine_type?.toLowerCase().includes(s) ||
-            item.volume?.toLowerCase().includes(s)
-        );
-    }, [inventoryItems, inventorySearchTerm]);
 
     const removeItem = (id) => {
         if (items.length <= 1) return;
@@ -414,29 +424,6 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
 
             setIsScannerOpen(false);
             setActiveScanningIndex(null);
-        } else {
-            // Batch scanning for "Chọn nhanh"
-            const invItem = inventoryItems.find(
-                (i) => (i.serial_number || '').trim().toUpperCase() === normalizedCode.toUpperCase()
-            );
-            if (invItem) {
-                const wasAdded = addInventoryItemIfMissing(invItem);
-                notificationService.add({
-                    title: wasAdded ? 'Đã thêm vỏ từ QR' : 'Mã đã được quét',
-                    description: wasAdded ? normalizedCode : `${normalizedCode} đã tồn tại trong danh sách`,
-                    type: wasAdded ? 'success' : 'warning'
-                });
-            } else {
-                notificationService.add({
-                    title: 'Không tìm thấy mã trong kho',
-                    description: normalizedCode,
-                    type: 'error'
-                });
-            }
-            // Keep scanner open for continuous scanning if desired, 
-            // but usually users scan one by one. Let's close it to be safe or keep it?
-            // User said "nút quét qr cạnh chọn toàn bộ list" which implies batch.
-            // Let's keep it open if it's batch scan.
         }
     };
 
@@ -489,6 +476,18 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
         const isReturnToSupplier = ['TRA_VO', 'TRA_BINH_LOI', 'TRA_MAY'].includes(formData.issue_type);
         if (!formData.supplier_id && isReturnToSupplier) {
             alert('Vui lòng chọn Nhà cung cấp khi trả hàng!');
+            return;
+        }
+
+        const delivererName = formData.deliverer_name === 'KHAC'
+            ? String(formData.deliverer_name_manual || '').trim()
+            : String(formData.deliverer_name || '').trim();
+        if (!delivererName) {
+            alert('Vui lòng chọn người vận chuyển trong mục Vận chuyển');
+            return;
+        }
+        if (!String(formData.deliverer_address || '').trim()) {
+            alert('Vui lòng nhập địa chỉ giao hàng trong mục Vận chuyển');
             return;
         }
 
@@ -595,6 +594,8 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
             };
             issuePayload.supplier_id = uuidOrNull(issuePayload.supplier_id);
             issuePayload.warehouse_id = uuidOrNull(issuePayload.warehouse_id);
+            issuePayload.deliverer_name = delivererName;
+            delete issuePayload.deliverer_name_manual;
 
             const currentCreatorRaw =
                 user?.name ||
@@ -778,6 +779,8 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
     };
 
     const currentFilteredProducts = filteredProductsForType(formData.issue_type);
+    const selectedSupplier = suppliers.find((s) => String(s.id) === String(formData.supplier_id));
+    const supplierDeliveryAddress = String(selectedSupplier?.address || '').trim();
 
     return createPortal(
         <>
@@ -902,7 +905,17 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                                     <div className="relative">
                                         <select
                                             value={formData.supplier_id}
-                                            onChange={(e) => setFormData({ ...formData, supplier_id: e.target.value })}
+                                            onChange={(e) => {
+                                                const supplierId = e.target.value;
+                                                const supplier = suppliers.find((s) => String(s.id) === String(supplierId));
+                                                setFormData((prev) => ({
+                                                    ...prev,
+                                                    supplier_id: supplierId,
+                                                    deliverer_address: supplier?.address
+                                                        ? String(supplier.address).trim()
+                                                        : '',
+                                                }));
+                                            }}
                                             className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] text-slate-800 appearance-none focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white transition-all"
                                         >
                                             <option value="">-- Chọn NCC trả về --</option>
@@ -923,149 +936,105 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-medium text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white transition-all min-h-[80px]"
                                     />
                                 </div>
-                            </div>
 
-                            {/* Bảng chọn nhanh (Chỉ hiện khi là loại Trả NCC) */}
-                            {(formData.issue_type === 'TRA_VO' || formData.issue_type === 'TRA_BINH_LOI' || formData.issue_type === 'TRA_MAY') && formData.warehouse_id && (
-                                <div className="rounded-3xl border border-emerald-200 bg-emerald-50/30 p-5 sm:p-6 space-y-4 shadow-sm">
-                                    <div className="flex flex-col gap-4">
-                                        <div className="flex items-center gap-2.5">
-                                            <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-sm border border-emerald-200 shrink-0">
-                                                <CheckSquare size={20} />
-                                            </div>
-                                            <div>
-                                                <h4 className="text-[16px] font-black text-emerald-800 tracking-tight">Chọn nhanh tài sản từ kho</h4>
-                                                <p className="text-[11px] font-bold text-emerald-600/70 uppercase">Có {inventoryItems.length} sản phẩm khả dụng trong kho này</p>
-                                            </div>
-                                        </div>
-                                        {inventoryItems.length > 0 && (
-                                            <div className="flex flex-wrap items-center gap-3 w-full">
-                                                <div className="relative group flex-1 min-w-[200px]">
-                                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-400 group-focus-within:text-emerald-600 transition-colors" size={14} />
-                                                    <input 
-                                                        type="text"
-                                                        placeholder="Tìm serial/loại bình..."
-                                                        value={inventorySearchTerm}
-                                                        onChange={(e) => setInventorySearchTerm(e.target.value)}
-                                                        className="h-9 pl-9 pr-4 w-full bg-white border border-emerald-100 rounded-xl text-[12px] font-bold text-emerald-900 focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500/40 transition-all"
-                                                    />
-                                                </div>
-                                                <button 
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setActiveScanningIndex(null);
-                                                        setIsScannerOpen(true);
-                                                    }}
-                                                    className="p-2 bg-white border border-emerald-200 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-all shadow-sm"
-                                                    title="Quét mã chọn nhanh"
-                                                >
-                                                    <ScanLine size={18} />
-                                                </button>
-                                                <button 
-                                                    type="button"
-                                                    onClick={() => {
-                                                        const allIds = inventoryItems.map(i => i.id);
-                                                        const currentIds = items.map(it => it.item_id).filter(Boolean);
-                                                        const areAllSelected = allIds.every(id => currentIds.includes(id));
-                                                        
-                                                        if (areAllSelected) {
-                                                            // Clear all returned items that belong to this warehouse inventory
-                                                            setItems(items.filter(it => !allIds.includes(it.item_id)));
-                                                        } else {
-                                                            // Add missing items
-                                                            const newItems = inventoryItems
-                                                                .filter(i => !currentIds.includes(i.id))
-                                                                .map(i => ({
-                                                                    id: Date.now() + Math.random(),
-                                                                    item_type: mapToProductType(i),
-                                                                    item_id: i.id,
-                                                                    item_code: i.serial_number,
-                                                                    quantity: 1,
-                                                                    _search: ''
-                                                                }));
-                                                            setItems([...items.filter(it => it.item_code), ...newItems]);
-                                                        }
-                                                    }}
-                                                    className="px-4 py-1.5 bg-white border border-emerald-200 rounded-lg text-[12px] font-black text-emerald-700 hover:bg-emerald-600 hover:text-white transition-all shadow-sm whitespace-nowrap"
-                                                >
-                                                    {inventoryItems.length > 0 && inventoryItems.every(i => items.some(it => it.item_id === i.id)) ? 'Bỏ chọn hàng loạt' : 'Chọn toàn bộ list'}
-                                                </button>
-                                            </div>
-                                        )}
+                                <div className="md:col-span-2 flex items-start gap-2.5 pt-2 border-t border-slate-100">
+                                    <Truck className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                                    <div>
+                                        <p className="text-sm font-extrabold text-primary">Vận chuyển</p>
+                                        <p className="text-[11px] font-semibold text-slate-500 mt-0.5">
+                                            Ghi nhận người vận chuyển, người nhận và địa chỉ giao để theo dõi và xác nhận giao hàng trả về NCC.
+                                        </p>
                                     </div>
+                                </div>
 
-                                    {isInventoryLoading ? (
-                                        <div className="py-12 text-center bg-white/40 rounded-2xl border border-dashed border-emerald-100">
-                                            <div className="w-8 h-8 border-4 border-emerald-100 border-t-emerald-500 rounded-full animate-spin mx-auto mb-3" />
-                                            <p className="text-[12px] font-bold text-emerald-600/60 uppercase tracking-widest">Đang đồng bộ list hàng...</p>
-                                        </div>
-                                    ) : inventoryItems.length === 0 ? (
-                                        <div className="py-12 text-center bg-white/50 rounded-2xl border border-dashed border-emerald-200">
-                                            <Package size={32} className="mx-auto text-emerald-200 mb-3" />
-                                            <p className="text-[13px] font-bold text-emerald-800/40">Kho này hiện không có tài sản để trả về</p>
-                                        </div>
-                                    ) : filteredInventory.length === 0 ? (
-                                        <div className="py-10 text-center bg-white/30 rounded-2xl border border-dashed border-emerald-100">
-                                            <p className="text-[12px] font-bold text-emerald-400">Không tìm thấy mã trùng khớp với "{inventorySearchTerm}"</p>
-                                        </div>
-                                    ) : (
-                                        <div className="max-h-[350px] overflow-auto custom-scrollbar border border-emerald-100 rounded-2xl bg-white shadow-inner">
-                                            <table className="w-full text-left border-collapse">
-                                                <thead className="sticky top-0 z-10 bg-emerald-50 shadow-sm">
-                                                    <tr>
-                                                        <th className="px-4 py-3 text-[11px] font-black text-emerald-800 uppercase tracking-wider w-10 text-center">Chọn</th>
-                                                        <th className="px-4 py-3 text-[11px] font-black text-emerald-800 uppercase tracking-wider">Số Serial / Barcode</th>
-                                                        <th className="px-4 py-3 text-[11px] font-black text-emerald-800 uppercase tracking-wider text-center">Loại</th>
-                                                        <th className="px-4 py-3 text-[11px] font-black text-emerald-800 uppercase tracking-wider">Thông tin</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-emerald-50">
-                                                    {filteredInventory.map(invItem => {
-                                                        const isSelected = items.some(it => it.item_id === invItem.id);
-                                                        return (
-                                                            <tr 
-                                                                key={invItem.id}
-                                                                onClick={() => toggleInventoryItem(invItem)}
-                                                                className={clsx(
-                                                                    "group cursor-pointer transition-all hover:bg-emerald-50/50",
-                                                                    isSelected ? "bg-emerald-50/70" : "bg-white"
-                                                                )}
-                                                            >
-                                                                <td className="px-4 py-3 text-center">
-                                                                    <div className={clsx(
-                                                                        "w-5 h-5 mx-auto rounded-md border flex items-center justify-center transition-all",
-                                                                        isSelected ? "bg-emerald-600 border-emerald-600 text-white shadow-md" : "bg-white border-slate-200 group-hover:border-emerald-300"
-                                                                    )}>
-                                                                        {isSelected && <CheckCircle2 size={12} strokeWidth={4} />}
-                                                                    </div>
-                                                                </td>
-                                                                <td className="px-4 py-3">
-                                                                    <div className={clsx("font-mono text-[13px] font-black tracking-tight", isSelected ? "text-emerald-700" : "text-slate-700")}>
-                                                                        {invItem.serial_number}
-                                                                    </div>
-                                                                </td>
-                                                                <td className="px-4 py-3 text-center">
-                                                                    <span className={clsx(
-                                                                        "text-[9px] font-black px-2 py-0.5 rounded-md",
-                                                                        isSelected ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
-                                                                    )}>
-                                                                        {formData.issue_type === 'TRA_MAY' ? 'MÁY' : 'BÌNH'}
-                                                                    </span>
-                                                                </td>
-                                                                <td className="px-4 py-3">
-                                                                    <div className={clsx("text-[12px] font-bold", isSelected ? "text-emerald-800/70" : "text-slate-500")}>
-                                                                        {formData.issue_type === 'TRA_MAY' ? invItem.machine_type : invItem.volume}
-                                                                    </div>
-                                                                </td>
-                                                            </tr>
-                                                        );
-                                                    })}
-                                                </tbody>
-                                            </table>
-                                        </div>
+                                <div className="space-y-1.5">
+                                    <label className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800">
+                                        <User className="w-4 h-4 text-primary/70" /> Người vận chuyển *
+                                    </label>
+                                    <div className="relative">
+                                        <select
+                                            disabled={!isTransportEditable}
+                                            value={formData.deliverer_name || ''}
+                                            onChange={(e) => setFormData((prev) => ({ ...prev, deliverer_name: e.target.value }))}
+                                            className={clsx(
+                                                'w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] appearance-none transition-all outline-none',
+                                                !isTransportEditable
+                                                    ? 'text-slate-500 cursor-not-allowed'
+                                                    : 'text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white'
+                                            )}
+                                            required
+                                        >
+                                            <option value="">-- Chọn hoặc nhập tên --</option>
+                                            {deliverers.map((d) => (
+                                                <option key={d.id} value={d.name}>
+                                                    {d.name} {d.type === 'USER_SHIPPER' ? '(NV)' : '(ĐVVC)'}
+                                                </option>
+                                            ))}
+                                            <option value="KHAC">Tên khác (Nhập tay)...</option>
+                                        </select>
+                                        <ChevronDown className="w-4 h-4 text-primary/70 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                    </div>
+                                    {formData.deliverer_name === 'KHAC' && (
+                                        <input
+                                            disabled={!isTransportEditable}
+                                            value={formData.deliverer_name_manual || ''}
+                                            onChange={(e) => setFormData((prev) => ({ ...prev, deliverer_name_manual: e.target.value }))}
+                                            placeholder="Nhập tên người vận chuyển..."
+                                            className="w-full h-11 px-4 mt-2 bg-white border border-slate-200 rounded-xl text-sm font-bold outline-none border-primary/30"
+                                        />
                                     )}
                                 </div>
-                            )}
+
+                                <div className="md:col-span-2 space-y-1.5">
+                                    <label className="flex flex-col gap-0.5 text-[14px] font-bold text-slate-800">
+                                        <span className="flex items-center gap-1.5">
+                                            <PenLine className="w-4 h-4 text-primary/70" />
+                                            Địa chỉ giao hàng *
+                                        </span>
+                                        <span className="text-[11px] font-semibold text-slate-500 normal-case pl-6">
+                                            Địa chỉ nhà cung cấp nhận hàng
+                                        </span>
+                                    </label>
+                                    <input
+                                        disabled={!isTransportEditable}
+                                        readOnly={Boolean(supplierDeliveryAddress)}
+                                        value={formData.deliverer_address || ''}
+                                        onChange={(e) => setFormData((prev) => ({ ...prev, deliverer_address: e.target.value }))}
+                                        placeholder="Chọn NCC để lấy địa chỉ"
+                                        className={clsx(
+                                            'w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] transition-all outline-none',
+                                            !isTransportEditable || supplierDeliveryAddress
+                                                ? 'text-slate-500 cursor-not-allowed'
+                                                : 'text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white'
+                                        )}
+                                    />
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="flex flex-col gap-0.5 text-[14px] font-bold text-slate-800">
+                                        <span className="flex items-center gap-1.5">
+                                            <User className="w-4 h-4 text-primary/70" />
+                                            Người nhận hàng
+                                        </span>
+                                        <span className="text-[11px] font-semibold text-slate-500 normal-case pl-6">
+                                            Liên hệ nhận hàng tại NCC
+                                        </span>
+                                    </label>
+                                    <input
+                                        disabled={!isTransportEditable}
+                                        value={formData.received_by || ''}
+                                        onChange={(e) => setFormData((prev) => ({ ...prev, received_by: e.target.value }))}
+                                        placeholder="Người nhận tại NCC"
+                                        className={clsx(
+                                            'w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] transition-all outline-none',
+                                            !isTransportEditable
+                                                ? 'text-slate-500 cursor-not-allowed'
+                                                : 'text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white'
+                                        )}
+                                    />
+                                </div>
+                            </div>
+
 
                             {formData.issue_type === 'TRA_VO' && (
                                 <div className="rounded-3xl border border-primary/20 bg-white p-5 sm:p-6 space-y-4 shadow-sm">

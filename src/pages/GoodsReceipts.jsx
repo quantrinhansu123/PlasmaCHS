@@ -36,12 +36,13 @@ import {
     Hash,
     Calendar,
     FileText,
-    Warehouse
+    Warehouse,
+    Truck,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import * as XLSX from 'xlsx';
 import GoodsReceiptPrintTemplate from '../components/GoodsReceiptPrintTemplate';
@@ -74,6 +75,7 @@ ChartJS.register(
 const GoodsReceipts = () => {
     const { role, department } = usePermissions();
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
     const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
     const [receipts, setReceipts] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -88,6 +90,27 @@ const GoodsReceipts = () => {
     const [showFormModal, setShowFormModal] = useState(false);
     const [selectedReceipt, setSelectedReceipt] = useState(null);
     const [isViewOnly, setIsViewOnly] = useState(false);
+    const [createPrefill, setCreatePrefill] = useState(null);
+
+    // Open create modal from external navigation (e.g. ShippingTasks -> Nhập hàng)
+    useEffect(() => {
+        const create = searchParams.get('create') === '1';
+        if (!create) return;
+        const note = searchParams.get('note') || searchParams.get('ref') || '';
+
+        setSelectedReceipt(null);
+        setIsViewOnly(false);
+        setCreatePrefill({ note });
+        setShowFormModal(true);
+
+        setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete('create');
+            next.delete('note');
+            next.delete('ref');
+            return next;
+        }, { replace: true });
+    }, [searchParams, setSearchParams]);
 
     // Column Picker State
     const defaultColOrder = TABLE_COLUMNS.map(col => col.key);
@@ -739,6 +762,40 @@ const GoodsReceipts = () => {
         }
     };
 
+    const handleConfirmDelivery = async (receipt) => {
+        if (!receipt?.deliverer_name?.trim()) {
+            toast.error('Phiếu chưa có người giao hàng. Mở phiếu và điền mục Giao hàng trước.');
+            return;
+        }
+        if (!receipt?.deliverer_address?.trim()) {
+            toast.error('Phiếu chưa có địa chỉ giao hàng. Mở phiếu và điền mục Giao hàng trước.');
+            return;
+        }
+        if (!window.confirm(`Xác nhận đã giao hàng cho phiếu "${receipt.receipt_code}"?`)) {
+            return;
+        }
+
+        try {
+            const { error } = await supabase
+                .from('goods_receipts')
+                .update({ status: 'HOAN_THANH' })
+                .eq('id', receipt.id);
+            if (error) throw error;
+
+            await notificationService.add({
+                title: 'Xác nhận giao hàng nhập kho',
+                description: `Phiếu ${receipt.receipt_code} đã hoàn tất giao hàng.`,
+                type: 'success',
+                link: '/nhap-hang',
+            });
+
+            toast.success(`Đã xác nhận giao hàng cho phiếu ${receipt.receipt_code}`);
+            fetchReceipts();
+        } catch (error) {
+            toast.error(`Lỗi xác nhận giao hàng: ${error.message}`);
+        }
+    };
+
     const getStatusBadge = (statusId) => {
         const statusObj = RECEIPT_STATUSES.find(s => s.id === statusId);
         if (!statusObj) return <span className="text-gray-400">—</span>;
@@ -814,6 +871,18 @@ const GoodsReceipts = () => {
 
     const filteredReceiptsCount = filteredReceipts.length;
     const paginatedReceipts = filteredReceipts.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+    const deliveryReceipts = receipts.filter((receipt) => {
+        if (receipt.status !== 'DA_NHAP') return false;
+        const search = searchTerm.toLowerCase();
+        if (!search) return true;
+        return (
+            receipt.receipt_code?.toLowerCase().includes(search)
+            || receipt.supplier_name?.toLowerCase().includes(search)
+            || receipt.deliverer_name?.toLowerCase().includes(search)
+            || receipt.deliverer_address?.toLowerCase().includes(search)
+        );
+    });
 
     const hasActiveFilters = selectedStatuses.length > 0 || selectedWarehouses.length > 0 || selectedTypes.length > 0;
     const totalActiveFilters = selectedStatuses.length + selectedWarehouses.length + selectedTypes.length;
@@ -924,6 +993,7 @@ const GoodsReceipts = () => {
                 setActiveView={setActiveView}
                 views={[
                     { id: 'list', label: 'Danh sách', icon: <List size={16} /> },
+                    { id: 'delivery', label: 'Giao hàng', icon: <Truck size={16} /> },
                     { id: 'stats', label: 'Thống kê', icon: <BarChart2 size={16} /> },
                 ]}
             />
@@ -1483,6 +1553,76 @@ const GoodsReceipts = () => {
                 </div>
             )}
 
+            {activeView === 'delivery' && (
+                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full overflow-hidden text-left">
+                    <MobilePageHeader
+                        searchTerm={searchTerm}
+                        setSearchTerm={setSearchTerm}
+                        searchPlaceholder="Tìm mã phiếu, NCC, người giao..."
+                        summary={
+                            <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-1.5 -mx-0.5 px-0.5">
+                                <span className="bg-sky-100 text-sky-700 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap shadow-sm">
+                                    Chờ xác nhận giao: {deliveryReceipts.length}
+                                </span>
+                            </div>
+                        }
+                    />
+
+                    <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-3 custom-scrollbar">
+                        {loading ? (
+                            <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
+                        ) : deliveryReceipts.length === 0 ? (
+                            <div className="py-16 text-center text-[13px] text-muted-foreground italic">
+                                Không có phiếu đã nhập kho đang chờ xác nhận giao hàng.
+                            </div>
+                        ) : (
+                            deliveryReceipts.map((receipt) => (
+                                <div key={receipt.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <p className="text-[13px] font-black text-blue-700">{receipt.receipt_code}</p>
+                                            <p className="text-[14px] font-bold text-slate-800 truncate">{receipt.supplier_name}</p>
+                                            <p className="text-[11px] text-slate-500 mt-1">
+                                                Kho nhận: {getWarehouseLabel(receipt.warehouse_id)}
+                                                {' · '}
+                                                {receipt.receipt_date ? new Date(receipt.receipt_date).toLocaleDateString('vi-VN') : '—'}
+                                            </p>
+                                        </div>
+                                        {getStatusBadge(receipt.status)}
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[12px]">
+                                        <p><span className="font-bold text-slate-500">Người giao:</span> {receipt.deliverer_name || '—'}</p>
+                                        <p><span className="font-bold text-slate-500">Người nhận:</span> {receipt.received_by || '—'}</p>
+                                        <p className="md:col-span-2"><span className="font-bold text-slate-500">Địa chỉ giao:</span> {receipt.deliverer_address || '—'}</p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setSelectedReceipt(receipt);
+                                                setIsViewOnly(false);
+                                                setShowFormModal(true);
+                                            }}
+                                            className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-[12px] font-bold text-slate-700 hover:bg-slate-50"
+                                        >
+                                            Sửa thông tin giao
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleConfirmDelivery(receipt)}
+                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-[12px] font-bold text-emerald-700 hover:bg-emerald-100"
+                                        >
+                                            <Truck size={14} />
+                                            Xác nhận đã giao
+                                        </button>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            )}
+
             {activeView === 'stats' && (
                 <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col w-full md:flex-1 md:min-h-0 md:overflow-hidden text-left">
 
@@ -1738,6 +1878,7 @@ const GoodsReceipts = () => {
                 <GoodsReceiptFormModal
                     receipt={selectedReceipt}
                     viewOnly={isViewOnly}
+                    prefill={!selectedReceipt && !isViewOnly ? createPrefill : null}
                     onClose={() => setShowFormModal(false)}
                     onSuccess={() => {
                         fetchReceipts();

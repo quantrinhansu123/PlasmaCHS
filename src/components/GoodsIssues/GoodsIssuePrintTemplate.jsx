@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { COMPANY_PRINT_ADDRESS_LINES } from '../../constants/companyPrintAddress';
 
 // Professional inline styles for printing (following A4 standards)
 const S = {
@@ -164,7 +165,7 @@ const GoodsIssuePrintTemplate = React.forwardRef(({ issue, items = [], warehouse
                     <tr>
                         <td style={S.headerTdLeft}>
                             <b>CÔNG TY TNHH DỊCH VỤ Y TẾ CỘNG ĐỒNG CHS</b><br />
-                            Hải âu 02 - 57 Vinhomes Ocean Park,<br />Xã Đa Tốn, Huyện Gia Lâm, Thành phố Hà Nội, Việt Nam<br />
+                            {COMPANY_PRINT_ADDRESS_LINES[0]}<br />{COMPANY_PRINT_ADDRESS_LINES[1]}<br />
                             Mã số thuế: 0110517351<br />
                             Tel: 0981878423
                         </td>

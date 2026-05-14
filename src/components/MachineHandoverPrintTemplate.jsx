@@ -1,5 +1,6 @@
 import React from 'react';
 import { PRODUCT_TYPES } from '../constants/orderConstants';
+import { COMPANY_PRINT_ADDRESS_LINE, COMPANY_PRINT_ADDRESS_LINES } from '../constants/companyPrintAddress';
 
 const getProductLabel = (id) => PRODUCT_TYPES.find(p => p.id === id)?.label || id;
 
@@ -199,7 +200,7 @@ const HandoverItem = ({ order }) => {
             {/* ===== HEADER ===== */}
             <div style={S.headerCompany}>
                 <div style={S.companyName}>CÔNG TY TNHH DỊCH VỤ Y TẾ CỘNG ĐỒNG</div>
-                <div style={S.companyAddress}>Hải Âu 02-57 Vinhomes Ocean Park,<br />Xã Đa Tốn, Huyện Gia Lâm, Thành phố Hà Nội, Việt Nam</div>
+                <div style={S.companyAddress}>{COMPANY_PRINT_ADDRESS_LINES[0]}<br />{COMPANY_PRINT_ADDRESS_LINES[1]}</div>
             </div>
 
             {/* ===== TITLE ===== */}
@@ -225,7 +226,7 @@ const HandoverItem = ({ order }) => {
                 </div>
                 <div style={S.partyRow}>
                     <span style={S.partyLabel}>Địa chỉ:&nbsp;</span>
-                    <span style={S.partyText}>Hải Âu 02-57 Vinhomes Ocean Park, Xã Gia Lâm, Hà Nội</span>
+                    <span style={S.partyText}>{COMPANY_PRINT_ADDRESS_LINE}</span>
                 </div>
                 <div style={S.partyRowInline}>
                     <div style={S.half}>

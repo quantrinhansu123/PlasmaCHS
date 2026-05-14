@@ -47,13 +47,6 @@ export const actionModuleGroups = [
         colorScheme: 'amber',
       },
       {
-        icon: Truck,
-        title: 'Lịch sử giao hàng',
-        description: 'Lịch sử giao nhận đơn hàng, có thể lọc theo tài xế/người giao.',
-        href: '/lich-su-giao-hang',
-        colorScheme: 'indigo',
-      },
-      {
         icon: Users,
         title: 'Danh sách khách hàng',
         description: 'Quản lý dữ liệu người liên hệ và theo dõi tài sản, máy móc phân bổ.',
@@ -276,6 +269,13 @@ export const actionModuleGroups = [
         title: 'Nhiệm vụ giao hàng',
         description: 'Danh sách các đơn hàng cần giao, xác nhận thành công và tải ảnh bằng chứng.',
         href: '/nhiem-vu-giao-hang',
+        colorScheme: 'indigo',
+      },
+      {
+        icon: Truck,
+        title: 'Lịch sử giao hàng',
+        description: 'Lịch sử giao nhận đơn hàng, có thể lọc theo tài xế/người giao.',
+        href: '/lich-su-giao-hang',
         colorScheme: 'indigo',
       },
     ],

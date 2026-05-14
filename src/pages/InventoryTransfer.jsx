@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import BarcodeScanner from '../components/Common/BarcodeScanner';
 import MachineHandoverPrintTemplate from '../components/MachineHandoverPrintTemplate';
@@ -52,6 +52,7 @@ const isCylinder = (item) => {
 const InventoryTransfer = () => {
     const { role, department } = usePermissions();
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
     const [loading, setLoading] = useState(false);
     const [warehouses, setWarehouses] = useState([]);
     const [inventory, setInventory] = useState([]);
@@ -62,6 +63,22 @@ const InventoryTransfer = () => {
         to_warehouse_id: '',
         note: ''
     });
+
+    // Prefill note from external navigation, e.g. /kho/dieu-chuyen?ref=DN-...
+    useEffect(() => {
+        const ref = searchParams.get('ref') || searchParams.get('orderCode') || '';
+        if (!ref) return;
+        setFormData((prev) => {
+            if (String(prev.note || '').trim()) return prev;
+            return { ...prev, note: `Tham chiếu: ${ref}` };
+        });
+        setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete('ref');
+            next.delete('orderCode');
+            return next;
+        }, { replace: true });
+    }, [searchParams, setSearchParams]);
 
     const [transferItems, setTransferItems] = useState([
         { id: Date.now().toString(), item_type: 'MAY', item_name: '', quantity: '', maxQuantity: 0, specific_codes: [] }

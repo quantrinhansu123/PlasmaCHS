@@ -7,6 +7,7 @@ import { supabase } from '../../supabase/config';
 import BarcodeScanner from '../Common/BarcodeScanner';
 import { notificationService } from '../../utils/notificationService';
 import MachineIssueRequestForm from '../Machines/MachineIssueRequestForm';
+import OrderHistoryTimeline from './OrderHistoryTimeline';
 import usePermissions from '../../hooks/usePermissions';
 import {
     collectMachineSerialsForOrder,
@@ -41,6 +42,69 @@ const toUuidOrNull = (value) => {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(raw) ? raw : null;
 };
 
+const extractWarehouseFromNote = (noteText) => {
+    const text = String(noteText || '');
+    if (!text) return '';
+    const match = text.match(/Kho:\s*([^\n\r.]+)/i);
+    return (match?.[1] || '').trim();
+};
+
+const getWarehouseReference = (order, warehouseName) => {
+    const fromProp = String(warehouseName || '').trim();
+    if (fromProp && fromProp !== '—') return fromProp;
+    const fromOrder = String(order?.warehouse || '').trim();
+    if (fromOrder) return fromOrder;
+    return extractWarehouseFromNote(order?.note);
+};
+
+const buildFallbackApprovalHistory = (order, notifications = []) => {
+    const entries = [];
+
+    if (order?.created_at) {
+        entries.push({
+            id: 'order-created',
+            action: 'CREATED',
+            created_by: order.ordered_by || order.sales_person || 'Hệ thống',
+            created_at: order.created_at,
+            new_status: 'CHO_DUYET',
+        });
+    }
+
+    notifications.forEach((notification, index) => {
+        entries.push({
+            id: notification.id || `notification-${index}`,
+            action: 'NOTIFICATION',
+            title: notification.title,
+            description: notification.description,
+            created_at: notification.created_at,
+            created_by: 'Hệ thống',
+        });
+    });
+
+    return entries.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+};
+
+const resolveWarehouseFromCustomer = (customer, warehouses = []) => {
+    if (!customer?.warehouse_id) return '';
+    const raw = String(customer.warehouse_id).trim();
+    const byId = warehouses.find((warehouse) => String(warehouse.id) === raw);
+    if (byId?.code) return byId.code;
+    const byCode = warehouses.find((warehouse) => warehouse.code === raw);
+    return byCode?.code || raw;
+};
+
+const getWarehouseLabelFromList = (value, warehouses = []) => {
+    if (!value) return '—';
+    const raw = String(value).trim();
+    const row = warehouses.find(
+        (warehouse) => warehouse.code === raw || String(warehouse.id) === raw
+    );
+    if (row?.name) {
+        return row.code ? `${row.name} (${row.code})` : row.name;
+    }
+    return raw;
+};
+
 export default function OrderStatusUpdater({ order, warehouseName, userRole, onClose, onUpdateSuccess }) {
     const { user } = usePermissions();
     const [isLoading, setIsLoading] = useState(false);
@@ -67,7 +131,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     const [deliveryProofBase64, setDeliveryProofBase64] = useState(order?.delivery_proof_base64 || '');
     const [showProofModal, setShowProofModal] = useState(false);
     const [showMachinePreviewPopup, setShowMachinePreviewPopup] = useState(false);
-    const [realWarehouseName, setRealWarehouseName] = useState(warehouseName || order?.warehouse);
+    const [realWarehouseName, setRealWarehouseName] = useState(() => getWarehouseReference(order, warehouseName) || '—');
     // Warehouse assignment when company approves DNXM
     const [approvedWarehouseId, setApprovedWarehouseId] = useState(order?.warehouse || '');
     const [warehouseList, setWarehouseList] = useState([]);
@@ -75,6 +139,8 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     const [availableMachineSerials, setAvailableMachineSerials] = useState([]);
     const [isFetchingMachineSerials, setIsFetchingMachineSerials] = useState(false);
     const [machineAssignErrorMsg, setMachineAssignErrorMsg] = useState('');
+    const [approvalHistory, setApprovalHistory] = useState([]);
+    const [isFetchingApprovalHistory, setIsFetchingApprovalHistory] = useState(true);
 
     const isDNXM = order?.order_code?.startsWith('DNXM-');
     const hasMachineItems = orderItems.length > 0
@@ -92,32 +158,148 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     );
 
     useEffect(() => {
-        if (order?.warehouse && (realWarehouseName === order.warehouse || /^[0-9a-fA-F]{8}-/.test(realWarehouseName))) {
-            const fetchWName = async () => {
-                const { data } = await supabase.from('warehouses').select('name').eq('id', order.warehouse).maybeSingle();
+        const resolveWarehouseName = async () => {
+            if (warehouseName && warehouseName !== '—') {
+                setRealWarehouseName(warehouseName);
+                return;
+            }
+
+            const warehouseRef = getWarehouseReference(order, '');
+            if (!warehouseRef) {
+                setRealWarehouseName('—');
+                return;
+            }
+
+            const warehouseId = toUuidOrNull(warehouseRef);
+            if (warehouseId) {
+                const { data } = await supabase.from('warehouses').select('name').eq('id', warehouseId).maybeSingle();
                 if (data?.name) {
                     setRealWarehouseName(data.name);
-                } else {
-                    const { data: bData } = await supabase.from('branches').select('name').eq('id', order.warehouse).maybeSingle();
-                    if (bData?.name) {
-                        setRealWarehouseName(bData.name);
-                    } else {
-                        setRealWarehouseName('—');
-                    }
+                    return;
                 }
-            };
-            fetchWName();
-        }
-    }, [order?.warehouse, warehouseName]);
+
+                const { data: branchData } = await supabase.from('branches').select('name').eq('id', warehouseId).maybeSingle();
+                if (branchData?.name) {
+                    setRealWarehouseName(branchData.name);
+                    return;
+                }
+
+                setRealWarehouseName('—');
+                return;
+            }
+
+            const { data: byCode } = await supabase.from('warehouses').select('name').eq('code', warehouseRef).maybeSingle();
+            if (byCode?.name) {
+                setRealWarehouseName(byCode.name);
+                return;
+            }
+
+            setRealWarehouseName(warehouseRef);
+        };
+
+        resolveWarehouseName();
+    }, [order?.warehouse, order?.note, warehouseName]);
 
     // Fetch warehouse list when approving DNXM (CHO_CTY_DUYET)
     useEffect(() => {
         if (order?.status === 'CHO_CTY_DUYET' && isDNXM) {
-            supabase.from('warehouses').select('id, name').order('name').then(({ data }) => {
+            supabase.from('warehouses').select('id, name, code').order('name').then(({ data }) => {
                 setWarehouseList(data || []);
             });
         }
     }, [order?.status, isDNXM]);
+
+    useEffect(() => {
+        if (!isDNXM || order?.status !== 'CHO_CTY_DUYET') return undefined;
+
+        const phone = String(order?.recipient_phone || '').trim();
+        if (phone.length < 8) return undefined;
+
+        let cancelled = false;
+
+        const loadCustomerWarehouse = async () => {
+            const { data } = await supabase
+                .from('customers')
+                .select('warehouse_id')
+                .eq('phone', phone);
+
+            if (cancelled || !data?.length) return;
+
+            const warehouseCode = resolveWarehouseFromCustomer(data[0], warehouseList);
+            if (warehouseCode) {
+                setApprovedWarehouseId(warehouseCode);
+            }
+        };
+
+        loadCustomerWarehouse();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [order?.recipient_phone, order?.status, isDNXM, warehouseList]);
+
+    useEffect(() => {
+        if (!order?.id) {
+            setApprovalHistory([]);
+            setIsFetchingApprovalHistory(false);
+            return undefined;
+        }
+
+        let cancelled = false;
+
+        const fetchApprovalHistory = async () => {
+            setIsFetchingApprovalHistory(true);
+
+            try {
+                const { data, error } = await supabase
+                    .from('order_history')
+                    .select('id, action, old_status, new_status, reason, created_by, created_at')
+                    .eq('order_id', order.id)
+                    .order('created_at', { ascending: false });
+
+                if (!cancelled && !error && data?.length) {
+                    setApprovalHistory(data);
+                    return;
+                }
+
+                const orderCode = String(order.order_code || '').trim();
+                let notificationQuery = supabase
+                    .from('notifications')
+                    .select('id, title, description, created_at')
+                    .order('created_at', { ascending: false })
+                    .limit(25);
+
+                if (orderCode) {
+                    notificationQuery = notificationQuery.or(
+                        `link.ilike.%orderId=${order.id}%,link.ilike.%${orderCode}%,title.ilike.%${orderCode}%`
+                    );
+                } else {
+                    notificationQuery = notificationQuery.ilike('link', `%orderId=${order.id}%`);
+                }
+
+                const { data: notifications } = await notificationQuery;
+
+                if (!cancelled) {
+                    setApprovalHistory(buildFallbackApprovalHistory(order, notifications || []));
+                }
+            } catch (historyError) {
+                if (!cancelled) {
+                    console.warn('[order_history]', historyError);
+                    setApprovalHistory(buildFallbackApprovalHistory(order, []));
+                }
+            } finally {
+                if (!cancelled) {
+                    setIsFetchingApprovalHistory(false);
+                }
+            }
+        };
+
+        fetchApprovalHistory();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [order?.id, order?.created_at, order?.order_code, order?.ordered_by, order?.sales_person]);
 
     useEffect(() => {
         if (!hasMachineItems || order?.status !== 'KHO_XU_LY') return;
@@ -833,7 +1015,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             // Công ty duyệt DNXM → gán kho cấp
             if (order.status === 'CHO_CTY_DUYET' && transition.nextStatus === 'KHO_XU_LY' && isDNXM) {
                 if (!approvedWarehouseId) {
-                    throw new Error('Bạn phải chỉ định Kho cấp trước khi duyệt chuyển sang Kho xử lý.');
+                    throw new Error('Khách hàng chưa có kho quản lý theo SĐT. Vui lòng cập nhật kho trong hồ sơ khách hàng.');
                 }
                 updatePayload.warehouse = approvedWarehouseId;
             }
@@ -900,6 +1082,23 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 .eq('id', order.id);
 
             if (dbError) throw dbError;
+
+            try {
+                const { error: historyError } = await supabase.from('order_history').insert([{
+                    order_id: order.id,
+                    action: 'STATUS_CHANGED',
+                    old_status: order.status,
+                    new_status: transition.nextStatus,
+                    reason: transition.label === 'Yêu cầu điều chỉnh' ? adjustmentNote.trim() || null : null,
+                    created_by: actorName,
+                }]);
+
+                if (historyError) {
+                    console.warn('[order_history]', historyError);
+                }
+            } catch (historyError) {
+                console.warn('[order_history]', historyError);
+            }
 
             onUpdateSuccess();
             onClose();
@@ -973,9 +1172,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                         )}
 
                         <div className="flex justify-between gap-3 pt-1"><span className="text-slate-500 font-bold uppercase text-[10px] tracking-wider">Cơ sở / Phòng</span><span className="font-black text-primary text-right">{order.department || '—'}</span></div>
-                        {order.warehouse && (
-                            <div className="flex justify-between gap-3 pt-1"><span className="text-slate-500 font-bold uppercase text-[10px] tracking-wider">Kho xuất</span><span className="font-black text-slate-900 text-right">{realWarehouseName}</span></div>
-                        )}
+                        <div className="flex justify-between gap-3 pt-1"><span className="text-slate-500 font-bold uppercase text-[10px] tracking-wider">Kho xuất</span><span className="font-black text-slate-900 text-right">{realWarehouseName || '—'}</span></div>
                     </div>
 
                     <div className="bg-white rounded-2xl p-1.5 border border-slate-200 shadow-sm">
@@ -994,23 +1191,16 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                             <Package className="w-4 h-4 text-white" />
                                         </div>
                                         <div>
-                                            <p className="text-[11px] font-black text-indigo-700 uppercase tracking-widest">Chỉ định Kho cấp</p>
-                                            <p className="text-[10px] text-indigo-500 font-medium">Kho sẽ nhận lệnh xuất máy</p>
+                                            <p className="text-[11px] font-black uppercase tracking-widest text-indigo-700">Kho cấp theo khách hàng</p>
+                                            <p className="text-[10px] font-medium text-indigo-500">Lấy từ SĐT khách hàng trong hồ sơ</p>
                                         </div>
                                     </div>
-                                    <select
-                                        value={approvedWarehouseId}
-                                        onChange={e => setApprovedWarehouseId(e.target.value)}
-                                        className="w-full h-11 px-4 bg-white border-2 border-indigo-300 rounded-xl font-bold text-slate-800 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 transition-all text-sm cursor-pointer"
-                                    >
-                                        <option value="">-- Chọn kho cấp --</option>
-                                        {warehouseList.map(w => (
-                                            <option key={w.id} value={w.id}>{w.name}</option>
-                                        ))}
-                                    </select>
+                                    <div className="mt-3 rounded-xl border border-indigo-200 bg-white px-4 py-3 text-sm font-bold text-slate-800">
+                                        {getWarehouseLabelFromList(approvedWarehouseId, warehouseList)}
+                                    </div>
                                     {!approvedWarehouseId && (
-                                        <p className="text-[11px] text-indigo-600 font-bold flex items-center gap-1">
-                                            <AlertTriangle className="w-3.5 h-3.5" /> Bắt buộc chọn kho trước khi duyệt
+                                        <p className="mt-2 flex items-center gap-1 text-[11px] font-bold text-indigo-600">
+                                            <AlertTriangle className="h-3.5 w-3.5" /> Chưa có kho quản lý theo SĐT khách hàng
                                         </p>
                                     )}
                                 </div>
@@ -1645,6 +1835,11 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                     </div>
                                 )}
                             </div>
+
+                            <OrderHistoryTimeline
+                                entries={approvalHistory}
+                                loading={isFetchingApprovalHistory}
+                            />
                         </div>
                 </div>
 

@@ -33,10 +33,11 @@ import {
     Upload,
     User,
     X,
-    Clock
+    Clock,
+    Truck
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { createPortal } from 'react-dom';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
@@ -97,10 +98,11 @@ function getKanbanCardBorderClass(typeId) {
 const GoodsIssues = () => {
     const { role, department } = usePermissions();
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
     const [issues, setIssues] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
-    const [activeView, setActiveView] = useState('list'); // 'list' | 'kanban' | 'stats'
+    const [activeView, setActiveView] = useState('list'); // 'list' | 'kanban' | 'stats' | 'transport'
     const [selectedIds, setSelectedIds] = useState([]);
 
     // Filters state
@@ -156,6 +158,31 @@ const GoodsIssues = () => {
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [selectedIssue, setSelectedIssue] = useState(null);
     const [initialForcedType, setInitialForcedType] = useState(null);
+    const [createPrefill, setCreatePrefill] = useState(null);
+
+    // Open create modal from external navigation (e.g. ShippingTasks -> Xuất trả NCC)
+    useEffect(() => {
+        const create = searchParams.get('create') === '1';
+        if (!create) return;
+
+        const forcedType = searchParams.get('type') || searchParams.get('issue_type') || null;
+        const notes = searchParams.get('note') || searchParams.get('ref') || '';
+
+        setSelectedIssue(null);
+        setInitialForcedType(forcedType);
+        setCreatePrefill({ notes });
+        setIsFormModalOpen(true);
+
+        setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete('create');
+            next.delete('type');
+            next.delete('issue_type');
+            next.delete('note');
+            next.delete('ref');
+            return next;
+        }, { replace: true });
+    }, [searchParams, setSearchParams]);
 
     const [showMoreActions, setShowMoreActions] = useState(false);
     
@@ -306,6 +333,21 @@ const GoodsIssues = () => {
         return suppliers.find(s => s.id === id)?.name || 'N/A';
     };
 
+    const transportIssues = useMemo(() => {
+        const search = searchTerm.toLowerCase();
+        return issues.filter((issue) => {
+            if (issue.status !== 'DA_XUAT') return false;
+            if (!search) return true;
+            return (
+                issue.issue_code?.toLowerCase().includes(search)
+                || issue.notes?.toLowerCase().includes(search)
+                || issue.deliverer_name?.toLowerCase().includes(search)
+                || issue.deliverer_address?.toLowerCase().includes(search)
+                || getSupplierName(issue.supplier_id).toLowerCase().includes(search)
+            );
+        });
+    }, [issues, searchTerm, suppliers]);
+
     const formatNumber = (num) => new Intl.NumberFormat('vi-VN').format(num || 0);
 
     // Stats Logic
@@ -433,6 +475,33 @@ const GoodsIssues = () => {
     const handleFormSuccess = () => {
         setIsFormModalOpen(false);
         fetchData();
+    };
+
+    const handleConfirmTransport = async (issue) => {
+        if (!issue?.deliverer_name?.trim()) {
+            toast.error('Phiếu chưa có người vận chuyển. Mở phiếu và điền mục Vận chuyển trước.');
+            return;
+        }
+        if (!issue?.deliverer_address?.trim()) {
+            toast.error('Phiếu chưa có địa chỉ giao hàng. Mở phiếu và điền mục Vận chuyển trước.');
+            return;
+        }
+        if (!window.confirm(`Xác nhận đã giao hàng trả NCC cho phiếu "${issue.issue_code}"?`)) {
+            return;
+        }
+
+        try {
+            const { error } = await supabase
+                .from('goods_issues')
+                .update({ status: 'HOAN_THANH' })
+                .eq('id', issue.id);
+            if (error) throw error;
+
+            toast.success(`Đã xác nhận vận chuyển cho phiếu ${issue.issue_code}`);
+            fetchData();
+        } catch (error) {
+            toast.error(`Lỗi xác nhận vận chuyển: ${error.message}`);
+        }
     };
 
     const uuidOrNull = (v) => {
@@ -758,6 +827,7 @@ const GoodsIssues = () => {
                 views={[
                     { id: 'list', label: 'Danh sách', icon: <List size={16} /> },
                     { id: 'kanban', label: 'Kanban', icon: <LayoutGrid size={16} /> },
+                    { id: 'transport', label: 'Vận chuyển', icon: <Truck size={16} /> },
                     { id: 'stats', label: 'Thống kê', icon: <BarChart2 size={16} /> },
                 ]}
             />
@@ -1621,6 +1691,74 @@ const GoodsIssues = () => {
                 </div>
             )}
 
+            {activeView === 'transport' && (
+                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full overflow-hidden text-left">
+                    <MobilePageHeader
+                        searchTerm={searchTerm}
+                        setSearchTerm={setSearchTerm}
+                        searchPlaceholder="Tìm mã phiếu, NCC, người vận chuyển..."
+                        summary={
+                            <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-1.5 -mx-0.5 px-0.5">
+                                <span className="bg-sky-100 text-sky-700 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap shadow-sm">
+                                    Chờ xác nhận vận chuyển: {transportIssues.length}
+                                </span>
+                            </div>
+                        }
+                    />
+
+                    <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-3 custom-scrollbar">
+                        {loading ? (
+                            <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
+                        ) : transportIssues.length === 0 ? (
+                            <div className="py-16 text-center text-[13px] text-muted-foreground italic">
+                                Không có phiếu xuất trả NCC đang chờ xác nhận vận chuyển.
+                            </div>
+                        ) : (
+                            transportIssues.map((issue) => (
+                                <div key={issue.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <p className="text-[13px] font-black text-blue-700">{issue.issue_code}</p>
+                                            <p className="text-[14px] font-bold text-slate-800 truncate">{getSupplierName(issue.supplier_id)}</p>
+                                            <p className="text-[11px] text-slate-500 mt-1">
+                                                Kho xuất: {getWarehouseLabel(issue.warehouse_id)}
+                                                {' · '}
+                                                {issue.issue_date ? new Date(issue.issue_date).toLocaleDateString('vi-VN') : '—'}
+                                            </p>
+                                        </div>
+                                        <span className={clsx('inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border', getStatusBadgeClass(getStatusConfig(issue.status).color))}>
+                                            {getStatusConfig(issue.status).label}
+                                        </span>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[12px]">
+                                        <p><span className="font-bold text-slate-500">Người vận chuyển:</span> {issue.deliverer_name || '—'}</p>
+                                        <p><span className="font-bold text-slate-500">Người nhận:</span> {issue.received_by || '—'}</p>
+                                        <p className="md:col-span-2"><span className="font-bold text-slate-500">Địa chỉ giao:</span> {issue.deliverer_address || '—'}</p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => openFormModal(issue)}
+                                            className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-[12px] font-bold text-slate-700 hover:bg-slate-50"
+                                        >
+                                            Sửa thông tin vận chuyển
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleConfirmTransport(issue)}
+                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-[12px] font-bold text-emerald-700 hover:bg-emerald-100"
+                                        >
+                                            <Truck size={14} />
+                                            Xác nhận đã giao
+                                        </button>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            )}
+
             {/* Modals & Portals */}
             {isFormModalOpen && (
                 <GoodsIssueFormModal
@@ -1631,6 +1769,7 @@ const GoodsIssues = () => {
                     forcedType={initialForcedType}
                     warehouses={warehouses}
                     suppliers={suppliers}
+                    prefill={!selectedIssue ? createPrefill : null}
                 />
             )}
 

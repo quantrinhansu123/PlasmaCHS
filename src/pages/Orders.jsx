@@ -143,6 +143,63 @@ const getWarehouseKeyVariants = (value) => {
     return [...new Set([normalized, shortByDash, compact, alnumOnly].filter(Boolean))];
 };
 
+const getManagerCandidateKeys = (...values) => (
+    [...new Set(values.map((value) => normalizeText(value)).filter(Boolean))]
+);
+
+const warehouseManagedByUser = (warehouse, managerCandidates = []) => {
+    const managerField = String(warehouse?.manager_name || '').trim();
+    if (!managerField || managerCandidates.length === 0) return false;
+
+    return managerField
+        .split(/[,;/|]+/)
+        .map((part) => normalizeText(part))
+        .filter(Boolean)
+        .some((managerPart) =>
+            managerCandidates.some((candidate) =>
+                managerPart === candidate
+                || managerPart.includes(candidate)
+                || candidate.includes(managerPart)
+            )
+        );
+};
+
+const buildAllowedWarehouseKeys = (warehouses = []) => {
+    const allowedWarehouseValues = new Set(warehouses.flatMap((warehouse) => getWarehouseAliases(warehouse)));
+    return new Set(Array.from(allowedWarehouseValues).flatMap((key) => getWarehouseKeyVariants(key)));
+};
+
+const loadCustomerWarehouseMap = async (orders = []) => {
+    const customerIds = [...new Set(orders.map((order) => order.customer_id).filter(Boolean))];
+    if (customerIds.length === 0) return {};
+
+    const customerWarehouseById = {};
+    for (let i = 0; i < customerIds.length; i += 200) {
+        const ids = customerIds.slice(i, i + 200);
+        const { data, error } = await supabase
+            .from('customers')
+            .select('id, warehouse_id')
+            .in('id', ids);
+        if (error) {
+            console.error('Error loading customer warehouses:', error);
+            continue;
+        }
+        (data || []).forEach((row) => {
+            customerWarehouseById[row.id] = row.warehouse_id;
+        });
+    }
+    return customerWarehouseById;
+};
+
+const orderMatchesWarehouseScope = (order, customerWarehouseById, allowedKeys, { customerWarehouseOnly = false } = {}) => {
+    const customerWarehouse = customerWarehouseById[order.customer_id];
+    const sources = customerWarehouseOnly
+        ? [customerWarehouse]
+        : [customerWarehouse, order.warehouse, extractWarehouseFromNote(order.note)];
+    const candidates = sources.flatMap((candidate) => getWarehouseKeyVariants(candidate));
+    return candidates.some((candidateKey) => allowedKeys.has(candidateKey));
+};
+
 const HIDDEN_ORDER_COLUMNS = new Set(['department']);
 
 /** BottleTrack ERP — không dùng `primary` app (#3b82f6) để không lệch mock */
@@ -152,6 +209,7 @@ const BOTTLETRACK_DESKTOP_TABLE_KEYS = [
     'code',
     'category',
     'customer',
+    'customer_warehouse',
     'recipient',
     'type',
     'product',
@@ -367,6 +425,7 @@ const Orders = () => {
     const statsDropdownRef = useRef(null);
     const { fetchCustomerCylinderDebt } = useReports();
     const [allCustomerDebts, setAllCustomerDebts] = useState({}); // customer_id -> debt array
+    const [customerWarehouseById, setCustomerWarehouseById] = useState({});
 
     useEffect(() => {
         if (permissionsLoading) return;
@@ -541,34 +600,25 @@ const Orders = () => {
             if (error) throw error;
 
             let scopedOrders = data || [];
+            const customerWarehouseById = await loadCustomerWarehouseMap(scopedOrders);
 
-            // Kho/Thủ kho: phạm vi dữ liệu theo kho phụ trách trong danh sách kho
-            // (match theo Tên kho, đồng thời hỗ trợ code/id và note để tương thích dữ liệu cũ).
+            // Kho/Thủ kho: chỉ đơn thuộc kho phụ trách (thủ kho: theo kho phụ trách khách hàng).
             if (!isAdmin && (isThuKhoRole || isWarehouseRole)) {
-                const managerCandidates = [user?.name, user?.username, storageUserName]
-                    .map((v) => normalizeText(v))
-                    .filter(Boolean);
+                const managerCandidates = getManagerCandidateKeys(user?.name, user?.username, storageUserName);
 
                 const { data: warehousesData } = await supabase
                     .from('warehouses')
                     .select('id, name, code, manager_name');
 
-                const myWarehouses = (warehousesData || []).filter((w) => {
-                    const managerNormalized = normalizeText(w.manager_name);
-                    if (!managerNormalized) return false;
-                    return managerCandidates.some((candidate) =>
-                        managerNormalized.includes(candidate) || candidate.includes(managerNormalized)
-                    );
-                });
+                let scopedWarehouses = (warehousesData || []).filter((warehouse) =>
+                    warehouseManagedByUser(warehouse, managerCandidates)
+                );
 
-                let scopedWarehouses = myWarehouses;
-                if (scopedWarehouses.length === 0) {
-                    const branchTokens = [department, user?.chi_nhanh]
-                        .map((v) => normalizeText(v))
-                        .filter(Boolean);
+                if (!isThuKhoRole && scopedWarehouses.length === 0) {
+                    const branchTokens = getManagerCandidateKeys(department, user?.chi_nhanh);
                     if (branchTokens.length > 0) {
-                        scopedWarehouses = (warehousesData || []).filter((w) => {
-                            const keys = getWarehouseAliases(w);
+                        scopedWarehouses = (warehousesData || []).filter((warehouse) => {
+                            const keys = getWarehouseAliases(warehouse);
                             return branchTokens.some((token) =>
                                 keys.some((key) => key.includes(token) || token.includes(key))
                             );
@@ -577,40 +627,29 @@ const Orders = () => {
                 }
 
                 if (scopedWarehouses.length > 0) {
-                    const allowedWarehouseValues = new Set(
-                        scopedWarehouses.flatMap((w) => getWarehouseAliases(w))
-                    );
-                    const allowedKeys = new Set(
-                        Array.from(allowedWarehouseValues).flatMap((key) => getWarehouseKeyVariants(key))
-                    );
+                    const allowedKeys = buildAllowedWarehouseKeys(scopedWarehouses);
 
-                    scopedOrders = scopedOrders.filter((order) => {
-                        const candidates = [
-                            order.warehouse,
-                            extractWarehouseFromNote(order.note),
-                        ].flatMap((candidate) => getWarehouseKeyVariants(candidate));
-                        return candidates.some((candidateKey) => allowedKeys.has(candidateKey));
-                    });
-                } else if (department) {
+                    scopedOrders = scopedOrders.filter((order) =>
+                        orderMatchesWarehouseScope(order, customerWarehouseById, allowedKeys, {
+                            customerWarehouseOnly: isThuKhoRole,
+                        })
+                    );
+                } else if (!isThuKhoRole && department) {
                     const fallbackWarehouseCode = department.includes('-')
                         ? department.split('-')[0].trim()
                         : department.trim();
                     const fallbackKeys = new Set(getWarehouseKeyVariants(fallbackWarehouseCode));
-                    if (isThuKhoRole) {
-                        // Thủ kho không bị bó cứng theo department text vì dữ liệu kho có thể lưu dạng code/id/name khác nhau.
-                        scopedOrders = scopedOrders;
-                    } else {
-                        scopedOrders = scopedOrders.filter((order) =>
-                            getWarehouseKeyVariants(order.warehouse).some((candidateKey) => fallbackKeys.has(candidateKey))
-                        );
-                    }
+                    scopedOrders = scopedOrders.filter((order) =>
+                        orderMatchesWarehouseScope(order, customerWarehouseById, fallbackKeys, {
+                            customerWarehouseOnly: false,
+                        })
+                    );
                 } else {
-                    // Fallback an toàn cho Thủ kho: nếu thiếu mapping kho trên hồ sơ user
-                    // thì không ẩn toàn bộ dữ liệu đơn hàng.
-                    scopedOrders = isThuKhoRole ? scopedOrders : [];
+                    scopedOrders = [];
                 }
             }
 
+            setCustomerWarehouseById(customerWarehouseById);
             setOrders(scopedOrders);
         } catch (error) {
             console.error('Error fetching orders:', error);
@@ -636,6 +675,7 @@ const Orders = () => {
         const matchesSearch = (
             (order.order_code?.toLowerCase().includes(search)) ||
             (order.customer_name?.toLowerCase().includes(search)) ||
+            (String(customerWarehouseById[order.customer_id] || '').toLowerCase().includes(search)) ||
             (order.recipient_name?.toLowerCase().includes(search)) ||
             (order.recipient_phone?.toLowerCase().includes(search))
         );
@@ -886,6 +926,11 @@ const Orders = () => {
             return '—';
         }
         return warehouseValue;
+    };
+
+    const getCustomerWarehouseLabel = (order) => {
+        const warehouseValue = customerWarehouseById[order?.customer_id];
+        return getWarehouseLabel(warehouseValue);
     };
 
     const hasActiveFilters =
@@ -1189,6 +1234,12 @@ const Orders = () => {
                 return (
                     <span className="text-[13px] md:text-sm font-medium md:font-semibold text-foreground">
                         {order.customer_name}
+                    </span>
+                );
+            case 'customer_warehouse':
+                return (
+                    <span className="text-[13px] md:text-sm font-medium text-foreground">
+                        {getCustomerWarehouseLabel(order)}
                     </span>
                 );
             case 'sales':

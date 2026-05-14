@@ -17,7 +17,6 @@ import {
     Search,
     CheckCircle2,
     Camera,
-    PenLine,
     SlidersHorizontal,
     Trash2,
     X,
@@ -25,7 +24,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import MobilePageHeader from '../components/layout/MobilePageHeader';
 import PageViewSwitcher from '../components/layout/PageViewSwitcher';
@@ -36,6 +35,7 @@ import PrintOptionsModal from '../components/Orders/PrintOptionsModal';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 import { isAdminRole, isWarehouseRole } from '../utils/accessControl';
+import { persistTransferHandover } from '../utils/persistTransferHandover';
 
 const PAGE_SIZE = 30;
 const DEFAULT_COLUMN_ORDER = ['code', 'status', 'transaction_type', 'from', 'to', 'items', 'qty', 'note', 'date'];
@@ -139,6 +139,7 @@ const columnTonePillClass = {
 
 export default function TransferList() {
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
     const { role } = usePermissions();
     const [records, setRecords] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -173,11 +174,7 @@ export default function TransferList() {
     const [transferChecklist, setTransferChecklist] = useState({});
     const [confirmTransferCheck, setConfirmTransferCheck] = useState(false);
     const [handoverProofBase64, setHandoverProofBase64] = useState('');
-    const [receiverName, setReceiverName] = useState('');
-    const [signatureBase64, setSignatureBase64] = useState('');
     const [isSubmittingHandover, setIsSubmittingHandover] = useState(false);
-    const signatureCanvasRef = useRef(null);
-    const isDrawingRef = useRef(false);
     const [transferFormModal, setTransferFormModal] = useState(null); // { mode: 'view' | 'edit', record }
     const [editingNote, setEditingNote] = useState('');
     const [editingItems, setEditingItems] = useState([]);
@@ -208,6 +205,18 @@ export default function TransferList() {
     useEffect(() => {
         fetchTransfers();
     }, []);
+
+    // Allow deep-linking with preset search. Example: /danh-sach-dieu-chuyen?q=TRF123
+    useEffect(() => {
+        const q = String(searchParams.get('q') || '').trim();
+        if (!q) return;
+        setSearchTerm(q);
+        setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete('q');
+            return next;
+        }, { replace: true });
+    }, [searchParams, setSearchParams]);
     useEffect(() => {
         localStorage.setItem('columns_transfer', JSON.stringify(visibleColumns));
     }, [visibleColumns]);
@@ -440,8 +449,6 @@ export default function TransferList() {
         setTransferChecklist(nextChecklist);
         setConfirmTransferCheck(false);
         setHandoverProofBase64('');
-        setReceiverName('');
-        setSignatureBase64('');
     }, [actionRecord?.id]);
 
     const handleHandoverImageChange = (e) => {
@@ -452,107 +459,21 @@ export default function TransferList() {
         reader.readAsDataURL(file);
     };
 
-    const startDraw = (x, y) => {
-        const canvas = signatureCanvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        ctx.strokeStyle = '#0f172a';
-        ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        isDrawingRef.current = true;
-    };
-    const drawLine = (x, y) => {
-        const canvas = signatureCanvasRef.current;
-        if (!canvas || !isDrawingRef.current) return;
-        const ctx = canvas.getContext('2d');
-        ctx.lineTo(x, y);
-        ctx.stroke();
-    };
-    const endDraw = () => {
-        const canvas = signatureCanvasRef.current;
-        if (!canvas || !isDrawingRef.current) return;
-        isDrawingRef.current = false;
-        setSignatureBase64(canvas.toDataURL('image/png'));
-    };
-    const clearSignature = () => {
-        const canvas = signatureCanvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        setSignatureBase64('');
-    };
-
-    const uploadDataUrl = async (dataUrl, fileName) => {
-        const response = await fetch(dataUrl);
-        const blob = await response.blob();
-        const { error } = await supabase.storage.from('delivery_proofs').upload(fileName, blob, {
-            contentType: blob.type || 'image/png',
-            upsert: true,
-        });
-        if (error) throw error;
-        const { data } = supabase.storage.from('delivery_proofs').getPublicUrl(fileName);
-        return data.publicUrl;
-    };
-
     const handleConfirmTransferHandover = async () => {
         if (!actionRecord) return;
         if (!confirmTransferCheck) {
             alert('Bạn cần xác nhận đã bàn giao hàng cho kho nhận.');
             return;
         }
-        if (!handoverProofBase64) {
-            alert('Bạn cần chụp ảnh xác nhận bàn giao.');
-            return;
-        }
-        if (!receiverName.trim()) {
-            alert('Bạn cần nhập tên người ký nhận kho nhận.');
-            return;
-        }
-        if (!signatureBase64) {
-            alert('Bạn cần ký nhận trước khi xác nhận.');
-            return;
-        }
 
         setIsSubmittingHandover(true);
         try {
-            const stamp = Date.now();
-            const proofUrl = await uploadDataUrl(
+            await persistTransferHandover({
+                transferRequestId: actionRecord.id,
+                transferCode: actionRecord.transferCode,
                 handoverProofBase64,
-                `transfer_${actionRecord.transferCode}_proof_${stamp}.png`
-            );
-            const signUrl = await uploadDataUrl(
-                signatureBase64,
-                `transfer_${actionRecord.transferCode}_signature_${stamp}.png`
-            );
-
-            const checklistDone = Object.keys(transferChecklist).filter((k) => transferChecklist[k]);
-            const appendLines = [
-                `[Kho Nhan Xac Nhan]: TRUE`,
-                `[Nguoi Ky Nhan]: ${receiverName.trim()}`,
-                `[Anh Kho Nhan]: ${proofUrl}`,
-                `[Chu Ky Kho Nhan]: ${signUrl}`,
-                `[Checklist Kho Nhan]: ${JSON.stringify(checklistDone)}`,
-                `[Thoi Gian Xac Nhan]: ${new Date().toISOString()}`,
-            ].join('\n');
-
-            const { data: requestRow, error: loadErr } = await supabase
-                .from('inventory_transfer_requests')
-                .select('id, note')
-                .eq('id', actionRecord.id)
-                .maybeSingle();
-            if (loadErr) throw loadErr;
-
-            const nextNote = `${requestRow?.note || ''}\n${appendLines}`.trim();
-            const { error: updateErr } = await supabase
-                .from('inventory_transfer_requests')
-                .update({
-                    note: nextNote,
-                    handover_image_url: proofUrl
-                })
-                .eq('id', actionRecord.id);
-            if (updateErr) throw updateErr;
+                transferChecklist,
+            });
 
             setActionRecord(null);
             fetchTransfers();
@@ -563,6 +484,7 @@ export default function TransferList() {
             setIsSubmittingHandover(false);
         }
     };
+
     const openTransferFormModal = (mode, record) => {
         setTransferFormModal({ mode, record });
         setEditingNote(record.notes?.[0] || '');
@@ -1660,50 +1582,6 @@ export default function TransferList() {
                                         )}
                                     </div>
 
-                                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-                                        <label className="flex items-center gap-1.5 text-xs font-black text-slate-600 uppercase tracking-widest">
-                                            <PenLine className="w-4 h-4 text-primary" />
-                                            Ký nhận kho nhận
-                                        </label>
-                                        <input
-                                            value={receiverName}
-                                            onChange={(e) => setReceiverName(e.target.value)}
-                                            placeholder="Tên người ký nhận kho nhận"
-                                            className="w-full h-10 px-3 rounded-xl border border-slate-200 text-sm font-semibold"
-                                        />
-                                        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                                            <canvas
-                                                ref={signatureCanvasRef}
-                                                width={600}
-                                                height={180}
-                                                className="w-full h-36 touch-none"
-                                                onMouseDown={(e) => {
-                                                    const r = e.currentTarget.getBoundingClientRect();
-                                                    startDraw(e.clientX - r.left, e.clientY - r.top);
-                                                }}
-                                                onMouseMove={(e) => {
-                                                    const r = e.currentTarget.getBoundingClientRect();
-                                                    drawLine(e.clientX - r.left, e.clientY - r.top);
-                                                }}
-                                                onMouseUp={endDraw}
-                                                onMouseLeave={endDraw}
-                                                onTouchStart={(e) => {
-                                                    const t = e.touches[0];
-                                                    const r = e.currentTarget.getBoundingClientRect();
-                                                    startDraw(t.clientX - r.left, t.clientY - r.top);
-                                                }}
-                                                onTouchMove={(e) => {
-                                                    e.preventDefault();
-                                                    const t = e.touches[0];
-                                                    const r = e.currentTarget.getBoundingClientRect();
-                                                    drawLine(t.clientX - r.left, t.clientY - r.top);
-                                                }}
-                                                onTouchEnd={endDraw}
-                                            />
-                                        </div>
-                                        <button type="button" onClick={clearSignature} className="text-xs font-bold text-rose-600 hover:underline">Xóa chữ ký</button>
-                                    </div>
-
                                     <label className={clsx(
                                         "flex items-center gap-3 p-4 rounded-2xl border-2 cursor-pointer transition-all",
                                         confirmTransferCheck ? "bg-emerald-50 border-emerald-400" : "bg-white border-slate-200"
@@ -1715,7 +1593,7 @@ export default function TransferList() {
                                             className="w-5 h-5"
                                         />
                                         <span className={clsx("text-sm font-bold", confirmTransferCheck ? "text-emerald-700" : "text-slate-600")}>
-                                            Tôi xác nhận đã bàn giao và kho nhận đã ký nhận đầy đủ
+                                            Tôi xác nhận đã bàn giao đầy đủ cho kho nhận
                                         </span>
                                     </label>
 

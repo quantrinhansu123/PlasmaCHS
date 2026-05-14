@@ -42,12 +42,14 @@ import {
     MessageSquare,
     Camera,
     Save,
-    Eye
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import RepairTicketForm from '../components/Repairs/RepairTicketForm';
+import RepairTicketErrorDetailDialog from '../components/Repairs/RepairTicketErrorDetailDialog';
+import RepairTicketErrorViewButton from '../components/Repairs/RepairTicketErrorViewButton';
+import RepairTicketImageThumb from '../components/Repairs/RepairTicketImageThumb';
 import { toast } from 'react-toastify';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
@@ -58,6 +60,11 @@ import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import { ERROR_LEVELS, getErrorLevelColor } from '../constants/repairConstants';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
+import {
+    appendRepairTicketImageFiles,
+    normalizeRepairTicketImages,
+    uploadRepairTicketImages,
+} from '../utils/repairTicketImages';
 
 ChartJS.register(
     CategoryScale,
@@ -167,6 +174,7 @@ export default function RepairTickets() {
     const [techFeedbackDraft, setTechFeedbackDraft] = useState(null);
     const [techModalNewFiles, setTechModalNewFiles] = useState([]);
     const [techModalSaving, setTechModalSaving] = useState(false);
+    const techModalFileInputRef = useRef(null);
     const [ticketDetailView, setTicketDetailView] = useState(null);
     const [activeDropdown, setActiveDropdown] = useState(null);
     const dropdownRef = useRef(null);
@@ -324,7 +332,13 @@ export default function RepairTickets() {
         try {
             const { data: ticketsData, error } = await supabase.from('repair_tickets').select('*').order('created_at', { ascending: false });
             if (error) throw error;
-            setTickets(ticketsData || []);
+            setTickets(
+                (ticketsData || []).map((ticket) => ({
+                    ...ticket,
+                    error_images: normalizeRepairTicketImages(ticket.error_images),
+                    technical_images: normalizeRepairTicketImages(ticket.technical_images),
+                }))
+            );
             setSelectedIds([]);
 
             const [custRes, errRes, userRes] = await Promise.all([
@@ -417,7 +431,7 @@ export default function RepairTickets() {
         setTechFeedbackDraft({
             technician_id: ticket.technician_id || '',
             technical_feedback: ticket.technical_feedback || '',
-            technical_images: Array.isArray(ticket.technical_images) ? [...ticket.technical_images] : [],
+            technical_images: normalizeRepairTicketImages(ticket.technical_images),
             status: ticket.status && STATUSES.includes(ticket.status) ? ticket.status : 'Mới',
         });
         setTechModalNewFiles([]);
@@ -428,23 +442,14 @@ export default function RepairTickets() {
         setTechFeedbackDraft(null);
         setTechModalNewFiles([]);
         setTechModalSaving(false);
+        if (techModalFileInputRef.current) {
+            techModalFileInputRef.current.value = '';
+        }
     };
 
-    const uploadTechFeedbackImages = async (files) => {
-        const urls = [];
-        for (const file of files) {
-            const fileExt = file.name.split('.').pop();
-            const fileName = `${Math.random()}.${fileExt}`;
-            const filePath = `${Date.now()}_${fileName}`;
-            const { error } = await supabase.storage.from('repair-tickets').upload(filePath, file);
-            if (error) {
-                console.error('Lỗi upload ảnh kỹ thuật:', error);
-                continue;
-            }
-            const { data: publicUrlData } = supabase.storage.from('repair-tickets').getPublicUrl(filePath);
-            urls.push(publicUrlData.publicUrl);
-        }
-        return urls;
+    const handleTechModalImageSelect = (fileList) => {
+        if (!fileList?.length) return;
+        setTechModalNewFiles((prev) => appendRepairTicketImageFiles(prev, fileList));
     };
 
     const saveTechnicalFeedback = async () => {
@@ -453,8 +458,26 @@ export default function RepairTickets() {
         try {
             let technical_images = [...techFeedbackDraft.technical_images];
             if (techModalNewFiles.length > 0) {
-                const uploaded = await uploadTechFeedbackImages(techModalNewFiles);
-                technical_images = [...technical_images, ...uploaded];
+                const { urls, failures, fallbackWarnings } = await uploadRepairTicketImages(techModalNewFiles, {
+                    folder: `technical/${technicalFeedbackTicket.id || 'draft'}`,
+                });
+                if (urls.length === 0) {
+                    const firstError = failures[0]?.error;
+                    throw new Error(
+                        firstError?.message
+                            ? `Không tải được ảnh kỹ thuật: ${firstError.message}`
+                            : 'Không tải được ảnh kỹ thuật nào. Vui lòng thử lại.',
+                    );
+                }
+                technical_images = [...technical_images, ...urls];
+                if (fallbackWarnings.length > 0) {
+                    toast.warn(
+                        `Bucket ảnh chưa sẵn sàng. Đã lưu ${fallbackWarnings.length} ảnh kỹ thuật dạng tạm để tiếp tục.`,
+                    );
+                }
+                if (failures.length > 0) {
+                    toast.warn(`Chỉ tải được ${urls.length}/${techModalNewFiles.length} ảnh kỹ thuật.`);
+                }
             }
             const { error } = await supabase
                 .from('repair_tickets')
@@ -1045,9 +1068,10 @@ export default function RepairTickets() {
 
                                             <td className="py-2 px-3 whitespace-nowrap sticky right-0 bg-white group-hover:bg-amber-50/50 shadow-[-5px_0_10px_-5px_rgba(0,0,0,0.05)] border-l border-slate-50 flex items-center justify-center h-full min-w-[10.5rem]">
                                                 <div className="flex items-center gap-1 justify-center h-full">
-                                                    <button type="button" onClick={() => openTicketErrorDetailView(ticket)} className="w-8 h-8 flex items-center justify-center !p-0 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-100 rounded-lg transition-colors" title="Xem thông tin thẻ lỗi">
-                                                        <Eye className="w-4 h-4" />
-                                                    </button>
+                                                    <RepairTicketErrorViewButton
+                                                        ticket={ticket}
+                                                        onClick={() => openTicketErrorDetailView(ticket)}
+                                                    />
                                                     <button type="button" onClick={() => openTechnicalFeedback(ticket)} className="w-8 h-8 flex items-center justify-center !p-0 text-violet-600 hover:text-violet-800 hover:bg-violet-100 rounded-lg transition-colors" title="Phản hồi (kỹ thuật)">
                                                         <MessageSquare className="w-4 h-4" />
                                                     </button>
@@ -1171,14 +1195,11 @@ export default function RepairTickets() {
                                                 )}
                                             </div>
                                             <div className="flex items-center gap-1.5">
-                                                <button
-                                                    type="button"
+                                                <RepairTicketErrorViewButton
+                                                    ticket={ticket}
+                                                    variant="mobile"
                                                     onClick={() => openTicketErrorDetailView(ticket)}
-                                                    className="p-1.5 btn-compact text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg active:scale-90 transition-all"
-                                                    title="Xem thông tin thẻ lỗi"
-                                                >
-                                                    <Eye size={16} />
-                                                </button>
+                                                />
                                                 <button
                                                     type="button"
                                                     onClick={() => openTechnicalFeedback(ticket)}
@@ -1409,56 +1430,62 @@ export default function RepairTickets() {
                         ) : (
                             <div className="flex gap-3 md:gap-4 h-full min-h-[min(440px,calc(100vh-300px))] pb-2">
                                 {repairKanbanColumns.map((col) => (
-                                    <div key={col.id} className="flex flex-col w-[min(88vw,260px)] sm:w-[min(240px,calc((100vw-3rem)/5))] shrink-0 rounded-2xl border border-slate-200 bg-slate-50/80 overflow-hidden">
+                                    <div key={col.id} className="flex flex-col w-[min(92vw,300px)] sm:w-[min(280px,calc((100vw-3rem)/5))] shrink-0 rounded-2xl border border-slate-200 bg-slate-50/80 overflow-hidden">
                                         <div className={clsx('px-3 py-2.5 border-b font-black text-[11px] uppercase tracking-wide flex items-start justify-between gap-2', getRepairStatusKanbanColumnHeaderClass(col.id))}>
                                             <span className="break-words leading-snug" title={col.label}>{col.label}</span>
                                             <span className="shrink-0 px-2 py-0.5 rounded-lg bg-white/70 text-[11px] font-black tabular-nums border border-black/5">{col.items.length}</span>
                                         </div>
-                                        <div className="flex-1 overflow-y-auto p-2 space-y-2.5 min-h-0 custom-scrollbar bg-white/70">
+                                        <div className="flex-1 overflow-y-auto p-1.5 flex flex-col gap-1 min-h-0 custom-scrollbar bg-white/70">
                                             {col.items.length === 0 ? (
                                                 <p className="text-[11px] font-semibold text-slate-500 text-center py-8 px-2">Trống</p>
                                             ) : (
                                                 col.items.map((ticket) => (
-                                                    <div key={ticket.id} className={clsx('rounded-xl border border-slate-200 bg-white p-3 shadow-sm border-l-4 space-y-2', getRepairStatusKanbanCardBorder(col.id))}>
-                                                        <div className="flex items-start justify-between gap-2">
-                                                            <div className="min-w-0">
-                                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">#{ticket.stt}</p>
-                                                                <p className="text-[13px] font-black font-mono text-slate-800 truncate">{ticket.machine_serial || '—'}</p>
-                                                                <p className="text-[11px] font-bold text-slate-600 truncate" title={getCustomerName(ticket.customer_id)}>{getCustomerName(ticket.customer_id)}</p>
-                                                            </div>
+                                                    <div key={ticket.id} className={clsx('rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm border-l-4 min-w-0', getRepairStatusKanbanCardBorder(col.id))}>
+                                                        <div className="flex items-start gap-1.5 min-w-0">
                                                             <input
                                                                 type="checkbox"
-                                                                className="rounded-md border-slate-300 text-blue-500 focus:ring-blue-500 cursor-pointer shrink-0 mt-0.5"
+                                                                className="rounded border-slate-300 text-blue-500 focus:ring-blue-500 cursor-pointer shrink-0 mt-0.5 scale-90"
                                                                 checked={selectedIds.includes(ticket.id)}
                                                                 onChange={() => toggleSelect(ticket.id)}
                                                                 title="Chọn phiếu"
                                                             />
-                                                        </div>
-                                                        <div className="flex flex-wrap items-center gap-1.5">
-                                                            {ticket.loai_loi && (
-                                                                <span className={clsx('px-2 py-0.5 rounded-lg text-[10px] font-bold border', getLoaiLoiBadgeClass(ticket.loai_loi))}>{ticket.loai_loi}</span>
-                                                            )}
-                                                            <span className="text-[11px] font-bold text-rose-600 truncate" title={getErrorTypeName(ticket.error_type_id)}>{getErrorTypeName(ticket.error_type_id)}</span>
-                                                        </div>
-                                                        {ticket.expected_completion_date && (
-                                                            <div className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-100 flex items-center gap-1 w-fit">
-                                                                <Clock size={10} />
-                                                                {new Date(ticket.expected_completion_date).toLocaleDateString('vi-VN')}
+                                                            <div className="min-w-0 flex-1 space-y-1">
+                                                                <div className="flex items-center gap-1.5 min-w-0">
+                                                                    <span className="shrink-0 text-[10px] font-black font-mono text-slate-800 whitespace-nowrap">
+                                                                        <span className="text-slate-400">#{ticket.stt}</span>
+                                                                        {ticket.machine_serial ? ` · ${ticket.machine_serial}` : ''}
+                                                                    </span>
+                                                                    <span className="text-[10px] font-semibold text-slate-600 truncate min-w-0" title={getCustomerName(ticket.customer_id)}>{getCustomerName(ticket.customer_id)}</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1 min-w-0">
+                                                                    {ticket.loai_loi && (
+                                                                        <span className={clsx('shrink-0 px-1 py-0.5 rounded text-[8px] font-bold border leading-none', getLoaiLoiBadgeClass(ticket.loai_loi))}>{ticket.loai_loi}</span>
+                                                                    )}
+                                                                    <span className="text-[9px] font-bold text-rose-600 truncate min-w-0" title={getErrorTypeName(ticket.error_type_id)}>{getErrorTypeName(ticket.error_type_id)}</span>
+                                                                    {ticket.expected_completion_date && (
+                                                                        <span className="shrink-0 inline-flex items-center gap-0.5 text-[8px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-100 leading-none whitespace-nowrap">
+                                                                            <Clock size={8} />
+                                                                            {new Date(ticket.expected_completion_date).toLocaleDateString('vi-VN')}
+                                                                        </span>
+                                                                    )}
+                                                                    <div className="ml-auto flex shrink-0 items-center gap-0.5">
+                                                                        <RepairTicketErrorViewButton
+                                                                            ticket={ticket}
+                                                                            variant="kanban"
+                                                                            onClick={() => openTicketErrorDetailView(ticket)}
+                                                                        />
+                                                                        <button type="button" onClick={() => openTechnicalFeedback(ticket)} className="p-1 text-violet-600 hover:bg-violet-50 rounded-md transition-all" title="Phản hồi (kỹ thuật)">
+                                                                            <MessageSquare size={12} />
+                                                                        </button>
+                                                                        <button type="button" onClick={() => handleEdit(ticket)} className="p-1 text-blue-600 hover:bg-blue-50 rounded-md transition-all" title="Chỉnh sửa">
+                                                                            <Edit size={12} />
+                                                                        </button>
+                                                                        <button type="button" onClick={() => handleDeleteTicket(ticket.id)} className="p-1 text-rose-500 hover:bg-rose-50 rounded-md transition-all" title="Xóa">
+                                                                            <Trash2 size={12} />
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
                                                             </div>
-                                                        )}
-                                                        <div className="flex items-center justify-end gap-0.5 pt-1 border-t border-slate-100">
-                                                            <button type="button" onClick={() => openTicketErrorDetailView(ticket)} className="p-2 text-emerald-700 hover:bg-emerald-50 rounded-lg transition-all" title="Xem thông tin thẻ lỗi">
-                                                                <Eye size={15} />
-                                                            </button>
-                                                            <button type="button" onClick={() => openTechnicalFeedback(ticket)} className="p-2 text-violet-600 hover:bg-violet-50 rounded-lg transition-all" title="Phản hồi (kỹ thuật)">
-                                                                <MessageSquare size={15} />
-                                                            </button>
-                                                            <button type="button" onClick={() => handleEdit(ticket)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Chỉnh sửa">
-                                                                <Edit size={15} />
-                                                            </button>
-                                                            <button type="button" onClick={() => handleDeleteTicket(ticket.id)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-all" title="Xóa">
-                                                                <Trash2 size={15} />
-                                                            </button>
                                                         </div>
                                                     </div>
                                                 ))
@@ -1656,152 +1683,20 @@ export default function RepairTickets() {
             )}
 
             {ticketDetailView && (
-                <div className="fixed inset-0 z-[100009] flex items-end sm:items-center justify-center p-0 sm:p-4">
-                    <button
-                        type="button"
-                        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-                        aria-label="Đóng"
-                        onClick={closeTicketErrorDetailView}
-                    />
-                    <div
-                        role="dialog"
-                        aria-modal="true"
-                        aria-labelledby="ticket-error-detail-title"
-                        className="relative w-full sm:max-w-lg max-h-[90vh] sm:max-h-[88vh] flex flex-col bg-white rounded-t-2xl sm:rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-slate-100 bg-emerald-50/60 shrink-0">
-                            <div className="min-w-0">
-                                <h2 id="ticket-error-detail-title" className="text-[15px] font-black text-slate-900 flex items-center gap-2">
-                                    <Eye className="w-5 h-5 text-emerald-700 shrink-0" />
-                                    Thông tin thẻ lỗi
-                                </h2>
-                                <p className="text-[12px] font-semibold text-slate-600 mt-0.5 truncate">
-                                    Phiếu #{ticketDetailView.stt}
-                                    {ticketDetailView.machine_serial ? ` · ${ticketDetailView.machine_serial}` : ''}
-                                </p>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={closeTicketErrorDetailView}
-                                className="p-2 rounded-xl text-slate-500 hover:bg-white/80 transition-colors shrink-0"
-                                title="Đóng"
-                            >
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-1">
-                            <div className="rounded-xl border border-slate-100 bg-slate-50/40 p-3 space-y-0 divide-y divide-slate-100">
-                                <div className="flex flex-col gap-0.5 pb-2">
-                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Trạng thái</span>
-                                    <div>{getStatusBadge(ticketDetailView.status)}</div>
-                                </div>
-                                <div className="flex flex-col gap-0.5 py-2">
-                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Khách hàng</span>
-                                    <span className="text-[14px] font-bold text-slate-800">{getCustomerName(ticketDetailView.customer_id)}</span>
-                                </div>
-                                <div className="flex flex-col gap-0.5 py-2">
-                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Ngày báo</span>
-                                    <span className="text-[13px] font-semibold text-slate-800">
-                                        {new Date(ticketDetailView.created_at).toLocaleString('vi-VN')}
-                                    </span>
-                                    <span className="text-[12px] text-slate-500">Người báo: {ticketDetailView.created_by ? getUserName(ticketDetailView.created_by) : 'Hệ thống'}</span>
-                                </div>
-                                <div className="flex flex-col gap-0.5 py-2">
-                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Thiết bị</span>
-                                    <span className="text-[13px] font-mono font-bold text-blue-800">{ticketDetailView.machine_serial || '—'}</span>
-                                    <span className="text-[13px] font-semibold text-slate-700">{ticketDetailView.machine_name || '—'}</span>
-                                </div>
-                                <div className="flex flex-col gap-1 py-2">
-                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Nội dung lỗi</span>
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        {ticketDetailView.loai_loi && (
-                                            <span className={clsx('px-2 py-0.5 rounded-lg text-[11px] font-bold border', getLoaiLoiBadgeClass(ticketDetailView.loai_loi))}>
-                                                {ticketDetailView.loai_loi}
-                                            </span>
-                                        )}
-                                        <span className="text-[13px] font-bold text-rose-600">{getErrorTypeName(ticketDetailView.error_type_id)}</span>
-                                        <span className={clsx('px-2 py-0.5 rounded-full text-[11px] font-bold border', getErrorLevelColor(ticketDetailView.error_level))}>
-                                            {ticketDetailView.error_level || 'Trung bình'}
-                                        </span>
-                                    </div>
-                                </div>
-                                <div className="flex flex-col gap-1 pt-2">
-                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Mô tả chi tiết</span>
-                                    {ticketDetailView.error_details?.trim() ? (
-                                        <p className="text-[13px] font-medium text-slate-700 whitespace-pre-wrap leading-relaxed">{ticketDetailView.error_details}</p>
-                                    ) : (
-                                        <p className="text-[13px] text-slate-400 italic">Chưa có mô tả</p>
-                                    )}
-                                </div>
-                            </div>
-                            <div className="rounded-xl border border-slate-100 bg-white p-3 space-y-2">
-                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                                    <ImageIcon size={12} className="text-rose-500" />
-                                    Hình ảnh chi tiết lỗi
-                                </span>
-                                {Array.isArray(ticketDetailView.error_images) && ticketDetailView.error_images.length > 0 ? (
-                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                                        {ticketDetailView.error_images.map((url, idx) => (
-                                            <a
-                                                key={`err-img-${idx}`}
-                                                href={url}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="aspect-square rounded-xl overflow-hidden border border-slate-200 bg-slate-100 hover:ring-2 hover:ring-emerald-300 transition-all"
-                                            >
-                                                <img src={url} alt={`Chi tiết ${idx + 1}`} className="w-full h-full object-cover" />
-                                            </a>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <p className="text-[13px] text-slate-400 italic">Chưa có ảnh</p>
-                                )}
-                            </div>
-                            <div className="rounded-xl border border-slate-100 bg-slate-50/40 p-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-[12px]">
-                                <div>
-                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-0.5">Kinh doanh</span>
-                                    <span className="font-bold text-slate-800">{getUserName(ticketDetailView.sales_id)}</span>
-                                </div>
-                                <div>
-                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-0.5">CSKH</span>
-                                    <span className="font-bold text-indigo-800">{getUserName(ticketDetailView.cskh_id)}</span>
-                                </div>
-                                <div className="sm:col-span-2">
-                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-0.5">Kỹ thuật phụ trách</span>
-                                    <span className="font-bold text-slate-800">{getUserName(ticketDetailView.technician_id)}</span>
-                                </div>
-                                {ticketDetailView.expected_completion_date && (
-                                    <div className="sm:col-span-2 flex items-center gap-2 text-emerald-800 font-bold text-[12px]">
-                                        <Clock size={14} />
-                                        Dự kiến hoàn thành: {new Date(ticketDetailView.expected_completion_date).toLocaleDateString('vi-VN')}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                        <div className="px-4 py-3 border-t border-slate-100 bg-slate-50/80 shrink-0 flex flex-wrap gap-2 justify-end">
-                            <button
-                                type="button"
-                                onClick={closeTicketErrorDetailView}
-                                className="px-5 py-2.5 rounded-xl bg-slate-800 text-white text-[13px] font-bold hover:bg-slate-900 transition-colors"
-                            >
-                                Đóng
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    const t = ticketDetailView;
-                                    closeTicketErrorDetailView();
-                                    handleEdit(t);
-                                }}
-                                className="px-5 py-2.5 rounded-xl border border-blue-200 bg-blue-50 text-blue-800 text-[13px] font-bold hover:bg-blue-100 transition-colors flex items-center gap-2"
-                            >
-                                <Edit size={16} />
-                                Chỉnh sửa phiếu
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <RepairTicketErrorDetailDialog
+                    ticket={ticketDetailView}
+                    onClose={closeTicketErrorDetailView}
+                    onEdit={(ticket) => {
+                        closeTicketErrorDetailView();
+                        handleEdit(ticket);
+                    }}
+                    getCustomerName={getCustomerName}
+                    getErrorTypeName={getErrorTypeName}
+                    getUserName={getUserName}
+                    getStatusBadge={getStatusBadge}
+                    getLoaiLoiBadgeClass={getLoaiLoiBadgeClass}
+                    getErrorLevelColor={getErrorLevelColor}
+                />
             )}
 
             {technicalFeedbackTicket && techFeedbackDraft && (
@@ -1816,7 +1711,7 @@ export default function RepairTickets() {
                         role="dialog"
                         aria-modal="true"
                         aria-labelledby="technical-feedback-title"
-                        className="relative w-full sm:max-w-lg max-h-[88vh] sm:max-h-[85vh] flex flex-col bg-white rounded-t-2xl sm:rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
+                        className="relative z-10 w-full sm:max-w-lg max-h-[88vh] sm:max-h-[85vh] flex flex-col bg-white rounded-t-2xl sm:rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-slate-100 bg-slate-50/80 shrink-0">
@@ -1899,25 +1794,19 @@ export default function RepairTickets() {
                                 </p>
                                 <div className="flex flex-wrap gap-2">
                                     {techFeedbackDraft.technical_images.map((url, idx) => (
-                                        <div key={`${url}-${idx}`} className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 shrink-0">
-                                            <a href={url} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
-                                                <img src={url} alt="" className="w-full h-full object-cover" />
-                                            </a>
-                                            <button
-                                                type="button"
-                                                disabled={techModalSaving}
-                                                onClick={() =>
-                                                    setTechFeedbackDraft((d) => ({
-                                                        ...d,
-                                                        technical_images: d.technical_images.filter((_, i) => i !== idx),
-                                                    }))
-                                                }
-                                                className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-md shadow hover:bg-rose-700 disabled:opacity-50"
-                                                title="Xóa ảnh"
-                                            >
-                                                <X size={12} />
-                                            </button>
-                                        </div>
+                                        <RepairTicketImageThumb
+                                            key={`${url}-${idx}`}
+                                            src={url}
+                                            alt={`Kỹ thuật ${idx + 1}`}
+                                            className="h-20 w-20 shrink-0 rounded-xl border border-slate-200 bg-slate-100 sm:h-24 sm:w-24"
+                                            removeDisabled={techModalSaving}
+                                            onRemove={() =>
+                                                setTechFeedbackDraft((d) => ({
+                                                    ...d,
+                                                    technical_images: d.technical_images.filter((_, i) => i !== idx),
+                                                }))
+                                            }
+                                        />
                                     ))}
                                     {techModalNewFiles.map((file, idx) => (
                                         <div key={`new-${idx}`} className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden border-2 border-violet-200 bg-slate-50 shrink-0">
@@ -1933,23 +1822,27 @@ export default function RepairTickets() {
                                             </button>
                                         </div>
                                     ))}
-                                    <label className="w-20 h-20 sm:w-24 sm:h-24 flex flex-col items-center justify-center border-2 border-dashed border-violet-200 rounded-xl bg-violet-50/50 text-violet-600 hover:border-violet-400 cursor-pointer shrink-0 transition-colors">
+                                    <button
+                                        type="button"
+                                        disabled={techModalSaving}
+                                        onClick={() => techModalFileInputRef.current?.click()}
+                                        className="w-20 h-20 sm:w-24 sm:h-24 flex flex-col items-center justify-center border-2 border-dashed border-violet-200 rounded-xl bg-violet-50/50 text-violet-600 hover:border-violet-400 cursor-pointer shrink-0 transition-colors disabled:opacity-50"
+                                    >
                                         <Camera size={20} />
                                         <span className="text-[9px] font-black mt-1 uppercase">Thêm</span>
-                                        <input
-                                            type="file"
-                                            accept="image/*"
-                                            multiple
-                                            className="hidden"
-                                            disabled={techModalSaving}
-                                            onChange={(e) => {
-                                                if (e.target.files?.length) {
-                                                    setTechModalNewFiles((prev) => [...prev, ...Array.from(e.target.files)]);
-                                                }
-                                                e.target.value = '';
-                                            }}
-                                        />
-                                    </label>
+                                    </button>
+                                    <input
+                                        ref={techModalFileInputRef}
+                                        type="file"
+                                        accept="image/*"
+                                        multiple
+                                        className="hidden"
+                                        disabled={techModalSaving}
+                                        onChange={(e) => {
+                                            handleTechModalImageSelect(e.target.files);
+                                            e.target.value = '';
+                                        }}
+                                    />
                                 </div>
                                 {techFeedbackDraft.technical_images.length === 0 && techModalNewFiles.length === 0 && (
                                     <p className="text-[12px] text-slate-400 italic">Chưa có ảnh — chọn &quot;Thêm&quot; để tải lên</p>

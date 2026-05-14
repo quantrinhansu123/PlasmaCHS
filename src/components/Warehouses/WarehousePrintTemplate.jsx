@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../supabase/config';
+import { COMPANY_PRINT_ADDRESS_LINES } from '../../constants/companyPrintAddress';
 
 // Inline styles to bypass global CSS overrides and ensure reliability across different views/portals
 const S = {
@@ -178,7 +179,7 @@ export default function WarehousePrintTemplate({ warehouse, onPrinted }) {
                     <tr>
                         <td style={S.headerTdLeft}>
                             <b>CÔNG TY TNHH DỊCH VỤ Y TẾ CỘNG ĐỒNG CHS</b><br />
-                            Hải âu 02 - 57 Vinhomes Ocean Park,<br />Xã Đa Tốn, Huyện Gia Lâm, Thành phố Hà Nội, Việt Nam<br />
+                            {COMPANY_PRINT_ADDRESS_LINES[0]}<br />{COMPANY_PRINT_ADDRESS_LINES[1]}<br />
                             Mã số thuế: 0110517351<br />
                             TK ngân hàng: 8186222999 - Ngân hàng TMCP Quân đội<br />
                             Tel: 0981878423

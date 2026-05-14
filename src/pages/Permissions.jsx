@@ -1,5 +1,4 @@
 import {
-    CheckCircle2,
     Edit,
     Plus,
     Search,
@@ -8,18 +7,16 @@ import {
     UserCircle,
     Users,
     X,
-    XCircle
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 import PermissionFormModal from '../components/Permissions/PermissionFormModal';
-import { ACTION_TYPES, MODULE_PERMISSIONS } from '../constants/permissionConstants';
+import PermissionMatrixView from '../components/Permissions/PermissionMatrixView';
 import { supabase } from '../supabase/config';
 
 const Permissions = () => {
-    const navigate = useNavigate();
     const [searchTerm, setSearchTerm] = useState('');
+    const [permissionQuery, setPermissionQuery] = useState('');
     const [roles, setRoles] = useState([]);
     const [usersList, setUsersList] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -27,6 +24,7 @@ const Permissions = () => {
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [selectedRole, setSelectedRole] = useState(null);
     const [isUserRole, setIsUserRole] = useState(false);
+    const [defaultPermissionType, setDefaultPermissionType] = useState('role');
 
     useEffect(() => {
         fetchRoles();
@@ -119,9 +117,18 @@ const Permissions = () => {
         setIsFormModalOpen(true);
     };
 
-    const handleCreateNew = () => {
+    const handleCreateNewGroup = () => {
         setSelectedRole(null);
         setIsUserRole(false);
+        setDefaultPermissionType('role');
+        setIsFormModalOpen(true);
+    };
+
+    const handleAssignUserPermission = () => {
+        setActiveTab('users');
+        setSelectedRole(null);
+        setIsUserRole(true);
+        setDefaultPermissionType('user');
         setIsFormModalOpen(true);
     };
 
@@ -182,44 +189,83 @@ const Permissions = () => {
                                 <ShieldCheck className="w-6 h-6" />
                             </div>
                             <div>
-                                <h1 className="text-xl font-black text-slate-800 tracking-tight leading-none uppercase">Ma trận Quyền</h1>
-                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em] mt-1">Hệ thống phân cấp truy cập</p>
+                                <h1 className="text-xl font-black text-slate-800 tracking-tight leading-none uppercase">Phân quyền</h1>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em] mt-1">Danh sách quyền theo phân hệ</p>
                             </div>
                         </div>
                     </div>
 
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                        <div className="relative group min-w-[300px]">
-                            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
-                            <input
-                                type="text"
-                                placeholder={activeTab === 'roles' ? "Tìm nhóm quyền..." : "Tìm nhân sự..."}
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-200 focus:border-blue-500 rounded-xl focus:ring-4 focus:ring-blue-50 outline-none transition-all text-[13px] font-bold text-slate-600"
-                            />
-                            {searchTerm && (
-                                <button 
-                                    onClick={() => setSearchTerm('')} 
-                                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                                >
-                                    <X size={14} />
-                                </button>
-                            )}
-                        </div>
                         <button
-                            onClick={handleCreateNew}
+                            type="button"
+                            onClick={handleCreateNewGroup}
                             className="flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[13px] font-black transition-all shadow-lg shadow-blue-200 border border-blue-700 active:scale-95"
                         >
                             <Plus size={18} />
-                            Thêm mới
+                            Thêm nhóm quyền
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleAssignUserPermission}
+                            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 rounded-xl text-[13px] font-black transition-all border border-slate-200 active:scale-95"
+                        >
+                            <UserCircle size={18} />
+                            Phân quyền cho nhân viên
                         </button>
                     </div>
                 </div>
 
                 {/* List Container */}
                 <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-[#F8FAFC]">
-
+                    <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50/80 p-4 md:p-5">
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                            <div>
+                                <label className="mb-1 block text-[10px] font-black uppercase tracking-widest text-amber-800/70">
+                                    Tên nhóm quyền
+                                </label>
+                                <input
+                                    type="text"
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    placeholder="Admin, Thủ kho, Kế toán..."
+                                    className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-[13px] font-semibold text-slate-700 outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
+                                />
+                            </div>
+                            <div>
+                                <label className="mb-1 block text-[10px] font-black uppercase tracking-widest text-amber-800/70">
+                                    Mô tả nhóm quyền
+                                </label>
+                                <input
+                                    type="text"
+                                    placeholder="Mô tả ngắn cho nhóm quyền"
+                                    className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-[13px] font-semibold text-slate-700 outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
+                                    disabled
+                                />
+                            </div>
+                            <div className="md:col-span-2 xl:col-span-1">
+                                <label className="mb-1 block text-[10px] font-black uppercase tracking-widest text-amber-800/70">
+                                    Nhập tên quyền để tìm nhanh
+                                </label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={permissionQuery}
+                                        onChange={(e) => setPermissionQuery(e.target.value)}
+                                        placeholder="Xem, Thêm, Sửa, Xóa..."
+                                        className="min-w-0 flex-1 rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-[13px] font-semibold text-slate-700 outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setPermissionQuery('')}
+                                        className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-amber-300 bg-amber-400 px-4 py-2.5 text-[12px] font-black text-white"
+                                    >
+                                        <Search size={14} />
+                                        Tìm kiếm
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
             {/* List Section */}
             {loading ? (
@@ -272,36 +318,12 @@ const Permissions = () => {
                                 </div>
                             </div>
 
-                            {/* Khung hiển thị tóm tắt quyền */}
-                            <div className="p-6 w-full overflow-x-auto custom-scrollbar">
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                                    {MODULE_PERMISSIONS.map(module => {
-                                        const modulePerms = item.permissions ? item.permissions[module.id] : {};
-                                        return (
-                                            <div key={module.id} className="flex flex-col p-6 bg-slate-50/50 rounded-3xl border border-transparent hover:bg-white hover:border-slate-100 hover:shadow-sm transition-all duration-300">
-                                                <div className="flex items-center justify-between mb-5">
-                                                    <span className="font-black text-slate-500 text-[10px] uppercase tracking-widest opacity-60">Phân hệ:</span>
-                                                    <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-                                                </div>
-                                                <span className="font-black text-black text-lg mb-6 leading-tight group-hover:text-blue-600 transition-colors">{module.label}</span>
-                                                <div className="flex items-center gap-2 flex-wrap mt-auto pt-4 border-t border-slate-100/50">
-                                                    {ACTION_TYPES.map(action => (
-                                                        <div
-                                                            key={action.id}
-                                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border transition-all
-                                                            ${modulePerms?.[action.id]
-                                                                    ? `${action.colorClass.replace('bg-', 'bg-').replace('text-', 'text-')} border-transparent shadow-sm translate-y-0 opacity-100 shadow-blue-100/50`
-                                                                    : 'bg-slate-100/30 text-slate-300 border-slate-100 opacity-40 line-through'}`}
-                                                        >
-                                                            {modulePerms?.[action.id] ? <CheckCircle2 className="w-3 h-3" /> : <XCircle className="w-3 h-3 grayscale" />}
-                                                            {action.label}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
+                            <div className="p-6 w-full">
+                                <PermissionMatrixView
+                                    permissions={item.permissions || {}}
+                                    readOnly
+                                    permissionQuery={permissionQuery}
+                                />
                             </div>
                         </div>
                     ))}
@@ -315,6 +337,7 @@ const Permissions = () => {
                 <PermissionFormModal
                     role={selectedRole}
                     isUserRole={isUserRole}
+                    defaultPermissionType={defaultPermissionType}
                     onClose={() => setIsFormModalOpen(false)}
                     onSuccess={handleFormSubmitSuccess}
                 />

@@ -18,7 +18,8 @@ import {
     FileText,
     Package,
     ScanLine,
-    Search as SearchIcon
+    Search as SearchIcon,
+    Truck,
 } from 'lucide-react';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -34,9 +35,11 @@ import { PRODUCT_TYPES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
 import { notificationService } from '../../utils/notificationService';
 
-export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, viewOnly = false }) {
+export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, viewOnly = false, prefill = null }) {
     const isEdit = !!receipt;
     const isReadOnly = viewOnly || (receipt && receipt.status !== 'CHO_DUYET');
+    const isDeliveryEditable = !viewOnly && (!receipt || ['CHO_DUYET', 'DA_NHAP'].includes(receipt.status));
+    const canSaveReceipt = !viewOnly && (!receipt || ['CHO_DUYET', 'DA_NHAP'].includes(receipt.status));
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isClosing, setIsClosing] = useState(false);
     const [suppliers, setSuppliers] = useState([]);
@@ -91,15 +94,41 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
         return fallbackCode ? [fallbackCode] : [];
     };
 
-    const isAvailableSerialOption = (option, type) => {
-        if (!option?.serial_number) return false;
-        const normalizedStatus = (option.status || '').toLowerCase();
-        const hasCustomer = Boolean(option.customer_name?.toString().trim());
-        const hasWarehouse = type === 'MAY'
-            ? hasValue(option.warehouse)
-            : hasValue(option.warehouse_id);
+    const normalizeWarehouseKey = (value) =>
+        String(value || '')
+            .trim()
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[đĐ]/g, (m) => (m === 'đ' ? 'd' : 'D'));
 
-        return normalizedStatus === 'sẵn sàng' && !hasCustomer && !hasWarehouse;
+    const resolveFactoryWarehouse = () => {
+        if (!warehousesList.length) return null;
+        return warehousesList.find((warehouse) => {
+            const code = normalizeWarehouseKey(warehouse.code);
+            const name = normalizeWarehouseKey(warehouse.name);
+            return code === 'nm' || name.includes('nha may');
+        }) || null;
+    };
+
+    const isAtFactorySerialOption = (option, type) => {
+        if (!option?.serial_number) return false;
+        if (option.customer_name?.toString().trim()) return false;
+
+        const factoryWarehouse = resolveFactoryWarehouse();
+        if (!factoryWarehouse) return false;
+
+        if (type === 'MAY') {
+            const storedWarehouse = normalizeWarehouseKey(option.warehouse);
+            if (!storedWarehouse) return false;
+            const factoryKeys = [factoryWarehouse.id, factoryWarehouse.code, factoryWarehouse.name]
+                .map((value) => normalizeWarehouseKey(value))
+                .filter(Boolean);
+            return factoryKeys.includes(storedWarehouse);
+        }
+
+        if (!hasValue(option.warehouse_id)) return false;
+        return String(option.warehouse_id) === String(factoryWarehouse.id);
     };
 
     /** UUID NCC đang chọn trên phiếu (khớp tên ↔ bảng suppliers) — dùng gợi ý vỏ đã trả NCC trên /binh */
@@ -130,8 +159,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
     };
 
     /**
-     * Gợi ý RFID: (BINH) vỏ sẵn sàng ở kho + vỏ đã trả đúng NCC đã chọn (theo dõi trên /binh); vẫn gõ tay mã mới bất kỳ.
-     * (MAY) chỉ máy sẵn sàng như cũ.
+     * Gợi ý RFID: (BINH) vỏ đã trả đúng NCC đã chọn + vỏ/máy đang ở kho nhà máy; vẫn gõ tay mã mới bất kỳ.
      */
     const getSerialSuggestions = (type, currentValue, itemIdx, serialIdx) => {
         const normalizedCurrent = normalizeSerial(currentValue);
@@ -165,16 +193,16 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                 }
             });
             sourceOptions.forEach((option) => {
-                if (isAvailableSerialOption(option, type)) {
-                    pushUnique(rows, option.serial_number, 'ready');
-                }
+                if (!isAtFactorySerialOption(option, type)) return;
+                if (type === 'BINH' && !binhVolumeMatchesProductLine(option.volume, item?.item_name)) return;
+                pushUnique(rows, option.serial_number, 'factory');
             });
             return rows.slice(0, 20);
         }
 
         sourceOptions.forEach((option) => {
-            if (isAvailableSerialOption(option, type)) {
-                pushUnique(rows, option.serial_number, 'ready');
+            if (isAtFactorySerialOption(option, type)) {
+                pushUnique(rows, option.serial_number, 'factory');
             }
         });
         return rows.slice(0, 20);
@@ -287,13 +315,27 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
         }
     }, [receipt, isEdit]);
 
+    // Prefill create form from external navigation (only when creating a new receipt)
+    useEffect(() => {
+        if (isEdit) return;
+        if (!prefill) return;
+        setFormData((prev) => {
+            const next = { ...prev };
+            if (prefill.note && !String(next.note || '').trim()) next.note = String(prefill.note);
+            if (prefill.supplier_name && !String(next.supplier_name || '').trim()) next.supplier_name = String(prefill.supplier_name);
+            if (prefill.warehouse_id && !String(next.warehouse_id || '').trim()) next.warehouse_id = String(prefill.warehouse_id);
+            if (prefill.receipt_type && !String(next.receipt_type || '').trim()) next.receipt_type = String(prefill.receipt_type);
+            return next;
+        });
+    }, [isEdit, prefill]);
+
     // Load suppliers and warehouses
     useEffect(() => {
         const loadInitialData = async () => {
             try {
                 const [suppliersRes, warehousesRes, cylindersRes, machinesRes] = await Promise.all([
                     supabase.from('suppliers').select('id, name, address, phone').order('name'),
-                    supabase.from('warehouses').select('id, name, manager_name, address').eq('status', 'Đang hoạt động').order('name'),
+                    supabase.from('warehouses').select('id, code, name, manager_name, address').eq('status', 'Đang hoạt động').order('name'),
                     supabase.from('cylinders').select('serial_number, status, warehouse_id, customer_name, supplier_id, volume').order('serial_number'),
                     supabase.from('machines').select('serial_number, status, warehouse, customer_name').order('serial_number')
                 ]);
@@ -488,6 +530,17 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
             toast.error('Vui lòng điền đủ thông tin phiếu nhập kho');
             return;
         }
+        const delivererName = formData.deliverer_name === 'KHAC'
+            ? String(formData.deliverer_name_manual || '').trim()
+            : String(formData.deliverer_name || '').trim();
+        if (!delivererName) {
+            toast.error('Vui lòng chọn người giao hàng trong mục Giao hàng');
+            return;
+        }
+        if (!String(formData.deliverer_address || '').trim()) {
+            toast.error('Vui lòng nhập địa chỉ giao hàng');
+            return;
+        }
         if (items.some(item => !item.item_name)) {
             toast.error('Vui lòng điền tên hàng hóa cho tất cả các dòng');
             return;
@@ -511,6 +564,23 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
 
         setIsSubmitting(true);
         try {
+            if (isEdit && receipt?.status === 'DA_NHAP') {
+                const { error: receiptError } = await supabase
+                    .from('goods_receipts')
+                    .update({
+                        deliverer_name: delivererName,
+                        deliverer_address: formData.deliverer_address,
+                        received_by: formData.received_by,
+                        note: formData.note,
+                    })
+                    .eq('id', receipt.id);
+                if (receiptError) throw receiptError;
+                toast.success('Đã cập nhật thông tin giao hàng');
+                onSuccess();
+                handleClose();
+                return;
+            }
+
             // Flatten items for DB storage
             const flattenedItems = [];
             items.forEach(item => {
@@ -800,6 +870,16 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                         />
                                     </div>
 
+                                    <div className="md:col-span-2 flex items-start gap-2.5 pt-2 border-t border-slate-100">
+                                        <Truck className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                                        <div>
+                                            <p className="text-sm font-extrabold text-primary">Giao hàng</p>
+                                            <p className="text-[11px] font-semibold text-slate-500 mt-0.5">
+                                                Ghi nhận người giao, người nhận và địa chỉ giao để theo dõi và xác nhận giao hàng hóa.
+                                            </p>
+                                        </div>
+                                    </div>
+
                                     <div className="space-y-1.5">
                                         <label className="flex items-center gap-2 text-sm font-bold !text-slate-700 ml-1">
                                             <User className="w-4 h-4 text-primary" />
@@ -807,12 +887,12 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                         </label>
                                         <div className="relative">
                                             <select
-                                                disabled={isReadOnly}
+                                                disabled={!isDeliveryEditable}
                                                 value={formData.deliverer_name || ''}
                                                 onChange={(e) => setFormData(prev => ({ ...prev, deliverer_name: e.target.value }))}
                                                 className={clsx(
                                                     "w-full h-12 pl-4 pr-10 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] appearance-none transition-all outline-none",
-                                                    isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                                    !isDeliveryEditable ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
                                                 )}
                                                 required
                                             >
@@ -826,7 +906,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                         </div>
                                         {formData.deliverer_name === 'KHAC' && (
                                             <input
-                                                disabled={isReadOnly}
+                                                disabled={!isDeliveryEditable}
                                                 onChange={(e) => setFormData(prev => ({ ...prev, deliverer_name_manual: e.target.value }))}
                                                 placeholder="Nhập tên người giao hàng..."
                                                 className="w-full h-11 px-4 mt-2 bg-white border border-slate-200 rounded-xl text-sm font-bold outline-none border-primary/30"
@@ -838,20 +918,20 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                         <label className="flex flex-col gap-0.5 text-sm font-bold !text-slate-700 ml-1">
                                             <span className="flex items-center gap-2">
                                                 <PenLine className="w-4 h-4 text-primary" />
-                                                Địa chỉ giao hàng
+                                                Địa chỉ giao hàng *
                                             </span>
                                             <span className="text-[11px] font-semibold text-slate-500 normal-case pl-6">
                                                 Tự điền theo địa chỉ kho nhận
                                             </span>
                                         </label>
                                         <input
-                                            disabled={isReadOnly}
+                                            disabled={!isDeliveryEditable}
                                             value={formData.deliverer_address || ''}
                                             onChange={(e) => setFormData(prev => ({ ...prev, deliverer_address: e.target.value }))}
                                             placeholder="Địa chỉ kho nhận (giao hàng đến)"
                                             className={clsx(
                                                 "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] transition-all outline-none",
-                                                isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                                !isDeliveryEditable ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
                                             )}
                                         />
                                     </div>
@@ -867,13 +947,13 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                             </span>
                                         </label>
                                         <input
-                                            disabled={isReadOnly}
+                                            disabled={!isDeliveryEditable}
                                             value={formData.received_by || ''}
                                             onChange={(e) => setFormData(prev => ({ ...prev, received_by: e.target.value }))}
                                             placeholder="Thủ kho kho nhận"
                                             className={clsx(
                                                 "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-[15px] transition-all outline-none",
-                                                isReadOnly ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
+                                                !isDeliveryEditable ? "text-slate-500 cursor-not-allowed" : "text-slate-800 focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
                                             )}
                                         />
                                     </div>
@@ -1067,7 +1147,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                                                 </label>
                                                                 {formData.receipt_type === 'BINH' && (
                                                                     <p className="text-[10px] font-semibold text-slate-500 mt-1 leading-snug pl-6">
-                                                                        Gõ mã RFID mới hoặc chọn gợi ý: vỏ <span className="font-bold text-orange-700">đã trả NCC</span> đúng nhà cung cấp đã chọn (như trên /binh), và vỏ <span className="font-bold text-emerald-700">sẵn sàng</span> tại kho.
+                                                                        Gõ mã RFID mới hoặc chọn gợi ý: vỏ <span className="font-bold text-orange-700">đã trả NCC</span> đúng nhà cung cấp đã chọn (như trên /binh), và vỏ <span className="font-bold text-emerald-700">đang ở nhà máy</span>.
                                                                     </p>
                                                                 )}
                                                             </div>
@@ -1135,8 +1215,8 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                                                                         {row.source === 'return_ncc' && (
                                                                                             <span className="shrink-0 text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-orange-50 text-orange-700 border border-orange-200">Đã trả NCC</span>
                                                                                         )}
-                                                                                        {row.source === 'ready' && (
-                                                                                            <span className="shrink-0 text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">Sẵn kho</span>
+                                                                                        {row.source === 'factory' && (
+                                                                                            <span className="shrink-0 text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">Nhà máy</span>
                                                                                         )}
                                                                                     </button>
                                                                                 ))}
@@ -1206,7 +1286,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                         >
                             {viewOnly ? 'Đóng' : 'Hủy bỏ'}
                         </button>
-                        {!isReadOnly && (
+                        {canSaveReceipt && (
                             <button
                                 type="submit"
                                 form="receiptForm"

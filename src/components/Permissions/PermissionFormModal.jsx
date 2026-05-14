@@ -1,11 +1,12 @@
-import { CheckCircle2, Save, ShieldCheck, UserCircle, Users, X } from 'lucide-react';
+import { Save, ShieldCheck, UserCircle, Users, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
-import { ACTION_TYPES, MODULE_PERMISSIONS } from '../../constants/permissionConstants';
+import PermissionMatrixView from './PermissionMatrixView';
+import { ACTION_TYPES, MODULE_PERMISSIONS, buildPermissionRows } from '../../constants/permissionConstants';
 import { supabase } from '../../supabase/config';
 
-export default function PermissionFormModal({ role, isUserRole, onClose, onSuccess }) {
+export default function PermissionFormModal({ role, isUserRole, defaultPermissionType = 'role', onClose, onSuccess }) {
     const isEdit = !!role;
     const [isLoading, setIsLoading] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
@@ -18,7 +19,9 @@ export default function PermissionFormModal({ role, isUserRole, onClose, onSucce
         }, 300);
     }, [onClose]);
 
-    const [permissionType, setPermissionType] = useState(isEdit ? (isUserRole ? 'user' : 'role') : 'role');
+    const [permissionType, setPermissionType] = useState(
+        isEdit ? (isUserRole ? 'user' : 'role') : defaultPermissionType,
+    );
     const [roleName, setRoleName] = useState(isEdit && !isUserRole ? role.name : '');
     const [usersList, setUsersList] = useState([]);
     const [selectedUserId, setSelectedUserId] = useState('');
@@ -32,6 +35,7 @@ export default function PermissionFormModal({ role, isUserRole, onClose, onSucce
     }, {});
 
     const [permissions, setPermissions] = useState(isEdit ? role.permissions : initialPermissions);
+    const [permissionQuery, setPermissionQuery] = useState('');
 
     useEffect(() => {
         fetchUsers();
@@ -65,28 +69,18 @@ export default function PermissionFormModal({ role, isUserRole, onClose, onSucce
         }));
     };
 
-    const handleSelectAllRow = (moduleId) => {
-        const isAllRowChecked = ACTION_TYPES.every(action => permissions[moduleId][action.id]);
-        setPermissions(prev => ({
-            ...prev,
-            [moduleId]: ACTION_TYPES.reduce((acc, action) => ({
-                ...acc,
-                [action.id]: !isAllRowChecked
-            }), {})
-        }));
-    };
-
-    const handleSelectAllColumn = (actionId) => {
-        const isAllColumnChecked = MODULE_PERMISSIONS.every(module => permissions[module.id][actionId]);
-        setPermissions(prev => {
-            const newState = { ...prev };
-            MODULE_PERMISSIONS.forEach(module => {
-                newState[module.id] = {
-                    ...newState[module.id],
-                    [actionId]: !isAllColumnChecked
+    const handleToggleGroup = (groupId, checked) => {
+        const group = buildPermissionRows().find((entry) => entry.id === groupId);
+        if (!group) return;
+        setPermissions((prev) => {
+            const next = { ...prev };
+            group.items.forEach((item) => {
+                next[item.moduleId] = {
+                    ...(next[item.moduleId] || {}),
+                    [item.actionId]: checked,
                 };
             });
-            return newState;
+            return next;
         });
     };
 
@@ -287,69 +281,29 @@ export default function PermissionFormModal({ role, isUserRole, onClose, onSucce
                             </div>
                         </div>
 
-                        {/* Matrix Table Area */}
-                        <div className="rounded-3xl border border-blue-600/10 bg-white overflow-hidden shadow-sm">
-                            <div className="bg-slate-50/50 p-4 border-b border-slate-100 flex items-center gap-3">
-                                <ShieldCheck className="w-5 h-5 text-blue-600" />
-                                <h4 className="text-[14px] font-black text-slate-800 uppercase tracking-tight">Ma trận truy cập Phân hệ</h4>
+                        <div className="rounded-3xl border border-blue-600/10 bg-white p-4 md:p-6 shadow-sm space-y-4">
+                            <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                                <div>
+                                    <h4 className="text-[14px] font-black uppercase tracking-tight text-slate-800">Danh sách quyền theo phân hệ</h4>
+                                    <p className="mt-1 text-[11px] font-semibold text-slate-400">Bật/tắt từng quyền theo module và thao tác.</p>
+                                </div>
+                                <div className="w-full md:max-w-sm">
+                                    <label className="mb-1 block text-[10px] font-black uppercase tracking-widest text-slate-400">Tìm nhanh quyền</label>
+                                    <input
+                                        type="text"
+                                        value={permissionQuery}
+                                        onChange={(e) => setPermissionQuery(e.target.value)}
+                                        placeholder="Nhập tên quyền để tìm nhanh"
+                                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-[13px] font-semibold text-slate-700 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
+                                    />
+                                </div>
                             </div>
-                            <div className="w-full overflow-x-auto custom-scrollbar">
-                                <table className="w-full border-collapse text-left min-w-[700px]">
-                                    <thead>
-                                        <tr className="bg-slate-50/30 border-b border-slate-100">
-                                            <th className="px-6 py-5 font-black text-[10px] text-slate-500 uppercase tracking-[0.2em] w-1/3 border-r border-slate-100/50">Phân hệ (Module)</th>
-                                            {ACTION_TYPES.map(action => (
-                                                <th key={action.id} className="px-4 py-5 text-center border-r border-slate-100/50 last:border-r-0 align-middle">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleSelectAllColumn(action.id)}
-                                                        className="group flex flex-col items-center justify-center gap-1.5 w-full outline-none"
-                                                    >
-                                                        <span className="font-extrabold text-slate-600 group-hover:text-blue-600 transition-colors uppercase text-[10px] tracking-widest">{action.label}</span>
-                                                        <span className="text-[8px] text-slate-400 font-black group-hover:text-blue-400 bg-slate-100 group-hover:bg-blue-50 px-2 py-0.5 rounded transition-all uppercase">Cột</span>
-                                                    </button>
-                                                </th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-50">
-                                        {MODULE_PERMISSIONS.map((module) => (
-                                            <tr key={module.id} className="hover:bg-blue-50/20 transition-colors">
-                                                <td className="px-6 py-5 border-r border-slate-50">
-                                                    <div className="flex items-center justify-between">
-                                                        <span className="font-bold text-slate-800 text-[14px] uppercase tracking-tight">{module.label}</span>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleSelectAllRow(module.id)}
-                                                            className="text-[9px] font-black text-slate-400 hover:text-blue-600 hover:bg-white px-2 py-1.5 rounded-lg transition-all uppercase tracking-widest shadow-sm border border-transparent hover:border-slate-100"
-                                                        >
-                                                            Dòng
-                                                        </button>
-                                                    </div>
-                                                </td>
-                                                {ACTION_TYPES.map(action => (
-                                                    <td key={`${module.id}-${action.id}`} className="px-4 py-5 text-center border-r border-slate-50 last:border-r-0 align-middle">
-                                                        <label className="relative flex items-center justify-center cursor-pointer group mx-auto w-max">
-                                                            <input
-                                                                type="checkbox"
-                                                                className="sr-only peer"
-                                                                checked={permissions[module.id]?.[action.id] || false}
-                                                                onChange={() => handleCheckboxChange(module.id, action.id)}
-                                                            />
-                                                            <div className={`w-8 h-8 rounded-xl border-2 flex items-center justify-center transition-all ${permissions[module.id]?.[action.id]
-                                                                ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-100'
-                                                                : 'bg-white border-slate-200 text-transparent group-hover:border-blue-400'
-                                                                }`}>
-                                                                <CheckCircle2 className={`w-5 h-5 transition-transform ${permissions[module.id]?.[action.id] ? 'scale-100' : 'scale-0'}`} />
-                                                            </div>
-                                                        </label>
-                                                    </td>
-                                                ))}
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
+                            <PermissionMatrixView
+                                permissions={permissions}
+                                permissionQuery={permissionQuery}
+                                onToggle={handleCheckboxChange}
+                                onToggleGroup={handleToggleGroup}
+                            />
                         </div>
                     </form>
                 </div>

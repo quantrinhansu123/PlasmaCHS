@@ -230,6 +230,12 @@ const CylinderRecoveries = () => {
     // Mở phiếu từ Nhiệm vụ giao hàng: /thu-hoi-vo?recovery=<uuid> [&hoanThanh=1]
     const recoveryQueryId = searchParams.get('recovery');
     const recoveryOpenComplete = searchParams.get('hoanThanh') === '1';
+    
+    // Tạo mới từ Nhiệm vụ giao hàng: /thu-hoi-vo?create=1&orderId=<uuid>&customerName=...&orderCode=...
+    const createFromShipping = searchParams.get('create') === '1';
+    const fromOrderId = searchParams.get('orderId') || searchParams.get('order_id');
+    const fromCustomerName = searchParams.get('customerName') || searchParams.get('customer_name');
+    const fromOrderCode = searchParams.get('orderCode') || searchParams.get('order_code');
     useEffect(() => {
         if (!recoveryQueryId) return;
         let cancelled = false;
@@ -256,6 +262,27 @@ const CylinderRecoveries = () => {
         })();
         return () => { cancelled = true; };
     }, [recoveryQueryId, recoveryOpenComplete, setSearchParams]);
+
+    useEffect(() => {
+        if (!createFromShipping) return;
+        if (recoveryQueryId) return;
+
+        setRecoveryToEdit(null);
+        setOpenRecoveryAsComplete(false);
+        setIsFormModalOpen(true);
+
+        setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete('create');
+            next.delete('orderId');
+            next.delete('order_id');
+            next.delete('customerName');
+            next.delete('customer_name');
+            next.delete('orderCode');
+            next.delete('order_code');
+            return next;
+        }, { replace: true });
+    }, [createFromShipping, recoveryQueryId, setSearchParams]);
 
     const fetchRecoveries = async () => {
         try {
@@ -1935,6 +1962,15 @@ const CylinderRecoveries = () => {
                 <CylinderRecoveryFormModal
                     recovery={recoveryToEdit}
                     prefillComplete={openRecoveryAsComplete}
+                    prefill={
+                        !recoveryToEdit && createFromShipping
+                            ? {
+                                order_id: fromOrderId || '',
+                                customer_name: fromCustomerName || '',
+                                notes: fromOrderCode ? `Từ đơn ${fromOrderCode}` : '',
+                            }
+                            : null
+                    }
                     onClose={() => {
                         setIsFormModalOpen(false);
                         setOpenRecoveryAsComplete(false);

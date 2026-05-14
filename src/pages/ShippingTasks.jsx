@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
     Truck,
     CheckCircle2,
@@ -10,34 +11,45 @@ import {
     Loader2,
     LayoutGrid,
     List,
+    Package,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase/config';
 import { clsx } from 'clsx';
 import { toast } from 'react-toastify';
-import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import usePermissions from '../hooks/usePermissions';
 import { isShipperRole, isAdminRole } from '../utils/accessControl';
 import {
     collectMachineSerialsForOrder,
     resolvedOrderCustomerAssetName,
 } from '../utils/orderMachineSerials';
+import { normalizeTransferActionRecord } from '../utils/normalizeTransferActionRecord';
+import { persistTransferHandover } from '../utils/persistTransferHandover';
 /** Chỉ các đơn này còn được mở modal «Xác nhận giao hàng». */
 const ORDER_STATUSES_NEED_DELIVERY_CONFIRM = ['CHO_GIAO_HANG', 'DANG_GIAO_HANG'];
 
-/** Luồng giao/trả/đối soát đang và đã qua tay giao — chưa bao gồm HOAN_THANH (đơn có gán đơn vị giao mới vào được). */
+/** Luồng giao/trả/đối soát còn cần thao tác — không hiển thị đơn HOAN_THANH trên màn nhiệm vụ giao. */
 const ORDER_STATUSES_PIPELINE_NO_SUCCESS_PREFIX = ['CHO_GIAO_HANG', 'DANG_GIAO_HANG', 'CHO_DOI_SOAT', 'DOI_SOAT_THAT_BAI', 'TRA_HANG'];
+
+const isTransferHandoverCompleted = (tr) =>
+    Boolean(tr?.handover_image_url) ||
+    String(tr?.note || '').includes('[Kho Nhan Xac Nhan]: TRUE');
 
 const giaoHangActionBtnCls =
     'shrink-0 rounded-lg border border-primary bg-primary px-3 py-2 text-[11px] font-bold text-white shadow-sm hover:opacity-95 !h-auto !min-h-0';
+
+const TRANSFER_STATUS_SHIPPING_VISIBLE = 'DA_DUYET';
 
 /** Chỉ đơn giao hàng (`orders`) — không gộp phiếu thu hồi vỏ. */
 const ShippingTasks = () => {
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
     const focusOrderId = searchParams.get('focusOrderId');
+    const focusTransferId = searchParams.get('focusTransferId');
     const { role } = usePermissions();
     const [orders, setOrders] = useState([]);
+    const [transferTasks, setTransferTasks] = useState([]);
+    const [warehouseNameById, setWarehouseNameById] = useState({});
     const [isLoading, setIsLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedOrder, setSelectedOrder] = useState(null);
@@ -47,9 +59,16 @@ const ShippingTasks = () => {
     const [notes, setNotes] = useState('');
     const [deliveryStatus, setDeliveryStatus] = useState('HOAN_THANH');
     const [activeView, setActiveView] = useState('list');
+    const [kanbanMode, setKanbanMode] = useState('shipper'); // shipper | order_status | transfer_status | task_type
     const [machineChecklist, setMachineChecklist] = useState({});
     /** Dòng order_items của đơn đang mở modal giao — cần để gom mã máy giống OrderStatusUpdater */
     const [shippingOrderItems, setShippingOrderItems] = useState([]);
+    const [transferHandoverRecord, setTransferHandoverRecord] = useState(null);
+    const [transferActionTab, setTransferActionTab] = useState('actions');
+    const [transferChecklist, setTransferChecklist] = useState({});
+    const [confirmTransferCheck, setConfirmTransferCheck] = useState(false);
+    const [handoverProofBase64, setHandoverProofBase64] = useState('');
+    const [isSubmittingTransferHandover, setIsSubmittingTransferHandover] = useState(false);
     useEffect(() => {
         fetchShippingTasks();
     }, [role]);
@@ -64,23 +83,42 @@ const ShippingTasks = () => {
             const shipperOnly = isShipperRole(role) && !isAdminRole(role);
 
             const shipperKey = String(storageUserName || '').trim();
-            const pipelineCsv = ORDER_STATUSES_PIPELINE_NO_SUCCESS_PREFIX.join(',');
-            /** Admin/giám sát: không tải mọi đơn HOAN_THANH toàn DB — chỉ đơn từng gán đơn vị giao. Shipper luôn lọc theo delivery_unit (kể cả đã HOAN_THANH). */
+            /** Chỉ đơn còn trong luồng giao — không tải HOAN_THANH vào nhiệm vụ giao. */
             let orderQuery = supabase.from('orders').select('*');
             if (shipperOnly) {
                 orderQuery = orderQuery
-                    .in('status', [...ORDER_STATUSES_PIPELINE_NO_SUCCESS_PREFIX, 'HOAN_THANH'])
+                    .in('status', ORDER_STATUSES_PIPELINE_NO_SUCCESS_PREFIX)
                     .eq('delivery_unit', shipperKey || '__NO_SHIPPER_NAME__');
             } else {
-                orderQuery = orderQuery.or(
-                    `status.in.(${pipelineCsv}),and(status.eq.HOAN_THANH,delivery_unit.not.is.null)`,
-                );
+                orderQuery = orderQuery.in('status', ORDER_STATUSES_PIPELINE_NO_SUCCESS_PREFIX);
             }
             orderQuery = orderQuery.order('created_at', { ascending: false });
             const { data: orderData, error: orderError } = await orderQuery;
             if (orderError) throw orderError;
 
             setOrders(orderData || []);
+
+            // Also load inventory transfer requests so "Luân chuyển" shows up in Vận chuyển.
+            const [{ data: transferRows, error: transferError }, { data: whRows, error: whError }] =
+                await Promise.all([
+                    supabase
+                        .from('inventory_transfer_requests')
+                        .select('*')
+                        .eq('status', TRANSFER_STATUS_SHIPPING_VISIBLE)
+                        .order('created_at', { ascending: false })
+                        .limit(300),
+                    supabase
+                        .from('warehouses')
+                        .select('id, name')
+                        .order('name'),
+                ]);
+
+            if (transferError) throw transferError;
+            if (whError) throw whError;
+
+            const whMap = Object.fromEntries((whRows || []).map((w) => [String(w.id), String(w.name || w.id)]));
+            setWarehouseNameById(whMap);
+            setTransferTasks(Array.isArray(transferRows) ? transferRows : []);
         } catch (error) {
             console.error('Error fetching delivery tasks:', error);
             toast.error('❌ Không thể tải danh sách nhiệm vụ: ' + error.message);
@@ -159,6 +197,7 @@ const ShippingTasks = () => {
     };
 
     const openDeliveryConfirmModal = useCallback(async (order) => {
+        setTransferHandoverRecord(null);
         try {
             const { data, error } = await supabase
                 .from('order_items')
@@ -183,6 +222,89 @@ const ShippingTasks = () => {
             toast.error('❌ Không tải được chi tiết đơn để xác nhận mã máy: ' + (e?.message || ''));
         }
     }, []);
+
+    const openTransferHandover = useCallback(
+        (tr) => {
+            if (!tr?.id) return;
+            setIsConfirmModalOpen(false);
+            setSelectedOrder(null);
+            setShippingOrderItems([]);
+            setTransferHandoverRecord(normalizeTransferActionRecord(tr, warehouseNameById));
+            setTransferActionTab('actions');
+        },
+        [warehouseNameById],
+    );
+
+    const openGiaoHangTask = useCallback(
+        (task) => {
+            if (!task?.row) return;
+            if (task.kind === 'TRANSFER') {
+                openTransferHandover(task.row);
+                return;
+            }
+            if (task.kind === 'ORDER') {
+                if (!ORDER_STATUSES_NEED_DELIVERY_CONFIRM.includes(task.row.status)) {
+                    toast.info('Đơn không còn ở bước xác nhận giao trên màn nhiệm vụ.');
+                    return;
+                }
+                void openDeliveryConfirmModal(task.row);
+            }
+        },
+        [openDeliveryConfirmModal, openTransferHandover],
+    );
+
+    const closeTransferHandover = useCallback(() => {
+        setTransferHandoverRecord(null);
+    }, []);
+
+    useEffect(() => {
+        if (!transferHandoverRecord) return;
+        const nextChecklist = {};
+        transferHandoverRecord.items.forEach((item, idx) => {
+            nextChecklist[`${idx}:${item.itemName}:${item.itemType}`] = false;
+        });
+        setTransferChecklist(nextChecklist);
+        setConfirmTransferCheck(false);
+        setHandoverProofBase64('');
+    }, [transferHandoverRecord?.id]);
+
+    const handleTransferHandoverImageChange = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onloadend = () => setHandoverProofBase64(reader.result);
+        reader.readAsDataURL(file);
+    };
+
+    const confirmTransferHandover = async () => {
+        if (!transferHandoverRecord) return;
+        if (!confirmTransferCheck) {
+            toast.error('Bạn cần xác nhận đã bàn giao hàng cho kho nhận.');
+            return;
+        }
+
+        setIsSubmittingTransferHandover(true);
+        try {
+            const { proofUrl } = await persistTransferHandover({
+                transferRequestId: transferHandoverRecord.id,
+                transferCode: transferHandoverRecord.transferCode,
+                handoverProofBase64,
+                transferChecklist,
+            });
+
+            if (String(proofUrl || '').startsWith('data:')) {
+                toast.warn('Bucket ảnh chưa tạo. Đã lưu ảnh tạm dạng base64 để tiếp tục thao tác.');
+            }
+            toast.success('Đã xác nhận bàn giao luân chuyển.');
+            closeTransferHandover();
+            fetchShippingTasks();
+        } catch (error) {
+            console.error('Confirm transfer handover failed:', error);
+            toast.error('Xác nhận luân chuyển thất bại: ' + (error.message || 'Unknown error'));
+        } finally {
+            setIsSubmittingTransferHandover(false);
+        }
+    };
 
     /** Mở modal giao từ URL (?focusOrderId=) khi bấm «Giao hàng» trên trang Đơn hàng. */
     useEffect(() => {
@@ -209,6 +331,26 @@ const ShippingTasks = () => {
             toast.info('Đơn không nằm trong danh sách nhiệm vụ giao (trạng thái hoặc phân quyền tài xế).');
         }
     }, [focusOrderId, isLoading, orders, setSearchParams, openDeliveryConfirmModal]);
+
+    /** Mở thao tác bàn giao luân chuyển từ URL (?focusTransferId=). */
+    useEffect(() => {
+        if (!focusTransferId || isLoading) return;
+        const transfer = transferTasks.find((tr) => String(tr.id) === String(focusTransferId));
+        setSearchParams(
+            (prev) => {
+                const next = new URLSearchParams(prev);
+                next.delete('focusTransferId');
+                return next;
+            },
+            { replace: true },
+        );
+        if (transfer) {
+            setActiveView('list');
+            openTransferHandover(transfer);
+        } else if (transferTasks.length > 0) {
+            toast.info('Phiếu luân chuyển chưa duyệt hoặc không nằm trong danh sách nhiệm vụ giao.');
+        }
+    }, [focusTransferId, isLoading, transferTasks, setSearchParams, openTransferHandover]);
 
     const parseCylinderSerialsFromOrder = (order) => {
         const fromAssigned = Array.isArray(order?.assigned_cylinders)
@@ -378,6 +520,7 @@ const ShippingTasks = () => {
 
     const q = searchTerm.toLowerCase();
     const filteredOrders = orders.filter((order) => {
+        if (order.status === 'HOAN_THANH') return false;
         return (
             !searchTerm ||
             order.order_code?.toLowerCase().includes(q) ||
@@ -387,6 +530,49 @@ const ShippingTasks = () => {
             (order.recipient_phone || '').includes(searchTerm)
         );
     });
+
+    const filteredTransfers = transferTasks.filter((tr) => {
+        if (isTransferHandoverCompleted(tr)) return false;
+        if (String(tr.status || '').trim().toUpperCase() !== TRANSFER_STATUS_SHIPPING_VISIBLE) return false;
+        if (!searchTerm) return true;
+        const q2 = searchTerm.toLowerCase();
+        return (
+            String(tr.transfer_code || '').toLowerCase().includes(q2) ||
+            String(tr.status || '').toLowerCase().includes(q2) ||
+            String(tr.note || '').toLowerCase().includes(q2) ||
+            String(tr.created_by || '').toLowerCase().includes(q2) ||
+            String(warehouseNameById[String(tr.from_warehouse_id)] || tr.from_warehouse_id || '').toLowerCase().includes(q2) ||
+            String(warehouseNameById[String(tr.to_warehouse_id)] || tr.to_warehouse_id || '').toLowerCase().includes(q2)
+        );
+    });
+
+    const combinedTasks = [...filteredOrders.map((order) => ({ kind: 'ORDER', row: order })), ...filteredTransfers.map((tr) => ({ kind: 'TRANSFER', row: tr }))].sort((a, b) => {
+        const aTime =
+            a.kind === 'ORDER'
+                ? new Date(a.row?.created_at || a.row?.updated_at || 0).getTime()
+                : new Date(a.row?.created_at || a.row?.updated_at || 0).getTime();
+        const bTime =
+            b.kind === 'ORDER'
+                ? new Date(b.row?.created_at || b.row?.updated_at || 0).getTime()
+                : new Date(b.row?.created_at || b.row?.updated_at || 0).getTime();
+        return bTime - aTime;
+    });
+
+    const listTasks = combinedTasks;
+
+    const transferStatusBadge = (status) => {
+        const s = String(status || '').trim().toUpperCase();
+        if (s === 'DA_DUYET') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+        if (s === 'TU_CHOI') return 'bg-rose-100 text-rose-800 border-rose-200';
+        return 'bg-amber-100 text-amber-700 border-amber-200';
+    };
+
+    const transferStatusLabel = (status) => {
+        const s = String(status || '').trim().toUpperCase();
+        if (s === 'DA_DUYET') return 'Đã duyệt';
+        if (s === 'TU_CHOI') return 'Từ chối';
+        return 'Chờ duyệt';
+    };
 
     const getShipperColumnKey = (order) => (order.delivery_unit || '').trim() || 'Chưa phân công';
 
@@ -423,10 +609,72 @@ const ShippingTasks = () => {
         }
     };
 
+    // NOTE: Extra cross-module action buttons were removed per request.
+
     const shipModMachineSerials =
         isConfirmModalOpen && selectedOrder
             ? resolveMachineSerialsForShippingConfirm(selectedOrder, shippingOrderItems)
             : [];
+
+    const renderCombinedTaskCards = () =>
+        listTasks.map((it) => {
+            if (it.kind === 'TRANSFER') {
+                const tr = it.row;
+                const fromName = warehouseNameById[String(tr.from_warehouse_id)] || tr.from_warehouse_id || '—';
+                const toName = warehouseNameById[String(tr.to_warehouse_id)] || tr.to_warehouse_id || '—';
+                return (
+                    <article key={`tr-${tr.id}`} className="rounded-xl border border-slate-200 bg-white shadow-sm p-3 flex flex-col gap-2">
+                        <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                                <span className="inline-block text-[9px] font-bold text-sky-700 bg-sky-50 border border-sky-100 px-1.5 py-0.5 rounded uppercase">Luân chuyển</span>
+                                <p className="text-[13px] font-black text-primary mt-1.5 leading-tight">{tr.transfer_code || '—'}</p>
+                                <p className="text-[11px] font-semibold text-slate-800 mt-0.5 line-clamp-2">{fromName} → {toName}</p>
+                            </div>
+                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[8px] font-bold border uppercase shrink-0', transferStatusBadge(tr.status))}>
+                                {transferStatusLabel(tr.status)}
+                            </span>
+                        </div>
+                        {tr.note ? (
+                            <p className="text-[10px] text-slate-500 line-clamp-2" title={String(tr.note)}>{tr.note}</p>
+                        ) : null}
+                        <p className="text-[10px] text-slate-500">SL: <span className="font-bold text-slate-700">{tr.total_quantity ?? '—'}</span></p>
+                        <button type="button" className={clsx(giaoHangActionBtnCls, 'w-full py-2 text-[10px]')} onClick={() => openGiaoHangTask(it)} title="Mở phiếu xác nhận bàn giao luân chuyển">
+                            Giao hàng
+                        </button>
+                    </article>
+                );
+            }
+
+            const order = it.row;
+            return (
+                <article key={`od-${order.id}`} className="rounded-xl border border-slate-200 bg-white shadow-sm p-3 flex flex-col gap-2">
+                    <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                            <span className="inline-block text-[9px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-1.5 py-0.5 rounded uppercase">Giao hàng</span>
+                            <p className="text-[13px] font-black text-primary mt-1.5 leading-tight">#{order.order_code}</p>
+                            <p className="text-[11px] font-semibold text-slate-800 mt-0.5 line-clamp-2">{order.recipient_name || order.customer_name}</p>
+                        </div>
+                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[9px] font-bold border uppercase shrink-0', getStatusBadge(order.status))}>
+                            {getStatusLabel(order.status)}
+                        </span>
+                    </div>
+                    <p className="text-[10px] text-slate-600 line-clamp-2" title={order.recipient_address || ''}>{order.recipient_address || '—'}</p>
+                    {order.recipient_phone ? (
+                        <a href={`tel:${order.recipient_phone}`} className="text-[11px] text-primary font-bold hover:underline">{order.recipient_phone}</a>
+                    ) : null}
+                    <p className="text-[10px] text-slate-500">{order.product_type || '—'} — SL: {order.quantity ?? '—'}</p>
+                    {ORDER_STATUSES_NEED_DELIVERY_CONFIRM.includes(order.status) ? (
+                        <button type="button" className={clsx(giaoHangActionBtnCls, 'w-full py-2 text-[10px]')} onClick={() => openGiaoHangTask(it)}>
+                            Giao hàng
+                        </button>
+                    ) : (
+                        <span className="w-full flex items-center justify-center py-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-600 text-[9px] font-bold uppercase">
+                            {getStatusLabel(order.status)}
+                        </span>
+                    )}
+                </article>
+            );
+        });
 
     return (
         <div className="flex flex-col h-full bg-slate-50">
@@ -438,23 +686,63 @@ const ShippingTasks = () => {
                     </button>
                     <div>
                         <h1 className="text-xl font-bold text-slate-900">Nhiệm vụ giao hàng</h1>
-                        <p className="text-[11px] text-slate-500 font-semibold mt-0.5">
-                            Đơn giao hàng (bảng <span className="font-mono text-slate-600">orders</span>) — chỉ thao tác «Giao hàng» để
-                            mở phiếu xác nhận, chụp ảnh và tích từng mã máy; lưu trực tiếp vào đơn.
+                        <p className="hidden sm:block text-[11px] text-slate-500 font-semibold mt-0.5">
+                            Đơn giao hàng và phiếu luân chuyển — bấm «Giao hàng» để mở phiếu xác nhận trực tiếp trên trang này.
                         </p>
                     </div>
                 </div>
 
-                <div className="mb-3">
-                    <PageViewSwitcher
-                        activeView={activeView}
-                        setActiveView={setActiveView}
-                        views={[
-                            { id: 'list', label: 'Danh sách', icon: <List size={16} /> },
-                            { id: 'kanban', label: 'Kanban', icon: <LayoutGrid size={16} /> },
-                        ]}
-                    />
+                <div className="mb-3 flex items-center p-1 bg-white border border-slate-200 rounded-xl shadow-sm">
+                    {[
+                        { id: 'list', label: 'Danh sách', icon: <List size={16} /> },
+                        { id: 'kanban', label: 'Kanban', icon: <LayoutGrid size={16} />, desktopOnly: true },
+                    ].map((view) => (
+                        <button
+                            key={view.id}
+                            type="button"
+                            onClick={() => setActiveView(view.id)}
+                            className={clsx(
+                                'flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[13px] font-bold transition-all',
+                                view.desktopOnly && 'hidden md:flex',
+                                activeView === view.id
+                                    ? 'bg-primary text-white shadow-md shadow-primary/20'
+                                    : 'text-slate-500',
+                            )}
+                        >
+                            {view.icon} {view.label}
+                        </button>
+                    ))}
                 </div>
+
+                {activeView === 'kanban' && (
+                    <div className="mb-3 hidden md:block">
+                        <div className="flex flex-wrap items-center gap-2">
+                            {[
+                                { id: 'shipper', label: 'Theo ĐV giao (Đơn)' },
+                                { id: 'order_status', label: 'Theo Trạng thái (Đơn)' },
+                                { id: 'transfer_status', label: 'Theo Trạng thái (Luân chuyển)' },
+                                { id: 'task_type', label: 'Theo Loại nhiệm vụ' },
+                            ].map((opt) => (
+                                <button
+                                    key={opt.id}
+                                    type="button"
+                                    onClick={() => setKanbanMode(opt.id)}
+                                    className={clsx(
+                                        'px-3 py-2 rounded-xl border text-[12px] font-black transition-all',
+                                        kanbanMode === opt.id
+                                            ? 'border-primary bg-primary/10 text-primary shadow-sm'
+                                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+                                    )}
+                                >
+                                    {opt.label}
+                                </button>
+                            ))}
+                        </div>
+                        <p className="text-[10px] font-semibold text-slate-400 mt-2">
+                            Chọn cách chia cột Kanban (không hiển thị 2 cấp).
+                        </p>
+                    </div>
+                )}
 
                 <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -475,15 +763,14 @@ const ShippingTasks = () => {
                         <Loader2 className="animate-spin text-primary" size={32} />
                         <p className="text-slate-500 font-medium">Đang tải danh sách nhiệm vụ...</p>
                     </div>
-                ) : filteredOrders.length === 0 ? (
+                ) : combinedTasks.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-20 text-center px-6">
                         <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
                             <Truck size={32} className="text-slate-400" />
                         </div>
                         <h3 className="text-lg font-bold text-slate-800">Không có nhiệm vụ nào</h3>
                         <p className="text-slate-500 text-sm mt-1">
-                            Thử làm mới trang hoặc bỏ ô tìm kiếm. Chỉ hiển thị đơn được gán cho bạn trong luồng giao hàng (
-                            <span className="font-mono">orders</span>).
+                            Thử làm mới trang hoặc bỏ ô tìm kiếm. Danh sách gồm đơn giao hàng và phiếu luân chuyển đã duyệt.
                         </p>
                         <button 
                             onClick={fetchShippingTasks}
@@ -492,186 +779,297 @@ const ShippingTasks = () => {
                             Tải lại trang
                         </button>
                     </div>
-                ) : activeView === 'list' ? (
-                    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-                        <div className="overflow-x-auto">
-                            <table className="w-full min-w-[960px] text-left text-[13px] border-collapse">
-                                <thead>
-                                    <tr className="bg-slate-50 text-slate-500 text-[11px] font-bold uppercase tracking-wide border-b border-slate-200">
-                                        <th className="py-3 pl-4 pr-2 min-w-[128px]">
-                                            <span className="block normal-case tracking-normal text-[10px] font-bold text-slate-400">Loại nhiệm vụ</span>
-                                            <span className="block text-[9px] font-semibold text-slate-400 normal-case tracking-tight mt-0.5">(bảng nguồn)</span>
-                                        </th>
-                                        <th className="py-3 px-2 whitespace-nowrap">Mã</th>
-                                        <th className="py-3 px-2 whitespace-nowrap">Trạng thái</th>
-                                        <th className="py-3 px-2 min-w-[140px]">Khách</th>
-                                        <th className="py-3 px-2 whitespace-nowrap">Đơn vị giao</th>
-                                        <th className="py-3 px-2 min-w-[160px]">Địa chỉ</th>
-                                        <th className="py-3 px-2 whitespace-nowrap">SĐT</th>
-                                        <th className="py-3 px-2 min-w-[120px]">Hàng / SL</th>
-                                        <th className="py-3 px-2 text-right whitespace-nowrap">Giá trị</th>
-                                        <th className="py-3 pr-4 pl-2 text-right min-w-[160px]">Thao tác</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {filteredOrders.map((order) => (
-                                        <tr
-                                            key={order.id}
-                                            className="border-b border-slate-100 last:border-0 hover:bg-slate-50/80 align-top"
-                                        >
-                                            <td className="py-3 pl-4 pr-2">
-                                                <span className="inline-block text-[10px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-1.5 py-0.5 rounded-md uppercase whitespace-nowrap">
-                                                    Giao hàng
-                                                </span>
-                                                <span
-                                                    className="block text-[10px] text-slate-400 font-mono mt-1.5 leading-tight"
-                                                    title="Dòng dữ liệu từ bảng orders"
-                                                >
-                                                    orders
-                                                </span>
-                                            </td>
-                                            <td className="py-3 px-2 font-bold text-slate-800 whitespace-nowrap">
-                                                #{order.order_code}
-                                            </td>
-                                            <td className="py-3 px-2">
-                                                <span
-                                                    className={clsx(
-                                                        'inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase whitespace-nowrap',
-                                                        getStatusBadge(order.status),
-                                                    )}
-                                                >
-                                                    {getStatusLabel(order.status)}
-                                                </span>
-                                            </td>
-                                            <td className="py-3 px-2 font-semibold text-slate-900">
-                                                {order.recipient_name || '—'}
-                                            </td>
-                                            <td
-                                                className="py-3 px-2 text-slate-600 max-w-[120px] truncate"
-                                                title={(order.delivery_unit || '').trim() || undefined}
-                                            >
-                                                {(order.delivery_unit || '').trim() || '—'}
-                                            </td>
-                                            <td className="py-3 px-2 text-slate-600 max-w-[220px]">
-                                                <span className="line-clamp-2" title={order.recipient_address}>
-                                                    {order.recipient_address || '—'}
-                                                </span>
-                                            </td>
-                                            <td className="py-3 px-2 whitespace-nowrap">
-                                                {order.recipient_phone ? (
-                                                    <a
-                                                        href={`tel:${order.recipient_phone}`}
-                                                        className="text-primary font-bold hover:underline"
-                                                    >
-                                                        {order.recipient_phone}
-                                                    </a>
-                                                ) : (
-                                                    '—'
-                                                )}
-                                            </td>
-                                            <td className="py-3 px-2 text-slate-600 whitespace-nowrap">
-                                                {order.product_type || '—'} — SL: {order.quantity ?? '—'}
-                                            </td>
-                                            <td className="py-3 px-2 text-right font-bold text-primary tabular-nums whitespace-nowrap">
-                                                {order.total_amount != null
-                                                    ? `${Number(order.total_amount).toLocaleString('vi-VN')}đ`
-                                                    : '—'}
-                                            </td>
-                                            <td className="py-3 pr-4 pl-2">
-                                                <div className="flex flex-wrap items-center justify-end gap-1.5 ml-auto">
-                                                    {ORDER_STATUSES_NEED_DELIVERY_CONFIRM.includes(order.status) ? (
-                                                        <button
-                                                            type="button"
-                                                            title="Mở phiếu xác nhận giao — ảnh + tích mã máy; lưu vào orders"
-                                                            onClick={() => openDeliveryConfirmModal(order)}
-                                                            className={giaoHangActionBtnCls}
-                                                        >
-                                                            Giao hàng
-                                                        </button>
-                                                    ) : (
-                                                        <span className="max-w-[140px] shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-center text-[10px] font-bold uppercase leading-tight text-slate-500">
-                                                            {getStatusLabel(order.status)}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
                 ) : (
-                    <div className="overflow-x-auto overflow-y-hidden">
-                        <div className="grid grid-flow-col auto-cols-[280px] gap-3 min-h-full">
-                            {shipperColumns.map(([shipperName, shipperOrders]) => (
-                                <div
-                                    key={shipperName}
-                                    className="rounded-xl border border-slate-200 bg-white flex flex-col min-h-0"
-                                >
-                                    <div className="px-3 py-2.5 border-b border-slate-100 flex items-center justify-between">
-                                        <p className="text-[12px] font-bold text-slate-700 truncate pr-2">{shipperName}</p>
-                                        <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[11px] font-bold">
-                                            {shipperOrders.length}
-                                        </span>
-                                    </div>
-                                    <div className="p-2.5 space-y-2 overflow-y-auto min-h-0">
-                                        {shipperOrders.map((order) => (
-                                            <div
-                                                key={order.id}
-                                                className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 flex flex-col gap-2 hover:bg-white hover:shadow-sm transition-all"
-                                            >
-                                                <div>
-                                                    <div className="flex items-start justify-between gap-2">
-                                                        <p className="text-[12px] font-bold text-primary">
-                                                            #{order.order_code}
-                                                        </p>
-                                                        <span
-                                                            className={clsx(
-                                                                'px-1.5 py-0.5 rounded-full text-[9px] font-bold border uppercase shrink-0',
-                                                                getStatusBadge(order.status),
-                                                            )}
-                                                        >
-                                                            {getStatusLabel(order.status)}
+                    <>
+                        <div className="space-y-2 md:hidden">
+                            {listTasks.length === 0 ? (
+                                <div className="rounded-xl border border-dashed border-slate-200 bg-white p-5 text-center text-[11px] font-semibold text-slate-400">
+                                    Không có nhiệm vụ phù hợp.
+                                </div>
+                            ) : (
+                                <div className="flex flex-col gap-2">
+                                    {renderCombinedTaskCards()}
+                                </div>
+                            )}
+                        </div>
+                        <div className="hidden md:block">
+                            {activeView === 'list' ? (
+                                <div className="space-y-3">
+                                    {listTasks.length === 0 ? (
+                                        <div className="rounded-xl border border-dashed border-slate-200 bg-white p-5 text-center text-[11px] font-semibold text-slate-400">
+                                            Không có nhiệm vụ phù hợp.
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
+                                            {renderCombinedTaskCards()}
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                    <div className="space-y-5">
+                        <div className="overflow-x-auto overflow-y-hidden">
+                            {(() => {
+                                if (kanbanMode === 'transfer_status') {
+                                    const byStatus = filteredTransfers.reduce((acc, tr) => {
+                                        const k = String(tr.status || 'CHO_DUYET').trim().toUpperCase();
+                                        if (!acc[k]) acc[k] = [];
+                                        acc[k].push(tr);
+                                        return acc;
+                                    }, {});
+                                    const statusOrder = ['CHO_DUYET', 'DA_DUYET', 'TU_CHOI'];
+                                    const cols = statusOrder
+                                        .filter((k) => byStatus[k]?.length)
+                                        .concat(Object.keys(byStatus).filter((k) => !statusOrder.includes(k)));
+                                    if (cols.length === 0) {
+                                        return (
+                                            <div className="mt-3 rounded-xl border border-slate-200 bg-white p-6 text-center text-[12px] font-semibold text-slate-400">
+                                                Không có phiếu luân chuyển phù hợp.
+                                            </div>
+                                        );
+                                    }
+                                    return (
+                                        <div className="grid grid-flow-col auto-cols-[280px] gap-3 min-h-full">
+                                            {cols.map((st) => {
+                                                const list = byStatus[st] || [];
+                                                return (
+                                                    <div key={st} className="rounded-xl border border-slate-200 bg-white flex flex-col min-h-0">
+                                                        <div className="px-3 py-2.5 border-b border-slate-100 flex items-center justify-between">
+                                                            <p className="text-[12px] font-bold text-slate-700 truncate pr-2">
+                                                                {transferStatusLabel(st)}
+                                                            </p>
+                                                            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[11px] font-bold">
+                                                                {list.length}
+                                                            </span>
+                                                        </div>
+                                                        <div className="p-2.5 space-y-2 overflow-y-auto min-h-0">
+                                                            {list.map((tr) => {
+                                                                const fromName = warehouseNameById[String(tr.from_warehouse_id)] || tr.from_warehouse_id || '—';
+                                                                const toName = warehouseNameById[String(tr.to_warehouse_id)] || tr.to_warehouse_id || '—';
+                                                                return (
+                                                                    <div key={tr.id} className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 flex flex-col gap-2 hover:bg-white hover:shadow-sm transition-all">
+                                                                        <div>
+                                                                            <div className="flex items-start justify-between gap-2">
+                                                                                <p className="text-[12px] font-bold text-primary">
+                                                                                    {tr.transfer_code || '—'}
+                                                                                </p>
+                                                                                <span
+                                                                                    className={clsx(
+                                                                                        'px-1.5 py-0.5 rounded-full text-[9px] font-bold border uppercase shrink-0',
+                                                                                        transferStatusBadge(tr.status),
+                                                                                    )}
+                                                                                >
+                                                                                    {transferStatusLabel(tr.status)}
+                                                                                </span>
+                                                                            </div>
+                                                                            <p className="text-[10px] font-bold text-sky-700 bg-sky-50 border border-sky-100 px-1 py-0.5 rounded mt-1.5 inline-block uppercase">
+                                                                                inventory_transfer_requests
+                                                                            </p>
+                                                                            <p className="text-[12px] font-bold text-slate-800 mt-1 line-clamp-2">
+                                                                                {fromName} → {toName}
+                                                                            </p>
+                                                                            {tr.note ? (
+                                                                                <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2" title={String(tr.note)}>
+                                                                                    {tr.note}
+                                                                                </p>
+                                                                            ) : null}
+                                                                            <p className="text-[11px] text-slate-500 mt-1">
+                                                                                SL: <span className="font-bold text-slate-700">{tr.total_quantity ?? '—'}</span>
+                                                                            </p>
+                                                                        </div>
+                                                                        <div className="flex flex-wrap items-stretch gap-1 pt-1.5 border-t border-slate-200/80">
+                                                                            <button
+                                                                                type="button"
+                                                                                className="flex-1 min-w-[100px] py-1.5 rounded-md bg-primary text-white text-[10px] font-bold shadow-sm active:opacity-90 !h-auto"
+                                                                                onClick={() => openGiaoHangTask({ kind: 'TRANSFER', row: tr })}
+                                                                                title="Mở thao tác xác nhận bàn giao luân chuyển"
+                                                                            >
+                                                                                Giao hàng
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    );
+                                }
+
+                                if (kanbanMode === 'task_type') {
+                                    const cols = [
+                                        { id: 'ORDER', label: 'Giao hàng', items: filteredOrders.map((o) => ({ kind: 'ORDER', row: o })) },
+                                        { id: 'TRANSFER', label: 'Luân chuyển', items: filteredTransfers.map((t) => ({ kind: 'TRANSFER', row: t })) },
+                                    ].filter((c) => c.items.length > 0);
+                                    if (cols.length === 0) {
+                                        return (
+                                            <div className="mt-3 rounded-xl border border-slate-200 bg-white p-6 text-center text-[12px] font-semibold text-slate-400">
+                                                Không có nhiệm vụ phù hợp.
+                                            </div>
+                                        );
+                                    }
+                                    return (
+                                        <div className="grid grid-flow-col auto-cols-[280px] gap-3 min-h-full">
+                                            {cols.map((col) => (
+                                                <div key={col.id} className="rounded-xl border border-slate-200 bg-white flex flex-col min-h-0">
+                                                    <div className="px-3 py-2.5 border-b border-slate-100 flex items-center justify-between">
+                                                        <p className="text-[12px] font-bold text-slate-700 truncate pr-2">{col.label}</p>
+                                                        <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[11px] font-bold">
+                                                            {col.items.length}
                                                         </span>
                                                     </div>
-                                                    <p className="text-[10px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-1 py-0.5 rounded mt-1.5 inline-block uppercase">
-                                                        orders
-                                                    </p>
-                                                    <p className="text-[12px] font-bold text-slate-800 mt-1 line-clamp-2">
-                                                        {order.recipient_name || order.customer_name}
-                                                    </p>
-                                                    <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">
-                                                        {order.recipient_phone || '—'}
-                                                    </p>
+                                                    <div className="p-2.5 space-y-2 overflow-y-auto min-h-0">
+                                                        {col.items.map((it) => {
+                                                            if (it.kind === 'TRANSFER') {
+                                                                const tr = it.row;
+                                                                const fromName = warehouseNameById[String(tr.from_warehouse_id)] || tr.from_warehouse_id || '—';
+                                                                const toName = warehouseNameById[String(tr.to_warehouse_id)] || tr.to_warehouse_id || '—';
+                                                                return (
+                                                                    <div key={`tr-${tr.id}`} className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 flex flex-col gap-2 hover:bg-white hover:shadow-sm transition-all">
+                                                                        <div className="flex items-start justify-between gap-2">
+                                                                            <p className="text-[12px] font-bold text-primary">{tr.transfer_code || '—'}</p>
+                                                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[8px] font-bold border uppercase shrink-0', transferStatusBadge(tr.status))}>
+                                                                                {transferStatusLabel(tr.status)}
+                                                                            </span>
+                                                                        </div>
+                                                                        <p className="text-[12px] font-bold text-slate-800 line-clamp-2">{fromName} → {toName}</p>
+                                                                        <div className="flex flex-wrap items-stretch gap-1 pt-1.5 border-t border-slate-200/80">
+                                                                        <button type="button" className="flex-1 min-w-[100px] py-1.5 rounded-md bg-primary text-white text-[10px] font-bold shadow-sm active:opacity-90 !h-auto" onClick={() => openGiaoHangTask({ kind: 'TRANSFER', row: tr })} title="Mở phiếu xác nhận bàn giao luân chuyển">
+                                                                                Giao hàng
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            }
+                                                            const order = it.row;
+                                                            return (
+                                                                <div key={`od-${order.id}`} className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 flex flex-col gap-2 hover:bg-white hover:shadow-sm transition-all">
+                                                                    <div className="flex items-start justify-between gap-2">
+                                                                        <p className="text-[12px] font-bold text-primary">#{order.order_code}</p>
+                                                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[9px] font-bold border uppercase shrink-0', getStatusBadge(order.status))}>
+                                                                            {getStatusLabel(order.status)}
+                                                                        </span>
+                                                                    </div>
+                                                                    <p className="text-[12px] font-bold text-slate-800 line-clamp-2">{order.recipient_name || order.customer_name}</p>
+                                                                    <div className="flex flex-wrap items-stretch gap-1 pt-1.5 border-t border-slate-200/80">
+                                                                        {ORDER_STATUSES_NEED_DELIVERY_CONFIRM.includes(order.status) ? (
+                                                                            <button type="button" className="flex-1 min-w-[100px] py-1.5 rounded-md bg-primary text-white text-[10px] font-bold shadow-sm active:opacity-90 !h-auto" onClick={() => openGiaoHangTask({ kind: 'ORDER', row: order })}>
+                                                                                Giao hàng
+                                                                            </button>
+                                                                        ) : (
+                                                                            <span className="w-full min-w-0 flex items-center justify-center py-1.5 rounded-md border border-slate-200 bg-slate-50 text-slate-600 text-[9px] font-bold text-center leading-tight uppercase">
+                                                                                {getStatusLabel(order.status)}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
                                                 </div>
-                                                <div className="flex flex-wrap items-stretch gap-1 pt-1.5 border-t border-slate-200/80">
-                                                    {ORDER_STATUSES_NEED_DELIVERY_CONFIRM.includes(order.status) ? (
-                                                        <button
-                                                            type="button"
-                                                            title="Phiếu xác nhận giao — ảnh + mã máy; ghi vào orders"
-                                                            className="flex-1 min-w-[100px] py-1.5 rounded-md bg-primary text-white text-[10px] font-bold shadow-sm active:opacity-90 !h-auto"
-                                                            onClick={(e) => {
-                                                                e.preventDefault();
-                                                                e.stopPropagation();
-                                                                void openDeliveryConfirmModal(order);
-                                                            }}
-                                                        >
-                                                            Giao hàng
-                                                        </button>
-                                                    ) : (
-                                                        <span className="w-full min-w-0 flex items-center justify-center py-1.5 rounded-md border border-slate-200 bg-slate-50 text-slate-600 text-[9px] font-bold text-center leading-tight uppercase">
-                                                            {getStatusLabel(order.status)}
-                                                        </span>
-                                                    )}
+                                            ))}
+                                        </div>
+                                    );
+                                }
+
+                                if (kanbanMode === 'order_status') {
+                                    const byStatus = filteredOrders.reduce((acc, o) => {
+                                        const k = String(o.status || '—').trim();
+                                        if (!acc[k]) acc[k] = [];
+                                        acc[k].push(o);
+                                        return acc;
+                                    }, {});
+                                    const statusOrder = ORDER_STATUSES_PIPELINE_NO_SUCCESS_PREFIX;
+                                    const cols = statusOrder
+                                        .filter((k) => byStatus[k]?.length)
+                                        .concat(Object.keys(byStatus).filter((k) => !statusOrder.includes(k)));
+                                    return (
+                                        <div className="grid grid-flow-col auto-cols-[280px] gap-3 min-h-full">
+                                            {cols.map((st) => {
+                                                const list = byStatus[st] || [];
+                                                return (
+                                                    <div key={st} className="rounded-xl border border-slate-200 bg-white flex flex-col min-h-0">
+                                                        <div className="px-3 py-2.5 border-b border-slate-100 flex items-center justify-between">
+                                                            <p className="text-[12px] font-bold text-slate-700 truncate pr-2">{getStatusLabel(st)}</p>
+                                                            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[11px] font-bold">{list.length}</span>
+                                                        </div>
+                                                        <div className="p-2.5 space-y-2 overflow-y-auto min-h-0">
+                                                            {list.map((order) => (
+                                                                <div key={order.id} className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 flex flex-col gap-2 hover:bg-white hover:shadow-sm transition-all">
+                                                                    <div className="flex items-start justify-between gap-2">
+                                                                        <p className="text-[12px] font-bold text-primary">#{order.order_code}</p>
+                                                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[9px] font-bold border uppercase shrink-0', getStatusBadge(order.status))}>
+                                                                            {getStatusLabel(order.status)}
+                                                                        </span>
+                                                                    </div>
+                                                                    <p className="text-[12px] font-bold text-slate-800 line-clamp-2">{order.recipient_name || order.customer_name}</p>
+                                                                    <div className="flex flex-wrap items-stretch gap-1 pt-1.5 border-t border-slate-200/80">
+                                                                        {ORDER_STATUSES_NEED_DELIVERY_CONFIRM.includes(order.status) ? (
+                                                                            <button type="button" className="flex-1 min-w-[100px] py-1.5 rounded-md bg-primary text-white text-[10px] font-bold shadow-sm active:opacity-90 !h-auto" onClick={() => openGiaoHangTask({ kind: 'ORDER', row: order })}>
+                                                                                Giao hàng
+                                                                            </button>
+                                                                        ) : (
+                                                                            <span className="w-full min-w-0 flex items-center justify-center py-1.5 rounded-md border border-slate-200 bg-slate-50 text-slate-600 text-[9px] font-bold text-center leading-tight uppercase">
+                                                                                {getStatusLabel(order.status)}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    );
+                                }
+
+                                // Default: shipper columns (orders)
+                                return (
+                                    <div className="grid grid-flow-col auto-cols-[280px] gap-3 min-h-full">
+                                        {shipperColumns.map(([shipperName, shipperOrders]) => (
+                                            <div key={shipperName} className="rounded-xl border border-slate-200 bg-white flex flex-col min-h-0">
+                                                <div className="px-3 py-2.5 border-b border-slate-100 flex items-center justify-between">
+                                                    <p className="text-[12px] font-bold text-slate-700 truncate pr-2">{shipperName}</p>
+                                                    <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[11px] font-bold">
+                                                        {shipperOrders.length}
+                                                    </span>
+                                                </div>
+                                                <div className="p-2.5 space-y-2 overflow-y-auto min-h-0">
+                                                    {shipperOrders.map((order) => (
+                                                        <div key={order.id} className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 flex flex-col gap-2 hover:bg-white hover:shadow-sm transition-all">
+                                                            <div className="flex items-start justify-between gap-2">
+                                                                <p className="text-[12px] font-bold text-primary">#{order.order_code}</p>
+                                                                <span className={clsx('px-1.5 py-0.5 rounded-full text-[9px] font-bold border uppercase shrink-0', getStatusBadge(order.status))}>
+                                                                    {getStatusLabel(order.status)}
+                                                                </span>
+                                                            </div>
+                                                            <p className="text-[12px] font-bold text-slate-800 line-clamp-2">{order.recipient_name || order.customer_name}</p>
+                                                            <div className="flex flex-wrap items-stretch gap-1 pt-1.5 border-t border-slate-200/80">
+                                                                {ORDER_STATUSES_NEED_DELIVERY_CONFIRM.includes(order.status) ? (
+                                                                    <button type="button" className="flex-1 min-w-[100px] py-1.5 rounded-md bg-primary text-white text-[10px] font-bold shadow-sm active:opacity-90 !h-auto" onClick={() => openGiaoHangTask({ kind: 'ORDER', row: order })}>
+                                                                        Giao hàng
+                                                                    </button>
+                                                                ) : (
+                                                                    <span className="w-full min-w-0 flex items-center justify-center py-1.5 rounded-md border border-slate-200 bg-slate-50 text-slate-600 text-[9px] font-bold text-center leading-tight uppercase">
+                                                                        {getStatusLabel(order.status)}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ))}
                                                 </div>
                                             </div>
                                         ))}
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })()}
                         </div>
                     </div>
+                            )}
+                        </div>
+                    </>
                 )}
             </div>
 
@@ -834,6 +1232,135 @@ const ShippingTasks = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {transferHandoverRecord && createPortal(
+                <div className="fixed inset-0 z-[100005] flex justify-end">
+                    <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" onClick={closeTransferHandover} />
+                    <div className="relative bg-slate-50 shadow-2xl w-full max-w-md overflow-hidden flex flex-col h-full border-l border-slate-200 animate-in slide-in-from-right duration-300">
+                        <div className="p-4 border-b border-slate-200 flex items-center justify-between shrink-0 bg-white sticky top-0 z-20">
+                            <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
+                                    <Package className="w-5 h-5" />
+                                </div>
+                                <div className="leading-tight">
+                                    <h3 className="text-lg font-black text-slate-900 tracking-tight">Phiếu xác nhận bàn giao luân chuyển</h3>
+                                    <p className="text-xs font-bold text-slate-500 tracking-wide">Mã: {transferHandoverRecord.transferCode}</p>
+                                    <p className="text-[11px] font-semibold text-slate-500 mt-1 leading-snug">
+                                        Dữ liệu ghi vào bảng nguồn{' '}
+                                        <span className="font-mono text-slate-700">inventory_transfer_requests</span>: ghi chú bàn giao, checklist và ảnh xác nhận.
+                                    </p>
+                                </div>
+                            </div>
+                            <button type="button" onClick={closeTransferHandover} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="p-4 space-y-4 overflow-y-auto flex-1">
+                            <div className="bg-white rounded-2xl p-4 border border-slate-200 space-y-2 text-sm shadow-sm">
+                                <div className="flex justify-between gap-3"><span className="text-slate-500 font-bold uppercase text-[10px] tracking-wider">Kho xuất</span><span className="font-black text-slate-900 text-right">{transferHandoverRecord.fromWarehouses.join(', ') || '—'}</span></div>
+                                <div className="flex justify-between gap-3"><span className="text-slate-500 font-bold uppercase text-[10px] tracking-wider">Kho nhận</span><span className="font-black text-slate-900 text-right">{transferHandoverRecord.toWarehouses.join(', ') || '—'}</span></div>
+                                <div className="flex justify-between gap-3"><span className="text-slate-500 font-bold uppercase text-[10px] tracking-wider">Số lượng</span><span className="font-black text-primary text-right">{transferHandoverRecord.totalQuantity}</span></div>
+                            </div>
+                            <div className="bg-white rounded-2xl p-1.5 border border-slate-200 shadow-sm grid grid-cols-2 gap-1.5">
+                                <button
+                                    type="button"
+                                    onClick={() => setTransferActionTab('actions')}
+                                    className={clsx('h-10 text-xs font-black uppercase tracking-wider rounded-xl transition-all flex items-center justify-center', transferActionTab === 'actions' ? 'bg-primary text-white shadow' : 'text-slate-500 hover:bg-slate-100')}
+                                >
+                                    Thao tác
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setTransferActionTab('history')}
+                                    className={clsx('h-10 text-xs font-black uppercase tracking-wider rounded-xl transition-all flex items-center justify-center', transferActionTab === 'history' ? 'bg-primary text-white shadow' : 'text-slate-500 hover:bg-slate-100')}
+                                >
+                                    Lịch sử
+                                </button>
+                            </div>
+
+                            {transferActionTab === 'actions' ? (
+                                <div className="space-y-3">
+                                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                                        <label className="flex items-center gap-1.5 text-xs font-black text-slate-600 uppercase tracking-widest">
+                                            <CheckCircle2 className="w-4 h-4 text-primary" />
+                                            Checklist bàn giao kho nhận
+                                        </label>
+                                        <div className="space-y-2 max-h-44 overflow-y-auto">
+                                            {Object.entries(transferChecklist).map(([key, checked]) => {
+                                                const [, itemName, itemType] = key.split(':');
+                                                return (
+                                                    <label key={key} className={clsx('flex items-center gap-2 p-2 rounded-xl border cursor-pointer', checked ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200')}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={checked}
+                                                            onChange={() => setTransferChecklist((prev) => ({ ...prev, [key]: !prev[key] }))}
+                                                            className="w-4 h-4"
+                                                        />
+                                                        <span className="text-[12px] font-semibold text-slate-700">{itemName} ({itemType})</span>
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                                        <label className="flex items-center gap-1.5 text-xs font-black text-slate-600 uppercase tracking-widest">
+                                            <Camera className="w-4 h-4 text-primary" />
+                                            Ảnh xác nhận kho nhận
+                                        </label>
+                                        {handoverProofBase64 ? (
+                                            <img src={handoverProofBase64} alt="Kho nhận xác nhận" className="w-full h-40 object-cover rounded-xl border border-slate-200" />
+                                        ) : (
+                                            <label className="h-28 border-2 border-dashed border-slate-300 rounded-xl flex items-center justify-center text-sm font-bold text-slate-500 cursor-pointer hover:bg-slate-50">
+                                                Chụp / chọn ảnh bàn giao
+                                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleTransferHandoverImageChange} />
+                                            </label>
+                                        )}
+                                    </div>
+
+                                    <label className={clsx(
+                                        'flex items-center gap-3 p-4 rounded-2xl border-2 cursor-pointer transition-all',
+                                        confirmTransferCheck ? 'bg-emerald-50 border-emerald-400' : 'bg-white border-slate-200',
+                                    )}>
+                                        <input
+                                            type="checkbox"
+                                            checked={confirmTransferCheck}
+                                            onChange={() => setConfirmTransferCheck((v) => !v)}
+                                            className="w-5 h-5"
+                                        />
+                                        <span className={clsx('text-sm font-bold', confirmTransferCheck ? 'text-emerald-700' : 'text-slate-600')}>
+                                            Tôi xác nhận đã bàn giao đầy đủ cho kho nhận
+                                        </span>
+                                    </label>
+
+                                    <button
+                                        type="button"
+                                        disabled={isSubmittingTransferHandover}
+                                        onClick={confirmTransferHandover}
+                                        className="w-full p-4 rounded-2xl border border-primary bg-primary text-white font-black text-sm disabled:opacity-60"
+                                    >
+                                        {isSubmittingTransferHandover ? 'Đang xác nhận...' : 'Xác nhận hoàn tất luân chuyển'}
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="bg-white p-4 rounded-2xl border border-slate-200 space-y-2">
+                                    {transferHandoverRecord.items.map((item, idx) => (
+                                        <div key={`${transferHandoverRecord.id}-history-${idx}`} className="text-sm font-medium text-slate-700">
+                                            {item.itemName} ({item.itemType}) x {item.quantity}
+                                        </div>
+                                    ))}
+                                    <p className="text-xs text-slate-400 font-bold pt-2 border-t border-slate-100">
+                                        {new Date(transferHandoverRecord.createdAt).toLocaleString('vi-VN')}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>,
+
+                document.body,
             )}
 
         </div>

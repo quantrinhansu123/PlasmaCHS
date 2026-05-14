@@ -34,6 +34,7 @@ export default function CylinderRecoveryFormModal({
     onSuccess,
     initialMode = 'edit',
     prefillComplete = false,
+    prefill = null,
 }) {
     const isEdit = !!recovery;
     const [mode, setMode] = useState(initialMode);
@@ -139,6 +140,45 @@ export default function CylinderRecoveryFormModal({
             generateCode();
         }
     }, [recovery, prefillComplete]);
+
+    /**
+     * Prefill from external navigation (e.g. ShippingTasks -> Thu hồi vỏ).
+     * We resolve customer_id by name once customers are loaded.
+     */
+    useEffect(() => {
+        if (recovery) return;
+        if (!prefill) return;
+        if (!customers || customers.length === 0) return;
+
+        setFormData((prev) => {
+            const next = { ...prev };
+
+            const preOrderId = prefill?.order_id || prefill?.orderId;
+            if (preOrderId && !next.order_id) next.order_id = preOrderId;
+
+            const preWarehouseId = prefill?.warehouse_id || prefill?.warehouseId;
+            if (preWarehouseId && !next.warehouse_id) next.warehouse_id = preWarehouseId;
+
+            const preNotes = prefill?.notes ?? prefill?.note;
+            if (preNotes && !String(next.notes || '').trim()) next.notes = String(preNotes);
+
+            const preRequestedQty = prefill?.requested_quantity ?? prefill?.requestedQuantity;
+            if (Number.isFinite(Number(preRequestedQty)) && Number(preRequestedQty) > 0 && !next.requested_quantity) {
+                next.requested_quantity = Number(preRequestedQty);
+            }
+
+            const preDriver = prefill?.driver_name ?? prefill?.driverName;
+            if (preDriver && !String(next.driver_name || '').trim()) next.driver_name = String(preDriver);
+
+            const preCustomerName = prefill?.customer_name ?? prefill?.customerName;
+            if (preCustomerName && !next.customer_id) {
+                const matched = resolveCustomerByName(preCustomerName);
+                if (matched?.id) next.customer_id = matched.id;
+            }
+
+            return next;
+        });
+    }, [customers, prefill, recovery, resolveCustomerByName]);
 
     const loadCustomers = async () => {
         const { data } = await supabase.from('customers').select('id, name').order('name');
