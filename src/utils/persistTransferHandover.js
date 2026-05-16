@@ -1,20 +1,13 @@
 import { supabase } from '../supabase/config';
+import { isCloudinaryDeliveryUrl, uploadDataUrlToCloudinary } from './cloudinaryUpload';
 
-export async function uploadDeliveryProofDataUrl(dataUrl, fileName) {
-    const response = await fetch(dataUrl);
-    const blob = await response.blob();
-    const { error } = await supabase.storage.from('delivery_proofs').upload(fileName, blob, {
-        contentType: blob.type || 'image/png',
-        upsert: true,
-    });
-    if (error) {
-        if (String(error.message || '').includes('Bucket not found')) {
-            return dataUrl;
-        }
-        throw error;
+export async function uploadDeliveryProofDataUrl(dataUrl, transferCode) {
+    const folder = `plasmavn/delivery_proofs/transfers/${transferCode || 'handover'}`;
+    const url = await uploadDataUrlToCloudinary(dataUrl, folder);
+    if (!isCloudinaryDeliveryUrl(url)) {
+        throw new Error('Không upload được ảnh lên Cloudinary.');
     }
-    const { data } = supabase.storage.from('delivery_proofs').getPublicUrl(fileName);
-    return data.publicUrl;
+    return url;
 }
 
 /**
@@ -36,7 +29,7 @@ export async function persistTransferHandover({
     const stamp = Date.now();
     const proofUrl = await uploadDeliveryProofDataUrl(
         handoverProofBase64,
-        `transfer_${transferCode || transferRequestId}_proof_${stamp}.png`,
+        transferCode || transferRequestId,
     );
 
     const checklistDone = Object.keys(transferChecklist).filter((key) => transferChecklist[key]);

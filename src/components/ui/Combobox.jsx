@@ -31,10 +31,13 @@ export function Combobox({
     placeholder = "Chọn hoặc nhập...", 
     emptyMessage = "Không tìm thấy kết quả.",
     className,
-    disabled = false
+    disabled = false,
+    disableBrowserAutofill = true,
+    inputName = "app-combobox-search",
 }) {
     const [open, setOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
+    const [blockBrowserAutofill, setBlockBrowserAutofill] = useState(disableBrowserAutofill);
     const inputRef = useRef(null);
 
     // Sync search term with value when value changes externally
@@ -86,7 +89,23 @@ export function Combobox({
                         disabled={disabled}
                         value={searchTerm}
                         onChange={handleInputChange}
-                        autoComplete="off"
+                        onFocus={() => {
+                            if (disableBrowserAutofill) setBlockBrowserAutofill(false);
+                        }}
+                        readOnly={blockBrowserAutofill}
+                        name={inputName}
+                        id={inputName}
+                        type="search"
+                        role="combobox"
+                        aria-autocomplete="list"
+                        autoComplete={disableBrowserAutofill ? 'off' : undefined}
+                        autoCorrect="off"
+                        autoCapitalize="off"
+                        spellCheck={false}
+                        data-lpignore="true"
+                        data-1p-ignore="true"
+                        data-bwignore="true"
+                        data-form-type="other"
                         placeholder={placeholder}
                         className={cn(
                             "w-full h-11 px-4 bg-slate-50/50 border border-slate-200 rounded-xl text-sm font-bold outline-none transition-all pr-16",

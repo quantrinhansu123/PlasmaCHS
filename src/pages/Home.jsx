@@ -295,7 +295,7 @@ function Home() {
       </div>
 
       {activeTab === 'chuc-nang' && (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 lg:gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-5">
           {dashboardModules.map((module, index) => (
             <ActionCard key={index} {...module} />
           ))}
@@ -336,7 +336,7 @@ function Home() {
                     <div className="h-px flex-1 bg-border/60" />
                   </h2>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     {filteredItems.map((item, itemIndex) => (
                       <ModuleCard key={`${item.title}-${itemIndex}`} {...item} />
                     ))}

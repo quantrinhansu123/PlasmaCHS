@@ -357,7 +357,6 @@ export default function DeliveryHistory() {
     function getOrderImages(o) {
         const imgs = [];
         if (Array.isArray(o.delivery_images) && o.delivery_images.length > 0) imgs.push(...o.delivery_images);
-        if (o.delivery_proof_base64) imgs.push(o.delivery_proof_base64);
         if (o.delivery_image_url && !imgs.includes(o.delivery_image_url)) imgs.push(o.delivery_image_url);
         return imgs;
     }

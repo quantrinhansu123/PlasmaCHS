@@ -32,6 +32,7 @@ import usePermissions from '../hooks/usePermissions';
 import { isWarehouseRole } from '../utils/accessControl';
 import { supabase } from '../supabase/config';
 import { notificationService } from '../utils/notificationService';
+import { uploadFileToCloudinary } from '../utils/cloudinaryUpload';
 
 // Helper functions for smart categorization
 const isMachine = (item) => {
@@ -138,20 +139,7 @@ const InventoryTransfer = () => {
 
         setUploading(true);
         try {
-            const fileExt = file.name.split('.').pop();
-            const fileName = `${Math.random()}.${fileExt}`;
-            const filePath = `inventory_transfers/${fileName}`;
-
-            const { error: uploadError } = await supabase.storage
-                .from('delivery_proofs')
-                .upload(filePath, file);
-
-            if (uploadError) throw uploadError;
-
-            const { data: { publicUrl } } = supabase.storage
-                .from('delivery_proofs')
-                .getPublicUrl(filePath);
-
+            const publicUrl = await uploadFileToCloudinary(file, 'plasmavn/delivery_proofs/inventory_transfers');
             setUploadedImage(publicUrl);
             toast.success('Đã tải lên ảnh bàn giao!');
         } catch (error) {

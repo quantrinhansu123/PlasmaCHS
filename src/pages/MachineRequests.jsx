@@ -1,6 +1,4 @@
 import { clsx } from 'clsx';
-import MobilePageHeader from '../components/layout/MobilePageHeader';
-import MobilePagination from '../components/layout/MobilePagination';
 import {
     ArcElement,
     BarElement,
@@ -22,6 +20,7 @@ import {
     Edit,
     Eye,
     FileText,
+    House,
     LayoutGrid,
     List,
     ListFilter,
@@ -29,6 +28,7 @@ import {
     Package,
     Plus,
     Search,
+    ClipboardList,
     Table2,
     Trash2,
     TrendingUp,
@@ -483,10 +483,10 @@ export default function MachineRequests() {
 
             {activeView === 'list' && (
                 <>
-                    <div className="hidden shrink-0 font-[family-name:Manrope,system-ui,sans-serif] md:-mt-1 md:mb-2 md:block">
+                    <div className="hidden shrink-0 font-[family-name:Manrope,system-ui,sans-serif] md:-mt-1 md:mb-1 md:block">
                         <div className="sticky top-0 z-30 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                            <div className="flex min-h-14 flex-nowrap items-center gap-3 overflow-x-auto px-5 py-3 sm:gap-4 sm:px-6 scrollbar-hide">
-                                <h2 className="shrink-0 text-base font-extrabold tracking-tight text-slate-900 sm:text-lg">
+                            <div className="flex min-h-10 flex-nowrap items-center gap-2 overflow-x-auto px-4 py-2 sm:px-5 scrollbar-hide">
+                                <h2 className="shrink-0 text-sm font-extrabold tracking-tight text-slate-900">
                                     Quản lý đề nghị xuất máy
                                 </h2>
                                 <div className="relative min-w-0 max-w-xl flex-1 md:max-w-md lg:max-w-lg">
@@ -499,7 +499,7 @@ export default function MachineRequests() {
                                         placeholder="Tìm mã phiếu, khách hàng, người yêu cầu..."
                                         value={searchTerm}
                                         onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="w-full rounded-lg border-0 bg-slate-100 py-2 pl-10 pr-8 text-sm transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00288e]/25"
+                                        className="w-full rounded-lg border-0 bg-slate-100 py-1.5 pl-10 pr-8 text-[12px] transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00288e]/25"
                                     />
                                     {searchTerm && (
                                         <button
@@ -523,7 +523,7 @@ export default function MachineRequests() {
                                             aria-pressed={listDisplayMode === 'table'}
                                             onClick={() => setListDisplayMode('table')}
                                             className={clsx(
-                                                'flex h-9 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-bold transition-all sm:px-3 sm:text-[13px]',
+                                                'flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-bold transition-all',
                                                 listDisplayMode === 'table'
                                                     ? 'bg-white text-[#00288e] shadow-sm'
                                                     : 'text-slate-600 hover:text-slate-900'
@@ -538,7 +538,7 @@ export default function MachineRequests() {
                                             aria-pressed={listDisplayMode === 'kanban'}
                                             onClick={() => setListDisplayMode('kanban')}
                                             className={clsx(
-                                                'flex h-9 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-bold transition-all sm:px-3 sm:text-[13px]',
+                                                'flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-bold transition-all',
                                                 listDisplayMode === 'kanban'
                                                     ? 'bg-white text-[#00288e] shadow-sm'
                                                     : 'text-slate-600 hover:text-slate-900'
@@ -582,10 +582,10 @@ export default function MachineRequests() {
                         </div>
                     </div>
 
-                    <div className="machine-dnxm-bt-page hidden pb-2 pt-1 font-[family-name:Manrope,system-ui,sans-serif] md:block">
-                        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="machine-dnxm-bt-page hidden pb-1 pt-0 font-[family-name:Manrope,system-ui,sans-serif] md:block">
+                        <div className="flex flex-col gap-1 lg:flex-row lg:items-center lg:justify-between">
                             <div className="min-w-0 flex-1 space-y-1">
-                                <nav className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
+                                <nav className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-slate-500">
                                     <button
                                         type="button"
                                         className="transition-colors hover:text-[#00288e]"
@@ -598,22 +598,22 @@ export default function MachineRequests() {
                                     <ChevronRight size={14} className="shrink-0 text-slate-400" aria-hidden />
                                     <span className="font-bold text-slate-900">Đề nghị xuất máy</span>
                                 </nav>
-                                <h1 className="text-2xl font-bold leading-snug tracking-[-0.02em] text-[#191c1e]">
+                                <h1 className="text-xl font-bold leading-tight tracking-[-0.02em] text-[#191c1e]">
                                     Đề nghị xuất máy
                                 </h1>
                             </div>
-                            <div className="flex shrink-0 flex-wrap items-center justify-end gap-3">
+                            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                                 <button
                                     type="button"
                                     onClick={() => setActiveView('stats')}
-                                    className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] font-bold text-slate-700 shadow-sm transition hover:bg-slate-50"
                                 >
                                     Thống kê
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => navigate('/de-nghi-xuat-may/tao')}
-                                    className="flex items-center justify-center gap-2 rounded-lg px-6 py-2.5 text-sm font-bold text-white shadow-sm transition hover:opacity-90 active:scale-[0.98]"
+                                    className="flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-[13px] font-bold text-white shadow-sm transition hover:opacity-90 active:scale-[0.98]"
                                     style={{ backgroundColor: BT_PRIMARY }}
                                 >
                                     <Plus size={18} aria-hidden />
@@ -622,39 +622,39 @@ export default function MachineRequests() {
                             </div>
                         </div>
 
-                        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
-                            <div className="group relative h-28 overflow-hidden rounded-xl shadow-sm">
+                        <div className="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_184px]">
+                            <div className="group relative h-16 overflow-hidden rounded-xl shadow-sm">
                                 <img
                                     src={DNXM_PAGE_HERO_IMAGE}
                                     alt=""
                                     className="absolute inset-0 size-full object-cover transition-transform duration-700 group-hover:scale-105"
                                 />
-                                <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-r from-[#00288e]/80 via-[#00288e]/50 to-transparent p-4">
-                                    <p className="text-[11px] font-semibold uppercase tracking-wider text-white/80">
+                                <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-r from-[#00288e]/80 via-[#00288e]/50 to-transparent p-3">
+                                    <p className="text-[10px] font-semibold uppercase tracking-wider text-white/80">
                                         Xuất máy &amp; bàn giao
                                     </p>
-                                    <h3 className="mt-0.5 text-base font-bold text-white sm:text-lg">
+                                    <h3 className="text-sm font-bold text-white">
                                         Theo dõi phiếu ĐNXM và luồng duyệt
                                     </h3>
                                 </div>
                             </div>
 
                             <div
-                                className="relative flex min-h-28 flex-col justify-between overflow-hidden rounded-xl border border-[#00288e]/20 p-4 shadow-sm"
+                                className="relative flex min-h-16 flex-col justify-between overflow-hidden rounded-xl border border-[#00288e]/20 p-3 shadow-sm"
                                 style={{ backgroundColor: BT_PRIMARY_CONTAINER, borderColor: `${BT_PRIMARY}33` }}
                             >
                                 <div className="relative z-[1]">
-                                    <p className="text-[11px] font-bold uppercase tracking-widest text-[#a8b8ff]/90">
+                                    <p className="text-[10px] font-bold uppercase tracking-widest text-[#a8b8ff]/90">
                                         Phiếu mới tháng này
                                     </p>
-                                    <p className="mt-1 text-3xl font-extrabold tabular-nums text-[#dde1ff]">
+                                    <p className="text-xl font-extrabold tabular-nums text-[#dde1ff]">
                                         {formatNumberBt(dnxmMonthStats.thisMonth)}
                                     </p>
-                                    <p className="mt-1 text-[10px] font-medium text-white/65">
+                                    <p className="text-[10px] font-medium text-white/65">
                                         Tổng phiếu ĐNXM: {formatNumberBt(dnxmOrders.length)}
                                     </p>
                                 </div>
-                                <div className="relative z-[1] mt-2 flex flex-wrap items-center gap-1.5 text-[11px] font-bold">
+                                <div className="relative z-[1] mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-bold">
                                     {dnxmMonthStats.pct != null ? (
                                         <>
                                             <TrendingUp
@@ -685,147 +685,90 @@ export default function MachineRequests() {
                     </div>
 
                     <div className="flex min-h-0 w-full flex-1 flex-col rounded-2xl border border-border bg-white shadow-sm md:overflow-hidden md:rounded-xl md:border-slate-200 md:shadow-md">
-                    <MobilePageHeader
-                        searchTerm={searchTerm}
-                        setSearchTerm={setSearchTerm}
-                        searchPlaceholder="Tìm kiếm đề nghị xuất máy..."
-                        onFilterClick={openMobileFilter}
-                        hasActiveFilters={hasActiveFilters}
-                        totalActiveFilters={totalActiveFilters}
-                        summary={
-                            <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-1.5 -mx-0.5 px-0.5">
-                                <span className="rounded-xl bg-emerald-100 px-3.5 py-2 text-xs font-bold whitespace-nowrap text-emerald-700 shadow-sm">
-                                    Tổng hiển thị: {totalRecords} / {dnxmOrders.length}
-                                </span>
-                                <span className="rounded-xl bg-amber-100 px-3 py-1.5 text-[11px] font-bold whitespace-nowrap text-amber-900 shadow-sm ring-1 ring-amber-200/70">
-                                    Chờ xử lý {pipelineAttentionCount}
-                                </span>
-                            </div>
-                        }
-                        actions={
-                            <button
-                                onClick={() => navigate('/de-nghi-xuat-may/tao')}
-                                className="rounded-xl bg-primary p-2.5 text-white shadow-lg shadow-primary/30 transition-all active:scale-95"
-                            >
-                                <Plus size={22} />
-                            </button>
-                        }
-                    />
-
-                    {selectedRequestIds.length > 0 && (
-                        <div className="mx-3 mb-2 mt-1 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-2 md:hidden">
-                            <div className="text-[12px] text-slate-700 font-bold">
-                                Đã chọn <span className="text-primary">{selectedRequestIds.length}</span> phiếu
-                            </div>
-                            {isAdmin ? (
-                                <button
-                                    type="button"
-                                    onClick={handleBulkDelete}
-                                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-rose-50 text-rose-700 text-[12px] font-bold border border-rose-100 hover:bg-rose-100 transition-all"
-                                >
-                                    <Trash2 size={14} /> Xóa hàng loạt
-                                </button>
-                            ) : (
-                                <div className="text-[12px] text-muted-foreground font-bold">
-                                    Chỉ Admin được xóa hàng loạt
+                    <div className="md:hidden flex min-h-0 flex-1 flex-col bg-gray-50">
+                        <header className="sticky top-0 z-10 border-b border-gray-100 bg-white p-4">
+                            <div className="flex items-center gap-3">
+                                <button type="button" onClick={() => navigate('/kho-va-may')} className="rounded-lg border border-gray-200 p-2"><ChevronLeft className="h-5 w-5 text-gray-600" /></button>
+                                <div className="relative flex-1">
+                                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                                    <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="block w-full rounded-lg border border-gray-200 bg-gray-50 py-2 pl-9 pr-3 text-sm" placeholder="Tim kiem de nghi x" />
                                 </div>
+                                <button type="button" onClick={openMobileFilter} className="rounded-lg border border-gray-200 p-2"><ListFilter className="h-5 w-5 text-gray-600" /></button>
+                                <button type="button" onClick={() => navigate('/de-nghi-xuat-may/tao')} className="rounded-lg bg-blue-600 p-2 text-white"><Plus className="h-6 w-6" /></button>
+                            </div>
+                            <div className="mt-4 flex gap-3">
+                                <div className="rounded-full bg-green-100 px-4 py-1.5 text-sm font-medium text-green-700">Tong hien thi: {totalRecords} / {dnxmOrders.length}</div>
+                                <div className="rounded-full bg-orange-100 px-4 py-1.5 text-sm font-medium text-orange-700">Cho xu ly {pipelineAttentionCount}</div>
+                            </div>
+                        </header>
+                        <div className="flex-1 overflow-y-auto p-4 pb-20">
+                            {loading ? (
+                                <div className="py-16 text-center text-[13px] italic text-muted-foreground">Dang tai du lieu...</div>
+                            ) : paginatedRequests.length === 0 ? (
+                                <div className="py-16 text-center text-[13px] italic text-muted-foreground">Khong tim thay ket qua phu hop</div>
+                            ) : (
+                                paginatedRequests.map((r, index) => {
+                                    const sInfo = getStatusInfo(r.status);
+                                    return (
+                                        <article key={r.id} className="group relative mb-4 overflow-hidden rounded-xl border border-white/60 bg-gradient-to-br from-white to-gray-50/50 p-3">
+                                            <div className="absolute bottom-0 left-0 top-0 w-1 rounded-r-full bg-orange-400/80" />
+                                            <div className="flex flex-col gap-2.5 pl-1.5">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <input type="checkbox" checked={selectedRequestIds.includes(r.id)} disabled={!isAdmin} onChange={() => toggleSelectOne(r.id)} className="h-3.5 w-3.5 rounded border-gray-300 bg-white/50 text-blue-600" />
+                                                        <span className="text-[11px] font-extrabold uppercase tracking-wider text-gray-400">#{((currentPage - 1) * pageSize) + index + 1}</span>
+                                                        <h3 className="cursor-pointer text-[14px] font-black leading-none tracking-tight text-gray-900" onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)}>{r.order_code}</h3>
+                                                    </div>
+                                                    <span className={clsx("rounded-md border px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest", sInfo.colorCls)}>{sInfo.label}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <p className="text-[13px] font-bold text-gray-800">{r.customer_name || '-'}</p>
+                                                    <span className="text-[11px] font-bold tracking-tight text-gray-500">{new Date(r.created_at).toLocaleDateString('vi-VN')}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between border-t border-gray-100/80 pt-1.5">
+                                                    <div className="flex items-center gap-1.5"><span className="text-[9px] font-black uppercase tracking-widest text-gray-400">Nguoi yc:</span><span className="truncate text-xs font-bold text-gray-700">{r.ordered_by || '-'}</span></div>
+                                                    <div className="flex items-center gap-1.5"><span className="text-[9px] font-black uppercase tracking-widest text-gray-400">SL:</span><span className="text-sm font-black text-blue-600">{getApprovedQuantityFromRequest(r)}</span></div>
+                                                </div>
+                                                <div className="rounded-lg border border-gray-100 bg-gray-50 px-2 py-1.5 text-[11px] font-semibold text-gray-600">Kho: {r.warehouse || extractWarehouseFromNote(r.note) || '-'}</div>
+                                                <div className="flex items-center justify-end gap-2 border-t border-gray-100/80 pt-2">
+                                                    <button type="button" onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)} className="rounded-lg border border-blue-100 bg-blue-50 p-2 text-blue-600"><Eye size={16} /></button>
+                                                    <button type="button" onClick={() => handleViewAsOrder(r)} className="rounded-lg border border-emerald-100 bg-emerald-50 p-2 text-emerald-700"><Package size={16} /></button>
+                                                    <button type="button" onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)} className="rounded-lg border border-amber-100 bg-amber-50 p-2 text-amber-700"><Edit size={16} /></button>
+                                                    <button type="button" onClick={() => handleDelete(r.id, r.order_code)} className="rounded-lg border border-rose-100 bg-rose-50 p-2 text-rose-700"><Trash2 size={16} /></button>
+                                                </div>
+                                            </div>
+                                        </article>
+                                    );
+                                })
                             )}
                         </div>
-                    )}
-
-                    {/* Mobile View */}
-                    <div className="md:hidden flex-1 overflow-y-auto p-3 pb-24 flex flex-col gap-3">
-                        {loading ? (
-                            <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
-                        ) : paginatedRequests.length === 0 ? (
-                            <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy kết quả phù hợp</div>
-                        ) : (
-                            paginatedRequests.map((r, index) => {
-                                const sInfo = getStatusInfo(r.status);
-                                return (
-                                    <div key={r.id} className="rounded-2xl border border-primary/15 bg-white shadow-sm p-4 transition-all duration-200">
-                                        <div className="flex items-start justify-between gap-2 mb-2">
-                                                        <div className="flex gap-3">
-                                                            <div className="pt-0.5">
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={selectedRequestIds.includes(r.id)}
-                                                                    disabled={!isAdmin}
-                                                                    onChange={() => toggleSelectOne(r.id)}
-                                                                    className="w-5 h-5 rounded-lg border-slate-300 text-primary focus:ring-primary/20 transition-all cursor-pointer shadow-sm"
-                                                                />
-                                                            </div>
-                                                <div>
-                                                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">#{((currentPage - 1) * pageSize) + index + 1}</p>
-                                                    <h3 className="text-[14px] font-bold text-foreground leading-tight mt-0.5 cursor-pointer" onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)}>{r.order_code}</h3>
-                                                </div>
-                                            </div>
-                                            <span className={clsx("text-[10px] font-bold uppercase px-3 py-1.5 rounded-full", sInfo.colorCls)}>
-                                                {sInfo.label}
-                                            </span>
-                                        </div>
-
-                                        <div className="mb-3">
-                                            <h3 className="text-[14px] font-black text-foreground leading-snug">{r.customer_name}</h3>
-                                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
-                                                <span className="text-[11px] font-medium text-muted-foreground">{new Date(r.created_at).toLocaleDateString('vi-VN')}</span>
-                                            </div>
-                                        </div>
-
-                                        <div className="grid grid-cols-2 gap-2 mb-3 rounded-xl bg-muted/10 border border-border/60 p-2.5">
-                                            <div>
-                                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                                                    <User className="w-3 h-3 text-blue-600" /> Người yêu cầu
-                                                </p>
-                                                <p className="text-[12px] text-foreground font-bold mt-0.5 truncate">
-                                                    {r.ordered_by || '—'}
-                                                </p>
-                                            </div>
-                                            <div>
-                                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Số lượng</p>
-                                                <div className="text-[14px] text-foreground font-black mt-0.5">
-                                                    {getApprovedQuantityFromRequest(r)} máy
-                                                </div>
-                                            </div>
-                                            <div className="col-span-2">
-                                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Kho</p>
-                                                <p className="text-[12px] text-foreground font-bold mt-0.5">
-                                                    {r.warehouse || extractWarehouseFromNote(r.note) || '—'}
-                                                </p>
-                                            </div>
-                                        </div>
-
-                                        <div className="flex items-center justify-end gap-2 pt-3 border-t border-border/70">
-                                            <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)} className="p-2 text-muted-foreground bg-slate-50 border border-slate-200 rounded-lg active:scale-90 transition-all"><Eye size={18} /></button>
-                                            <button onClick={() => handleViewAsOrder(r)} className="p-2 text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg active:scale-90 transition-all" title="Thao tác Đơn hàng"><Package size={18} /></button>
-                                            <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)} className="p-2 text-amber-700 bg-amber-50 border border-amber-100 rounded-lg active:scale-90 transition-all"><Edit size={18} /></button>
-                                            <button onClick={() => handleDelete(r.id, r.order_code)} className="p-2 text-rose-700 bg-rose-50 border border-rose-100 rounded-lg active:scale-90 transition-all"><Trash2 size={18} /></button>
-                                        </div>
-                                    </div>
-                                );
-                            })
-                        )}
+                        <nav className="border-t border-gray-200 bg-white pb-safe">
+                            <div className="relative flex h-16 items-center justify-around">
+                                <button type="button" onClick={() => navigate('/kho-va-may')} className="flex w-full flex-col items-center justify-center text-gray-400"><ChevronLeft className="h-6 w-6" /></button>
+                                <div className="absolute -top-6 left-1/2 -translate-x-1/2"><button type="button" onClick={() => navigate('/')} className="rounded-full border border-gray-100 bg-white p-3 text-blue-600"><House className="h-8 w-8" /></button></div>
+                                <button type="button" onClick={() => navigate('/de-nghi-xuat-may')} className="ml-auto flex w-full flex-col items-center justify-center text-gray-400"><ClipboardList className="h-6 w-6" /></button>
+                            </div>
+                        </nav>
                     </div>
-
                     {/* Desktop View */}
                     <div className="hidden min-h-0 flex-1 flex-col font-[family-name:Manrope,system-ui,sans-serif] md:flex">
-                        <div className="shrink-0 border-b border-slate-200 p-4 pb-4">
-                            <div className="mb-3 flex flex-wrap gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-[11px] font-semibold text-slate-600 shadow-sm ring-1 ring-slate-100">
-                                <span className="inline-flex flex-wrap items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-800">
+                        <div className="shrink-0 border-b border-slate-200 p-2">
+                            <div className="mb-2 flex flex-wrap gap-2 rounded-lg border border-slate-100 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 shadow-sm ring-1 ring-slate-100">
+                                <span className="inline-flex flex-wrap items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-800">
                                     <span className="text-slate-500">Đang hiển thị:</span>{' '}
                                     <strong className="tabular-nums text-[#00288e]">{totalRecords}</strong>
                                     <span>/</span>
                                     <strong className="tabular-nums text-slate-600">{dnxmOrders.length}</strong>
                                     <span className="font-medium text-slate-500">phiếu</span>
                                 </span>
-                                <span className="rounded-md bg-amber-50 px-2.5 py-1 font-bold text-amber-900 ring-1 ring-amber-100">
+                                <span className="rounded-md bg-amber-50 px-2 py-0.5 font-bold text-amber-900 ring-1 ring-amber-100">
                                     Chờ xử lý {pipelineAttentionCount}
                                 </span>
                             </div>
 
                             <div
                                 ref={listDropdownRef}
-                                className="flex flex-wrap items-end gap-x-4 gap-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+                                className="flex flex-wrap items-end gap-x-3 gap-y-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
                             >
                                 <div className="relative min-w-[160px] flex-1 lg:min-w-[180px]">
                                     <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -1193,15 +1136,6 @@ export default function MachineRequests() {
                         )}
                     </div>
 
-                    {!loading && (
-                        <MobilePagination
-                            currentPage={currentPage}
-                            setCurrentPage={setCurrentPage}
-                            pageSize={pageSize}
-                            setPageSize={setPageSize}
-                            totalRecords={totalRecords}
-                        />
-                    )}
                     </div>
                 </>
             )}

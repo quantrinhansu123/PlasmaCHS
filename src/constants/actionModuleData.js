@@ -28,7 +28,7 @@ export const actionModuleGroups = [
   {
     path: '/don-hang-kinh-doanh',
     title: 'Đơn hàng & Kinh doanh',
-    description: 'Đơn hàng, khách hàng và khuyến mãi.',
+    description: 'Quản lý đơn hàng, báo giá và doanh thu.',
     icon: Package,
     colorScheme: 'blue',
     items: [
@@ -121,7 +121,7 @@ export const actionModuleGroups = [
   {
     path: '/quan-ly-thiet-bi',
     title: 'Quản lý thiết bị',
-    description: 'Quản lý máy, bình và trạng thái sử dụng.',
+    description: 'Theo dõi và quản lý thiết bị hệ thống.',
     icon: Monitor,
     colorScheme: 'purple',
     items: [
@@ -179,7 +179,7 @@ export const actionModuleGroups = [
   {
     path: '/kho',
     title: 'Kho',
-    description: 'Quản lý kho tổng và thêm điểm kho mới.',
+    description: 'Quản lý kho hàng, tồn kho và xuất nhập.',
     icon: Warehouse,
     colorScheme: 'amber',
     items: [
@@ -216,7 +216,7 @@ export const actionModuleGroups = [
   {
     path: '/mua-hang-nha-cung-cap',
     title: 'Mua hàng & Nhà cung cấp',
-    description: 'Nhà cung cấp, nhập hàng và xuất trả.',
+    description: 'Quản lý mua hàng và nhà cung cấp.',
     icon: ShoppingCart,
     colorScheme: 'orange',
     items: [
@@ -253,7 +253,7 @@ export const actionModuleGroups = [
   {
     path: '/van-chuyen',
     title: 'Vận chuyển',
-    description: 'Đơn vị vận chuyển và cấu hình đối tác giao nhận.',
+    description: 'Quản lý vận chuyển và giao nhận hàng.',
     icon: Truck,
     colorScheme: 'cyan',
     items: [
@@ -267,7 +267,7 @@ export const actionModuleGroups = [
       {
         icon: PackageCheck,
         title: 'Nhiệm vụ giao hàng',
-        description: 'Danh sách các đơn hàng cần giao, xác nhận thành công và tải ảnh bằng chứng.',
+        description: 'Giao đơn, thu hồi vỏ, luân chuyển — xác nhận và upload ảnh Cloudinary.',
         href: '/nhiem-vu-giao-hang',
         colorScheme: 'indigo',
       },
@@ -283,14 +283,14 @@ export const actionModuleGroups = [
   {
     path: '/thu-hoi',
     title: 'Thu hồi',
-    description: 'Thu hồi vỏ và tạo phiếu thu hồi tại hiện trường.',
+    description: 'Quản lý thu hồi sản phẩm, thiết bị.',
     icon: RefreshCw,
     colorScheme: 'teal',
     items: [
       {
         icon: PackageCheck,
         title: 'Thu hồi vỏ bình',
-        description: 'Quản lý phiếu thu hồi vỏ bình từ khách hàng, quét barcode và xuất PDF.',
+        description: 'Phiếu thu hồi vỏ, xác nhận tài xế (mã bình + ảnh hiện trường), đồng bộ kho.',
         href: '/thu-hoi-vo',
         colorScheme: 'teal',
       },
@@ -313,7 +313,7 @@ export const actionModuleGroups = [
   {
     path: '/vat-tu',
     title: 'Vật tư',
-    description: 'Quản lý danh mục vật tư và khai báo vật tư mới.',
+    description: 'Quản lý vật tư và linh kiện.',
     icon: Layers,
     colorScheme: 'cyan',
     items: [
@@ -329,7 +329,7 @@ export const actionModuleGroups = [
   {
     path: '/he-thong',
     title: 'Hệ thống',
-    description: 'Người dùng, vai trò và phân quyền hệ thống.',
+    description: 'Cấu hình hệ thống và phân quyền.',
     icon: Settings,
     colorScheme: 'slate',
     items: [
@@ -359,14 +359,14 @@ export const actionModuleGroups = [
   {
     path: '/phieu-sua-chua',
     title: 'Ticket sửa chữa',
-    description: 'Quản lý phiếu yêu cầu và tiến độ sửa chữa thiết bị.',
+    description: 'Quản lý ticket sửa chữa và bảo trì.',
     icon: Ticket,
     colorScheme: 'amber',
     items: [
       {
         icon: Ticket,
         title: 'Ticket sửa chữa',
-        description: 'Quản lý phiếu yêu cầu và tiến độ sửa chữa thiết bị.',
+        description: 'Quản lý ticket sửa chữa và bảo trì.',
         href: '/phieu-sua-chua',
         colorScheme: 'amber',
       },

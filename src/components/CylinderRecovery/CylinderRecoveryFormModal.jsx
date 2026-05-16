@@ -39,6 +39,10 @@ export default function CylinderRecoveryFormModal({
     const isEdit = !!recovery;
     const [mode, setMode] = useState(initialMode);
     const isReadOnly = mode === 'view';
+
+    useEffect(() => {
+        setMode(initialMode);
+    }, [initialMode, recovery?.id]);
     const [isLoading, setIsLoading] = useState(false);
     const [isClosing, setIsClosing] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
@@ -52,10 +56,6 @@ export default function CylinderRecoveryFormModal({
     const [shippers, setShippers] = useState([]);
     const [uploadingPhoto, setUploadingPhoto] = useState(false);
     const photoInputRef = useRef(null);
-
-    const [masterBarcode, setMasterBarcode] = useState('');
-    const masterInputRef = useRef(null);
-    const [scanResultInfo, setScanResultInfo] = useState(null);
 
     // Cylinder autocomplete for serial input
     const [availableCyls, setAvailableCyls] = useState([]);
@@ -180,8 +180,22 @@ export default function CylinderRecoveryFormModal({
         });
     }, [customers, prefill, recovery, resolveCustomerByName]);
 
+    const buildCustomerSelectOption = (customer) => {
+        const rep = String(customer.legal_rep || customer.representative || '').trim();
+        const facility = String(customer.name || '').trim();
+        const phone = String(customer.phone || '').trim();
+        const label = rep
+            ? (facility && facility !== rep ? `${rep} · ${facility}` : rep)
+            : facility || '—';
+        const searchText = [rep, facility, phone].filter(Boolean).join(' ');
+        return { label, value: customer.id, searchText };
+    };
+
     const loadCustomers = async () => {
-        const { data } = await supabase.from('customers').select('id, name').order('name');
+        const { data } = await supabase
+            .from('customers')
+            .select('id, name, legal_rep, phone')
+            .order('name');
         if (data) setCustomers(data);
     };
 
@@ -240,41 +254,67 @@ export default function CylinderRecoveryFormModal({
         if (data) setItems(data.map(i => ({ ...i, _id: i.id || Date.now() + Math.random() })));
     };
 
-    // Fetch cylinders currently at customer sites for autocomplete suggestions
-    const fetchAvailableCyls = async () => {
-        if (availableCyls.length > 0 || isFetchingCyls) return;
+    const fetchAvailableCyls = useCallback(async (customerId = formDataRef.current.customer_id) => {
+        if (!customerId) {
+            setAvailableCyls([]);
+            return;
+        }
+
+        const selectedCustomer = customersRef.current.find((c) => c.id === customerId);
+        if (!selectedCustomer) {
+            setAvailableCyls([]);
+            return;
+        }
+
+        if (isFetchingCyls) return;
+
         setIsFetchingCyls(true);
         try {
-            const { data } = await supabase
+            const { data, error } = await supabase
                 .from('cylinders')
                 .select('serial_number, volume, customer_name, status')
                 .eq('status', 'thuộc khách hàng')
-                .not('customer_name', 'is', null)
+                .eq('customer_name', selectedCustomer.name.trim())
                 .order('serial_number', { ascending: true })
                 .limit(5000);
-            setAvailableCyls(data || []);
+
+            if (error) throw error;
+
+            const filtered = (data || []).filter((cylinder) => {
+                const matchedCustomer = resolveCustomerByName(cylinder.customer_name);
+                return matchedCustomer?.id === customerId;
+            });
+
+            setAvailableCyls(filtered);
         } catch (e) {
             console.error('fetchAvailableCyls error', e);
+            setAvailableCyls([]);
         } finally {
             setIsFetchingCyls(false);
         }
-    };
+    }, [resolveCustomerByName]);
 
-    // Get matching suggestions for a specific item row
+    useEffect(() => {
+        if (isReadOnly) return;
+        setAvailableCyls([]);
+        if (formData.customer_id) {
+            fetchAvailableCyls(formData.customer_id);
+        }
+    }, [formData.customer_id, isReadOnly, fetchAvailableCyls]);
+
     const getCylSuggestions = (itemId, searchVal) => {
-        if (!availableCyls || availableCyls.length === 0) return [];
+        if (!formData.customer_id) return [];
+
         const search = (searchVal || '').trim().toUpperCase();
         const takenSerials = new Set(
             items.filter(i => i._id !== itemId && i.serial_number?.trim()).map(i => i.serial_number.trim().toUpperCase())
         );
-        // If customer is selected, filter by that customer
-        const selectedCustomer = customers.find(c => c.id === formData.customer_id);
+
         return availableCyls
             .filter(c => {
                 const serial = c.serial_number?.toUpperCase();
                 if (!serial) return false;
                 if (takenSerials.has(serial)) return false;
-                if (selectedCustomer && c.customer_name && !c.customer_name.includes(selectedCustomer.name)) return false;
                 if (!search) return true;
                 return serial.includes(search);
             })
@@ -368,12 +408,6 @@ export default function CylinderRecoveryFormModal({
             if (!cylData.customer_name) {
                 setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: 'Đang ở kho' } : i));
                 toast.warn(`Bình ${serial} đang lưu tại kho, không cần thu hồi.`);
-                setScanResultInfo({
-                    type: 'BINH',
-                    code: serial,
-                    customerName: 'Đang ở kho',
-                    extra: 'Không ghi nhận đang ở khách hàng',
-                });
                 return;
             }
 
@@ -385,12 +419,6 @@ export default function CylinderRecoveryFormModal({
 
             // Successfully validated
             setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: true, error: null } : i));
-            setScanResultInfo({
-                type: 'BINH',
-                code: serial,
-                customerName: cylData.customer_name,
-                extra: 'Đã ghi nhận từ mã bình',
-            });
 
             // Auto-detect customer if not set
             if (!currentFormData.customer_id) {
@@ -443,12 +471,6 @@ export default function CylinderRecoveryFormModal({
                 setFormData(prev => ({ ...prev, order_id: orderData.id }));
                 toast.success(`Đã quét được đơn hàng ${orderCode}`);
             }
-            setScanResultInfo({
-                type: 'DON_HANG',
-                code: orderData.order_code,
-                customerName: orderData.customer_name || '—',
-                extra: `Trạng thái: ${orderData.status || '—'}`,
-            });
         } catch (err) {
             console.error(err);
             toast.error('Lỗi khi quét đơn hàng: ' + err.message);
@@ -493,12 +515,6 @@ export default function CylinderRecoveryFormModal({
             if (matchedCustomer && !formDataRef.current.customer_id) {
                 setFormData(prev => ({ ...prev, customer_id: matchedCustomer.id }));
             }
-            setScanResultInfo({
-                type: 'MAY',
-                code: machineData.serial_number || normalizedText,
-                customerName: machineData.customer_name || 'Đang ở kho',
-                extra: `Trạng thái: ${machineData.status || '—'}`,
-            });
             toast.success(`Đã nhận diện mã máy ${normalizedText}`);
             setIsScannerOpen(false);
             return;
@@ -518,12 +534,6 @@ export default function CylinderRecoveryFormModal({
         } else {
             addNewRecoveredItem(normalizedText, safeTime);
         }
-        setScanResultInfo({
-            type: 'KHAC',
-            code: normalizedText,
-            customerName: 'Không xác định',
-            extra: 'Không tìm thấy dữ liệu máy/bình/đơn',
-        });
         setIsScannerOpen(false);
     }, [addNewRecoveredItem, handleOrderScanSuccess, updateItem]);
 
@@ -670,6 +680,15 @@ export default function CylinderRecoveryFormModal({
             const payload = { ...effective, photos: photoUrls };
             if (!payload.order_id) delete payload.order_id;
 
+            const driverName = String(payload.driver_name || '').trim();
+            const previousStatus = isEdit ? recovery?.status : payload.status;
+            let statusForDb = payload.status;
+            if (statusForDb !== 'HOAN_THANH' && statusForDb !== 'HUY') {
+                if (driverName && ['CHO_PHAN_CONG', 'CHO_DUYET'].includes(previousStatus)) {
+                    statusForDb = 'DANG_THU_HOI';
+                }
+            }
+
             const dbPayload = {
                 recovery_code: payload.recovery_code,
                 recovery_date: payload.recovery_date,
@@ -679,7 +698,7 @@ export default function CylinderRecoveryFormModal({
                 driver_name: payload.driver_name,
                 notes: payload.notes,
                 total_items: payload.total_items,
-                status: payload.status,
+                status: statusForDb,
                 photos: payload.photos,
                 requested_quantity: payload.requested_quantity || 0,
                 created_by: payload.created_by || 'Admin hệ thống'
@@ -729,7 +748,7 @@ export default function CylinderRecoveryFormModal({
                     type: 'info',
                     link: '/thu-hoi/vo-binh'
                 });
-            } else if (payload.status === 'DANG_THU_HOI' && recovery.status === 'CHO_PHAN_CONG') {
+            } else if (statusForDb === 'DANG_THU_HOI' && ['CHO_PHAN_CONG', 'CHO_DUYET'].includes(recovery?.status)) {
                 notificationService.add({
                     title: `🚚 Phân công thu hồi: #${effective.recovery_code}`,
                     description: `Phiếu của ${customerName} đã được gán cho: ${effective.driver_name}`,
@@ -828,76 +847,6 @@ export default function CylinderRecoveryFormModal({
                         )}
 
                         <form id="recoveryForm" onSubmit={handleSubmit} className="space-y-6">
-                            {/* Master Scanner / Barcode Input */}
-                            {!isReadOnly && (
-                                <div className="rounded-3xl border-2 border-primary/30 bg-primary/5 p-4 sm:p-5 space-y-3 shadow-sm animate-in zoom-in-95 duration-300">
-                                    <label className="flex items-center gap-2 text-[15px] font-black text-primary uppercase tracking-tight">
-                                        <ScanLine className="w-5 h-5" />
-                                        Quét hoặc Nhập Barcode (Bình hoặc Đơn)
-                                    </label>
-                                    <div className="flex gap-2">
-                                        <div className="relative flex-1">
-                                            <input
-                                                ref={masterInputRef}
-                                                autoFocus
-                                                value={masterBarcode}
-                                                onChange={(e) => setMasterBarcode(e.target.value)}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') {
-                                                        e.preventDefault();
-                                                        if (masterBarcode.trim()) {
-                                                            handleScanSuccess(masterBarcode.trim());
-                                                            setMasterBarcode('');
-                                                        }
-                                                    }
-                                                }}
-                                                placeholder="Quét mã vỏ bình hoặc mã đơn hàng..."
-                                                className="w-full h-14 pl-5 pr-12 bg-white border-2 border-primary/20 rounded-2xl text-[18px] font-black text-slate-800 placeholder:text-slate-300 focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all outline-none"
-                                            />
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    if (masterBarcode.trim()) {
-                                                        handleScanSuccess(masterBarcode.trim());
-                                                        setMasterBarcode('');
-                                                    }
-                                                }}
-                                                className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-primary bg-primary/5 rounded-lg hover:bg-primary/10 transition-colors"
-                                            >
-                                                <Plus size={20} strokeWidth={3} />
-                                            </button>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setScannerType('master');
-                                                setIsScannerOpen(true);
-                                            }}
-                                            className="h-14 w-14 sm:w-auto sm:px-5 flex items-center justify-center gap-2 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 active:scale-95 transition-all"
-                                        >
-                                            <Camera size={24} />
-                                            <span className="hidden sm:inline uppercase">Mở Camera</span>
-                                        </button>
-                                    </div>
-                                    <p className="text-[11px] text-slate-500 font-bold italic">
-                                        * Hệ thống sẽ tự động phân loại: nếu là mã bình (Serial) sẽ thêm vào danh sách, nếu là mã đơn sẽ tự chọn KH/Đơn.
-                                    </p>
-                                    {scanResultInfo && (
-                                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 px-4 py-3">
-                                            <p className="text-[11px] font-black uppercase tracking-wider text-emerald-700 mb-1">
-                                                Thông tin nhận diện
-                                            </p>
-                                            <div className="text-[13px] text-slate-700 font-semibold leading-relaxed">
-                                                <div>Loại: <span className="font-black text-slate-900">{scanResultInfo.type}</span></div>
-                                                <div>Mã: <span className="font-mono font-black text-slate-900">{scanResultInfo.code}</span></div>
-                                                <div>Khách hàng: <span className="font-black text-slate-900">{scanResultInfo.customerName || '—'}</span></div>
-                                                <div className="text-[12px] text-emerald-700">{scanResultInfo.extra || ''}</div>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
                             {/* Section 1: Info */}
                             <div className="rounded-3xl border border-primary/20 bg-white p-5 sm:p-6 space-y-5 shadow-sm">
                                 <div className="flex items-center gap-2.5 pb-3 border-b border-primary/10">
@@ -986,11 +935,11 @@ export default function CylinderRecoveryFormModal({
                                     </label>
                                     <div className="relative">
                                         <SearchableSelect
-                                            options={customers.map(c => ({ label: c.name, value: c.id }))}
+                                            options={customers.map(buildCustomerSelectOption)}
                                             value={formData.customer_id}
                                             onValueChange={(val) => setFormData({ ...formData, customer_id: val, order_id: '' })}
                                             placeholder="-- Chọn khách hàng --"
-                                            searchPlaceholder="Tìm tên khách hàng..."
+                                            searchPlaceholder="Tìm người đại diện, tên cơ sở, SĐT..."
                                             disabled={isReadOnly}
                                         />
                                     </div>
@@ -1096,7 +1045,8 @@ export default function CylinderRecoveryFormModal({
                                                                             value={item.serial_number}
                                                                             onChange={(e) => updateItem(item._id, 'serial_number', e.target.value)}
                                                                             onFocus={() => {
-                                                                                fetchAvailableCyls();
+                                                                                if (!formData.customer_id) return;
+                                                                                fetchAvailableCyls(formData.customer_id);
                                                                                 setActiveSerialDropdown(item._id);
                                                                             }}
                                                                             onBlur={() => {
@@ -1120,11 +1070,13 @@ export default function CylinderRecoveryFormModal({
                                                                             <div className="absolute z-[9999] left-0 right-0 top-[42px] bg-white border border-primary/20 rounded-xl shadow-xl max-h-52 overflow-y-auto">
                                                                                 {isFetchingCyls ? (
                                                                                     <div className="px-4 py-3 text-xs text-slate-400 italic">Đang tải danh sách bình...</div>
+                                                                                ) : !formData.customer_id ? (
+                                                                                    <div className="px-4 py-3 text-xs text-slate-400 italic">Chọn khách hàng trước</div>
                                                                                 ) : (() => {
                                                                                     const suggs = getCylSuggestions(item._id, item.serial_number);
                                                                                     if (suggs.length === 0) return (
                                                                                         <div className="px-4 py-3 text-xs text-slate-400 italic">
-                                                                                            {item.serial_number ? 'Không tìm thấy bình phù hợp' : 'Nhập để tìm kiếm...'}
+                                                                                            {item.serial_number ? 'Không tìm thấy vỏ thuộc khách hàng này' : 'Nhập để tìm kiếm...'}
                                                                                         </div>
                                                                                     );
                                                                                     return suggs.map(c => (
@@ -1291,6 +1243,16 @@ export default function CylinderRecoveryFormModal({
                                 </div>
                             </div>
 
+                            {isReadOnly && isEdit && (
+                                <button
+                                    type="button"
+                                    onClick={() => setMode('edit')}
+                                    className="flex-1 md:flex-none px-6 py-3 rounded-xl font-bold text-[14px] flex items-center justify-center gap-2 border border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100 transition-all active:scale-[0.98] whitespace-nowrap"
+                                >
+                                    <Edit3 size={16} />
+                                    Chỉnh sửa
+                                </button>
+                            )}
                             {!isReadOnly && (
                                 <div className="flex flex-col xs:flex-row gap-2 flex-1 md:flex-none min-w-0">
                                     {isEdit && formData.status !== 'HOAN_THANH' && recovery?.status !== 'HOAN_THANH' && (

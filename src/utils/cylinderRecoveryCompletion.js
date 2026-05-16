@@ -108,7 +108,7 @@ export async function applyRecoveryCompletionInventory(supabase, {
  * Hoàn thành nhanh: đã có dòng vỏ trên phiếu → đổi trạng thái + đồng bộ kho.
  * Chưa có vỏ → gọi onNeedOpenForm (mở form nhập vỏ).
  */
-export async function tryQuickCompleteRecovery(supabase, recoveryId, { onNeedOpenForm } = {}) {
+export async function tryQuickCompleteRecovery(supabase, recoveryId, { onNeedOpenForm, photos } = {}) {
     const { data: recovery, error: rErr } = await supabase
         .from('cylinder_recoveries')
         .select('*')
@@ -175,13 +175,21 @@ export async function tryQuickCompleteRecovery(supabase, recoveryId, { onNeedOpe
         }
     }
 
+    const updatePayload = {
+        status: 'HOAN_THANH',
+        total_items: items.length,
+        updated_at: new Date().toISOString(),
+    };
+    if (Array.isArray(photos) && photos.length > 0) {
+        updatePayload.photos = photos;
+        const stamp = new Date().toLocaleString('vi-VN');
+        const proofLine = `\n[Xác nhận tài xế ${stamp}]: ${photos.length} ảnh hiện trường`;
+        updatePayload.notes = `${recovery.notes || ''}${proofLine}`.trim();
+    }
+
     const { error: uErr } = await supabase
         .from('cylinder_recoveries')
-        .update({
-            status: 'HOAN_THANH',
-            total_items: items.length,
-            updated_at: new Date().toISOString(),
-        })
+        .update(updatePayload)
         .eq('id', recoveryId);
 
     if (uErr) {

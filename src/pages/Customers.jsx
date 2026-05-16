@@ -81,7 +81,17 @@ function appendCustomerTextSearch(query, searchTrimmed) {
     if (t) {
         const esc = t.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_').replace(/,/g, '');
         const p = `%${esc}%`;
-        q = q.or(`code.ilike.${p},name.ilike.${p},phone.ilike.${p},address.ilike.${p}`);
+        
+        let orString = `code.ilike.${p},name.ilike.${p},phone.ilike.${p},address.ilike.${p}`;
+        
+        // Improve phone number search by ignoring spaces/formatting in DB
+        const digits = t.replace(/\D/g, '');
+        if (digits.length >= 3) {
+            const phoneP = `%${digits.split('').join('%')}%`;
+            orString += `,phone.ilike.${phoneP}`;
+        }
+        
+        q = q.or(orString);
     }
     return q;
 }
@@ -315,7 +325,9 @@ const Customers = () => {
         try {
             const saved = JSON.parse(localStorage.getItem('columns_customers') || 'null');
             if (Array.isArray(saved) && saved.length > 0) {
-                return saved.filter(key => defaultColOrder.includes(key));
+                const normalized = saved.filter(key => defaultColOrder.includes(key));
+                if (!normalized.includes('warehouse_id')) normalized.push('warehouse_id');
+                return normalized;
             }
         } catch { }
         return defaultColOrder;
@@ -356,6 +368,11 @@ const Customers = () => {
     useEffect(() => {
         fetchWarehouses();
     }, []);
+
+    useEffect(() => {
+        if (filterType === 'lead') return;
+        setVisibleColumns((prev) => (prev.includes('warehouse_id') ? prev : [...prev, 'warehouse_id']));
+    }, [filterType]);
 
     useEffect(() => {
         const t = setTimeout(() => setDebouncedSearchTerm(searchTerm), 320);

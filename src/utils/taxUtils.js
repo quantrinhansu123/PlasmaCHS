@@ -74,6 +74,9 @@ export const validatePhone = (phone) => {
     return phoneRegex.test(cleanPhone);
 };
 
+/** Strip phone to digits only (for lookup / compare). */
+export const normalizePhoneDigits = (value) => String(value || '').replace(/\D/g, '');
+
 /**
  * Format phone number to standard 0XXX XXX XXX
  */

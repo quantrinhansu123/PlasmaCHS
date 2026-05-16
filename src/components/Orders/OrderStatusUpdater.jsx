@@ -1,6 +1,6 @@
 import { AlertCircle, AlertTriangle, ArrowRightCircle, Camera, Check, CheckCircle, CheckCircle2, Clock, CloudUpload, Package, Plus, ScanLine, Truck, X, XCircle, ZoomIn, FileText } from 'lucide-react';
 import clsx from 'clsx';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ORDER_STATE_TRANSITIONS, PRODUCT_TYPES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
@@ -11,9 +11,25 @@ import OrderHistoryTimeline from './OrderHistoryTimeline';
 import usePermissions from '../../hooks/usePermissions';
 import {
     collectMachineSerialsForOrder,
+    formatOrderMachineTypeFilterLabel,
+    getOrderFacilityRoomLabel,
+    getOrderMachineTypeFilter,
     isMachineProductType,
+    machineMatchesOrderTypeFilter,
     resolvedOrderCustomerAssetName,
 } from '../../utils/orderMachineSerials';
+import {
+    isCloudinaryDeliveryUrl,
+    uploadDataUrlToCloudinary,
+    uploadDeliveryProofFile,
+} from '../../utils/cloudinaryUpload';
+import Combobox from '../ui/Combobox';
+import {
+    fetchCustomersByPhone,
+    matchCustomerRecordForOrder,
+    resolveWarehouseCode,
+    resolveWarehouseCodeFromCustomer,
+} from '../../utils/customerOrderMatch';
 
 const parseNoteFieldList = (noteText, prefix) => {
     const lines = (noteText || '').split('\n').map(l => l.trim());
@@ -84,15 +100,6 @@ const buildFallbackApprovalHistory = (order, notifications = []) => {
     return entries.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 };
 
-const resolveWarehouseFromCustomer = (customer, warehouses = []) => {
-    if (!customer?.warehouse_id) return '';
-    const raw = String(customer.warehouse_id).trim();
-    const byId = warehouses.find((warehouse) => String(warehouse.id) === raw);
-    if (byId?.code) return byId.code;
-    const byCode = warehouses.find((warehouse) => warehouse.code === raw);
-    return byCode?.code || raw;
-};
-
 const getWarehouseLabelFromList = (value, warehouses = []) => {
     if (!value) return '—';
     const raw = String(value).trim();
@@ -116,6 +123,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     const [shippers, setShippers] = useState([]);
     const [adjustedQuantity, setAdjustedQuantity] = useState(order?.quantity || 0);
     const [adjustedQuantity2, setAdjustedQuantity2] = useState(order?.quantity_2 || 0);
+    const [isApprovedQtyTouched, setIsApprovedQtyTouched] = useState(false);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
     const [isClosing, setIsClosing] = useState(false);
     const [adjustmentNote, setAdjustmentNote] = useState('');
@@ -200,14 +208,17 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         resolveWarehouseName();
     }, [order?.warehouse, order?.note, warehouseName]);
 
-    // Fetch warehouse list when approving DNXM (CHO_CTY_DUYET)
+    // Fetch warehouse list for DNXM approval + machine serial suggestions at KHO_XU_LY
     useEffect(() => {
-        if (order?.status === 'CHO_CTY_DUYET' && isDNXM) {
-            supabase.from('warehouses').select('id, name, code').order('name').then(({ data }) => {
-                setWarehouseList(data || []);
-            });
-        }
-    }, [order?.status, isDNXM]);
+        const needsWarehouses =
+            (order?.status === 'CHO_CTY_DUYET' && isDNXM) ||
+            (order?.status === 'KHO_XU_LY' && hasMachineItems);
+        if (!needsWarehouses) return;
+
+        supabase.from('warehouses').select('id, name, code').order('name').then(({ data }) => {
+            setWarehouseList(data || []);
+        });
+    }, [order?.status, isDNXM, hasMachineItems]);
 
     useEffect(() => {
         if (!isDNXM || order?.status !== 'CHO_CTY_DUYET') return undefined;
@@ -218,14 +229,11 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         let cancelled = false;
 
         const loadCustomerWarehouse = async () => {
-            const { data } = await supabase
-                .from('customers')
-                .select('warehouse_id')
-                .eq('phone', phone);
+            const customers = await fetchCustomersByPhone(phone);
+            if (cancelled || !customers?.length) return;
 
-            if (cancelled || !data?.length) return;
-
-            const warehouseCode = resolveWarehouseFromCustomer(data[0], warehouseList);
+            const matchedCustomer = matchCustomerRecordForOrder(customers, order);
+            const warehouseCode = resolveWarehouseCodeFromCustomer(matchedCustomer, warehouseList);
             if (warehouseCode) {
                 setApprovedWarehouseId(warehouseCode);
             }
@@ -236,7 +244,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         return () => {
             cancelled = true;
         };
-    }, [order?.recipient_phone, order?.status, isDNXM, warehouseList]);
+    }, [order?.recipient_phone, order?.customer_id, order?.recipient_name, order?.status, isDNXM, warehouseList]);
 
     useEffect(() => {
         if (!order?.id) {
@@ -302,6 +310,10 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     }, [order?.id, order?.created_at, order?.order_code, order?.ordered_by, order?.sales_person]);
 
     useEffect(() => {
+        setIsApprovedQtyTouched(false);
+    }, [order?.id]);
+
+    useEffect(() => {
         if (!hasMachineItems || order?.status !== 'KHO_XU_LY') return;
 
         const initialSerials = (order?.department || '')
@@ -323,9 +335,24 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         order?.id
     ]);
 
+    const orderWarehouseCode = resolveWarehouseCode(
+        getWarehouseReference(order, warehouseName),
+        warehouseList
+    );
+
+    const orderMachineTypeFilter = useMemo(
+        () => getOrderMachineTypeFilter(order, orderItems),
+        [order?.product_type, order?.product_type_2, order?.note, orderItems]
+    );
+
+    const orderMachineTypeFilterLabel = useMemo(
+        () => formatOrderMachineTypeFilterLabel(orderMachineTypeFilter),
+        [orderMachineTypeFilter]
+    );
+
     useEffect(() => {
         const fetchAvailableMachineSerials = async () => {
-            if (!hasMachineItems || order?.status !== 'KHO_XU_LY' || !order?.warehouse) {
+            if (!hasMachineItems || order?.status !== 'KHO_XU_LY' || !orderWarehouseCode) {
                 setAvailableMachineSerials([]);
                 return;
             }
@@ -334,14 +361,19 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 setIsFetchingMachineSerials(true);
                 const { data, error } = await supabase
                     .from('machines')
-                    .select('serial_number')
-                    .eq('warehouse', order.warehouse)
+                    .select('serial_number, machine_type, warehouse, status')
+                    .eq('warehouse', orderWarehouseCode)
                     .eq('status', 'sẵn sàng')
                     .order('serial_number', { ascending: true })
                     .limit(3000);
 
                 if (error) throw error;
-                setAvailableMachineSerials((data || []).map(item => item.serial_number).filter(Boolean));
+                const filtered = (data || []).filter((machine) =>
+                    machineMatchesOrderTypeFilter(machine.machine_type, orderMachineTypeFilter)
+                );
+                setAvailableMachineSerials(
+                    filtered.map((item) => item.serial_number).filter(Boolean)
+                );
             } catch (err) {
                 console.error('Error fetching machine serials:', err);
                 setAvailableMachineSerials([]);
@@ -351,7 +383,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         };
 
         fetchAvailableMachineSerials();
-    }, [hasMachineItems, order?.status, order?.warehouse]);
+    }, [hasMachineItems, order?.status, orderWarehouseCode, orderMachineTypeFilter]);
 
     // Checklist giao: bình từ assigned + dòng BINH; máy từ collectMachineSerialsForOrder (order_items, department, khối note kho).
     useEffect(() => {
@@ -399,13 +431,11 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     ]);
 
     const handleProofImageChange = (e) => {
-        const file = e.target.files[0];
+        const file = e.target.files?.[0];
         if (!file) return;
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            setDeliveryProofBase64(reader.result);
-        };
-        reader.readAsDataURL(file);
+        setSelectedFile(file);
+        const previewUrl = URL.createObjectURL(file);
+        setDeliveryProofBase64(previewUrl);
     };
 
     const STATUS_TRANSITIONS_METADATA = [
@@ -672,7 +702,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                         .from('cylinders')
                         .update({
                             status: 'đang vận chuyển',
-                            customer_name: `${order.customer_name}${order.department ? ` / ${order.department}` : ''}`
+                            customer_name: resolvedOrderCustomerAssetName(order) || order.customer_name
                         })
                         .in('serial_number', serials)
                         .select('id, serial_number, category');
@@ -755,7 +785,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     .from('cylinders')
                     .update({
                         status: 'đang vận chuyển',
-                        customer_name: `${order.customer_name}${order.department ? ` / ${order.department}` : ''}`
+                        customer_name: resolvedOrderCustomerAssetName(order) || order.customer_name
                     })
                     .in('serial_number', serials)
                     .select('id, serial_number');
@@ -802,7 +832,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
 
                 const { data: machineRows, error: machineFetchErr } = await supabase
                     .from('machines')
-                    .select('serial_number, status, warehouse')
+                    .select('serial_number, status, warehouse, machine_type')
                     .in('serial_number', serials);
 
                 if (machineFetchErr) {
@@ -813,8 +843,26 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     throw new Error('Có mã máy không tồn tại trong hệ thống. Vui lòng kiểm tra lại.');
                 }
 
-                const invalidMachine = machineRows.find((m) => m.status !== 'sẵn sàng' || m.warehouse !== order.warehouse);
+                const invalidMachine = machineRows.find((m) => {
+                    const machineWarehouse = resolveWarehouseCode(m.warehouse, warehouseList);
+                    if (m.status !== 'sẵn sàng' || machineWarehouse !== orderWarehouseCode) {
+                        return true;
+                    }
+                    return !machineMatchesOrderTypeFilter(m.machine_type, orderMachineTypeFilter);
+                });
                 if (invalidMachine) {
+                    const typeHint = orderMachineTypeFilterLabel
+                        ? ` (yêu cầu loại: ${orderMachineTypeFilterLabel})`
+                        : '';
+                    const wrongType = !machineMatchesOrderTypeFilter(
+                        invalidMachine.machine_type,
+                        orderMachineTypeFilter
+                    );
+                    if (wrongType) {
+                        throw new Error(
+                            `Mã máy ${invalidMachine.serial_number} không đúng loại máy trên đơn${typeHint}.`
+                        );
+                    }
                     throw new Error(`Mã máy ${invalidMachine.serial_number} không ở trạng thái sẵn sàng tại kho hiện tại.`);
                 }
 
@@ -976,31 +1024,27 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 }
             }
 
-            // Upload image if selected
+            let uploadedProofUrl = null;
+
             if (selectedFile) {
-                const fileExt = selectedFile.name.split('.').pop();
-                const fileName = `${order.order_code}-${Date.now()}.${fileExt}`;
-                const { data, error: uploadError } = await supabase.storage
-                    .from('delivery_proofs')
-                    .upload(fileName, selectedFile);
-
-                if (uploadError) {
-                    if (uploadError.message.includes('Bucket not found')) {
-                        // Bucket doesn't exist, we skip error to not block flow, but log warning. 
-                        // Usually I would run a command to create it, but for UI safety.
-                        console.warn("delivery_proofs bucket not created in Supabase yet.");
-                    } else {
-                        throw uploadError;
-                    }
-                }
-
-                if (!uploadError) {
-                    const { data: publicUrlData } = supabase.storage
-                        .from('delivery_proofs')
-                        .getPublicUrl(fileName);
-
-                    imageUrl = publicUrlData.publicUrl;
-                }
+                const { url } = await uploadDeliveryProofFile(
+                    selectedFile,
+                    `plasmavn/delivery_proofs/orders/${order.order_code || order.id}`,
+                );
+                imageUrl = url;
+                uploadedProofUrl = url;
+            } else if (
+                deliveryProofBase64
+                && String(deliveryProofBase64).startsWith('data:image')
+            ) {
+                imageUrl = await uploadDataUrlToCloudinary(
+                    deliveryProofBase64,
+                    `plasmavn/delivery_proofs/orders/${order.order_code || order.id}`,
+                );
+                uploadedProofUrl = imageUrl;
+            } else if (isCloudinaryDeliveryUrl(deliveryProofBase64)) {
+                imageUrl = deliveryProofBase64;
+                uploadedProofUrl = deliveryProofBase64;
             }
 
             // Perform DB update
@@ -1017,7 +1061,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 if (!approvedWarehouseId) {
                     throw new Error('Khách hàng chưa có kho quản lý theo SĐT. Vui lòng cập nhật kho trong hồ sơ khách hàng.');
                 }
-                updatePayload.warehouse = approvedWarehouseId;
+                updatePayload.warehouse = resolveWarehouseCode(approvedWarehouseId, warehouseList) || approvedWarehouseId;
             }
 
             // Calculate total amount if quantity changed
@@ -1068,11 +1112,16 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             if (deliveryUnit) {
                 updatePayload.delivery_unit = deliveryUnit;
             }
-            if (imageUrl) {
+            if (uploadedProofUrl && isCloudinaryDeliveryUrl(uploadedProofUrl)) {
+                updatePayload.delivery_image_url = uploadedProofUrl;
+                updatePayload.delivery_proof_base64 = uploadedProofUrl;
+            } else if (imageUrl && isCloudinaryDeliveryUrl(imageUrl)) {
                 updatePayload.delivery_image_url = imageUrl;
-            }
-            if (order.status === 'DANG_GIAO_HANG' && deliveryProofBase64) {
+            } else if (order.status === 'DANG_GIAO_HANG' && isCloudinaryDeliveryUrl(deliveryProofBase64)) {
                 updatePayload.delivery_proof_base64 = deliveryProofBase64;
+                updatePayload.delivery_image_url = deliveryProofBase64;
+            }
+            if (order.status === 'DANG_GIAO_HANG') {
                 updatePayload.delivery_checklist = deliveryChecklist;
             }
 
@@ -1171,7 +1220,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                             </div>
                         )}
 
-                        <div className="flex justify-between gap-3 pt-1"><span className="text-slate-500 font-bold uppercase text-[10px] tracking-wider">Cơ sở / Phòng</span><span className="font-black text-primary text-right">{order.department || '—'}</span></div>
+                        <div className="flex justify-between gap-3 pt-1"><span className="text-slate-500 font-bold uppercase text-[10px] tracking-wider">Cơ sở / Phòng</span><span className="font-black text-primary text-right">{getOrderFacilityRoomLabel(order) || '—'}</span></div>
                         <div className="flex justify-between gap-3 pt-1"><span className="text-slate-500 font-bold uppercase text-[10px] tracking-wider">Kho xuất</span><span className="font-black text-slate-900 text-right">{realWarehouseName || '—'}</span></div>
                     </div>
 
@@ -1192,7 +1241,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                         </div>
                                         <div>
                                             <p className="text-[11px] font-black uppercase tracking-widest text-indigo-700">Kho cấp theo khách hàng</p>
-                                            <p className="text-[10px] font-medium text-indigo-500">Lấy từ SĐT khách hàng trong hồ sơ</p>
+                                            <p className="text-[10px] font-medium text-indigo-500">Theo kho gán cơ sở đã chọn (hồ sơ khách hàng)</p>
                                         </div>
                                     </div>
                                     <div className="mt-3 rounded-xl border border-indigo-200 bg-white px-4 py-3 text-sm font-bold text-slate-800">
@@ -1240,8 +1289,15 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                             <input
                                                 type="number"
                                                 className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl font-black text-emerald-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50 transition-all text-sm"
-                                                value={adjustedQuantity2}
+                                                value={
+                                                    isApprovedQtyTouched
+                                                        ? adjustedQuantity2
+                                                        : ((parseInt(adjustedQuantity2, 10) || 0) === 0 ? '' : adjustedQuantity2)
+                                                }
+                                                placeholder="Nhập số lượng"
+                                                onFocus={() => setIsApprovedQtyTouched(true)}
                                                 onChange={e => {
+                                                    setIsApprovedQtyTouched(true);
                                                     const val = e.target.value;
                                                     const q1 = parseInt(adjustedQuantity) || 0;
                                                     const inputVal = val === '' ? '' : Math.max(0, parseInt(val) || 0);
@@ -1417,6 +1473,24 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                         )}
                                     </div>
 
+                                    <p className="text-[11px] font-semibold text-cyan-800">
+                                        Gợi ý: máy{' '}
+                                        {orderMachineTypeFilterLabel ? (
+                                            <span className="font-black">{orderMachineTypeFilterLabel}</span>
+                                        ) : null}
+                                        {orderMachineTypeFilterLabel ? ' · ' : ''}
+                                        <span className="font-black">sẵn sàng</span>
+                                        {' '}tại kho{' '}
+                                        <span className="font-black">
+                                            {orderWarehouseCode
+                                                ? getWarehouseLabelFromList(orderWarehouseCode, warehouseList)
+                                                : '—'}
+                                        </span>
+                                        {!isFetchingMachineSerials && orderWarehouseCode ? (
+                                            <span className="text-cyan-600"> ({availableMachineSerials.length} mã)</span>
+                                        ) : null}
+                                    </p>
+
                                     <div className="space-y-2">
                                         {Array.from({ length: approvedMachineCount }).map((_, idx) => {
                                             const row = machineAssignments[idx] || { serial: '' };
@@ -1435,22 +1509,28 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                                 <div key={idx} className="bg-white border border-cyan-100 rounded-xl p-3 space-y-2.5">
                                                     <p className="text-[11px] font-black text-slate-600 uppercase tracking-wider">Máy #{idx + 1}</p>
 
-                                                    <input
-                                                        type="text"
-                                                        list={`dnxm-ready-machine-serials-${idx}`}
+                                                    <Combobox
+                                                        inputName={`dnxm-machine-serial-${order?.id || 'order'}-${idx}`}
+                                                        options={rowSerialOptions}
                                                         value={row.serial}
-                                                        onChange={(e) => handleMachineSerialChange(idx, e.target.value, approvedMachineCount)}
-                                                        className="w-full h-10 px-3 bg-slate-50 border border-slate-200 rounded-lg text-[13px] font-bold text-slate-800 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100 font-mono"
-                                                        placeholder="Nhập mã máy (serial)"
+                                                        onChange={(value) => handleMachineSerialChange(idx, value, approvedMachineCount)}
+                                                        placeholder={
+                                                            !orderWarehouseCode
+                                                                ? 'Chưa có kho trên đơn'
+                                                                : isFetchingMachineSerials
+                                                                    ? 'Đang tải danh sách máy...'
+                                                                    : 'Chọn hoặc gõ mã máy (serial)'
+                                                        }
+                                                        emptyMessage={
+                                                            orderWarehouseCode
+                                                                ? orderMachineTypeFilterLabel
+                                                                    ? `Không có máy ${orderMachineTypeFilterLabel} sẵn sàng tại kho này`
+                                                                    : 'Không có máy sẵn sàng tại kho này'
+                                                                : 'Chưa xác định kho xuất'
+                                                        }
+                                                        disabled={isFetchingMachineSerials || !orderWarehouseCode}
+                                                        className="h-10 rounded-lg text-[13px] font-mono"
                                                     />
-
-                                                    <datalist id={`dnxm-ready-machine-serials-${idx}`}>
-                                                        {rowSerialOptions.map((serial) => (
-                                                            <option key={`${idx}-${serial}`} value={serial} />
-                                                        ))}
-                                                    </datalist>
-
-                                                    <p className="text-[11px] text-slate-500 font-medium">Chỉ cần nhập mã máy theo số lượng đã phê duyệt.</p>
                                                 </div>
                                             );
                                         })}

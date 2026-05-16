@@ -6,9 +6,9 @@ import {
     ChevronLeft,
     ChevronRight,
     Edit,
+    Eye,
     Filter,
     Info,
-    LayoutGrid,
     List,
     MapPin,
     Package,
@@ -17,7 +17,6 @@ import {
     Plus,
     Printer,
     Search,
-    Table2,
     Trash2,
     User,
     X,
@@ -69,8 +68,6 @@ ChartJS.register(
     ChartLegend
 );
 
-const RECOVERIES_LIST_DISPLAY_MODE_KEY = 'cylinder_recoveries_list_display_mode';
-
 const CHART_COLORS = [
     'rgba(37, 99, 235, 0.8)',   // blue-600
     'rgba(16, 185, 129, 0.8)',  // emerald-500
@@ -109,6 +106,7 @@ const CylinderRecoveries = () => {
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(50);
     const [recoveryToEdit, setRecoveryToEdit] = useState(null);
+    const [recoveryFormMode, setRecoveryFormMode] = useState('edit');
     /** Mở form với trạng thái Hoàn thành sẵn (nhập vỏ + lưu), nhưng recovery prop vẫn là bản ghi DB để xử lý kho đúng */
     const [openRecoveryAsComplete, setOpenRecoveryAsComplete] = useState(false);
     const [recoveriesToPrint, setRecoveriesToPrint] = useState(null);
@@ -121,18 +119,8 @@ const CylinderRecoveries = () => {
     const [pendingCustomers, setPendingCustomers] = useState([]);
     const [pendingWarehouses, setPendingWarehouses] = useState([]);
     const [showMoreActions, setShowMoreActions] = useState(false);
-    /** Lọc nhanh như mockup: Tất cả / Đang xử lý / Hoàn thành */
-    const [recoveryQuickSegment, setRecoveryQuickSegment] = useState(() => /** @type {'all' | 'processing' | 'completed'} */ ('all'));
     const [shippersList, setShippersList] = useState([]);
-    const [listDisplayMode, setListDisplayMode] = useState(() => {
-        try {
-            const s = localStorage.getItem(RECOVERIES_LIST_DISPLAY_MODE_KEY);
-            if (s === 'kanban' || s === 'table') return s;
-        } catch {
-            /* ignore */
-        }
-        return 'table';
-    });
+    const [listDisplayMode] = useState('table');
 
     // Filter State
     const [selectedStatuses, setSelectedStatuses] = useState([]);
@@ -179,14 +167,6 @@ const CylinderRecoveries = () => {
         localStorage.setItem('columns_recoveries_visible', JSON.stringify(visibleColumns));
         localStorage.setItem('columns_recoveries_order', JSON.stringify(columnOrder));
     }, [visibleColumns, columnOrder]);
-
-    useEffect(() => {
-        try {
-            localStorage.setItem(RECOVERIES_LIST_DISPLAY_MODE_KEY, listDisplayMode);
-        } catch {
-            /* ignore */
-        }
-    }, [listDisplayMode]);
 
     const isColumnVisible = (key) => visibleColumns.includes(key);
 
@@ -250,6 +230,7 @@ const CylinderRecoveries = () => {
                 toast.error('Không tìm thấy phiếu thu hồi.');
             } else {
                 setRecoveryToEdit(data);
+                setRecoveryFormMode(recoveryOpenComplete ? 'edit' : 'view');
                 setOpenRecoveryAsComplete(recoveryOpenComplete && data.status !== 'HOAN_THANH');
                 setIsFormModalOpen(true);
             }
@@ -268,6 +249,7 @@ const CylinderRecoveries = () => {
         if (recoveryQueryId) return;
 
         setRecoveryToEdit(null);
+        setRecoveryFormMode('edit');
         setOpenRecoveryAsComplete(false);
         setIsFormModalOpen(true);
 
@@ -339,10 +321,17 @@ const CylinderRecoveries = () => {
     };
 
     // Handlers
-    const handleEdit = (recovery, forComplete = false) => {
+    const openRecoveryForm = (recovery, mode = 'edit', forComplete = false) => {
         setRecoveryToEdit(recovery);
+        setRecoveryFormMode(recovery ? mode : 'edit');
         setOpenRecoveryAsComplete(!!forComplete && recovery?.status !== 'HOAN_THANH');
         setIsFormModalOpen(true);
+    };
+
+    const handleView = (recovery) => openRecoveryForm(recovery, 'view');
+
+    const handleEdit = (recovery, forComplete = false) => {
+        openRecoveryForm(recovery, 'edit', forComplete);
     };
 
     const handleRecoveryCompleteClick = async (recovery) => {
@@ -350,6 +339,31 @@ const CylinderRecoveries = () => {
             onNeedOpenForm: () => handleEdit(recovery, true),
         });
         if (res?.ok) fetchRecoveries();
+    };
+
+    const handleApproveRecoveryForShipping = async (recovery) => {
+        const driver = String(recovery.driver_name || '').trim();
+        if (!driver) {
+            toast.info('Chọn đơn vị vận chuyển trước khi duyệt phiếu.');
+            handleEdit(recovery);
+            return;
+        }
+
+        try {
+            const { error } = await supabase
+                .from('cylinder_recoveries')
+                .update({
+                    status: 'DANG_THU_HOI',
+                    driver_name: driver,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', recovery.id);
+            if (error) throw error;
+            toast.success('Đã duyệt phiếu — chuyển sang vận chuyển.');
+            fetchRecoveries();
+        } catch (error) {
+            toast.error('Không thể duyệt phiếu: ' + (error.message || error));
+        }
     };
 
     const handleDelete = async (id, code) => {
@@ -401,18 +415,43 @@ const CylinderRecoveries = () => {
             'w-full flex items-center gap-3 px-3 py-2 text-left text-[13px] font-bold text-slate-700 hover:bg-slate-50 transition-colors';
         return (
             <>
-                {recovery.status === 'CHO_PHAN_CONG' && (
+                <button
+                    type="button"
+                    role="menuitem"
+                    className={itemClass}
+                    onClick={() => {
+                        handleView(recovery);
+                        closeRecoveryRowActions();
+                    }}
+                >
+                    <Eye className="h-4 w-4 shrink-0 text-slate-500" />
+                    Xem chi tiết
+                </button>
+                <button
+                    type="button"
+                    role="menuitem"
+                    className={clsx(itemClass, 'text-amber-800')}
+                    onClick={() => {
+                        handleEdit(recovery);
+                        closeRecoveryRowActions();
+                    }}
+                >
+                    <Edit className="h-4 w-4 shrink-0 text-amber-500" />
+                    Chỉnh sửa
+                </button>
+                <div className="my-0.5 border-t border-slate-100" role="separator" />
+                {(recovery.status === 'CHO_PHAN_CONG' || recovery.status === 'CHO_DUYET') && (
                     <button
                         type="button"
                         role="menuitem"
                         className={clsx(itemClass, 'text-blue-700')}
                         onClick={() => {
-                            handleEdit(recovery);
                             closeRecoveryRowActions();
+                            void handleApproveRecoveryForShipping(recovery);
                         }}
                     >
                         <User className="h-4 w-4 shrink-0 text-blue-500" />
-                        Phân công
+                        Duyệt vận chuyển
                     </button>
                 )}
                 {recovery.status === 'DANG_THU_HOI' && (
@@ -440,18 +479,6 @@ const CylinderRecoveries = () => {
                 >
                     <Printer className="h-4 w-4 shrink-0 text-slate-400" />
                     In phiếu
-                </button>
-                <button
-                    type="button"
-                    role="menuitem"
-                    className={clsx(itemClass, 'text-amber-800')}
-                    onClick={() => {
-                        handleEdit(recovery);
-                        closeRecoveryRowActions();
-                    }}
-                >
-                    <Edit className="h-4 w-4 shrink-0 text-amber-500" />
-                    Chỉnh sửa
                 </button>
                 {canDeleteRecoveries && (
                     <>
@@ -536,14 +563,7 @@ const CylinderRecoveries = () => {
         const matchesCustomer = selectedCustomers.length === 0 || selectedCustomers.includes(r.customer_id);
         const matchesWarehouse = selectedWarehouses.length === 0 || selectedWarehouses.includes(r.warehouse_id);
 
-        const matchesQuickSegment =
-            recoveryQuickSegment === 'all'
-                ? true
-                : recoveryQuickSegment === 'completed'
-                  ? r.status === 'HOAN_THANH'
-                  : isRecoveryProcessingStatus(r.status);
-
-        return matchesSearch && matchesStatus && matchesCustomer && matchesWarehouse && matchesQuickSegment;
+        return matchesSearch && matchesStatus && matchesCustomer && matchesWarehouse;
     });
 
     const recoveryKanbanColumns = useMemo(() => {
@@ -687,11 +707,6 @@ const CylinderRecoveries = () => {
         return { newToday, pending, totalShells };
     }, [recoveries]);
 
-    const setRecoverySegment = (seg) => {
-        setRecoveryQuickSegment(seg);
-        setCurrentPage(1);
-    };
-
     const statusPillRecovery = (statusId) => {
         if (statusId === 'HOAN_THANH') {
             return 'inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-green-50 text-green-700 border border-green-100';
@@ -716,60 +731,33 @@ const CylinderRecoveries = () => {
             {activeView === 'list' && (
                 <>
                     {/* ── Desktop: hero + breadcrumb (mockup BottleTrack) ── */}
-                    <div className="hidden md:block relative overflow-hidden rounded-xl h-44 lg:h-48 mb-6 shadow-lg shrink-0">
+                    <div className="hidden md:block relative overflow-hidden rounded-xl h-24 mb-4 shadow-md shrink-0">
                         <img
                             src={RECOVERY_HERO_IMAGE}
                             alt=""
                             className="absolute inset-0 h-full w-full object-cover"
                         />
                         <div className="absolute inset-0 bg-gradient-to-r from-[#00288e]/90 via-[#00288e]/75 to-[#3755c3]/35" />
-                        <div className="relative z-10 h-full flex flex-col justify-center px-8 lg:px-10 text-white">
-                            <nav className="flex items-center gap-1.5 text-[11px] font-semibold text-white/80 mb-2">
+                        <div className="relative z-10 h-full flex flex-col justify-center px-5 lg:px-6 text-white">
+                            <nav className="flex items-center gap-1.5 text-[10px] font-semibold text-white/80 mb-1">
                                 <span>Hệ thống</span>
-                                <ChevronRight size={12} className="opacity-80" aria-hidden />
+                                <ChevronRight size={11} className="opacity-80" aria-hidden />
                                 <span>Kho vận</span>
-                                <ChevronRight size={12} className="opacity-80" aria-hidden />
+                                <ChevronRight size={11} className="opacity-80" aria-hidden />
                                 <span className="text-white">Thu hồi vỏ bình</span>
                             </nav>
-                            <div className="flex flex-wrap items-end justify-between gap-4">
-                                <div>
-                                    <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight drop-shadow-sm">
-                                        Thu hồi vỏ bình
-                                    </h1>
-                                    <p className="mt-1 text-sm text-white/85 max-w-xl">
-                                        Quản lý quy trình nhận và kiểm kê vỏ bình từ khách hàng
-                                    </p>
-                                </div>
-                                <div className="relative w-full max-w-md">
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                                    <input
-                                        type="text"
-                                        placeholder="Tìm kiếm phiếu thu hồi..."
-                                        value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="w-full rounded-lg border-0 bg-white/95 py-2.5 pl-10 pr-10 text-sm text-slate-800 shadow-inner placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-white/50"
-                                    />
-                                    {searchTerm ? (
-                                        <button
-                                            type="button"
-                                            aria-label="Xóa tìm kiếm"
-                                            onClick={() => setSearchTerm('')}
-                                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                                        >
-                                            <X size={16} />
-                                        </button>
-                                    ) : null}
-                                </div>
+                            <div>
+                                <h1 className="text-lg lg:text-xl font-extrabold tracking-tight drop-shadow-sm">
+                                    Thu hồi vỏ bình
+                                </h1>
+                                <p className="mt-0.5 text-xs text-white/80 max-w-xl">
+                                    Quản lý quy trình nhận và kiểm kê vỏ bình từ khách hàng
+                                </p>
                             </div>
                         </div>
                     </div>
 
-                <div
-                    className={clsx(
-                        'flex flex-col flex-1 min-h-0 w-full relative overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:shadow-[0_8px_30px_rgb(0,0,0,0.04)]',
-                        listDisplayMode === 'kanban' && 'md:min-h-[min(76vh,720px)]',
-                    )}
-                >
+                <div className="flex flex-col flex-1 min-h-0 w-full relative overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
                     <MobilePageHeader
                         searchTerm={searchTerm}
                         setSearchTerm={setSearchTerm}
@@ -821,7 +809,7 @@ const CylinderRecoveries = () => {
                                 </div>
 
                                 <button
-                                    onClick={() => { setRecoveryToEdit(null); setOpenRecoveryAsComplete(false); setIsFormModalOpen(true); }}
+                                    onClick={() => openRecoveryForm(null, 'edit')}
                                     className="p-2 rounded-xl bg-primary text-white shrink-0 shadow-lg shadow-primary/30 active:scale-95 transition-all"
                                 >
                                     <Plus size={20} />
@@ -987,31 +975,6 @@ const CylinderRecoveries = () => {
                     <div className="hidden md:block p-5 border-b border-slate-100 bg-white space-y-4">
                         <div className="flex flex-wrap items-center justify-between gap-4">
                             <div className="flex flex-wrap items-center gap-4">
-                                <div className="flex shadow-sm rounded-lg overflow-hidden border border-slate-200">
-                                    {[
-                                        { id: 'all', label: 'Tất cả' },
-                                        { id: 'processing', label: 'Đang xử lý' },
-                                        { id: 'completed', label: 'Hoàn thành' },
-                                    ].map((seg, i, arr) => (
-                                        <button
-                                            key={seg.id}
-                                            type="button"
-                                            onClick={() => setRecoverySegment(seg.id)}
-                                            className={clsx(
-                                                'px-3 py-1.5 text-sm font-semibold border-slate-200 transition-colors',
-                                                i > 0 && 'border-l',
-                                                recoveryQuickSegment === seg.id
-                                                    ? 'bg-blue-50 text-blue-800 border-blue-100'
-                                                    : 'bg-white text-slate-500 hover:bg-slate-50',
-                                                i === 0 && 'rounded-l-md',
-                                                i === arr.length - 1 && 'rounded-r-md',
-                                            )}
-                                        >
-                                            {seg.label}
-                                        </button>
-                                    ))}
-                                </div>
-                                <div className="hidden sm:block h-6 w-px bg-slate-200" aria-hidden />
                                 <div className="flex items-center gap-2 text-sm text-slate-500 font-medium">
                                     <Info size={18} className="text-slate-400 shrink-0" />
                                     <span>
@@ -1019,88 +982,36 @@ const CylinderRecoveries = () => {
                                         <strong className="text-slate-900">{formatNumber(totalRecords)} phiếu</strong>
                                     </span>
                                 </div>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                                <div
-                                    className="flex rounded-lg border border-slate-200 bg-slate-100 p-0.5"
-                                    role="group"
-                                    aria-label="Chế độ hiển thị"
-                                >
-                                    <button
-                                        type="button"
-                                        title="Bảng"
-                                        aria-pressed={listDisplayMode === 'table'}
-                                        onClick={() => setListDisplayMode('table')}
-                                        className={clsx(
-                                            'flex h-9 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-bold transition-all sm:px-3 sm:text-[13px]',
-                                            listDisplayMode === 'table'
-                                                ? 'bg-white text-[#00288e] shadow-sm'
-                                                : 'text-slate-600 hover:text-slate-900',
-                                        )}
-                                    >
-                                        <Table2 size={16} className="shrink-0" aria-hidden />
-                                        <span className="hidden sm:inline">Bảng</span>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        title="Kanban"
-                                        aria-pressed={listDisplayMode === 'kanban'}
-                                        onClick={() => setListDisplayMode('kanban')}
-                                        className={clsx(
-                                            'flex h-9 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-bold transition-all sm:px-3 sm:text-[13px]',
-                                            listDisplayMode === 'kanban'
-                                                ? 'bg-white text-[#00288e] shadow-sm'
-                                                : 'text-slate-600 hover:text-slate-900',
-                                        )}
-                                    >
-                                        <LayoutGrid size={16} className="shrink-0" aria-hidden />
-                                        <span className="hidden sm:inline">Kanban</span>
-                                    </button>
-                                </div>
                                 <button
                                     type="button"
-                                    onClick={() => navigate(-1)}
-                                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50 transition-all"
-                                >
-                                    <ChevronLeft size={16} />
-                                    Quay lại
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={handleDownloadTemplate}
-                                    className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50"
-                                >
-                                    <Download size={18} />
-                                    Xuất Excel
-                                </button>
-                                <div className="relative">
-                                    <input
-                                        type="file"
-                                        accept=".xlsx, .xls"
-                                        onChange={handleImportExcel}
-                                        className="hidden"
-                                        id="excel-import"
-                                    />
-                                    <label
-                                        htmlFor="excel-import"
-                                        className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50 cursor-pointer"
-                                    >
-                                        <Upload size={18} />
-                                        Nhập Excel
-                                    </label>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setRecoveryToEdit(null);
-                                        setOpenRecoveryAsComplete(false);
-                                        setIsFormModalOpen(true);
-                                    }}
+                                    onClick={() => openRecoveryForm(null, 'edit')}
                                     className="flex items-center gap-2 px-5 py-2 rounded-lg bg-[#00288e] text-white text-sm font-bold shadow-md shadow-blue-900/20 hover:bg-[#173bab] transition-all active:scale-[0.98]"
                                 >
                                     <Plus size={18} />
                                     Thêm mới
                                 </button>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <div className="relative w-full min-w-[220px] max-w-sm">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                                    <input
+                                        type="text"
+                                        placeholder="Tìm kiếm phiếu thu hồi..."
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-9 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#00288e]/20 focus:border-[#00288e]/30"
+                                    />
+                                    {searchTerm ? (
+                                        <button
+                                            type="button"
+                                            aria-label="Xóa tìm kiếm"
+                                            onClick={() => setSearchTerm('')}
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                                        >
+                                            <X size={16} />
+                                        </button>
+                                    ) : null}
+                                </div>
                             </div>
                         </div>
 
@@ -1318,7 +1229,7 @@ const CylinderRecoveries = () => {
                                                 <td className="px-4 py-4 whitespace-nowrap">
                                                     <button
                                                         type="button"
-                                                        onClick={() => handleEdit(recovery)}
+                                                        onClick={() => handleView(recovery)}
                                                         className="font-bold text-[#00288e] hover:underline"
                                                     >
                                                         {recovery.recovery_code}
@@ -1502,7 +1413,7 @@ const CylinderRecoveries = () => {
                                                                         <div className="min-w-0 flex-1 space-y-1">
                                                                             <button
                                                                                 type="button"
-                                                                                onClick={() => handleEdit(recovery)}
+                                                                                onClick={() => handleView(recovery)}
                                                                                 className="block w-full min-w-0 text-left"
                                                                             >
                                                                                 <span className="block truncate text-[12px] font-bold leading-tight text-[#00288e]">
@@ -1537,15 +1448,17 @@ const CylinderRecoveries = () => {
                                                                                 </p>
                                                                             ) : null}
                                                                             <div className="flex flex-wrap items-center gap-1 border-t border-slate-100 pt-1.5">
-                                                                                {recovery.status === 'CHO_PHAN_CONG' && (
+                                                                                {(recovery.status === 'CHO_PHAN_CONG' || recovery.status === 'CHO_DUYET') && (
                                                                                     <button
                                                                                         type="button"
-                                                                                        title="Phân công"
+                                                                                        title="Duyệt vận chuyển"
                                                                                         className={clsx(
                                                                                             recoveryKanbanActionBtnClass,
                                                                                             'hover:text-blue-700',
                                                                                         )}
-                                                                                        onClick={() => handleEdit(recovery)}
+                                                                                        onClick={() =>
+                                                                                            void handleApproveRecoveryForShipping(recovery)
+                                                                                        }
                                                                                     >
                                                                                         <User size={14} strokeWidth={2.35} className="text-inherit" />
                                                                                     </button>
@@ -1572,17 +1485,6 @@ const CylinderRecoveries = () => {
                                                                                     onClick={() => handlePrintSingle(recovery)}
                                                                                 >
                                                                                     <Printer size={14} strokeWidth={2.35} className="text-inherit" />
-                                                                                </button>
-                                                                                <button
-                                                                                    type="button"
-                                                                                    title="Chỉnh sửa"
-                                                                                    className={clsx(
-                                                                                        recoveryKanbanActionBtnClass,
-                                                                                        'hover:text-amber-800',
-                                                                                    )}
-                                                                                    onClick={() => handleEdit(recovery)}
-                                                                                >
-                                                                                    <Edit size={14} strokeWidth={2.35} className="text-inherit" />
                                                                                 </button>
                                                                                 {canDeleteRecoveries && (
                                                                                     <button
@@ -1961,6 +1863,7 @@ const CylinderRecoveries = () => {
             {isFormModalOpen && (
                 <CylinderRecoveryFormModal
                     recovery={recoveryToEdit}
+                    initialMode={recoveryFormMode}
                     prefillComplete={openRecoveryAsComplete}
                     prefill={
                         !recoveryToEdit && createFromShipping
@@ -1974,6 +1877,7 @@ const CylinderRecoveries = () => {
                     onClose={() => {
                         setIsFormModalOpen(false);
                         setOpenRecoveryAsComplete(false);
+                        setRecoveryFormMode('edit');
                     }}
                     onSuccess={handleFormSuccess}
                 />

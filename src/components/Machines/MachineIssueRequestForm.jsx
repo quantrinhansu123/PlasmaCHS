@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { Printer, Save, Eye, EyeOff, Edit, X, Warehouse } from 'lucide-react';
+import { ChevronDown, Printer, Save, Eye, EyeOff, Edit, X, Warehouse } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase/config';
@@ -16,6 +16,13 @@ import { COMPANY_PRINT_ADDRESS_LINES } from '../../constants/companyPrintAddress
 import MachineHandoverPrintTemplate from '../MachineHandoverPrintTemplate';
 import GoodsIssuePrintTemplate from '../GoodsIssues/GoodsIssuePrintTemplate';
 import Combobox from '../ui/Combobox';
+import { formatPhoneNumber } from '../../utils/taxUtils';
+import {
+    fetchCustomersByPhone,
+    matchCustomerRecordForOrder,
+    resolveWarehouseCode,
+    resolveWarehouseCodeFromCustomer,
+} from '../../utils/customerOrderMatch';
 
 const dmyToYmd = (dmy) => {
     if (!dmy || typeof dmy !== 'string') return "";
@@ -43,8 +50,6 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
     const isAdminRole = isAdminRoleHelper(role);
     const isWarehouseRole = isWarehouseRoleHelper(role);
     const isSalesRole = isSalesRoleHelper(role);
-    
-    const canEditApprovedQuantity = !isSalesRole;
 
     const [formData, setFormData] = useState({
         orangeNumber: '',
@@ -131,31 +136,10 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
         return (serialMap || {})[typeKey] || [];
     };
 
-    const resolveWarehouseCode = (value) => {
-        if (!value) return value;
-        const input = String(value).trim();
-        if (!input) return input;
-
-        if (!Array.isArray(warehouseList) || warehouseList.length === 0) return input;
-
-        // Nếu input là code thật
-        const direct = warehouseList.find((w) => w.code === input);
-        if (direct?.code) return direct.code;
-
-        // Nếu input là id
-        const byId = warehouseList.find((w) => String(w.id) === input);
-        if (byId?.code) return byId.code;
-
-        // Nếu input là name
-        const byName = warehouseList.find((w) => String(w.name) === input);
-        if (byName?.code) return byName.code;
-
-        // Không resolve được thì giữ nguyên
-        return input;
-    };
+    const resolveWarehouseCodeForForm = (value) => resolveWarehouseCode(value, warehouseList);
 
     const sanitizeWarehouseForOrder = (value) => {
-        const resolved = resolveWarehouseCode(value);
+        const resolved = resolveWarehouseCodeForForm(value);
         if (!resolved) return null;
         const candidate = String(resolved).trim();
         if (!candidate) return null;
@@ -170,34 +154,36 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
         return allowed.has(candidate) ? candidate : null;
     };
 
-    const resolveWarehouseFromCustomer = (customer) => {
-        if (!customer?.warehouse_id) return '';
-        const resolved = resolveWarehouseCode(String(customer.warehouse_id).trim());
-        return resolved || String(customer.warehouse_id).trim();
-    };
-
     const getWarehouseLabel = (value) => {
         if (!value) return '—';
-        const resolved = resolveWarehouseCode(value);
-        const row = warehouseList.find(
-            (warehouse) => warehouse.code === resolved || String(warehouse.id) === String(value)
-        );
+        const resolved = resolveWarehouseCodeForForm(value);
+        const normalized = String(value || '').trim().toLowerCase();
+        const row = warehouseList.find((warehouse) => {
+            const code = String(warehouse?.code || '').trim().toLowerCase();
+            const id = String(warehouse?.id || '').trim().toLowerCase();
+            const name = String(warehouse?.name || '').trim().toLowerCase();
+            const resolvedKey = String(resolved || '').trim().toLowerCase();
+            return (
+                resolvedKey === code ||
+                normalized === code ||
+                normalized === id ||
+                normalized === name
+            );
+        });
         if (row?.name) {
             return row.code ? `${row.name} (${row.code})` : row.name;
         }
         return resolved || value;
     };
 
-    const getProductLabel = (value) => {
-        if (!value) return '—';
-        const match = availableProducts.find((product) => product.value === value);
-        return match?.label || value;
-    };
-
     const [editOrderId, setEditOrderId] = useState(null);
     const [isReadOnly, setIsReadOnly] = useState(false);
     const [facilities, setFacilities] = useState([]);
     const [isFacilityDropdownOpen, setIsFacilityDropdownOpen] = useState(false);
+    const facilityDropdownRef = useRef(null);
+
+    const getFacilityDisplayName = (customer) =>
+        String(customer?.name || customer?.invoice_company_name || '').trim();
     const currentActorName =
         user?.name ||
         localStorage.getItem('user_name') ||
@@ -219,7 +205,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
             setEditOrderId(orderId);
             fetchExistingOrder(orderId);
         } else if (phone) {
-            setFormData(prev => ({ ...prev, phone }));
+            setFormData(prev => ({ ...prev, phone: formatPhoneNumber(phone) }));
         }
     }, [location.search, overrideOrderId, overrideViewOnly]);
 
@@ -235,6 +221,16 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
             });
         }
     }, [user?.name, editOrderId]);
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (facilityDropdownRef.current && !facilityDropdownRef.current.contains(event.target)) {
+                setIsFacilityDropdownOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
     const fetchExistingOrder = async (id) => {
         try {
@@ -383,45 +379,57 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
 
             setIsSearching(true);
             try {
-                const { data, error } = await supabase
-                    .from('customers')
-                    .select('*')
-                    .eq('phone', formData.phone);
+                const data = await fetchCustomersByPhone(formData.phone);
 
-                if (data && data.length > 0 && !error) {
-                    const matchedCustomer = formData.customerId
-                        ? data.find((customer) => customer.id === formData.customerId) || data[0]
-                        : data[0];
-                    const warehouseCode = resolveWarehouseFromCustomer(matchedCustomer);
+                if (data && data.length > 0) {
+                    const matchedCustomer = matchCustomerRecordForOrder(data, {
+                        customerId: formData.customerId,
+                        facilityName: formData.facilityName,
+                    });
+                    const warehouseCode = resolveWarehouseCodeFromCustomer(matchedCustomer, warehouseList);
 
                     setFacilities(data);
 
                     if (editOrderId) {
-                        setFormData((prev) => (
-                            prev.warehouse === warehouseCode ? prev : { ...prev, warehouse: warehouseCode }
-                        ));
+                        setFormData((prev) => ({
+                            ...prev,
+                            customerId: matchedCustomer?.id || prev.customerId,
+                            warehouse: warehouseCode,
+                        }));
                         return;
                     }
 
                     if (data.length === 1) {
                         const customer = data[0];
+                        const customerChanged = String(formData.customerId) !== String(customer.id);
                         setFormData((prev) => ({
                             ...prev,
                             customerId: customer.id || prev.customerId,
                             customerName: customer.legal_rep || customer.representative || customer.name || '',
-                            facilityName: customer.agency_name || customer.invoice_company_name || customer.name || '',
-                            placementAddress: customer.address || '',
+                            facilityName: customerChanged || !prev.facilityName
+                                ? getFacilityDisplayName(customer)
+                                : prev.facilityName,
+                            placementAddress: customerChanged || !prev.placementAddress
+                                ? (customer.address || '')
+                                : prev.placementAddress,
                             machineManager: customer.managed_by || prev.machineManager,
                             warehouse: warehouseCode,
                         }));
                         return;
                     }
 
+                    const customerChanged = String(formData.customerId) !== String(matchedCustomer.id);
                     setIsFacilityDropdownOpen(true);
                     setFormData((prev) => ({
                         ...prev,
                         customerId: matchedCustomer.id || prev.customerId,
                         customerName: matchedCustomer.legal_rep || matchedCustomer.representative || matchedCustomer.name || '',
+                        facilityName: customerChanged || !prev.facilityName
+                            ? getFacilityDisplayName(matchedCustomer)
+                            : prev.facilityName,
+                        placementAddress: customerChanged || !prev.placementAddress
+                            ? (matchedCustomer.address || '')
+                            : prev.placementAddress,
                         machineManager: matchedCustomer.managed_by || prev.machineManager,
                         warehouse: warehouseCode,
                     }));
@@ -439,7 +447,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
 
         const timeoutId = setTimeout(fetchCustomerData, 600);
         return () => clearTimeout(timeoutId);
-    }, [formData.phone, formData.customerId, editOrderId, warehouseList]);
+    }, [formData.phone, formData.customerId, formData.facilityName, editOrderId, warehouseList]);
 
     const handleFacilitySelect = (facility) => {
         setFormData(prev => ({
@@ -447,17 +455,18 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
             customerId: facility.id || prev.customerId,
             // Ưu tiên hiển thị Người đại diện theo yêu cầu nghiệp vụ
             customerName: facility.legal_rep || facility.representative || facility.name || prev.customerName,
-            facilityName: facility.agency_name || facility.invoice_company_name || facility.name || '',
+            facilityName: getFacilityDisplayName(facility),
             placementAddress: facility.address || '',
             machineManager: facility.managed_by || prev.machineManager,
-            warehouse: resolveWarehouseFromCustomer(facility),
+            warehouse: resolveWarehouseCodeFromCustomer(facility, warehouseList),
         }));
         setIsFacilityDropdownOpen(false);
     };
 
     const handleInputChange = (field, value) => {
         setFormData(prev => {
-            const newData = { ...prev, [field]: value };
+            const nextValue = field === 'phone' ? formatPhoneNumber(value) : value;
+            const newData = { ...prev, [field]: nextValue };
             
             // Auto-calculate quantity based on machineCode split by comma
             if (field === 'machineCode') {
@@ -522,7 +531,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
 
     // Filter machines by warehouseCode (e.g. 'HN', 'TP.HCM') — must match machines.warehouse
     const loadReadyMachinesByWarehouse = async (warehouseCode) => {
-        const resolvedWarehouseCode = resolveWarehouseCode(warehouseCode);
+        const resolvedWarehouseCode = resolveWarehouseCodeForForm(warehouseCode);
 
         if (!resolvedWarehouseCode) {
             setAvailableProducts([]);
@@ -570,7 +579,6 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
                 product: '',
                 machineCode: '',
                 quantity: '',
-                quantityApproved: '',
             }));
             setAvailableMachineCodes([]);
             return;
@@ -635,7 +643,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
 
             // Map ĐNXM fields to orders table
             const safeMachineCode = parseMachineCodes(formData.machineCode).join(', ');
-            const safeQuantityApproved = canEditApprovedQuantity ? formData.quantityApproved : '';
+            const safeQuantityApproved = formData.quantityApproved || '';
             const warehouseCodeForOrder = sanitizeWarehouseForOrder(formData.warehouse);
 
             if (formData.warehouse && !warehouseCodeForOrder) {
@@ -644,6 +652,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
 
             const orderData = {
                 order_code: formData.orangeNumber || `DNXM-${Date.now().toString().slice(-6)}`,
+                customer_id: formData.customerId || null,
                 customer_name: formData.customerName,
                 recipient_name: formData.facilityName || formData.customerName, // Required NOT NULL
                 recipient_address: formData.placementAddress || 'N/A', // Required NOT NULL
@@ -960,31 +969,48 @@ Ghi chú: ${formData.notes}`,
                                         className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
                                     />
                                 </div>
-                                <div className="relative">
+                                <div className="relative" ref={facilityDropdownRef}>
                                     <label className="block text-sm font-medium text-foreground mb-1.5">Tên cơ sở</label>
+                                    <div className="relative">
                                     <input
                                         type="text"
                                         value={formData.facilityName}
                                         onFocus={() => facilities.length > 0 && setIsFacilityDropdownOpen(true)}
                                         onChange={(e) => handleInputChange('facilityName', e.target.value)}
-                                        className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                        className={clsx(
+                                            'w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20',
+                                            facilities.length > 0 && 'pr-10'
+                                        )}
                                     />
+                                    {facilities.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsFacilityDropdownOpen((open) => !open)}
+                                            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-primary/50 hover:text-primary"
+                                        >
+                                            <ChevronDown size={18} className={isFacilityDropdownOpen ? 'rotate-180' : ''} />
+                                        </button>
+                                    )}
+                                    </div>
                                     {isFacilityDropdownOpen && facilities.length > 0 && (
                                         <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 shadow-2xl rounded-xl overflow-hidden animate-in fade-in slide-in-from-top-1">
                                             <div className="p-2 border-b border-primary/10 bg-primary/5 text-[10px] font-bold text-primary uppercase tracking-wider flex items-center justify-between">
                                                 <div className="flex items-center gap-1.5">
-                                                    <Warehouse size={12} /> Chọn cơ sở tương ứng
+                                                    <Warehouse size={12} /> Chọn cơ sở tương ứng ({facilities.length})
                                                 </div>
-                                                <button onClick={() => setIsFacilityDropdownOpen(false)} className="text-slate-400 hover:text-rose-500"><X size={14}/></button>
+                                                <button type="button" onClick={() => setIsFacilityDropdownOpen(false)} className="text-slate-400 hover:text-rose-500"><X size={14}/></button>
                                             </div>
                                             <div className="max-h-48 overflow-y-auto custom-scrollbar">
                                                 {facilities.map(f => (
                                                     <div
                                                         key={f.id}
                                                         className="px-4 py-2.5 cursor-pointer hover:bg-slate-50 border-b border-slate-100 last:border-0 transition-colors"
-                                                        onClick={() => handleFacilitySelect(f)}
+                                                        onMouseDown={(e) => {
+                                                            e.preventDefault();
+                                                            handleFacilitySelect(f);
+                                                        }}
                                                     >
-                                                        <div className="font-bold text-slate-800 text-[13px]">{f.name}</div>
+                                                        <div className="font-bold text-slate-800 text-[13px]">{getFacilityDisplayName(f) || f.name}</div>
                                                         <div className="text-[11px] text-slate-500 mt-0.5 line-clamp-1 italic">{f.address}</div>
                                                     </div>
                                                 ))}
@@ -1088,12 +1114,6 @@ Ghi chú: ${formData.notes}`,
                                             {getWarehouseLabel(formData.warehouse)}
                                         </div>
                                     </div>
-                                    <div className="col-span-2">
-                                        <label className="mb-1.5 block text-sm font-medium text-muted-foreground">Sản phẩm (sẵn sàng trong kho)</label>
-                                        <div className="w-full rounded-lg border border-border/50 bg-muted/50 px-4 py-2 text-sm font-semibold text-slate-800">
-                                            {getProductLabel(formData.product)}
-                                        </div>
-                                    </div>
                                     <div>
                                         <label className="block text-sm font-medium text-foreground mb-1.5">Số lượng yêu cầu</label>
                                         <input
@@ -1105,20 +1125,10 @@ Ghi chú: ${formData.notes}`,
                                     </div>
                                     {!isSalesRole && (
                                         <div>
-                                            <label className="block text-sm font-medium text-foreground mb-1.5">Số lượng phê duyệt</label>
-                                            <input
-                                                type="text"
-                                                value={formData.quantityApproved}
-                                                readOnly={!canEditApprovedQuantity}
-                                                onChange={(e) => handleInputChange('quantityApproved', e.target.value)}
-                                                placeholder={canEditApprovedQuantity ? "Nhập số lượng phê duyệt" : "NVKD không có quyền nhập"}
-                                                className={clsx(
-                                                    "w-full px-4 py-2 border rounded-lg focus:outline-none transition-all",
-                                                    canEditApprovedQuantity
-                                                        ? "bg-background border-border focus:ring-2 focus:ring-primary/20"
-                                                        : "bg-muted/50 border-border/50 text-muted-foreground cursor-not-allowed italic font-normal"
-                                                )}
-                                            />
+                                            <label className="mb-1.5 block text-sm font-medium text-muted-foreground">Số lượng phê duyệt</label>
+                                            <div className="w-full rounded-lg border border-border/50 bg-muted/50 px-4 py-2 text-sm font-semibold text-slate-800">
+                                                {formData.quantityApproved?.trim() || '—'}
+                                            </div>
                                         </div>
                                     )}
                                     {!isSalesRole && (

@@ -12,6 +12,10 @@ import { useReports } from '../../hooks/useReports';
 import { supabase } from '../../supabase/config';
 import { isAdminRole, isWarehouseRole } from '../../utils/accessControl';
 import { stripDeliveryMediaFromNote } from '../../utils/orderNoteSanitize';
+import {
+    fetchCustomersByPhone,
+    resolveWarehouseCodeFromCustomer,
+} from '../../utils/customerOrderMatch';
 import BarcodeScanner from '../Common/BarcodeScanner';
 import OrderFormReadOnlyView from './OrderFormReadOnlyView';
 import clsx from 'clsx';
@@ -340,17 +344,26 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 
                 if (!isEdit && finalWarehouses.length > 0) {
                     const firstCoded = finalWarehouses.find((wh) => warehouseSelectCode(wh));
-                    let defaultWh = firstCoded ? warehouseSelectCode(firstCoded) : '';
+                    let roleDefaultWh = firstCoded ? warehouseSelectCode(firstCoded) : '';
                     if (isWarehouseRole(role) && department) {
                         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
                         const matched = finalWarehouses.find(wh => wh.name === userWhCode || wh.id === userWhCode || wh.code === userWhCode);
-                        if (matched) defaultWh = resolveWarehouseCode(warehouseSelectCode(matched) || matched.id || matched.name, finalWarehouses);
+                        if (matched) roleDefaultWh = resolveWarehouseCode(warehouseSelectCode(matched) || matched.id || matched.name, finalWarehouses);
                     }
-                    
-                    setFormData(prev => {
-                        const newWh = resolveWarehouseCode(prev.warehouse, finalWarehouses) || defaultWh;
-                        updateStockOptions(newWh, finalWarehouses);
-                        return { ...prev, warehouse: newWh };
+
+                    setFormData((prev) => {
+                        const customer = customers.find((c) => String(c.id) === String(prev.customerId));
+                        const customerWh = customer
+                            ? resolveWarehouseCodeFromCustomer(customer, finalWarehouses)
+                            : '';
+                        const resolvedPrev = resolveWarehouseCode(prev.warehouse, finalWarehouses);
+                        const newWh = customerWh || resolvedPrev || roleDefaultWh;
+                        if (newWh !== prev.warehouse) {
+                            updateStockOptions(newWh, finalWarehouses);
+                            return { ...prev, warehouse: newWh };
+                        }
+                        if (newWh) updateStockOptions(newWh, finalWarehouses);
+                        return prev;
                     });
                 } else if (isEdit && order.warehouse) {
                     const editWhCode = resolveWarehouseCode(order.warehouse, finalWarehouses);
@@ -441,7 +454,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         try {
             const { data, error } = await supabase
                 .from('customers')
-                .select('id, name, legal_rep, phone, address, category')
+                .select('id, name, legal_rep, phone, address, category, warehouse_id, agency_name, invoice_company_name')
                 .order('name', { ascending: true })
                 .limit(10000);
 
@@ -453,7 +466,10 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 address: c.address,
                 recipient: c.legal_rep || c.representative || c.name,
                 phone: c.phone,
-                category: c.category
+                category: c.category,
+                warehouse_id: c.warehouse_id,
+                agency_name: c.agency_name,
+                invoice_company_name: c.invoice_company_name,
             }));
             setCustomers(dbCustomers);
         } catch (error) {
@@ -620,33 +636,50 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         }
     };
 
+    useEffect(() => {
+        if (isEdit || !formData.customerId || !warehousesList.length) return;
+        const customer = customers.find((c) => String(c.id) === String(formData.customerId));
+        if (!customer?.warehouse_id) return;
+        const whCode = resolveWarehouseCodeFromCustomer(customer, warehousesList);
+        if (!whCode) return;
+        setFormData((prev) => {
+            if (prev.warehouse === whCode) return prev;
+            updateStockOptions(whCode, warehousesList);
+            return { ...prev, warehouse: whCode };
+        });
+    }, [isEdit, formData.customerId, customers, warehousesList]);
+
     const handleCustomerSelect = async (customer) => {
-        setFormData(prev => ({
-            ...prev,
-            customerId: customer.id,
-            recipientName: customer.recipient || customer.legal_rep || customer.name || '',
-            recipientAddress: customer.address || '',
-            recipientPhone: customer.phone || '',
-            customerCategory: customer.category || 'TM'
-        }));
+        const whCode = resolveWarehouseCodeFromCustomer(customer, warehousesList);
+        setFormData((prev) => {
+            const next = {
+                ...prev,
+                customerId: customer.id,
+                recipientName: customer.recipient || customer.legal_rep || customer.name || '',
+                recipientAddress: customer.address || '',
+                recipientPhone: customer.phone || '',
+                customerCategory: customer.category || 'TM',
+                warehouse: whCode || prev.warehouse,
+            };
+            if (whCode) updateStockOptions(whCode, warehousesList);
+            return next;
+        });
         setIsCustomerDropdownOpen(false);
         setCustomerSearchTerm('');
 
-        // Fetch related facilities (locations with same phone)
         if (customer.phone) {
             try {
-                const { data } = await supabase
-                    .from('customers')
-                    .select('id, name, legal_rep, phone, address, category, agency_name')
-                    .eq('phone', customer.phone);
-                
-                if (data && data.length > 1) {
-                    const mappedFacilities = data.map(f => ({
+                const data = await fetchCustomersByPhone(customer.phone);
+                if (data.length > 1) {
+                    const mappedFacilities = data.map((f) => ({
                         id: f.id,
                         name: f.name,
                         address: f.address,
                         recipient: f.legal_rep || f.name,
-                        agency_name: f.agency_name
+                        agency_name: f.agency_name,
+                        warehouse_id: f.warehouse_id,
+                        phone: f.phone,
+                        category: f.category,
                     }));
                     setFacilities(mappedFacilities);
                     setIsFacilityDropdownOpen(true);
@@ -660,11 +693,19 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
     };
 
     const handleFacilitySelect = (facility) => {
-        setFormData(prev => ({
-            ...prev,
-            recipientName: facility.recipient || facility.name,
-            recipientAddress: facility.address || prev.recipientAddress
-        }));
+        const whCode = resolveWarehouseCodeFromCustomer(facility, warehousesList);
+        setFormData((prev) => {
+            const next = {
+                ...prev,
+                customerId: facility.id || prev.customerId,
+                recipientName: facility.recipient || facility.name,
+                recipientAddress: facility.address || prev.recipientAddress,
+                customerCategory: facility.category || prev.customerCategory,
+                warehouse: whCode || prev.warehouse,
+            };
+            if (whCode) updateStockOptions(whCode, warehousesList);
+            return next;
+        });
         setIsFacilityDropdownOpen(false);
     };
 

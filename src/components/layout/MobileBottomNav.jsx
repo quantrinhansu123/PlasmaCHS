@@ -1,60 +1,106 @@
 import React from 'react';
-import { ChevronLeft, Home, ClipboardList } from 'lucide-react';
+import { Home, Package, Warehouse, Bell, User } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { clsx } from 'clsx';
 import { usePermissions } from '../../hooks/usePermissions';
 import { canAccessPath } from '../../utils/accessControl';
 
+const NAV_ITEMS = [
+  {
+    id: 'home',
+    label: 'Trang chủ',
+    path: '/trang-chu',
+    icon: Home,
+    isActive: (path) => path === '/trang-chu' || path === '/',
+  },
+  {
+    id: 'orders',
+    label: 'Đơn hàng',
+    path: '/don-hang',
+    icon: Package,
+    canAccess: (role, permissions) => canAccessPath('/don-hang', role, permissions),
+    isActive: (path) => path === '/don-hang' || path.startsWith('/don-hang-kinh-doanh'),
+  },
+  {
+    id: 'warehouse',
+    label: 'Kho',
+    path: '/kho',
+    icon: Warehouse,
+    canAccess: (role, permissions) => canAccessPath('/kho', role, permissions),
+    isActive: (path) => path === '/kho' || path.startsWith('/kho/'),
+  },
+  {
+    id: 'notifications',
+    label: 'Thông báo',
+    action: 'notifications',
+    icon: Bell,
+    isActive: () => false,
+  },
+  {
+    id: 'profile',
+    label: 'Tài khoản',
+    path: '/ho-so',
+    icon: User,
+    isActive: (path) => path === '/ho-so',
+  },
+];
+
 function MobileBottomNav() {
   const navigate = useNavigate();
-  const { role, permissions } = usePermissions();
   const location = useLocation();
+  const { role, permissions } = usePermissions();
 
-  const isHome = location.pathname === '/trang-chu' || location.pathname === '/';
+  const handleNav = (item) => {
+    if (item.action === 'notifications') {
+      window.dispatchEvent(new CustomEvent('plasmavn:open-notifications'));
+      return;
+    }
+    if (item.path) {
+      navigate(item.path);
+    }
+  };
+
+  const visibleItems = NAV_ITEMS.filter(
+    (item) => !item.canAccess || item.canAccess(role, permissions)
+  );
 
   return (
-    <div className="lg:hidden fixed bottom-0 left-0 right-0 h-14 bg-white border-t border-slate-100 z-40 px-8 flex items-center justify-between pb-safe shadow-[0_-4px_12px_rgba(0,0,0,0.03)]">
-      {/* Back Button */}
-      <button
-        onClick={() => navigate(-1)}
-        className="!p-2 !h-10 !w-10 !min-w-0 !rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-colors"
-      >
-        <ChevronLeft size={24} strokeWidth={2} />
-      </button>
+    <nav
+      className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-100 shadow-[0_-4px_20px_rgba(15,23,42,0.06)] pb-safe"
+      aria-label="Điều hướng chính"
+    >
+      <div className="flex items-stretch justify-around px-1 pt-1.5 pb-1.5 min-h-[62px]">
+        {visibleItems.map((item) => {
+          const active = item.isActive(location.pathname);
+          const Icon = item.icon;
 
-      {/* Floating Home Button - FORCED CIRCULAR */}
-      <button
-        onClick={() => navigate('/trang-chu')}
-        className={clsx(
-          "relative !w-12 !h-12 !p-0 !rounded-full flex items-center justify-center -translate-y-4 shadow-[0_8px_20px_-4px_rgba(0,0,0,0.12)] border border-slate-50 transition-all duration-300 hover:scale-110 active:scale-95 group",
-          isHome ? "bg-white text-primary" : "bg-white text-slate-500"
-        )}
-      >
-        <div className="absolute inset-0 !rounded-full bg-white" />
-        <Home 
-          size={22} 
-          strokeWidth={2.2} 
-          className="relative z-10"
-        />
-      </button>
-
-      {/* Right Slot: Shipping Tasks or Spacer */}
-      {canAccessPath('/nhiem-vu-giao-hang', role, permissions) ? (
-        <button
-          onClick={() => navigate('/nhiem-vu-giao-hang')}
-          className={clsx(
-            '!p-2 !h-10 !w-10 !min-w-0 !rounded-full flex items-center justify-center transition-colors',
-            location.pathname === '/nhiem-vu-giao-hang' ? 'text-primary bg-primary/5' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
-          )}
-        >
-          <ClipboardList size={22} strokeWidth={2} />
-        </button>
-      ) : (
-        <div className="w-10" />
-      )}
-    </div>
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => handleNav(item)}
+              className={clsx(
+                'flex flex-1 flex-col items-center justify-center gap-0.5 min-w-0 px-1 py-1 rounded-xl transition-colors',
+                active ? 'text-blue-600' : 'text-slate-500 hover:text-slate-800'
+              )}
+            >
+              <span
+                className={clsx(
+                  'flex h-9 w-9 items-center justify-center rounded-full transition-all',
+                  active && 'bg-blue-50 shadow-sm'
+                )}
+              >
+                <Icon size={21} strokeWidth={active ? 2.4 : 2} />
+              </span>
+              <span className={clsx('text-[10px] font-semibold leading-tight truncate max-w-full', active && 'text-blue-600')}>
+                {item.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
   );
 }
 
 export default MobileBottomNav;
-

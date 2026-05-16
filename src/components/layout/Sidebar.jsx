@@ -128,10 +128,7 @@ function NavItem({ item, onClick, isOpen }) {
           isOpen ? 'w-10 h-10 mr-3' : 'w-11 h-11'
         )}
       >
-        <item.icon
-          size={22}
-          strokeWidth={2.25}
-        />
+        <item.icon size={22} strokeWidth={2.25} />
       </div>
 
       <span

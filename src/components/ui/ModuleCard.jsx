@@ -1,25 +1,16 @@
 import React from 'react';
 import { clsx } from 'clsx';
-import { HelpCircle, Star } from 'lucide-react';
+import { ChevronRight, HelpCircle, Star } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { ModuleIconBox } from './ModuleIconBox';
+import {
+  flatIconBoxClass,
+  flatIconColorMap,
+  mobileModuleCardClass,
+  desktopModuleCardClass,
+} from './moduleIconStyles';
 
-const colorMap = {
-  red: 'bg-red-500/10 text-red-500',
-  green: 'bg-emerald-500/10 text-emerald-500',
-  pink: 'bg-pink-500/10 text-pink-500',
-  blue: 'bg-blue-500/10 text-blue-500',
-  orange: 'bg-orange-500/10 text-orange-500',
-  teal: 'bg-teal-500/10 text-teal-500',
-  purple: 'bg-purple-500/10 text-purple-500',
-  cyan: 'bg-cyan-500/10 text-cyan-500',
-  emerald: 'bg-emerald-500/10 text-emerald-500',
-  amber: 'bg-amber-500/10 text-amber-500',
-  slate: 'bg-slate-500/10 text-slate-500',
-  gray: 'bg-gray-500/10 text-gray-500',
-  yellow: 'bg-yellow-500/10 text-yellow-500',
-};
-
-export const ModuleCard = ({
+export function ModuleCard({
   icon: Icon,
   title,
   description,
@@ -27,8 +18,10 @@ export const ModuleCard = ({
   path,
   isBookmarked = false,
   onToggleBookmark,
-}) => {
+  cardLayout = 'default',
+}) {
   const navigate = useNavigate();
+  const isHome = cardLayout === 'home';
 
   const handleClick = () => {
     if (path) {
@@ -36,48 +29,88 @@ export const ModuleCard = ({
     }
   };
 
+  const bookmarkButtons = (className = '') => (
+    <div
+      className={clsx('hidden md:flex flex-col gap-3 shrink-0 text-muted-foreground/30', className)}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <button
+        type="button"
+        onClick={() => onToggleBookmark?.(path)}
+        className={clsx(
+          'transition-colors',
+          isBookmarked ? 'text-amber-500' : 'text-muted-foreground/30 hover:text-amber-500'
+        )}
+        title={isBookmarked ? 'Bỏ đánh dấu' : 'Đánh dấu'}
+        disabled={!path}
+      >
+        <Star size={15} className={clsx(isBookmarked && 'fill-current')} />
+      </button>
+      <button type="button" className="hover:text-primary transition-colors" title="Hướng dẫn sử dụng">
+        <HelpCircle size={15} />
+      </button>
+    </div>
+  );
+
   return (
     <div
       onClick={handleClick}
       className={clsx(
-        'group flex items-center bg-white rounded-xl p-4 transition-all duration-300 border border-border hover:border-primary/30 hover:shadow-sm cursor-pointer hover:-translate-y-0.5',
-        !path && 'opacity-60 grayscale-[0.5] cursor-not-allowed hover:translate-y-0 hover:border-border'
+        'group transition-all duration-200 cursor-pointer',
+        isHome && mobileModuleCardClass,
+        isHome && desktopModuleCardClass,
+        !isHome &&
+          'flex items-center gap-4 bg-[#e8e8e8] rounded-[28px] p-5 lg:p-6 min-h-[120px] border border-black/10 hover:border-black/20 hover:-translate-y-0.5',
+        !path && 'opacity-60 grayscale-[0.5] cursor-not-allowed hover:translate-y-0 hover:border-border lg:grayscale-[0.5]'
       )}
     >
-      <div
-        className={clsx(
-          'w-11 h-11 rounded-xl flex items-center justify-center shrink-0 mr-3 transition-transform group-hover:scale-110',
-          colorMap[colorScheme]
-        )}
-      >
-        <Icon size={22} />
-      </div>
+      {isHome ? (
+        <>
+          <span className="lg:hidden">
+            <ModuleIconBox icon={Icon} colorScheme={colorScheme} size="card" />
+          </span>
+          <span className="hidden lg:block">
+            <ModuleIconBox icon={Icon} colorScheme={colorScheme} size="lg" />
+          </span>
 
-      <div className="flex-1 min-w-0 pr-2">
-        <h3 className="font-bold text-[14px] text-foreground mb-0.5 truncate transition-colors">
-          {title}
-        </h3>
-        <p className="text-[12px] text-muted-foreground truncate leading-snug">
-          {description}
-        </p>
-      </div>
+          <div className="mt-2.5 flex-1 flex flex-col min-w-0 pr-8">
+            <h3 className="font-bold text-[13px] leading-snug text-slate-900 line-clamp-2 lg:mt-0 lg:pr-0 lg:font-extrabold lg:text-[34px] xl:text-[40px] lg:text-[#1a1a1a] lg:leading-tight lg:line-clamp-none">
+              {title}
+            </h3>
+            {description ? (
+              <p className="mt-1 text-[11px] leading-[1.45] text-slate-500 line-clamp-2 lg:hidden">
+                {description}
+              </p>
+            ) : null}
+          </div>
 
-      <div className="flex flex-col gap-3 shrink-0 text-muted-foreground/30" onClick={(event) => event.stopPropagation()}>
-        <button
-          onClick={() => onToggleBookmark?.(path)}
-          className={clsx(
-            'transition-colors',
-            isBookmarked ? 'text-amber-500' : 'text-muted-foreground/30 hover:text-amber-500'
-          )}
-          title={isBookmarked ? 'Bỏ đánh dấu' : 'Đánh dấu'}
-          disabled={!path}
-        >
-          <Star size={15} className={clsx(isBookmarked && 'fill-current')} />
-        </button>
-        <button className="hover:text-primary transition-colors" title="Hướng dẫn sử dụng">
-          <HelpCircle size={15} />
-        </button>
-      </div>
+          <span
+            className="absolute bottom-3 right-3 lg:hidden flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/90 bg-white text-slate-400 shadow-sm"
+            aria-hidden
+          >
+            <ChevronRight size={16} strokeWidth={2.5} />
+          </span>
+
+          {bookmarkButtons('absolute top-4 right-4')}
+        </>
+      ) : (
+        <>
+          <div className={clsx(flatIconBoxClass, flatIconColorMap[colorScheme] || flatIconColorMap.blue)}>
+            <Icon size={30} strokeWidth={1.8} />
+          </div>
+
+          <div className="flex-1 min-w-0 pr-2">
+            <h3 className="font-extrabold text-[34px] lg:text-[40px] text-[#1a1a1a] leading-tight">
+              {title}
+            </h3>
+          </div>
+
+          {bookmarkButtons()}
+        </>
+      )}
     </div>
   );
-};
+}
+
+export default ModuleCard;
+

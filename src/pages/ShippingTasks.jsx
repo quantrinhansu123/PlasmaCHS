@@ -25,6 +25,14 @@ import {
 } from '../utils/orderMachineSerials';
 import { normalizeTransferActionRecord } from '../utils/normalizeTransferActionRecord';
 import { persistTransferHandover } from '../utils/persistTransferHandover';
+import {
+    isCloudinaryDeliveryUrl,
+    isCloudinaryConfigured,
+    uploadDeliveryProofFile,
+} from '../utils/cloudinaryUpload';
+import RecoveryDeliveryConfirmModal from '../components/CylinderRecovery/RecoveryDeliveryConfirmModal';
+import { tryQuickCompleteRecovery } from '../utils/cylinderRecoveryCompletion';
+
 /** Chỉ các đơn này còn được mở modal «Xác nhận giao hàng». */
 const ORDER_STATUSES_NEED_DELIVERY_CONFIRM = ['CHO_GIAO_HANG', 'DANG_GIAO_HANG'];
 
@@ -49,11 +57,20 @@ const ShippingTasks = () => {
     const { role } = usePermissions();
     const [orders, setOrders] = useState([]);
     const [transferTasks, setTransferTasks] = useState([]);
+    const [recoveryTasks, setRecoveryTasks] = useState([]);
+    const [receiptTasks, setReceiptTasks] = useState([]);
+    const [issueTasks, setIssueTasks] = useState([]);
+    const [customersMap, setCustomersMap] = useState({});
+    const [suppliersMap, setSuppliersMap] = useState({});
     const [warehouseNameById, setWarehouseNameById] = useState({});
     const [isLoading, setIsLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedOrder, setSelectedOrder] = useState(null);
     const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+    const [selectedRecovery, setSelectedRecovery] = useState(null);
+    const [recoveryConfirmItems, setRecoveryConfirmItems] = useState([]);
+    const [isRecoveryConfirmOpen, setIsRecoveryConfirmOpen] = useState(false);
+    const [isSubmittingRecoveryConfirm, setIsSubmittingRecoveryConfirm] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [uploadedImages, setUploadedImages] = useState([]);
     const [notes, setNotes] = useState('');
@@ -99,8 +116,41 @@ const ShippingTasks = () => {
             setOrders(orderData || []);
 
             // Also load inventory transfer requests so "Luân chuyển" shows up in Vận chuyển.
-            const [{ data: transferRows, error: transferError }, { data: whRows, error: whError }] =
-                await Promise.all([
+            let recoveryQuery = supabase
+                .from('cylinder_recoveries')
+                .select('*')
+                .in('status', ['DANG_THU_HOI', 'CHO_PHAN_CONG'])
+                .order('created_at', { ascending: false })
+            let receiptQuery = supabase
+                .from('goods_receipts')
+                .select('*')
+                .in('status', ['DA_NHAP', 'CHO_DUYET'])
+                .order('created_at', { ascending: false })
+                .limit(300);
+
+            let issueQuery = supabase
+                .from('goods_issues')
+                .select('*')
+                .in('status', ['DA_XUAT', 'CHO_DUYET'])
+                .order('created_at', { ascending: false })
+                .limit(300);
+
+            if (shipperOnly) {
+                const shipperFilter = shipperKey || '__NO_SHIPPER_NAME__';
+                recoveryQuery = recoveryQuery.eq('driver_name', shipperFilter);
+                receiptQuery = receiptQuery.eq('deliverer_name', shipperFilter);
+                issueQuery = issueQuery.eq('deliverer_name', shipperFilter);
+            }
+
+            const [
+                { data: transferRows, error: transferError },
+                { data: whRows, error: whError },
+                { data: recoveryRows, error: recoveryErr },
+                { data: customerRows, error: custErr },
+                { data: receiptRows, error: receiptErr },
+                { data: issueRows, error: issueErr },
+                { data: supplierRows, error: supErr }
+            ] = await Promise.all([
                     supabase
                         .from('inventory_transfer_requests')
                         .select('*')
@@ -111,14 +161,33 @@ const ShippingTasks = () => {
                         .from('warehouses')
                         .select('id, name')
                         .order('name'),
+                    recoveryQuery,
+                    supabase.from('customers').select('id, name, phone, address'),
+                    receiptQuery,
+                    issueQuery,
+                    supabase.from('suppliers').select('id, name')
                 ]);
 
             if (transferError) throw transferError;
             if (whError) throw whError;
+            if (recoveryErr) throw recoveryErr;
+            if (custErr) throw custErr;
+            if (receiptErr) throw receiptErr;
+            if (issueErr) throw issueErr;
+            if (supErr) throw supErr;
 
             const whMap = Object.fromEntries((whRows || []).map((w) => [String(w.id), String(w.name || w.id)]));
             setWarehouseNameById(whMap);
             setTransferTasks(Array.isArray(transferRows) ? transferRows : []);
+            setRecoveryTasks(Array.isArray(recoveryRows) ? recoveryRows : []);
+            setReceiptTasks(Array.isArray(receiptRows) ? receiptRows : []);
+            setIssueTasks(Array.isArray(issueRows) ? issueRows : []);
+            
+            const custMap = Object.fromEntries((customerRows || []).map((c) => [String(c.id), c]));
+            setCustomersMap(custMap);
+
+            const supMap = Object.fromEntries((supplierRows || []).map((s) => [String(s.id), s]));
+            setSuppliersMap(supMap);
         } catch (error) {
             console.error('Error fetching delivery tasks:', error);
             toast.error('❌ Không thể tải danh sách nhiệm vụ: ' + error.message);
@@ -133,43 +202,22 @@ const ShippingTasks = () => {
 
         setUploading(true);
         const newImages = [...uploadedImages];
-        const fileToDataUrl = (file) =>
-            new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(String(reader.result || ''));
-                reader.onerror = reject;
-                reader.readAsDataURL(file);
-            });
 
         try {
+            if (!isCloudinaryConfigured()) {
+                throw new Error(
+                    'Chưa cấu hình Cloudinary. Thêm VITE_CLOUDINARY_CLOUD_NAME và VITE_CLOUDINARY_UPLOAD_PRESET vào .env, rồi khởi động lại npm run dev.',
+                );
+            }
             for (const file of files) {
-                const fileExt = file.name.split('.').pop();
-                const fileName = `${Math.random()}.${fileExt}`;
-                const filePath = `delivery_proofs/${selectedOrder.order_code}/${fileName}`;
-
-                const { error: uploadError } = await supabase.storage
-                    .from('delivery_proofs')
-                    .upload(filePath, file);
-
-                if (uploadError) {
-                    if (String(uploadError.message || '').includes('Bucket not found')) {
-                        const dataUrl = await fileToDataUrl(file);
-                        if (dataUrl) {
-                            newImages.push(dataUrl);
-                            continue;
-                        }
-                    }
-                    throw uploadError;
-                }
-
-                const { data: { publicUrl } } = supabase.storage
-                    .from('delivery_proofs')
-                    .getPublicUrl(filePath);
-
-                newImages.push(publicUrl);
+                const { url } = await uploadDeliveryProofFile(
+                    file,
+                    `plasmavn/delivery_proofs/shipping/${selectedOrder?.order_code || 'tasks'}`,
+                );
+                newImages.push(url);
             }
             setUploadedImages(newImages);
-            toast.success('🎉 Đã tải lên ' + files.length + ' ảnh!');
+            toast.success(`Đã tải lên Cloudinary ${files.length} ảnh.`);
         } catch (error) {
             console.error('Error uploading images:', error);
             toast.error('❌ Lỗi tải ảnh: ' + error.message);
@@ -235,11 +283,61 @@ const ShippingTasks = () => {
         [warehouseNameById],
     );
 
+    const openRecoveryConfirmModal = useCallback(async (recovery) => {
+        if (!recovery?.id) return;
+        try {
+            const { data: itemRows, error } = await supabase
+                .from('cylinder_recovery_items')
+                .select('id, serial_number, condition, note')
+                .eq('recovery_id', recovery.id)
+                .order('created_at', { ascending: true });
+            if (error) throw error;
+
+            setSelectedRecovery(recovery);
+            setRecoveryConfirmItems(itemRows || []);
+            setIsRecoveryConfirmOpen(true);
+        } catch (err) {
+            console.error(err);
+            toast.error('Không tải được danh sách mã bình: ' + (err?.message || ''));
+        }
+    }, []);
+
+    const closeRecoveryConfirmModal = useCallback(() => {
+        setIsRecoveryConfirmOpen(false);
+        setSelectedRecovery(null);
+        setRecoveryConfirmItems([]);
+    }, []);
+
+    const confirmRecoveryDelivery = async (photoUrls = []) => {
+        if (!selectedRecovery?.id) return;
+        if (!Array.isArray(photoUrls) || photoUrls.length === 0) {
+            toast.error('Vui lòng chụp ít nhất một ảnh hiện trường.');
+            return;
+        }
+        setIsSubmittingRecoveryConfirm(true);
+        try {
+            const res = await tryQuickCompleteRecovery(supabase, selectedRecovery.id, { photos: photoUrls });
+            if (res?.ok) {
+                closeRecoveryConfirmModal();
+                fetchShippingTasks();
+            }
+        } catch (err) {
+            console.error(err);
+            toast.error('Xác nhận thu hồi thất bại: ' + (err?.message || ''));
+        } finally {
+            setIsSubmittingRecoveryConfirm(false);
+        }
+    };
+
     const openGiaoHangTask = useCallback(
         (task) => {
             if (!task?.row) return;
             if (task.kind === 'TRANSFER') {
                 openTransferHandover(task.row);
+                return;
+            }
+            if (task.kind === 'RECOVERY') {
+                void openRecoveryConfirmModal(task.row);
                 return;
             }
             if (task.kind === 'ORDER') {
@@ -250,7 +348,7 @@ const ShippingTasks = () => {
                 void openDeliveryConfirmModal(task.row);
             }
         },
-        [openDeliveryConfirmModal, openTransferHandover],
+        [openDeliveryConfirmModal, openRecoveryConfirmModal, openTransferHandover],
     );
 
     const closeTransferHandover = useCallback(() => {
@@ -292,9 +390,6 @@ const ShippingTasks = () => {
                 transferChecklist,
             });
 
-            if (String(proofUrl || '').startsWith('data:')) {
-                toast.warn('Bucket ảnh chưa tạo. Đã lưu ảnh tạm dạng base64 để tiếp tục thao tác.');
-            }
             toast.success('Đã xác nhận bàn giao luân chuyển.');
             closeTransferHandover();
             fetchShippingTasks();
@@ -399,15 +494,22 @@ const ShippingTasks = () => {
                 deliveryStatus !== 'HOAN_THANH' ? 'TRA_HANG' : 'HOAN_THANH';
             const notePrefix = finalStatus === 'TRA_HANG' ? '[Lý do Giao Không Thành Công]: ' : '[Ghi chú Shipper]: ';
             const newNoteText = notes ? `\n${notePrefix}${notes}` : '';
-            const uploadedProofText = finalStatus === 'HOAN_THANH' && uploadedImages.length > 0
-                ? `\n[Ảnh giao hàng]: ${uploadedImages.join(', ')}`
+            const proofUrls = uploadedImages.filter((url) => isCloudinaryDeliveryUrl(url));
+            if (finalStatus === 'HOAN_THANH' && uploadedImages.length > 0 && proofUrls.length !== uploadedImages.length) {
+                throw new Error('Một hoặc nhiều ảnh chưa upload Cloudinary. Vui lòng chọn lại ảnh sau khi cấu hình .env.');
+            }
+            const firstProof = proofUrls[0] || '';
+            const uploadedProofText = finalStatus === 'HOAN_THANH' && proofUrls.length > 0
+                ? `\n[Ảnh giao hàng]: ${proofUrls.join(', ')}`
                 : '';
             const deliveryImageUrl = finalStatus === 'HOAN_THANH'
-                ? (uploadedImages[0] || selectedOrder.delivery_image_url || null)
+                ? (firstProof || selectedOrder.delivery_image_url || null)
                 : selectedOrder.delivery_image_url;
-            const deliveryProofBase64 = finalStatus === 'HOAN_THANH' && String(uploadedImages[0] || '').startsWith('data:image')
-                ? uploadedImages[0]
-                : (selectedOrder.delivery_proof_base64 || null);
+            const deliveryProofBase64 = finalStatus === 'HOAN_THANH' && firstProof
+                ? firstProof
+                : (isCloudinaryDeliveryUrl(selectedOrder.delivery_proof_base64)
+                    ? selectedOrder.delivery_proof_base64
+                    : null);
 
             /** Gộp tick máy shipper vào JSON (đồng bộ với OrderStatusUpdater / parseCylinderSerialsFromOrder). */
             let nextDeliveryChecklist =
@@ -546,15 +648,44 @@ const ShippingTasks = () => {
         );
     });
 
-    const combinedTasks = [...filteredOrders.map((order) => ({ kind: 'ORDER', row: order })), ...filteredTransfers.map((tr) => ({ kind: 'TRANSFER', row: tr }))].sort((a, b) => {
-        const aTime =
-            a.kind === 'ORDER'
-                ? new Date(a.row?.created_at || a.row?.updated_at || 0).getTime()
-                : new Date(a.row?.created_at || a.row?.updated_at || 0).getTime();
-        const bTime =
-            b.kind === 'ORDER'
-                ? new Date(b.row?.created_at || b.row?.updated_at || 0).getTime()
-                : new Date(b.row?.created_at || b.row?.updated_at || 0).getTime();
+    const filteredRecoveries = recoveryTasks.filter((rec) => {
+        if (rec.status === 'HOAN_THANH' || rec.status === 'HUY') return false;
+        if (!searchTerm) return true;
+        const q2 = searchTerm.toLowerCase();
+        return (
+            String(rec.recovery_code || '').toLowerCase().includes(q2) ||
+            String(rec.driver_name || '').toLowerCase().includes(q2)
+        );
+    });
+
+    const filteredReceipts = receiptTasks.filter((rec) => {
+        if (!searchTerm) return true;
+        const q2 = searchTerm.toLowerCase();
+        return (
+            String(rec.receipt_code || '').toLowerCase().includes(q2) ||
+            String(rec.supplier_name || '').toLowerCase().includes(q2) ||
+            String(rec.deliverer_name || '').toLowerCase().includes(q2)
+        );
+    });
+
+    const filteredIssues = issueTasks.filter((iss) => {
+        if (!searchTerm) return true;
+        const q2 = searchTerm.toLowerCase();
+        return (
+            String(iss.issue_code || '').toLowerCase().includes(q2) ||
+            String(iss.deliverer_name || '').toLowerCase().includes(q2)
+        );
+    });
+
+    const combinedTasks = [
+        ...filteredOrders.map((order) => ({ kind: 'ORDER', row: order })), 
+        ...filteredTransfers.map((tr) => ({ kind: 'TRANSFER', row: tr })),
+        ...filteredRecoveries.map((rec) => ({ kind: 'RECOVERY', row: rec })),
+        ...filteredReceipts.map((r) => ({ kind: 'RECEIPT', row: r })),
+        ...filteredIssues.map((i) => ({ kind: 'ISSUE', row: i }))
+    ].sort((a, b) => {
+        const aTime = new Date(a.row?.created_at || a.row?.updated_at || 0).getTime();
+        const bTime = new Date(b.row?.created_at || b.row?.updated_at || 0).getTime();
         return bTime - aTime;
     });
 
@@ -618,6 +749,100 @@ const ShippingTasks = () => {
 
     const renderCombinedTaskCards = () =>
         listTasks.map((it) => {
+            if (it.kind === 'RECOVERY') {
+                const rec = it.row;
+                const cust = customersMap[String(rec.customer_id)] || {};
+                const customerName = cust.name || rec.customer_id || '—';
+                const customerPhone = cust.phone || '—';
+                const customerAddress = cust.address || '—';
+
+                return (
+                    <article key={`rec-${rec.id}`} className="rounded-xl border border-slate-200 bg-white shadow-sm p-3 flex flex-col gap-2">
+                        <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                                <span className="inline-block text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded uppercase">Thu hồi vỏ</span>
+                                <p className="text-[13px] font-black text-primary mt-1.5 leading-tight">{rec.recovery_code || '—'}</p>
+                            </div>
+                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[8px] font-bold border uppercase shrink-0', rec.status === 'DANG_THU_HOI' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700')}>
+                                {rec.status === 'DANG_THU_HOI' ? 'Đang thu hồi' : 'Chờ phân công'}
+                            </span>
+                        </div>
+
+                        {/* Thông tin khách hàng */}
+                        <div className="bg-slate-50 rounded-lg p-2 flex flex-col gap-1 border border-slate-100 mt-1">
+                            <p className="text-[11px] font-bold text-slate-800 line-clamp-2">Khách hàng: {customerName}</p>
+                            <p className="text-[10px] text-slate-600 font-medium">SĐT: {customerPhone}</p>
+                            <p className="text-[10px] text-slate-600 line-clamp-2" title={customerAddress}>Địa chỉ: {customerAddress}</p>
+                        </div>
+
+                        {rec.notes ? (
+                            <p className="text-[10px] text-slate-500 line-clamp-2" title={String(rec.notes)}>{rec.notes}</p>
+                        ) : null}
+                        <p className="text-[10px] text-slate-500 mb-1">Số lượng thu: <span className="font-bold text-slate-700">{rec.requested_quantity ?? '—'}</span></p>
+                        
+                        <div className="mt-auto pt-1">
+                            <button type="button" className={clsx(giaoHangActionBtnCls, 'w-full py-2 text-[10px] bg-amber-500 border-amber-500 text-white hover:bg-amber-600')} onClick={() => openRecoveryConfirmModal(rec)}>
+                                Xác nhận thu hồi
+                            </button>
+                        </div>
+                    </article>
+                );
+            }
+            if (it.kind === 'RECEIPT') {
+                const rec = it.row;
+                return (
+                    <article key={`receipt-${rec.id}`} className="rounded-xl border border-slate-200 bg-white shadow-sm p-3 flex flex-col gap-2">
+                        <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                                <span className="inline-block text-[9px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-1.5 py-0.5 rounded uppercase">Nhập hàng NCC</span>
+                                <p className="text-[13px] font-black text-primary mt-1.5 leading-tight">{rec.receipt_code || '—'}</p>
+                            </div>
+                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[8px] font-bold border uppercase shrink-0', 'bg-blue-100 text-blue-700')}>
+                                Chờ vận chuyển
+                            </span>
+                        </div>
+
+                        <div className="bg-slate-50 rounded-lg p-2 flex flex-col gap-1 border border-slate-100 mt-1">
+                            <p className="text-[11px] font-bold text-slate-800 line-clamp-2">NCC: {rec.supplier_name || '—'}</p>
+                            <p className="text-[10px] text-slate-600 line-clamp-2" title={rec.deliverer_address}>Địa chỉ nhận: {rec.deliverer_address || '—'}</p>
+                        </div>
+                        
+                        <div className="mt-auto pt-1">
+                            <button type="button" className={clsx(giaoHangActionBtnCls, 'w-full py-2 text-[10px] bg-teal-500 border-teal-500 text-white hover:bg-teal-600')} onClick={() => navigate(`/nhap-hang`)}>
+                                Thực hiện vận chuyển
+                            </button>
+                        </div>
+                    </article>
+                );
+            }
+            if (it.kind === 'ISSUE') {
+                const iss = it.row;
+                const supplierName = suppliersMap[String(iss.supplier_id)]?.name || '—';
+                return (
+                    <article key={`issue-${iss.id}`} className="rounded-xl border border-slate-200 bg-white shadow-sm p-3 flex flex-col gap-2">
+                        <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                                <span className="inline-block text-[9px] font-bold text-rose-700 bg-rose-50 border border-rose-100 px-1.5 py-0.5 rounded uppercase">Xuất trả NCC</span>
+                                <p className="text-[13px] font-black text-primary mt-1.5 leading-tight">{iss.issue_code || '—'}</p>
+                            </div>
+                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[8px] font-bold border uppercase shrink-0', 'bg-blue-100 text-blue-700')}>
+                                Chờ vận chuyển
+                            </span>
+                        </div>
+
+                        <div className="bg-slate-50 rounded-lg p-2 flex flex-col gap-1 border border-slate-100 mt-1">
+                            <p className="text-[11px] font-bold text-slate-800 line-clamp-2">NCC: {supplierName}</p>
+                            <p className="text-[10px] text-slate-600 line-clamp-2" title={iss.deliverer_address}>Địa chỉ giao: {iss.deliverer_address || '—'}</p>
+                        </div>
+                        
+                        <div className="mt-auto pt-1">
+                            <button type="button" className={clsx(giaoHangActionBtnCls, 'w-full py-2 text-[10px] bg-rose-500 border-rose-500 text-white hover:bg-rose-600')} onClick={() => navigate(`/xuat-tra-ncc`)}>
+                                Thực hiện vận chuyển
+                            </button>
+                        </div>
+                    </article>
+                );
+            }
             if (it.kind === 'TRANSFER') {
                 const tr = it.row;
                 const fromName = warehouseNameById[String(tr.from_warehouse_id)] || tr.from_warehouse_id || '—';
@@ -1080,11 +1305,6 @@ const ShippingTasks = () => {
                         <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white rounded-t-3xl z-10">
                             <div>
                                 <h2 className="text-xl font-bold text-slate-900">Phiếu xác nhận giao hàng</h2>
-                                <p className="text-[11px] font-semibold text-slate-500 mt-1 leading-snug">
-                                    Dữ liệu được ghi vào bảng nguồn{' '}
-                                    <span className="font-mono text-slate-700">orders</span>: ảnh (URL/base64/ghi chú),
-                                    <span className="font-mono text-slate-700"> delivery_checklist</span> theo từng mã máy đã tích.
-                                </p>
                             </div>
                             <button
                                 type="button"
@@ -1361,6 +1581,16 @@ const ShippingTasks = () => {
                 </div>,
 
                 document.body,
+            )}
+
+            {isRecoveryConfirmOpen && selectedRecovery && (
+                <RecoveryDeliveryConfirmModal
+                    recovery={selectedRecovery}
+                    items={recoveryConfirmItems}
+                    isSubmitting={isSubmittingRecoveryConfirm}
+                    onClose={closeRecoveryConfirmModal}
+                    onConfirm={confirmRecoveryDelivery}
+                />
             )}
 
         </div>

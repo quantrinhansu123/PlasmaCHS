@@ -54,6 +54,35 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
     const [isMachineDropdownOpen, setIsMachineDropdownOpen] = useState(false); // Renamed internally to Device later
     const [machineSearchTerm, setMachineSearchTerm] = useState('');
     const machineDropdownRef = useRef(null);
+    const customersRef = useRef(customers);
+    useEffect(() => { customersRef.current = customers; }, [customers]);
+
+    const normalizeCustomerText = (value) =>
+        String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase();
+
+    const belongsToCustomer = (assetCustomerName, customerName) => {
+        const normalizedAsset = normalizeCustomerText(assetCustomerName);
+        const normalizedCustomer = normalizeCustomerText(customerName);
+        if (!normalizedAsset || !normalizedCustomer) return false;
+        return (
+            normalizedAsset === normalizedCustomer
+            || normalizedAsset.includes(normalizedCustomer)
+            || normalizedCustomer.includes(normalizedAsset)
+        );
+    };
+
+    const formatDeviceLabel = (rawType, fallback) => {
+        if (!rawType) return fallback;
+        let formatted = rawType.toString().replace(/_/g, ' ');
+        if (formatted.toUpperCase().startsWith('BINH')) formatted = formatted.replace(/BINH/i, 'Bình');
+        if (formatted.toUpperCase().startsWith('MAY')) formatted = formatted.replace(/MAY/i, 'Máy');
+        return formatted;
+    };
 
     // Close dropdowns on outside click
     useEffect(() => {
@@ -121,7 +150,6 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                     ...prev,
                     customerId: initialCustomer.id
                 }));
-                fetchCustomerDevices(initialCustomer.name);
             }
 
             // Auto assign creator: KD + CSKH (có thể đổi trong form); kỹ thuật nếu đúng role
@@ -135,13 +163,6 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
             }
         }
     }, [ticket, isEdit, user, role, initialCustomer]);
-
-    useEffect(() => {
-        if (isEdit && ticket && customers.length > 0) {
-            const customer = customers.find(c => c.id === ticket.customer_id);
-            if (customer) fetchCustomerDevices(customer.name);
-        }
-    }, [isEdit, ticket, customers]);
 
     const fetchMasterData = async () => {
         setIsFetchingData(true);
@@ -204,110 +225,149 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
         setCskhUsers(cskhList);
     }, [user, allUsers, isEdit, ticket]);
 
-    const fetchCustomerDevices = async (customerName) => {
-        if (!customerName) return;
+    useEffect(() => {
+        if (!formData.customerId || customers.length === 0) return;
+        const customer = customers.find((item) => item.id === formData.customerId);
+        if (customer) fetchCustomerDevices(customer);
+    }, [formData.customerId, customers]);
+
+    const fetchCustomerDevices = async (customer) => {
+        const customerName = String(customer?.name || '').trim();
+        if (!customerName) {
+            setAvailableDevices([]);
+            return;
+        }
+
         setIsFetchingDevices(true);
         try {
-            const trimmedName = customerName.trim();
-            const { data: orderData } = await supabase
-                .from('orders')
-                .select('department, assigned_cylinders, product_type')
-                .ilike('customer_name', `%${trimmedName}%`);
+            const [{ data: machineData, error: machineError }, { data: cylinderData, error: cylinderError }] =
+                await Promise.all([
+                    supabase
+                        .from('machines')
+                        .select('serial_number, machine_type, status, customer_name, department_in_charge')
+                        .eq('customer_name', customerName)
+                        .not('serial_number', 'is', null)
+                        .order('serial_number', { ascending: true }),
+                    supabase
+                        .from('cylinders')
+                        .select('serial_number, volume, category, status, customer_name')
+                        .eq('customer_name', customerName)
+                        .eq('status', 'thuộc khách hàng')
+                        .not('serial_number', 'is', null)
+                        .order('serial_number', { ascending: true }),
+                ]);
 
-            if (orderData) {
-                const formatProdName = (name) => {
-                    if (!name) return '';
-                    let f = name.toString().replace(/_/g, ' ');
-                    if (f.toUpperCase().startsWith('BINH')) f = f.replace(/BINH/i, 'Bình');
-                    if (f.toUpperCase().startsWith('MAY')) f = f.replace(/MAY/i, 'Máy');
-                    return f;
-                };
+            if (machineError) throw machineError;
+            if (cylinderError) throw cylinderError;
 
-                const serialMap = new Map(); // serial -> {name, category}
-                orderData.forEach(o => {
-                    const readableName = formatProdName(o.product_type);
-                    if (o.department?.trim()) {
-                        serialMap.set(o.department.trim(), {
-                            name: readableName || 'Máy',
-                            category: (readableName || 'Máy').includes('Máy') ? 'Máy' : 'Bình'
-                        });
-                    }
-                    if (o.assigned_cylinders) {
-                        o.assigned_cylinders.forEach(s => {
-                            if (s?.trim()) {
-                                serialMap.set(s.trim(), {
-                                    name: readableName || 'Bình',
-                                    category: (readableName || 'Bình').includes('Máy') ? 'Máy' : 'Bình'
-                                });
-                            }
-                        });
-                    }
+            const serialMap = new Map();
+
+            (machineData || [])
+                .filter((machine) => belongsToCustomer(machine.customer_name, customerName))
+                .forEach((machine) => {
+                    const serial = String(machine.serial_number || '').trim();
+                    if (!serial) return;
+                    serialMap.set(serial.toUpperCase(), {
+                        serial_number: serial,
+                        name: formatDeviceLabel(machine.machine_type, 'Máy'),
+                        category: 'Máy',
+                        site: machine.department_in_charge || '',
+                    });
                 });
 
-                setAvailableDevices(Array.from(serialMap.entries()).map(([s, info]) => ({
-                    serial_number: s,
-                    name: info.name,
-                    category: info.category
-                })));
-            }
+            (cylinderData || [])
+                .filter((cylinder) => belongsToCustomer(cylinder.customer_name, customerName))
+                .forEach((cylinder) => {
+                    const serial = String(cylinder.serial_number || '').trim();
+                    if (!serial) return;
+                    const label = [formatDeviceLabel(cylinder.category, 'Bình'), cylinder.volume].filter(Boolean).join(' · ');
+                    serialMap.set(serial.toUpperCase(), {
+                        serial_number: serial,
+                        name: label || 'Bình',
+                        category: 'Bình',
+                        site: '',
+                    });
+                });
+
+            setAvailableDevices(
+                Array.from(serialMap.values()).sort((a, b) =>
+                    a.serial_number.localeCompare(b.serial_number, 'vi', { sensitivity: 'base' }),
+                ),
+            );
         } catch (err) {
-            console.error('Lỗi fetch đơn hàng:', err);
+            console.error('Lỗi tải thiết bị của khách hàng:', err);
+            setAvailableDevices([]);
         } finally {
             setIsFetchingDevices(false);
         }
     };
 
     const fetchAnyDeviceBySerial = async (serialPart) => {
-        if (!serialPart || serialPart.length < 2) return;
+        const customer = customersRef.current.find((item) => item.id === formData.customerId);
+        const customerName = String(customer?.name || '').trim();
+        if (!customerName || !serialPart || serialPart.length < 2) return;
+
         setIsFetchingDevices(true);
         try {
-            const { data: orderData } = await supabase
-                .from('orders')
-                .select('department, assigned_cylinders, product_type')
-                .or(`department.ilike.%${serialPart}%,assigned_cylinders.cs.{${serialPart.toUpperCase()}}`)
-                .limit(20);
+            const search = serialPart.trim().toUpperCase();
+            const [{ data: machineData, error: machineError }, { data: cylinderData, error: cylinderError }] =
+                await Promise.all([
+                    supabase
+                        .from('machines')
+                        .select('serial_number, machine_type, status, customer_name, department_in_charge')
+                        .eq('customer_name', customerName)
+                        .ilike('serial_number', `%${search}%`)
+                        .limit(50),
+                    supabase
+                        .from('cylinders')
+                        .select('serial_number, volume, category, status, customer_name')
+                        .eq('customer_name', customerName)
+                        .eq('status', 'thuộc khách hàng')
+                        .ilike('serial_number', `%${search}%`)
+                        .limit(50),
+                ]);
 
-            if (orderData) {
-                const serialMap = new Map();
-                // Add existing ones first to avoid duplicates
-                availableDevices.forEach(d => serialMap.set(d.serial_number, { name: d.name, category: d.category }));
+            if (machineError) throw machineError;
+            if (cylinderError) throw cylinderError;
 
-                orderData.forEach(o => {
-                    const formatProdName = (name) => {
-                        if (!name) return '';
-                        let f = name.toString().replace(/_/g, ' ');
-                        if (f.toUpperCase().startsWith('BINH')) f = f.replace(/BINH/i, 'Bình');
-                        if (f.toUpperCase().startsWith('MAY')) f = f.replace(/MAY/i, 'Máy');
-                        return f;
-                    };
-                    const readableName = formatProdName(o.product_type);
+            const serialMap = new Map(
+                availableDevices.map((device) => [String(device.serial_number).toUpperCase(), device]),
+            );
 
-                    if (o.department?.trim() && o.department.toUpperCase().includes(serialPart.toUpperCase())) {
-                        serialMap.set(o.department.trim(), {
-                            name: readableName || 'Máy',
-                            category: (readableName || 'Máy').includes('Máy') ? 'Máy' : 'Bình'
-                        });
-                    }
-                    if (o.assigned_cylinders) {
-                        o.assigned_cylinders.forEach(s => {
-                            if (s?.trim() && s.toUpperCase().includes(serialPart.toUpperCase())) {
-                                serialMap.set(s.trim(), {
-                                    name: readableName || 'Bình',
-                                    category: (readableName || 'Bình').includes('Máy') ? 'Máy' : 'Bình'
-                                });
-                            }
-                        });
-                    }
+            (machineData || [])
+                .filter((machine) => belongsToCustomer(machine.customer_name, customerName))
+                .forEach((machine) => {
+                    const serial = String(machine.serial_number || '').trim();
+                    if (!serial) return;
+                    serialMap.set(serial.toUpperCase(), {
+                        serial_number: serial,
+                        name: formatDeviceLabel(machine.machine_type, 'Máy'),
+                        category: 'Máy',
+                        site: machine.department_in_charge || '',
+                    });
                 });
 
-                setAvailableDevices(Array.from(serialMap.entries()).map(([s, info]) => ({
-                    serial_number: s,
-                    name: info.name,
-                    category: info.category
-                })));
-            }
+            (cylinderData || [])
+                .filter((cylinder) => belongsToCustomer(cylinder.customer_name, customerName))
+                .forEach((cylinder) => {
+                    const serial = String(cylinder.serial_number || '').trim();
+                    if (!serial) return;
+                    const label = [formatDeviceLabel(cylinder.category, 'Bình'), cylinder.volume].filter(Boolean).join(' · ');
+                    serialMap.set(serial.toUpperCase(), {
+                        serial_number: serial,
+                        name: label || 'Bình',
+                        category: 'Bình',
+                        site: '',
+                    });
+                });
+
+            setAvailableDevices(
+                Array.from(serialMap.values()).sort((a, b) =>
+                    a.serial_number.localeCompare(b.serial_number, 'vi', { sensitivity: 'base' }),
+                ),
+            );
         } catch (err) {
-            console.error('Lỗi tìm kiếm thiết bị mở rộng:', err);
+            console.error('Lỗi tìm kiếm thiết bị của khách hàng:', err);
         } finally {
             setIsFetchingDevices(false);
         }
@@ -323,8 +383,8 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
         setFormData(prev => ({ ...prev, customerId: customer.id, machineSerial: '', machineName: '' }));
         setIsCustomerDropdownOpen(false);
         setCustomerSearchTerm('');
-        setAvailableDevices([]); // Reset
-        fetchCustomerDevices(customer.name);
+        setAvailableDevices([]);
+        fetchCustomerDevices(customer);
     };
 
     const cFilteredCustomers = customers.filter(c =>
@@ -345,9 +405,15 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
         toast.success(`Đã chọn: ${m.serial_number}`, { autoClose: 1000, position: 'top-center' });
     };
 
-    const mFilteredMachines = availableDevices.filter(m =>
-        m.serial_number.toLowerCase().includes(machineSearchTerm.toLowerCase())
-    );
+    const mFilteredMachines = availableDevices.filter((device) => {
+        const query = machineSearchTerm.trim().toLowerCase();
+        if (!query) return true;
+        return (
+            device.serial_number.toLowerCase().includes(query)
+            || String(device.name || '').toLowerCase().includes(query)
+            || String(device.site || '').toLowerCase().includes(query)
+        );
+    });
 
     // Error Type Add New logic
     const handleAddErrorType = async () => {
@@ -634,7 +700,7 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                                                 onClick={(e) => { e.stopPropagation(); fetchAnyDeviceBySerial(machineSearchTerm); }}
                                                                 className="px-2 py-1 bg-primary/10 text-primary text-[10px] font-black rounded-lg hover:bg-primary hover:text-white transition-all shrink-0"
                                                             >
-                                                                Tìm toàn hệ thống
+                                                                Tìm trong khách hàng
                                                             </button>
                                                         )}
                                                     </div>
@@ -644,17 +710,20 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                                         <div key={m.serial_number} className="px-5 py-3.5 cursor-pointer border-b border-slate-100 hover:bg-primary/5 transition-colors group" onClick={() => handleMachineSelect(m)}>
                                                             <div className="font-black text-[14px] text-slate-800 group-hover:text-primary">{m.serial_number}</div>
                                                             <div className="text-[12px] text-primary font-bold">{m.name}</div>
+                                                            {m.site ? (
+                                                                <div className="text-[11px] text-slate-500 font-semibold">{m.site}</div>
+                                                            ) : null}
                                                         </div>
                                                     )) : (
                                                         <div className="px-5 py-6 text-center">
-                                                            <p className="text-sm text-slate-500 font-semibold italic mb-2">Không tìm thấy thiết bị nào của khách hàng này</p>
+                                                            <p className="text-sm text-slate-500 font-semibold italic mb-2">Không tìm thấy thiết bị trực thuộc khách hàng / cơ sở này</p>
                                                             {machineSearchTerm.length >= 2 && (
                                                                 <button 
                                                                     type="button"
                                                                     onClick={(e) => { e.stopPropagation(); fetchAnyDeviceBySerial(machineSearchTerm); }}
                                                                     className="text-xs font-black text-primary hover:underline"
                                                                 >
-                                                                    Thử tìm kiếm trên toàn bộ đơn hàng?
+                                                                    Thử tìm lại trong danh sách thiết bị của khách hàng?
                                                                 </button>
                                                             )}
                                                         </div>

@@ -39,11 +39,21 @@ export function SearchableSelect({
     [options, value]
   )
 
+  const normalizeSearch = (value) =>
+    String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+
   const filteredOptions = useMemo(() => {
     if (!searchTerm) return options;
-    return options.filter(opt => 
-      opt.label.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const q = normalizeSearch(searchTerm);
+    return options.filter((opt) => {
+      const haystack = normalizeSearch(opt.searchText ?? opt.label);
+      return haystack.includes(q);
+    });
   }, [options, searchTerm]);
 
   return (

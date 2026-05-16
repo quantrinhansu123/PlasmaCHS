@@ -142,7 +142,7 @@ function getRepairStatusKanbanCardBorder(status) {
 }
 
 export default function RepairTickets() {
-    const { role } = usePermissions();
+    const { role, canDelete } = usePermissions();
     const navigate = useNavigate();
     const location = useLocation();
     
@@ -502,34 +502,56 @@ export default function RepairTickets() {
     };
 
     const handleDeleteTicket = async (id) => {
+        if (!canDelete('machines')) {
+            toast.error('Bạn không có quyền xóa phiếu sửa chữa.');
+            return;
+        }
         if (!window.confirm('Bạn có chắc chắn muốn xóa phiếu sửa chữa này không?')) return;
-        
+
         try {
-            const { error } = await supabase.from('repair_tickets').delete().eq('id', id);
+            const { data, error } = await supabase
+                .from('repair_tickets')
+                .delete()
+                .eq('id', id)
+                .select('id');
             if (error) throw error;
+            if (!data?.length) {
+                throw new Error('Không xóa được phiếu. Kiểm tra quyền DELETE trên bảng repair_tickets (RLS).');
+            }
+            setTickets((prev) => prev.filter((ticket) => ticket.id !== id));
             toast.success('Xóa phiếu thành công');
-            setSelectedIds(prev => prev.filter(i => i !== id));
-            fetchData();
+            setSelectedIds((prev) => prev.filter((selectedId) => selectedId !== id));
         } catch (error) {
             console.error('Error deleting ticket:', error);
-            alert('❌ Lỗi khi xóa: ' + error.message);
+            toast.error('Lỗi khi xóa: ' + (error.message || error));
         }
     };
 
     const handleBulkDelete = async () => {
+        if (!canDelete('machines')) {
+            toast.error('Bạn không có quyền xóa phiếu sửa chữa.');
+            return;
+        }
         if (selectedIds.length === 0) return;
         if (!window.confirm(`Bạn có chắc chắn muốn xóa ${selectedIds.length} phiếu sửa chữa đã chọn không?`)) return;
 
         try {
-            const { error } = await supabase.from('repair_tickets').delete().in('id', selectedIds);
+            const { data, error } = await supabase
+                .from('repair_tickets')
+                .delete()
+                .in('id', selectedIds)
+                .select('id');
             if (error) throw error;
-            
-            toast.success(`Đã xóa ${selectedIds.length} phiếu thành công`);
+            const deletedIds = new Set((data || []).map((row) => row.id));
+            if (deletedIds.size === 0) {
+                throw new Error('Không xóa được phiếu đã chọn. Kiểm tra quyền DELETE trên bảng repair_tickets (RLS).');
+            }
+            setTickets((prev) => prev.filter((ticket) => !deletedIds.has(ticket.id)));
+            toast.success(`Đã xóa ${deletedIds.size} phiếu thành công`);
             setSelectedIds([]);
-            fetchData();
         } catch (error) {
             console.error('Error deleting tickets:', error);
-            alert('❌ Lỗi khi xóa: ' + error.message);
+            toast.error('Lỗi khi xóa: ' + (error.message || error));
         }
     };
 

@@ -1,16 +1,4 @@
 import {
-    ArcElement,
-    BarElement,
-    CategoryScale,
-    Chart as ChartJS,
-    Legend as ChartLegend,
-    Tooltip as ChartTooltip,
-    LinearScale,
-    LineElement,
-    PointElement,
-    Title
-} from 'chart.js';
-import {
     Activity,
     BarChart2,
     CheckCircle2,
@@ -20,6 +8,7 @@ import {
     Edit,
     Eye,
     Filter,
+    Kanban,
     List,
     MoreVertical,
     Plus,
@@ -35,7 +24,6 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
-import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 import MobilePageHeader from '../components/layout/MobilePageHeader';
@@ -46,6 +34,7 @@ import MachineFormModal from '../components/Machines/MachineFormModal';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
+import { SummaryCard } from '../components/ui/SummaryCard';
 import { MACHINE_STATUSES, MACHINE_TYPES } from '../constants/machineConstants';
 import usePermissions from '../hooks/usePermissions';
 import {
@@ -56,18 +45,6 @@ import {
 } from '../utils/machineCustomerFromOrders';
 import { isAdminRole } from '../utils/accessControl';
 import { supabase } from '../supabase/config';
-
-ChartJS.register(
-    CategoryScale,
-    LinearScale,
-    BarElement,
-    ArcElement,
-    PointElement,
-    LineElement,
-    Title,
-    ChartTooltip,
-    ChartLegend
-);
 
 /** Escape cho chuỗi trong filter .or(... ilike.%x%) — tránh % _ , phá cú pháp PostgREST */
 function escapeIlikeOrFragment(text) {
@@ -1068,6 +1045,26 @@ const Machines = () => {
         !status && 'border-l-transparent'
     );
 
+    const kanbanAccentClasses = [
+        'border-t-slate-300 bg-slate-50/70',
+        'border-t-emerald-400 bg-emerald-50/40',
+        'border-t-blue-400 bg-blue-50/40',
+        'border-t-orange-400 bg-orange-50/40',
+        'border-t-amber-400 bg-amber-50/40',
+        'border-t-rose-400 bg-rose-50/40',
+        'border-t-amber-400 bg-amber-50/40',
+    ];
+
+    const kanbanColumns = useMemo(() => (
+        MACHINE_STATUSES
+            .filter(status => status.label !== 'Kiểm tra')
+            .map((status, index) => ({
+                ...status,
+                accentClass: kanbanAccentClasses[index % kanbanAccentClasses.length],
+                items: machines.filter(machine => machine.status === status.id)
+            }))
+    ), [machines]);
+
     return (
         <div className="font-roboto animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5">
             <PageViewSwitcher
@@ -1075,6 +1072,7 @@ const Machines = () => {
                 setActiveView={setActiveView}
                 views={[
                     { id: 'list', label: 'Danh sách', icon: <List size={16} /> },
+                    { id: 'kanban', label: 'Kanban', icon: <Kanban size={16} /> },
                     { id: 'stats', label: 'Thống kê', icon: <BarChart2 size={16} /> },
                 ]}
             />
@@ -1653,6 +1651,204 @@ const Machines = () => {
                             </button>
                         </div>
                     </div>
+                </div>
+            )}
+
+            {activeView === 'kanban' && (
+                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full">
+                    <MobilePageHeader
+                        searchTerm={searchTerm}
+                        setSearchTerm={setSearchTerm}
+                        searchPlaceholder="Tìm kiếm..."
+                        onFilterClick={openMobileFilter}
+                        hasActiveFilters={hasActiveFilters}
+                        totalActiveFilters={totalActiveFilters}
+                        summary={
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200 shadow-sm">
+                                <span className="text-[11px] font-bold text-slate-600 uppercase tracking-tight">Kanban</span>
+                                <span className="text-[16px] font-black text-slate-900 font-mono leading-none">{machines.length}</span>
+                            </div>
+                        }
+                        actions={
+                            isAdminOrManager ? (
+                                <button
+                                    onClick={() => { setSelectedMachine(null); setIsFormModalOpen(true); }}
+                                    className="p-2 rounded-xl bg-primary text-white shadow-lg shadow-primary/30 active:scale-95 transition-all"
+                                >
+                                    <Plus size={20} />
+                                </button>
+                            ) : null
+                        }
+                    />
+
+                    <div className="hidden md:flex items-center justify-between gap-4 p-4 border-b border-border">
+                        <div className="flex items-center gap-2 flex-1">
+                            <button
+                                onClick={() => navigate(-1)}
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground text-[12px] font-bold transition-all bg-white shadow-sm shrink-0"
+                            >
+                                <ChevronLeft size={16} />
+                                Quay lại
+                            </button>
+                            <div className="relative flex-1 max-w-xl">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
+                                <input
+                                    type="text"
+                                    placeholder="Tìm kiếm . . ."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="w-full pl-10 pr-8 py-1.5 bg-muted/20 border border-border/80 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
+                                />
+                                {searchTerm && (
+                                    <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                                        <X size={14} />
+                                    </button>
+                                )}
+                            </div>
+                            {hasActiveFilters && (
+                                <button
+                                    onClick={clearAllFilters}
+                                    className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-red-300 text-red-500 text-[12px] font-bold hover:bg-red-50 transition-all"
+                                >
+                                    <X size={14} />
+                                    Xóa bộ lọc
+                                </button>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            {isAdminOrManager && selectedIds.length > 0 && (
+                                <button
+                                    onClick={handleBulkDelete}
+                                    className="flex items-center gap-2 px-4 h-10 rounded-lg border border-rose-200 bg-rose-50 text-rose-600 text-[13px] font-bold hover:bg-rose-100 shadow-sm transition-all active:scale-95"
+                                >
+                                    <Trash2 size={16} />
+                                    Xóa ({selectedIds.length})
+                                </button>
+                            )}
+                            {isAdminOrManager && (
+                                <button
+                                    onClick={() => { setSelectedMachine(null); setIsFormModalOpen(true); }}
+                                    className="flex items-center gap-2 px-6 h-10 rounded-lg bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all active:scale-95"
+                                >
+                                    <Plus size={18} />
+                                    Thêm
+                                </button>
+                            )}
+                            <div className="px-4 py-2 rounded-2xl bg-slate-50 border border-slate-200">
+                                <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider">Hiển thị </span>
+                                <span className="text-[16px] font-black text-slate-900 font-mono">{machines.length}</span>
+                                <span className="text-[11px] font-bold text-slate-500">/{totalRecords.toLocaleString()}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden bg-slate-50/70 p-3 md:p-4">
+                        {isLoading ? (
+                            <div className="py-16 text-center text-[13px] text-muted-foreground italic">Đang tải dữ liệu...</div>
+                        ) : machines.length === 0 ? (
+                            <div className="py-16 text-center text-[13px] text-muted-foreground italic">Không tìm thấy máy nào</div>
+                        ) : (
+                            <div className="flex gap-4 min-w-max h-full md:grid md:grid-cols-[repeat(auto-fit,minmax(360px,1fr))] md:min-w-0">
+                                {kanbanColumns.map((column) => (
+                                    <section
+                                        key={column.id}
+                                        className={clsx(
+                                            'w-[360px] md:w-auto min-h-[420px] rounded-2xl border border-border border-t-4 shadow-sm flex flex-col overflow-hidden',
+                                            column.accentClass
+                                        )}
+                                    >
+                                        <div className="px-3 py-3 border-b border-border/70 bg-white/80">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className={clsx('inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-black border', getStatusBadgeClass(column.id))}>
+                                                    {column.label}
+                                                </span>
+                                                <span className="min-w-7 h-7 px-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-700 text-[12px] font-black flex items-center justify-center">
+                                                    {column.items.length}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5">
+                                            {column.items.length === 0 ? (
+                                                <div className="h-28 rounded-xl border border-dashed border-slate-200 bg-white/60 flex items-center justify-center text-[12px] font-semibold text-muted-foreground">
+                                                    Trống
+                                                </div>
+                                            ) : column.items.map((machine) => (
+                                                <article
+                                                    key={machine.id}
+                                                    className={clsx(
+                                                        'rounded-xl border bg-white p-3 shadow-sm transition-all hover:shadow-md',
+                                                        selectedIds.includes(machine.id)
+                                                            ? 'border-primary ring-2 ring-primary/15'
+                                                            : 'border-slate-200'
+                                                    )}
+                                                >
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <div className="flex items-start gap-2 min-w-0">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={selectedIds.includes(machine.id)}
+                                                                onChange={() => toggleSelectOne(machine.id)}
+                                                                className="mt-0.5 w-4 h-4 rounded border-border text-primary focus:ring-primary/20 cursor-pointer shrink-0"
+                                                            />
+                                                            <div className="min-w-0">
+                                                                <p className="font-mono text-[13px] font-black text-foreground truncate">{machine.serial_number}</p>
+                                                                <p className="text-[11px] font-semibold text-muted-foreground truncate">{getLabel(MACHINE_TYPES, machine.machine_type)}</p>
+                                                            </div>
+                                                        </div>
+                                                        <span className={getMachineTypeBadgeClass(machine.machine_type)}>
+                                                            {machine.machine_type || '-'}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="mt-3 space-y-2 rounded-lg bg-slate-50 border border-slate-100 p-2">
+                                                        <div className="flex items-start gap-2">
+                                                            <User size={13} className="text-blue-500 mt-0.5 shrink-0" />
+                                                            <p className="text-[12px] font-semibold text-slate-700 line-clamp-2">{machine.customer_name || '-'}</p>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <Warehouse size={13} className="text-indigo-500 shrink-0" />
+                                                            <p className="text-[12px] text-muted-foreground truncate">{getWarehouseLabel(machine.warehouse)}</p>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <Activity size={13} className="text-amber-500 shrink-0" />
+                                                            <p className="text-[12px] text-muted-foreground truncate">{machine.department_in_charge || '-'}</p>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="mt-3 flex items-center justify-end gap-2">
+                                                        <button onClick={() => handleViewMachine(machine)} className="p-2 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors" title="Xem chi tiết">
+                                                            <Eye size={15} />
+                                                        </button>
+                                                        {isAdminOrManager && (
+                                                            <button onClick={() => handleEditMachine(machine)} className="p-2 rounded-lg border border-amber-100 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors" title="Chỉnh sửa">
+                                                                <Edit size={15} />
+                                                            </button>
+                                                        )}
+                                                        {isAdminOrManager && (
+                                                            <button onClick={() => handleDeleteMachine(machine.id, machine.serial_number)} className="p-2 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors" title="Xóa">
+                                                                <Trash2 size={15} />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </article>
+                                            ))}
+                                        </div>
+                                    </section>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {!isLoading && (
+                        <MobilePagination
+                            currentPage={currentPage}
+                            setCurrentPage={setCurrentPage}
+                            pageSize={pageSize}
+                            setPageSize={setPageSize}
+                            totalRecords={totalRecords}
+                        />
+                    )}
                 </div>
             )}
 

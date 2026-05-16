@@ -61,6 +61,15 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
   };
 
   useEffect(() => {
+    const openNotificationsFromNav = () => {
+      setShowNotifications(true);
+      setShowUserDropdown(false);
+    };
+    window.addEventListener('plasmavn:open-notifications', openNotificationsFromNav);
+    return () => window.removeEventListener('plasmavn:open-notifications', openNotificationsFromNav);
+  }, []);
+
+  useEffect(() => {
     fetchNotifications();
 
     // Setup Real-time Subscription
@@ -135,6 +144,8 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
       'thu-hoi': 'Thu hồi',
       'vat-tu': 'Vật tư',
       'he-thong': 'Hệ thống',
+      'phieu-sua-chua': 'Ticket sửa chữa',
+      'nhiem-vu-giao-hang': 'Nhiệm vụ giao hàng',
       'trang-chu': 'Trang chủ',
       tao: 'Tạo mới',
       'danh-sach': 'Danh sách',
