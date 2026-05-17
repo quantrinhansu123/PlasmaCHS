@@ -2191,8 +2191,8 @@ const Customers = () => {
                     </div>
 
                     <div className="hidden md:block flex-1 overflow-x-auto bg-white">
-                        <table className="customers-data-table w-full border-collapse">
-                            <thead className="bg-primary/5">
+                        <table className="customers-data-table app-data-table w-full border-separate border-spacing-0">
+                            <thead>
                                 <tr>
                                     <th className="px-4 py-3.5 text-center border-r border-primary/30">
                                         <input

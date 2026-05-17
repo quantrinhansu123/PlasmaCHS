@@ -91,13 +91,13 @@ const StatisticsDashboard = ({ hideHeader = false }) => {
           <FileText className="w-4 h-4 text-primary" />
           Báo cáo nhanh
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          <ModuleCard title="Báo cáo khách hàng" description="Theo nhân viên, loại" icon={Users} path="/bao-cao/khach-hang" colorScheme="blue" isBookmarked={isBookmarked("/bao-cao/khach-hang")} onToggleBookmark={toggleBookmark} />
-          <ModuleCard title="Báo cáo NVKD" description="Báo cáo doanh số" icon={TrendingUp} path="/bao-cao/nhan-vien" colorScheme="green" isBookmarked={isBookmarked("/bao-cao/nhan-vien")} onToggleBookmark={toggleBookmark} />
-          <ModuleCard title="Đơn hàng" description="Theo tháng, năm" icon={Package} path="/bao-cao/don-xuat" colorScheme="purple" isBookmarked={isBookmarked("/bao-cao/don-xuat")} onToggleBookmark={toggleBookmark} />
-          <ModuleCard title="Quản lý máy" description="Bán/Cho thuê/Demo" icon={Monitor} path="/bao-cao/may-banh" colorScheme="teal" isBookmarked={isBookmarked("/bao-cao/may-banh")} onToggleBookmark={toggleBookmark} />
-          <ModuleCard title="Báo cáo quý" description="Chi tiết bảo trì" icon={Calendar} path="/bao-cao/bao-cao-quy" colorScheme="orange" isBookmarked={isBookmarked("/bao-cao/bao-cao-quy")} onToggleBookmark={toggleBookmark} />
-          <ModuleCard title="Báo cáo doanh số" description="Thống kê theo máy" icon={DollarSign} path="/bao-cao/doanh-so-may" colorScheme="yellow" isBookmarked={isBookmarked("/bao-cao/doanh-so-may")} onToggleBookmark={toggleBookmark} />
+        <div className="grid grid-cols-2 gap-3 sm:gap-3.5 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 lg:gap-4">
+          <ModuleCard cardLayout="home" title="Báo cáo khách hàng" description="Theo nhân viên, loại" icon={Users} path="/bao-cao/khach-hang" colorScheme="blue" isBookmarked={isBookmarked("/bao-cao/khach-hang")} onToggleBookmark={toggleBookmark} />
+          <ModuleCard cardLayout="home" title="Báo cáo NVKD" description="Báo cáo doanh số" icon={TrendingUp} path="/bao-cao/nhan-vien" colorScheme="green" isBookmarked={isBookmarked("/bao-cao/nhan-vien")} onToggleBookmark={toggleBookmark} />
+          <ModuleCard cardLayout="home" title="Đơn hàng" description="Theo tháng, năm" icon={Package} path="/bao-cao/don-xuat" colorScheme="purple" isBookmarked={isBookmarked("/bao-cao/don-xuat")} onToggleBookmark={toggleBookmark} />
+          <ModuleCard cardLayout="home" title="Quản lý máy" description="Bán/Cho thuê/Demo" icon={Monitor} path="/bao-cao/may-banh" colorScheme="teal" isBookmarked={isBookmarked("/bao-cao/may-banh")} onToggleBookmark={toggleBookmark} />
+          <ModuleCard cardLayout="home" title="Báo cáo quý" description="Chi tiết bảo trì" icon={Calendar} path="/bao-cao/bao-cao-quy" colorScheme="orange" isBookmarked={isBookmarked("/bao-cao/bao-cao-quy")} onToggleBookmark={toggleBookmark} />
+          <ModuleCard cardLayout="home" title="Báo cáo doanh số" description="Thống kê theo máy" icon={DollarSign} path="/bao-cao/doanh-so-may" colorScheme="yellow" isBookmarked={isBookmarked("/bao-cao/doanh-so-may")} onToggleBookmark={toggleBookmark} />
         </div>
       </div>
 

@@ -395,7 +395,7 @@ export default function TransferList() {
         const html = `
             <html>
                 <head><title>Phiếu điều chuyển ${record.transferCode}</title></head>
-                <body style="font-family: Arial; padding: 24px;">
+                <body style="font-family: Roboto, Arial, sans-serif; padding: 24px;">
                     <h2>Phiếu điều chuyển: ${record.transferCode}</h2>
                     <p><b>Số bản in:</b> ${options.copies || 1}</p>
                     <p><b>Khổ giấy:</b> ${options.paperSize || 'A5'} ${options.orientation === 'portrait' ? '(Dọc)' : '(Ngang)'}</p>

@@ -5,7 +5,7 @@ import { COMPANY_PRINT_ADDRESS_LINES } from '../../constants/companyPrintAddress
 // Inline styles to bypass global CSS overrides and ensure reliability across different views/portals
 const S = {
     page: {
-        fontFamily: '"Times New Roman", Times, serif',
+        fontFamily: 'Roboto, Helvetica, Arial, sans-serif',
         fontSize: '11pt',
         lineHeight: '1.4',
         color: '#000',

@@ -4,7 +4,7 @@ import { COMPANY_PRINT_ADDRESS_LINES } from '../../constants/companyPrintAddress
 // Professional inline styles for printing (following A4 standards)
 const S = {
     page: {
-        fontFamily: '"Times New Roman", Times, serif',
+        fontFamily: 'Roboto, Helvetica, Arial, sans-serif',
         fontSize: '11pt',
         lineHeight: '1.4',
         color: '#000',

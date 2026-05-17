@@ -53,6 +53,16 @@ import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import {
+    appDataTableClass,
+    appDataTableWrapperClass,
+    appTableActionBtnClass,
+    appTableCellIconBoxClass,
+    appTableCellWithIconClass,
+    appTableCheckboxClass,
+    appTableTdClass,
+    appTableThClass,
+} from '../components/ui/appDataTable';
+import {
     CUSTOMER_CATEGORIES,
     ORDER_STATUSES,
     ORDER_TYPES,
@@ -792,14 +802,14 @@ const Orders = () => {
 
     /** Pill trạng thái như BottleTrack HTML mock (rounded-full border) */
     const getStatusBadgeClass = (statusColor) => clsx(
-        'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold whitespace-nowrap border',
-        statusColor === 'blue' && 'border-blue-200 bg-blue-100 text-blue-800',
-        statusColor === 'yellow' && 'border-amber-200 bg-amber-100 text-amber-800',
-        statusColor === 'orange' && 'border-orange-200 bg-orange-100 text-orange-800',
-        statusColor === 'green' && 'border-emerald-200 bg-emerald-100 text-emerald-800',
-        statusColor === 'red' && 'border-red-200 bg-red-100 text-red-800',
-        statusColor === 'gray' && 'border-slate-200 bg-slate-100 text-slate-700',
-        !statusColor && 'border-border bg-muted text-muted-foreground'
+        'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap',
+        statusColor === 'blue' && 'bg-blue-50 text-blue-700',
+        statusColor === 'yellow' && 'bg-amber-50 text-amber-700',
+        statusColor === 'orange' && 'bg-orange-50 text-orange-700',
+        statusColor === 'green' && 'bg-emerald-50 text-emerald-700',
+        statusColor === 'red' && 'bg-red-50 text-red-700',
+        statusColor === 'gray' && 'bg-slate-100 text-slate-600',
+        !statusColor && 'bg-slate-100 text-slate-600'
     );
 
     const getKanbanLaneHeaderClass = (statusColor) =>
@@ -881,13 +891,13 @@ const Orders = () => {
     };
 
     const getCategoryBadgeClass = (categoryId) => clsx(
-        'inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border',
-        categoryId === 'BV' && 'bg-blue-50 text-blue-700 border-blue-200',
-        categoryId === 'TM' && 'bg-pink-50 text-pink-700 border-pink-200',
-        categoryId === 'PK' && 'bg-emerald-50 text-emerald-700 border-emerald-200',
-        categoryId === 'NG' && 'bg-violet-50 text-violet-700 border-violet-200',
-        categoryId === 'SP' && 'bg-amber-50 text-amber-700 border-amber-200',
-        !categoryId && 'bg-muted text-muted-foreground border-border'
+        'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold',
+        categoryId === 'BV' && 'bg-blue-50 text-blue-700',
+        categoryId === 'TM' && 'bg-pink-50 text-pink-700',
+        categoryId === 'PK' && 'bg-emerald-50 text-emerald-700',
+        categoryId === 'NG' && 'bg-violet-50 text-violet-700',
+        categoryId === 'SP' && 'bg-amber-50 text-amber-700',
+        !categoryId && 'bg-slate-100 text-slate-600'
     );
 
     const getOrderTypeBadgeClass = (orderTypeId) => clsx(
@@ -1220,9 +1230,12 @@ const Orders = () => {
         switch (key) {
             case 'code':
                 return (
-                    <span className="text-[13px] md:text-sm font-semibold md:font-bold text-foreground md:text-blue-700">
-                        {order.order_code}
-                    </span>
+                    <div className={appTableCellWithIconClass}>
+                        <span className={appTableCellIconBoxClass} aria-hidden>
+                            <FileText size={16} strokeWidth={2} />
+                        </span>
+                        <span className="font-semibold text-slate-900">{order.order_code}</span>
+                    </div>
                 );
             case 'category':
                 return (
@@ -1248,7 +1261,7 @@ const Orders = () => {
                 return <span className="text-[13px] text-muted-foreground font-normal">{order.recipient_name}</span>;
             case 'type':
                 return (
-                    <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-200 text-xs font-semibold">
+                    <span className="inline-flex items-center rounded-full bg-violet-50 px-2.5 py-0.5 text-xs font-semibold text-violet-700">
                         {getLabel(ORDER_TYPES, order.order_type)}
                     </span>
                 );
@@ -1266,7 +1279,7 @@ const Orders = () => {
                     );
                 }
                 return (
-                    <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-xs font-semibold">
+                    <span className="inline-flex items-center rounded-full bg-sky-50 px-2.5 py-0.5 text-xs font-semibold text-sky-700">
                         {getLabel(PRODUCT_TYPES, items[0]?.product_type || order.product_type)}
                     </span>
                 );
@@ -1366,7 +1379,7 @@ const Orders = () => {
             {activeView === 'list' && (
                 <>
                 {/* Desktop: thanh điều khiển đầu trang — một hàng */}
-                <div className="hidden shrink-0 font-[family-name:Manrope,system-ui,sans-serif] md:-mt-1 md:mb-4 md:block">
+                <div className="hidden shrink-0 font-sans md:-mt-1 md:mb-4 md:block">
                     <div className="sticky top-0 z-30 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                         <div className="flex min-h-14 flex-nowrap items-center gap-3 overflow-x-auto px-5 py-3 sm:gap-4 sm:px-6 scrollbar-hide">
                             <h2 className="shrink-0 text-base font-extrabold tracking-tight text-slate-900 sm:text-lg">
@@ -2033,15 +2046,15 @@ const Orders = () => {
                         )}
                     >
                         {listDisplayMode === 'table' ? (
-                            <div className="overflow-x-auto bg-white">
-                                <table className="w-full border-collapse text-left">
+                            <div className={appDataTableWrapperClass}>
+                                <table className={appDataTableClass}>
                             <thead>
-                                <tr className="border-b border-slate-200 bg-slate-50">
-                                    <th className="px-4 py-4 w-10 whitespace-nowrap">
+                                <tr>
+                                    <th className={clsx(appTableThClass, 'w-10 text-center')}>
                                         <div className="flex items-center justify-center">
                                             <input
                                                 type="checkbox"
-                                                className="h-4 w-4 rounded border-border text-primary focus:ring-primary/20"
+                                                className={appTableCheckboxClass}
                                                 checked={selectedIds.length === filteredOrders.length && filteredOrders.length > 0}
                                                 onChange={toggleSelectAll}
                                             />
@@ -2051,17 +2064,17 @@ const Orders = () => {
                                         <th
                                             key={col.key}
                                             className={clsx(
-                                                'px-4 py-4 text-[12px] font-semibold uppercase tracking-wider text-slate-500 whitespace-nowrap',
+                                                appTableThClass,
                                                 (col.key === 'quantity' || col.key === 'cylinder_debt') && 'text-right'
                                             )}
                                         >
                                             {col.key === 'sales' ? 'Nhân viên KD' : col.label}
                                         </th>
                                     ))}
-                                    <th className="sticky right-0 z-30 whitespace-nowrap border-b border-slate-200 bg-slate-50 px-4 py-4 shadow-[-4px_0_4px_rgba(0,0,0,0.02)]" />
+                                    <th className={clsx(appTableThClass, 'text-center min-w-[88px]')}>Thao tác</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-100">
+                            <tbody>
                                 {isLoading ? (
                                     <tr>
                                         <td colSpan={desktopColsForTable.length + 2} className="px-4 py-16 text-center text-muted-foreground">
@@ -2075,20 +2088,18 @@ const Orders = () => {
                                         </td>
                                     </tr>
                                 ) : sortedOrders.map((order) => {
-                                    const status = getStatusConfig(order.status);
                                     return (
                                         <tr
                                             key={order.id}
                                             className={clsx(
-                                                'transition-colors hover:bg-slate-50 group',
-                                                selectedIds.includes(order.id) && 'bg-blue-50/50'
+                                                selectedIds.includes(order.id) && 'bg-blue-50/40'
                                             )}
                                         >
-                                            <td className="px-4 py-4 uppercase whitespace-nowrap">
+                                            <td className={clsx(appTableTdClass, 'text-center')}>
                                                 <div className="flex items-center justify-center">
                                                     <input
                                                         type="checkbox"
-                                                        className="h-4 w-4 rounded border-border text-primary focus:ring-primary/20"
+                                                        className={appTableCheckboxClass}
                                                         checked={selectedIds.includes(order.id)}
                                                         onChange={() => toggleSelect(order.id)}
                                                     />
@@ -2098,20 +2109,35 @@ const Orders = () => {
                                                 <td
                                                     key={col.key}
                                                     className={clsx(
-                                                        'px-4 py-4 text-sm whitespace-nowrap',
+                                                        appTableTdClass,
                                                         col.key === 'note' && 'max-w-[12rem]',
-                                                        col.key === 'quantity' && 'text-right font-bold tabular-nums',
-                                                        col.key === 'cylinder_debt' && 'text-right',
-                                                        (col.key === 'sales' || col.key === 'recipient') && 'font-normal text-slate-900'
+                                                        col.key === 'quantity' && 'text-right font-semibold tabular-nums',
+                                                        col.key === 'cylinder_debt' && 'text-right'
                                                     )}
                                                 >
                                                     {renderCell(col.key, order)}
                                                 </td>
                                             ))}
-                                            <td className="sticky right-0 z-20 whitespace-nowrap bg-white px-4 py-4 shadow-[-4px_0_4px_rgba(0,0,0,0.02)] group-hover:bg-slate-50">
-                                                <div className="flex justify-end">
-                                                    <div className="relative">
+                                            <td className={clsx(appTableTdClass, 'text-center')}>
+                                                <div className="app-table-row-actions relative inline-flex items-center justify-center gap-0.5">
                                                         <button
+                                                            type="button"
+                                                            onClick={() => handleEditOrder(order)}
+                                                            className={clsx(appTableActionBtnClass, 'text-blue-600 hover:bg-blue-50')}
+                                                            title="Sửa đơn hàng"
+                                                        >
+                                                            <Edit size={16} strokeWidth={2} />
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleDeleteOrder(order.id, order.order_code)}
+                                                            className={clsx(appTableActionBtnClass, 'text-red-600 hover:bg-red-50')}
+                                                            title="Xóa đơn hàng"
+                                                        >
+                                                            <Trash2 size={16} strokeWidth={2} />
+                                                        </button>
+                                                        <button
+                                                            type="button"
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
                                                                 if (activeRowMenu === order.id) {
@@ -2120,17 +2146,20 @@ const Orders = () => {
                                                                     const rect = e.currentTarget.getBoundingClientRect();
                                                                     setMenuPosition({ 
                                                                         top: rect.bottom + window.scrollY, 
-                                                                        left: rect.left + window.scrollX - 200 // Offset to the left
+                                                                        left: rect.left + window.scrollX - 200
                                                                     });
                                                                     setActiveRowMenu(order.id);
                                                                 }
                                                             }}
                                                             className={clsx(
-                                                                "p-2 rounded-xl transition-all",
-                                                                activeRowMenu === order.id ? "bg-slate-100 text-slate-800" : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+                                                                appTableActionBtnClass,
+                                                                activeRowMenu === order.id
+                                                                    ? 'bg-slate-100 text-slate-700'
+                                                                    : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'
                                                             )}
+                                                            title="Thêm thao tác"
                                                         >
-                                                            <MoreVertical className="w-5 h-5" />
+                                                            <MoreVertical size={16} strokeWidth={2} />
                                                         </button>
 
                                                         {activeRowMenu === order.id && createPortal(
@@ -2196,17 +2225,6 @@ const Orders = () => {
                                                                     </button>
                                                                 )}
 
-                                                                <button
-                                                                    onClick={() => {
-                                                                        handleEditOrder(order);
-                                                                        setActiveRowMenu(null);
-                                                                    }}
-                                                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-amber-600 hover:bg-amber-50 transition-colors text-[13px] font-bold"
-                                                                >
-                                                                    <Edit className="w-4 h-4" />
-                                                                    Sửa đơn hàng
-                                                                </button>
-
                                                                 {order.order_type === 'DNXM' && (
                                                                     <button
                                                                         onClick={() => {
@@ -2250,19 +2268,9 @@ const Orders = () => {
                                                                     </button>
                                                                 )}
 
-                                                                <div className="h-px bg-slate-100 my-1 mx-2" />
-
-                                                                <button
-                                                                    onClick={() => { handleDeleteOrder(order.id, order.order_code); setActiveRowMenu(null); }}
-                                                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-rose-600 hover:bg-rose-50 transition-colors text-[13px] font-bold"
-                                                                >
-                                                                    <Trash2 className="w-4 h-4" />
-                                                                    Xóa đơn hàng
-                                                                </button>
                                                             </div>,
                                                             document.body
                                                         )}
-                                                    </div>
                                                 </div>
                                             </td>
                                         </tr>

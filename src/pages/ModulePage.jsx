@@ -8,6 +8,9 @@ import useBookmarkedPaths from '../hooks/useBookmarkedPaths';
 import usePermissions from '../hooks/usePermissions';
 import { canAccessPath } from '../utils/accessControl';
 
+const moduleGridClass =
+  'grid grid-cols-2 gap-3 sm:gap-3.5 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 lg:gap-4';
+
 const ModulePage = () => {
   const [activeTab, setActiveTab] = useState('tat-ca');
   const [searchQuery, setSearchQuery] = useState('');
@@ -80,11 +83,12 @@ const ModulePage = () => {
       {/* Content Area */}
       {activeTab === 'danh-dau' ? (
         filteredBookmarkedItems.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 animate-in fade-in duration-500">
+          <div className={`${moduleGridClass} animate-in fade-in duration-500`}>
             {filteredBookmarkedItems.map((item) => (
               <ModuleCard
                 key={item.path}
                 {...item}
+                cardLayout="home"
                 isBookmarked={isBookmarked(item.path)}
                 onToggleBookmark={toggleBookmark}
               />
@@ -117,11 +121,12 @@ const ModulePage = () => {
                   <div className="h-px flex-1 bg-border/60"></div>
                 </h2>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                <div className={moduleGridClass}>
                   {filteredItems.map((item, itemIdx) => (
                     <ModuleCard
                       key={item.path || itemIdx}
                       {...item}
+                      cardLayout="home"
                       isBookmarked={isBookmarked(item.path)}
                       onToggleBookmark={toggleBookmark}
                     />

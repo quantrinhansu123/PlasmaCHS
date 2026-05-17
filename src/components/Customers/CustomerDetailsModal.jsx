@@ -3,13 +3,13 @@ import {
     ArrowDownRight,
     ArrowUpRight,
     CreditCard,
-    Cpu,
-    Droplets,
     DollarSign,
     FileText,
     History,
     ImageIcon,
+    LayoutGrid,
     MapPin,
+    Monitor,
     Package,
     Phone,
     Upload,
@@ -22,13 +22,12 @@ import {
     Edit,
     Trash2,
     MoreVertical,
-    ChevronDown,
-    ChevronRight,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
 import { supabase } from '../../supabase/config';
+import CustomerAssetsHistoryPanel from './CustomerAssetsHistoryPanel';
 import { getCustomerIdsForCareHistory } from '../../utils/customerCareHistory';
 import {
     isOrderDeliveredCompleted,
@@ -107,6 +106,35 @@ function machineSerialHintsFromCustomerRecord(cust) {
     return s.split(/[\n,;/|]+/).map((x) => String(x).trim()).filter(Boolean);
 }
 
+function filterAssetsBySearch(list, query, fields) {
+    const t = String(query || '').trim().toLowerCase();
+    if (!t) return list;
+    return list.filter((item) =>
+        fields.some((f) => String(item[f] || '').toLowerCase().includes(t)),
+    );
+}
+
+function sortAssetsByKey(list, sortKey) {
+    const copy = [...list];
+    if (sortKey === 'serial_asc') {
+        return copy.sort((a, b) =>
+            String(a.serial_number || '').localeCompare(String(b.serial_number || ''), 'vi'),
+        );
+    }
+    if (sortKey === 'oldest') {
+        return copy.sort(
+            (a, b) =>
+                new Date(a.updated_at || a.created_at || 0) -
+                new Date(b.updated_at || b.created_at || 0),
+        );
+    }
+    return copy.sort(
+        (a, b) =>
+            new Date(b.updated_at || b.created_at || 0) -
+            new Date(a.updated_at || a.created_at || 0),
+    );
+}
+
 export default function CustomerDetailsModal({ customer, onClose, hideCommerceTabs = false }) {
     const [activeTab, setActiveTab] = useState('overview'); // overview, assets_history, care_history, …
     const [loading, setLoading] = useState(true);
@@ -156,8 +184,13 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
     const [customerCylinders, setCustomerCylinders] = useState([]);
     const [machineLogs, setMachineLogs] = useState([]);
     const [machinesHistoryLoading, setMachinesHistoryLoading] = useState(false);
-    const [expandedMachineSerial, setExpandedMachineSerial] = useState(null);
-    const [expandedCylinderSerial, setExpandedCylinderSerial] = useState(null);
+    const [machineSearch, setMachineSearch] = useState('');
+    const [machineSort, setMachineSort] = useState('newest');
+    const [cylinderSearch, setCylinderSearch] = useState('');
+    const [cylinderSort, setCylinderSort] = useState('newest');
+    const [assetsQuickDays, setAssetsQuickDays] = useState(30);
+    const [assetDetailKey, setAssetDetailKey] = useState(null);
+    const [assetHistoryKey, setAssetHistoryKey] = useState(null);
 
     const logsByNormSerial = useMemo(() => {
         const map = new Map();
@@ -173,6 +206,52 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
 
     const logsForAssetSerial = (serial) =>
         logsByNormSerial.get(normalizeMachineSerialKey(serial)) || [];
+
+    const filteredMachines = useMemo(
+        () =>
+            sortAssetsByKey(
+                filterAssetsBySearch(customerMachines, machineSearch, [
+                    'serial_number',
+                    'machine_type',
+                    'status',
+                    'warehouse',
+                ]),
+                machineSort,
+            ),
+        [customerMachines, machineSearch, machineSort],
+    );
+
+    const filteredCylinders = useMemo(
+        () =>
+            sortAssetsByKey(
+                filterAssetsBySearch(customerCylinders, cylinderSearch, [
+                    'serial_number',
+                    'volume',
+                    'status',
+                ]),
+                cylinderSort,
+            ),
+        [customerCylinders, cylinderSearch, cylinderSort],
+    );
+
+    const applyAssetsQuickDays = (days) => {
+        const to = new Date();
+        const from = new Date();
+        from.setDate(from.getDate() - days);
+        setAssetsQuickDays(days);
+        setMachineRange({
+            from: from.toISOString().split('T')[0],
+            to: to.toISOString().split('T')[0],
+        });
+    };
+
+    const formatAssetUpdatedAt = (row) => {
+        const raw = row?.updated_at || row?.created_at;
+        if (!raw) return '—';
+        return formatDateTime(raw);
+    };
+
+    const assetPanelKey = (kind, serial) => `${kind}:${serial}`;
 
     useEffect(() => {
         if (!customer) return;
@@ -490,10 +569,13 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
     ]);
 
     useEffect(() => {
-        setExpandedMachineSerial(null);
-        setExpandedCylinderSerial(null);
+        setAssetDetailKey(null);
+        setAssetHistoryKey(null);
+        setMachineSearch('');
+        setCylinderSearch('');
         setCustomerCylinders([]);
         setMachineRange(defaultMachineRange());
+        setAssetsQuickDays(30);
     }, [customer?.id]);
 
     useEffect(() => {
@@ -842,35 +924,93 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
 
             <div
                 className={clsx(
-                    "relative bg-slate-50 shadow-2xl w-full max-w-4xl overflow-hidden h-full flex flex-col border-l border-slate-200 animate-in slide-in-from-right duration-500",
+                    "relative bg-slate-50 shadow-2xl w-full max-w-5xl overflow-hidden h-full flex flex-col border-l border-slate-200 animate-in slide-in-from-right duration-500",
                     isClosing && "animate-out slide-out-to-right duration-300"
                 )}
                 onClick={e => e.stopPropagation()}
             >
                 {/* Header */}
-                <div className="bg-white px-6 py-4 border-b border-slate-200 shrink-0">
-                    <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-primary text-white shadow-lg">
-                                <UserCircle className="w-7 h-7" />
+                <div className="bg-white px-6 py-5 border-b border-slate-200 shrink-0">
+                    <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-center gap-4 min-w-0">
+                            <div className="w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center bg-primary text-white shadow-lg shadow-primary/25">
+                                <UserCircle className="w-8 h-8" />
                             </div>
-                            <div>
-                                <h2 className="text-2xl font-black text-slate-900 tracking-tight">{customer.name}</h2>
-                                <div className="flex items-center gap-4 text-sm font-bold text-slate-500">
-                                    <span className="flex items-center gap-1.5"><Phone className="w-4 h-4" /> {customer.phone || '—'}</span>
-                                    <span className="flex items-center gap-1.5"><MapPin className="w-4 h-4" /> {customer.address || '—'}</span>
+                            <div className="min-w-0">
+                                <h2 className="text-2xl font-black text-slate-900 tracking-tight truncate">
+                                    {customer.name}
+                                </h2>
+                                <div className="mt-1 flex flex-col gap-1 text-sm font-semibold text-slate-500 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+                                    <span className="flex items-center gap-1.5">
+                                        <Phone className="w-4 h-4 shrink-0 text-slate-400" />
+                                        {customer.phone || '—'}
+                                    </span>
+                                    <span className="flex items-center gap-1.5 min-w-0">
+                                        <MapPin className="w-4 h-4 shrink-0 text-slate-400" />
+                                        <span className="truncate">{customer.address || '—'}</span>
+                                    </span>
                                 </div>
                             </div>
                         </div>
-                        <button onClick={handleClose} className="p-2 bg-slate-100 text-slate-400 hover:text-rose-500 rounded-xl transition-colors">
-                            <X className="w-6 h-6" />
-                        </button>
+                        <div className="flex items-center gap-1 shrink-0">
+                            <button
+                                type="button"
+                                className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-50 transition-colors"
+                                aria-label="Tùy chọn"
+                            >
+                                <MoreVertical className="w-5 h-5" />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleClose}
+                                className="p-2 bg-slate-100 text-slate-400 hover:text-rose-500 rounded-xl transition-colors"
+                                aria-label="Đóng"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
                     </div>
 
-                    <div className="flex items-center gap-6 mt-5 border-b border-slate-200 overflow-x-auto scrollbar-hide scroll-smooth">
-                        <button type="button" onClick={() => setActiveTab('overview')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'overview' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Tổng quan</button>
-                        <button type="button" onClick={() => setActiveTab('assets_history')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0 max-w-[220px] text-left sm:text-center sm:max-w-none", activeTab === 'assets_history' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Máy, vỏ bình & lịch sử</button>
-                        <button type="button" onClick={() => setActiveTab('care_history')} className={clsx("pb-4 text-sm font-black transition-all border-b-2 whitespace-nowrap shrink-0", activeTab === 'care_history' ? 'text-primary border-primary' : 'text-slate-400 border-transparent')}>Lịch sử chăm sóc ({careHistoryCount})</button>
+                    <div className="mt-5 flex items-center gap-1 border-b border-slate-200 overflow-x-auto scrollbar-hide">
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('overview')}
+                            className={clsx(
+                                'flex items-center gap-2 px-3 pb-3.5 text-sm font-bold transition-all border-b-2 whitespace-nowrap shrink-0',
+                                activeTab === 'overview'
+                                    ? 'text-primary border-primary'
+                                    : 'text-slate-400 border-transparent hover:text-slate-600',
+                            )}
+                        >
+                            <LayoutGrid className="w-4 h-4" />
+                            Tổng quan
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('assets_history')}
+                            className={clsx(
+                                'flex items-center gap-2 px-3 pb-3.5 text-sm font-bold transition-all border-b-2 whitespace-nowrap shrink-0',
+                                activeTab === 'assets_history'
+                                    ? 'text-primary border-primary'
+                                    : 'text-slate-400 border-transparent hover:text-slate-600',
+                            )}
+                        >
+                            <Monitor className="w-4 h-4" />
+                            Máy, vỏ bình & lịch sử
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('care_history')}
+                            className={clsx(
+                                'flex items-center gap-2 px-3 pb-3.5 text-sm font-bold transition-all border-b-2 whitespace-nowrap shrink-0',
+                                activeTab === 'care_history'
+                                    ? 'text-primary border-primary'
+                                    : 'text-slate-400 border-transparent hover:text-slate-600',
+                            )}
+                        >
+                            <History className="w-4 h-4" />
+                            Lịch sử chăm sóc ({careHistoryCount})
+                        </button>
                     </div>
                 </div>
 
@@ -1000,262 +1140,34 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
                             )}
 
                             {activeTab === 'assets_history' && (
-                                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                                    <div className="flex flex-col gap-3 border-b border-slate-100 pb-3 sm:flex-row sm:items-end sm:justify-between">
-                                        <h4 className="flex items-center gap-2 text-sm font-black text-slate-800 uppercase tracking-widest">
-                                            <Cpu className="w-4 h-4 shrink-0 text-indigo-600" />
-                                            Máy, vỏ bình & lịch sử
-                                        </h4>
-                                        <div className="flex flex-wrap items-end gap-2">
-                                            <div className="space-y-0.5">
-                                                <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400">
-                                                    Từ ngày
-                                                </label>
-                                                <input
-                                                    type="date"
-                                                    value={machineRange.from}
-                                                    onChange={(e) =>
-                                                        setMachineRange((r) => ({ ...r, from: e.target.value }))
-                                                    }
-                                                    className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold text-slate-800"
-                                                />
-                                            </div>
-                                            <div className="space-y-0.5">
-                                                <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400">
-                                                    Đến ngày
-                                                </label>
-                                                <input
-                                                    type="date"
-                                                    value={machineRange.to}
-                                                    onChange={(e) =>
-                                                        setMachineRange((r) => ({ ...r, to: e.target.value }))
-                                                    }
-                                                    className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold text-slate-800"
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {!customer?.id &&
-                                    !(customer?.name && String(customer.name).trim()) ? (
-                                        <p className="text-sm font-medium text-slate-500 italic">
-                                            Cần mã khách hoặc tên khách để tra máy, vỏ bình và nhật ký.
-                                        </p>
-                                    ) : machinesHistoryLoading ? (
-                                        <p className="py-6 text-center text-sm font-bold text-slate-400">
-                                            Đang tải máy, vỏ bình & nhật ký…
-                                        </p>
-                                    ) : customerMachines.length === 0 && customerCylinders.length === 0 ? (
-                                        <p className="text-sm text-slate-600">
-                                            Chưa thấy máy hay vỏ bình gán cho khách này: kiểm tra tên/SĐT khớp{' '}
-                                            <span className="font-mono text-xs">
-                                                machines.customer_name / cylinders.customer_*
-                                            </span>
-                                            , serial trên các đơn đã hoàn thành, và khoảng ngày lọc nhật ký.
-                                        </p>
-                                    ) : (
-                                        <div
-                                            className={clsx(
-                                                'grid gap-6 lg:items-start',
-                                                customerMachines.length > 0 && customerCylinders.length > 0
-                                                    ? 'lg:grid-cols-2'
-                                                    : 'grid-cols-1',
-                                            )}
-                                        >
-                                            {customerMachines.length > 0 && (
-                                                <div className="min-w-0 space-y-2">
-                                                    <p className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                                        <Cpu className="h-3.5 w-3.5 text-indigo-600" /> Máy (
-                                                        {customerMachines.length})
-                                                    </p>
-                                                    {customerMachines.map((m) => {
-                                                        const logs = logsForAssetSerial(m.serial_number);
-                                                        const open = expandedMachineSerial === m.serial_number;
-                                                        return (
-                                                            <div
-                                                                key={m.id}
-                                                                className="overflow-hidden rounded-xl border border-slate-100 bg-slate-50/40"
-                                                            >
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() =>
-                                                                        setExpandedMachineSerial(
-                                                                            open ? null : m.serial_number,
-                                                                        )
-                                                                    }
-                                                                    className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-white"
-                                                                >
-                                                                    {open ? (
-                                                                        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
-                                                                    ) : (
-                                                                        <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
-                                                                    )}
-                                                                    <div className="min-w-0 flex-1">
-                                                                        <p className="truncate font-black text-slate-900">
-                                                                            {m.serial_number}
-                                                                        </p>
-                                                                        <p className="truncate text-[11px] font-bold text-slate-500">
-                                                                            {m.machine_type || '—'} · {m.status || '—'}
-                                                                            {m.warehouse ? ` · Kho ${m.warehouse}` : ''}
-                                                                        </p>
-                                                                    </div>
-                                                                    <span className="shrink-0 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-black text-slate-600">
-                                                                        {logs.length} sự kiện
-                                                                    </span>
-                                                                </button>
-                                                                {open && (
-                                                                    <div className="border-t border-slate-100 bg-white px-2 py-2">
-                                                                        {logs.length === 0 ? (
-                                                                            <p className="px-2 py-3 text-center text-xs font-medium italic text-slate-400">
-                                                                                Không có nhật ký trong khoảng thời gian đã
-                                                                                chọn.
-                                                                            </p>
-                                                                        ) : (
-                                                                            <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-100">
-                                                                                <table className="w-full text-left text-[11px]">
-                                                                                    <thead className="sticky top-0 bg-slate-50 text-[9px] font-black uppercase tracking-wider text-slate-400">
-                                                                                        <tr>
-                                                                                            <th className="px-2 py-1.5">
-                                                                                                Thời điểm
-                                                                                            </th>
-                                                                                            <th className="px-2 py-1.5">
-                                                                                                Hành động
-                                                                                            </th>
-                                                                                            <th className="px-2 py-1.5">
-                                                                                                Mô tả
-                                                                                            </th>
-                                                                                        </tr>
-                                                                                    </thead>
-                                                                                    <tbody className="divide-y divide-slate-50">
-                                                                                        {logs.map((log) => (
-                                                                                            <tr
-                                                                                                key={log.id}
-                                                                                                className="align-top text-slate-700"
-                                                                                            >
-                                                                                                <td className="whitespace-nowrap px-2 py-1.5 font-semibold text-slate-500">
-                                                                                                    {formatDateTime(
-                                                                                                        log.created_at,
-                                                                                                    )}
-                                                                                                </td>
-                                                                                                <td className="px-2 py-1.5 font-bold text-indigo-700">
-                                                                                                    {log.action || '—'}
-                                                                                                </td>
-                                                                                                <td className="max-w-[200px] px-2 py-1.5 break-words text-slate-600">
-                                                                                                    {log.description || '—'}
-                                                                                                </td>
-                                                                                            </tr>
-                                                                                        ))}
-                                                                                    </tbody>
-                                                                                </table>
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
-                                            {customerCylinders.length > 0 && (
-                                                <div className="min-w-0 space-y-2">
-                                                    <p className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                                        <Droplets className="h-3.5 w-3.5 text-sky-600" /> Vỏ bình (
-                                                        {customerCylinders.length})
-                                                    </p>
-                                                    {customerCylinders.map((cyl) => {
-                                                        const logs = logsForAssetSerial(cyl.serial_number);
-                                                        const open =
-                                                            expandedCylinderSerial === cyl.serial_number;
-                                                        return (
-                                                            <div
-                                                                key={cyl.id}
-                                                                className="overflow-hidden rounded-xl border border-slate-100 bg-sky-50/30"
-                                                            >
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() =>
-                                                                        setExpandedCylinderSerial(
-                                                                            open ? null : cyl.serial_number,
-                                                                        )
-                                                                    }
-                                                                    className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-white"
-                                                                >
-                                                                    {open ? (
-                                                                        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
-                                                                    ) : (
-                                                                        <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
-                                                                    )}
-                                                                    <div className="min-w-0 flex-1">
-                                                                        <p className="truncate font-black text-slate-900 font-mono text-sm">
-                                                                            {cyl.serial_number}
-                                                                        </p>
-                                                                        <p className="truncate text-[11px] font-bold text-slate-500">
-                                                                            {(cyl.volume &&
-                                                                                String(cyl.volume).trim()) ||
-                                                                                '—'}{' '}
-                                                                            · {cyl.status || '—'}
-                                                                        </p>
-                                                                    </div>
-                                                                    <span className="shrink-0 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-black text-slate-600">
-                                                                        {logs.length} sự kiện
-                                                                    </span>
-                                                                </button>
-                                                                {open && (
-                                                                    <div className="border-t border-slate-100 bg-white px-2 py-2">
-                                                                        {logs.length === 0 ? (
-                                                                            <p className="px-2 py-3 text-center text-xs font-medium italic text-slate-400">
-                                                                                Không có nhật ký trong khoảng thời gian đã
-                                                                                chọn.
-                                                                            </p>
-                                                                        ) : (
-                                                                            <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-100">
-                                                                                <table className="w-full text-left text-[11px]">
-                                                                                    <thead className="sticky top-0 bg-slate-50 text-[9px] font-black uppercase tracking-wider text-slate-400">
-                                                                                        <tr>
-                                                                                            <th className="px-2 py-1.5">
-                                                                                                Thời điểm
-                                                                                            </th>
-                                                                                            <th className="px-2 py-1.5">
-                                                                                                Hành động
-                                                                                            </th>
-                                                                                            <th className="px-2 py-1.5">
-                                                                                                Mô tả
-                                                                                            </th>
-                                                                                        </tr>
-                                                                                    </thead>
-                                                                                    <tbody className="divide-y divide-slate-50">
-                                                                                        {logs.map((log) => (
-                                                                                            <tr
-                                                                                                key={log.id}
-                                                                                                className="align-top text-slate-700"
-                                                                                            >
-                                                                                                <td className="whitespace-nowrap px-2 py-1.5 font-semibold text-slate-500">
-                                                                                                    {formatDateTime(
-                                                                                                        log.created_at,
-                                                                                                    )}
-                                                                                                </td>
-                                                                                                <td className="px-2 py-1.5 font-bold text-indigo-700">
-                                                                                                    {log.action || '—'}
-                                                                                                </td>
-                                                                                                <td className="max-w-[200px] px-2 py-1.5 break-words text-slate-600">
-                                                                                                    {log.description || '—'}
-                                                                                                </td>
-                                                                                            </tr>
-                                                                                        ))}
-                                                                                    </tbody>
-                                                                                </table>
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
+                                <CustomerAssetsHistoryPanel
+                                    customer={customer}
+                                    machineRange={machineRange}
+                                    setMachineRange={setMachineRange}
+                                    machinesHistoryLoading={machinesHistoryLoading}
+                                    filteredMachines={filteredMachines}
+                                    filteredCylinders={filteredCylinders}
+                                    machineSearch={machineSearch}
+                                    setMachineSearch={setMachineSearch}
+                                    machineSort={machineSort}
+                                    setMachineSort={setMachineSort}
+                                    cylinderSearch={cylinderSearch}
+                                    setCylinderSearch={setCylinderSearch}
+                                    cylinderSort={cylinderSort}
+                                    setCylinderSort={setCylinderSort}
+                                    assetsQuickDays={assetsQuickDays}
+                                    applyAssetsQuickDays={applyAssetsQuickDays}
+                                    assetDetailKey={assetDetailKey}
+                                    setAssetDetailKey={setAssetDetailKey}
+                                    assetHistoryKey={assetHistoryKey}
+                                    setAssetHistoryKey={setAssetHistoryKey}
+                                    assetPanelKey={assetPanelKey}
+                                    logsForAssetSerial={logsForAssetSerial}
+                                    formatDateTime={formatDateTime}
+                                    formatAssetUpdatedAt={formatAssetUpdatedAt}
+                                    machineCount={customerMachines.length}
+                                    cylinderCount={customerCylinders.length}
+                                />
                             )}
 
                             {activeTab === 'care_history' && (

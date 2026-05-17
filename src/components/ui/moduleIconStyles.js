@@ -20,8 +20,12 @@ export const flatIconColorMap = {
 export const flatIconBoxClass =
   'w-20 h-20 lg:w-24 lg:h-24 rounded-[24px] flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-[1.03]';
 
-export const mobileModuleCardClass =
-  'flex flex-col bg-white rounded-[18px] p-3.5 min-h-[168px] shadow-[0_2px_14px_rgba(15,23,42,0.07)] border border-slate-100/90 relative active:scale-[0.98]';
+/** Thẻ module Trang chủ: icon trái, chữ phải cùng một hàng */
+export const homeModuleCardClass =
+  'flex flex-row items-center gap-3 lg:gap-4 bg-white rounded-[18px] p-3 lg:p-3.5 min-h-[64px] shadow-[0_2px_14px_rgba(15,23,42,0.07)] border border-slate-100/90 relative active:scale-[0.98] lg:hover:-translate-y-0.5 lg:active:scale-100';
 
-export const desktopModuleCardClass =
-  'lg:flex-row lg:items-center lg:gap-5 lg:bg-[#e8e8e8] lg:rounded-[28px] lg:p-6 lg:min-h-[120px] lg:border-black/10 lg:shadow-none lg:hover:border-black/20 lg:hover:-translate-y-0.5 lg:active:scale-100';
+/** @deprecated dùng homeModuleCardClass */
+export const mobileModuleCardClass = homeModuleCardClass;
+
+/** @deprecated dùng homeModuleCardClass */
+export const desktopModuleCardClass = '';

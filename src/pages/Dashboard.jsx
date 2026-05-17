@@ -8,7 +8,7 @@ import usePermissions from '../hooks/usePermissions';
 import { canAccessPath } from '../utils/accessControl';
 
 const moduleGridClass =
-  'grid grid-cols-2 gap-3 sm:gap-3.5 lg:grid-cols-2 xl:grid-cols-3 lg:gap-5';
+  'grid grid-cols-2 gap-3 sm:gap-3.5 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 lg:gap-4';
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState('chuc-nang');

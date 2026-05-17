@@ -40,7 +40,7 @@ function OxygenCylinderWatermark({ className }) {
                 textAnchor="middle"
                 fill="currentColor"
                 opacity="0.17"
-                style={{ fontSize: '40px', fontWeight: 700, fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}
+                style={{ fontSize: '40px', fontWeight: 700, fontFamily: 'Roboto, ui-sans-serif, system-ui, sans-serif' }}
             >
                 O₂
             </text>

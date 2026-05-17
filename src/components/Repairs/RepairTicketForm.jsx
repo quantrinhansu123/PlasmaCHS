@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { Activity, AlertCircle, Camera, ChevronDown, Edit3, HeartPulse, Image as ImageIcon, MapPin, Plus, Save, Search, Ticket, Trash2, User, Wrench, X } from 'lucide-react';
+import { Activity, AlertCircle, Camera, ChevronDown, Edit3, HeartPulse, Image as ImageIcon, MapPin, Save, Search, Ticket, Trash2, User, Wrench, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'react-toastify';
@@ -13,6 +13,7 @@ import {
     uploadRepairTicketImages,
 } from '../../utils/repairTicketImages';
 import RepairTicketImageThumb from './RepairTicketImageThumb';
+import { fetchCustomerOwnedDevices } from '../../utils/customerOwnedDevices';
 
 export default function RepairTicketForm({ ticket, initialCustomer, onClose, onSuccess, fullPage = false }) {
     const { role, user } = usePermissions();
@@ -44,12 +45,6 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
     const [customerSearchTerm, setCustomerSearchTerm] = useState('');
     const customerDropdownRef = useRef(null);
 
-    // Custom dropdown state for Error Types
-    const [isErrorTypeDropdownOpen, setIsErrorTypeDropdownOpen] = useState(false);
-    const [errorTypeSearchTerm, setErrorTypeSearchTerm] = useState('');
-    const [newErrorTypeName, setNewErrorTypeName] = useState('');
-    const errorTypeDropdownRef = useRef(null);
-
     // Custom dropdown state for Device (Unified)
     const [isMachineDropdownOpen, setIsMachineDropdownOpen] = useState(false); // Renamed internally to Device later
     const [machineSearchTerm, setMachineSearchTerm] = useState('');
@@ -65,30 +60,44 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
             .trim()
             .toLowerCase();
 
-    const belongsToCustomer = (assetCustomerName, customerName) => {
-        const normalizedAsset = normalizeCustomerText(assetCustomerName);
-        const normalizedCustomer = normalizeCustomerText(customerName);
-        if (!normalizedAsset || !normalizedCustomer) return false;
-        return (
-            normalizedAsset === normalizedCustomer
-            || normalizedAsset.includes(normalizedCustomer)
-            || normalizedCustomer.includes(normalizedAsset)
-        );
+    const getCustomerRepName = (customer) =>
+        String(customer?.legal_rep || customer?.representative || '').trim();
+
+    const getCustomerFacilityName = (customer) => String(customer?.name || '').trim();
+
+    const formatCustomerLabel = (customer) => {
+        if (!customer) return 'Chọn khách hàng...';
+        const rep = getCustomerRepName(customer);
+        const facility = getCustomerFacilityName(customer);
+        if (rep) {
+            return facility && facility !== rep ? `${rep} · ${facility}` : rep;
+        }
+        return facility || 'Chọn khách hàng...';
     };
 
-    const formatDeviceLabel = (rawType, fallback) => {
-        if (!rawType) return fallback;
-        let formatted = rawType.toString().replace(/_/g, ' ');
-        if (formatted.toUpperCase().startsWith('BINH')) formatted = formatted.replace(/BINH/i, 'Bình');
-        if (formatted.toUpperCase().startsWith('MAY')) formatted = formatted.replace(/MAY/i, 'Máy');
-        return formatted;
+    const customerMatchesSearch = (customer, rawTerm) => {
+        const term = normalizeCustomerText(rawTerm);
+        if (!term) return true;
+        const haystack = [getCustomerRepName(customer), getCustomerFacilityName(customer), customer?.phone]
+            .filter(Boolean)
+            .map(normalizeCustomerText)
+            .join(' ');
+        return haystack.includes(term);
+    };
+
+    const ERROR_DEVICE_CATEGORIES = ['Máy', 'Bình', 'Nâng cấp'];
+
+    const deviceMatchesErrorCategory = (device, category) => {
+        if (!category || category === 'Nâng cấp') return false;
+        if (category === 'Máy') return device?.category === 'Máy';
+        if (category === 'Bình') return device?.category === 'Bình';
+        return true;
     };
 
     // Close dropdowns on outside click
     useEffect(() => {
         const handleClickOutside = (event) => {
             if (customerDropdownRef.current && !customerDropdownRef.current.contains(event.target)) setIsCustomerDropdownOpen(false);
-            if (errorTypeDropdownRef.current && !errorTypeDropdownRef.current.contains(event.target)) setIsErrorTypeDropdownOpen(false);
             if (machineDropdownRef.current && !machineDropdownRef.current.contains(event.target)) setIsMachineDropdownOpen(false);
         };
         document.addEventListener('mousedown', handleClickOutside);
@@ -99,7 +108,7 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
         customerId: '',
         machineSerial: '',
         machineName: '',
-        errorTypeId: '',
+        errorTypeName: '',
         errorDetails: '',
         detailImages: [],
         salesId: '',
@@ -130,7 +139,7 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                 customerId: ticket.customer_id || '',
                 machineSerial: ticket.machine_serial || '',
                 machineName: ticket.machine_name || '',
-                errorTypeId: ticket.error_type_id || '',
+                errorTypeName: '',
                 errorDetails: ticket.error_details || '',
                 detailImages: normalizeRepairTicketImages(ticket.error_images),
                 salesId: ticket.sales_id || '',
@@ -164,11 +173,22 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
         }
     }, [ticket, isEdit, user, role, initialCustomer]);
 
+    useEffect(() => {
+        if (!isEdit || !ticket?.error_type_id || errorTypes.length === 0) return;
+        const match = errorTypes.find((e) => e.id === ticket.error_type_id);
+        if (match?.name) {
+            setFormData((prev) => (prev.errorTypeName ? prev : { ...prev, errorTypeName: match.name }));
+        }
+    }, [isEdit, ticket, errorTypes]);
+
     const fetchMasterData = async () => {
         setIsFetchingData(true);
         try {
             // 1. Fetch Customers
-            const { data: custData } = await supabase.from('customers').select('id, name, address, phone').order('name');
+            const { data: custData } = await supabase
+                .from('customers')
+                .select('id, name, address, phone, legal_rep, representative, invoice_company_name, machines_in_use')
+                .order('name');
             if (custData) setCustomers(custData);
 
             // 2. Fetch Error Types
@@ -232,68 +252,15 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
     }, [formData.customerId, customers]);
 
     const fetchCustomerDevices = async (customer) => {
-        const customerName = String(customer?.name || '').trim();
-        if (!customerName) {
+        if (!customer?.id && !customer?.name) {
             setAvailableDevices([]);
             return;
         }
 
         setIsFetchingDevices(true);
         try {
-            const [{ data: machineData, error: machineError }, { data: cylinderData, error: cylinderError }] =
-                await Promise.all([
-                    supabase
-                        .from('machines')
-                        .select('serial_number, machine_type, status, customer_name, department_in_charge')
-                        .eq('customer_name', customerName)
-                        .not('serial_number', 'is', null)
-                        .order('serial_number', { ascending: true }),
-                    supabase
-                        .from('cylinders')
-                        .select('serial_number, volume, category, status, customer_name')
-                        .eq('customer_name', customerName)
-                        .eq('status', 'thuộc khách hàng')
-                        .not('serial_number', 'is', null)
-                        .order('serial_number', { ascending: true }),
-                ]);
-
-            if (machineError) throw machineError;
-            if (cylinderError) throw cylinderError;
-
-            const serialMap = new Map();
-
-            (machineData || [])
-                .filter((machine) => belongsToCustomer(machine.customer_name, customerName))
-                .forEach((machine) => {
-                    const serial = String(machine.serial_number || '').trim();
-                    if (!serial) return;
-                    serialMap.set(serial.toUpperCase(), {
-                        serial_number: serial,
-                        name: formatDeviceLabel(machine.machine_type, 'Máy'),
-                        category: 'Máy',
-                        site: machine.department_in_charge || '',
-                    });
-                });
-
-            (cylinderData || [])
-                .filter((cylinder) => belongsToCustomer(cylinder.customer_name, customerName))
-                .forEach((cylinder) => {
-                    const serial = String(cylinder.serial_number || '').trim();
-                    if (!serial) return;
-                    const label = [formatDeviceLabel(cylinder.category, 'Bình'), cylinder.volume].filter(Boolean).join(' · ');
-                    serialMap.set(serial.toUpperCase(), {
-                        serial_number: serial,
-                        name: label || 'Bình',
-                        category: 'Bình',
-                        site: '',
-                    });
-                });
-
-            setAvailableDevices(
-                Array.from(serialMap.values()).sort((a, b) =>
-                    a.serial_number.localeCompare(b.serial_number, 'vi', { sensitivity: 'base' }),
-                ),
-            );
+            const devices = await fetchCustomerOwnedDevices(supabase, customer);
+            setAvailableDevices(devices);
         } catch (err) {
             console.error('Lỗi tải thiết bị của khách hàng:', err);
             setAvailableDevices([]);
@@ -304,68 +271,19 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
 
     const fetchAnyDeviceBySerial = async (serialPart) => {
         const customer = customersRef.current.find((item) => item.id === formData.customerId);
-        const customerName = String(customer?.name || '').trim();
-        if (!customerName || !serialPart || serialPart.length < 2) return;
+        if (!customer || !serialPart || serialPart.length < 2) return;
 
         setIsFetchingDevices(true);
         try {
-            const search = serialPart.trim().toUpperCase();
-            const [{ data: machineData, error: machineError }, { data: cylinderData, error: cylinderError }] =
-                await Promise.all([
-                    supabase
-                        .from('machines')
-                        .select('serial_number, machine_type, status, customer_name, department_in_charge')
-                        .eq('customer_name', customerName)
-                        .ilike('serial_number', `%${search}%`)
-                        .limit(50),
-                    supabase
-                        .from('cylinders')
-                        .select('serial_number, volume, category, status, customer_name')
-                        .eq('customer_name', customerName)
-                        .eq('status', 'thuộc khách hàng')
-                        .ilike('serial_number', `%${search}%`)
-                        .limit(50),
-                ]);
-
-            if (machineError) throw machineError;
-            if (cylinderError) throw cylinderError;
-
-            const serialMap = new Map(
-                availableDevices.map((device) => [String(device.serial_number).toUpperCase(), device]),
+            const all = await fetchCustomerOwnedDevices(supabase, customer);
+            const query = serialPart.trim().toLowerCase();
+            const filtered = all.filter(
+                (device) =>
+                    device.serial_number.toLowerCase().includes(query) ||
+                    String(device.name || '').toLowerCase().includes(query) ||
+                    String(device.site || '').toLowerCase().includes(query),
             );
-
-            (machineData || [])
-                .filter((machine) => belongsToCustomer(machine.customer_name, customerName))
-                .forEach((machine) => {
-                    const serial = String(machine.serial_number || '').trim();
-                    if (!serial) return;
-                    serialMap.set(serial.toUpperCase(), {
-                        serial_number: serial,
-                        name: formatDeviceLabel(machine.machine_type, 'Máy'),
-                        category: 'Máy',
-                        site: machine.department_in_charge || '',
-                    });
-                });
-
-            (cylinderData || [])
-                .filter((cylinder) => belongsToCustomer(cylinder.customer_name, customerName))
-                .forEach((cylinder) => {
-                    const serial = String(cylinder.serial_number || '').trim();
-                    if (!serial) return;
-                    const label = [formatDeviceLabel(cylinder.category, 'Bình'), cylinder.volume].filter(Boolean).join(' · ');
-                    serialMap.set(serial.toUpperCase(), {
-                        serial_number: serial,
-                        name: label || 'Bình',
-                        category: 'Bình',
-                        site: '',
-                    });
-                });
-
-            setAvailableDevices(
-                Array.from(serialMap.values()).sort((a, b) =>
-                    a.serial_number.localeCompare(b.serial_number, 'vi', { sensitivity: 'base' }),
-                ),
-            );
+            setAvailableDevices(filtered.length > 0 ? filtered : all);
         } catch (err) {
             console.error('Lỗi tìm kiếm thiết bị của khách hàng:', err);
         } finally {
@@ -387,18 +305,30 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
         fetchCustomerDevices(customer);
     };
 
-    const cFilteredCustomers = customers.filter(c =>
-        c.name.toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
-        (c.phone && c.phone.includes(customerSearchTerm))
-    );
+    const cFilteredCustomers = customers.filter((c) => customerMatchesSearch(c, customerSearchTerm));
 
     // Device Dropdown logic
+    const handleErrorCategorySelect = (cat) => {
+        setFormData((prev) => {
+            const selected = availableDevices.find((d) => d.serial_number === prev.machineSerial);
+            const mustClearDevice = selected && !deviceMatchesErrorCategory(selected, cat);
+            return {
+                ...prev,
+                errorCategory: cat,
+                ...(mustClearDevice ? { machineSerial: '', machineName: '' } : {}),
+            };
+        });
+        setIsMachineDropdownOpen(false);
+        setMachineSearchTerm('');
+    };
+
     const handleMachineSelect = (m) => {
-        setFormData(prev => ({
+        if (!deviceMatchesErrorCategory(m, formData.errorCategory)) return;
+        setFormData((prev) => ({
             ...prev,
             machineSerial: m.serial_number,
             machineName: m.name,
-            errorCategory: m.category || prev.errorCategory
+            errorCategory: m.category || prev.errorCategory,
         }));
         setIsMachineDropdownOpen(false);
         setMachineSearchTerm('');
@@ -406,6 +336,7 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
     };
 
     const mFilteredMachines = availableDevices.filter((device) => {
+        if (!deviceMatchesErrorCategory(device, formData.errorCategory)) return false;
         const query = machineSearchTerm.trim().toLowerCase();
         if (!query) return true;
         return (
@@ -415,24 +346,49 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
         );
     });
 
-    // Error Type Add New logic
-    const handleAddErrorType = async () => {
-        if (!newErrorTypeName.trim()) return;
-        setIsLoading(true);
-        try {
-            const { data, error } = await supabase.from('repair_error_types').insert([{ name: newErrorTypeName.trim() }]).select();
-            if (error) throw error;
-            if (data && data[0]) {
-                setErrorTypes(prev => [...prev, data[0]].sort((a, b) => a.name.localeCompare(b.name)));
-                setFormData(prev => ({ ...prev, errorTypeId: data[0].id }));
-                setNewErrorTypeName('');
-                setIsErrorTypeDropdownOpen(false);
+    const deviceSerialLabel =
+        formData.errorCategory === 'Bình' ? 'Mã bình' : formData.errorCategory === 'Máy' ? 'Mã máy' : 'Mã thiết bị';
+
+    const deviceSearchPlaceholder =
+        formData.errorCategory === 'Bình'
+            ? 'Tìm mã hoặc tên bình...'
+            : formData.errorCategory === 'Máy'
+              ? 'Tìm mã hoặc tên máy...'
+              : 'Tìm mã thiết bị...';
+
+    const resolveErrorTypeId = async (name) => {
+        const trimmed = String(name || '').trim();
+        if (!trimmed) return null;
+
+        const normalized = normalizeCustomerText(trimmed);
+        const existing = errorTypes.find((e) => normalizeCustomerText(e.name) === normalized);
+        if (existing) return existing.id;
+
+        const { data, error } = await supabase
+            .from('repair_error_types')
+            .insert([{ name: trimmed }])
+            .select('id, name')
+            .single();
+
+        if (error) {
+            if (error.code === '23505') {
+                const { data: dup } = await supabase
+                    .from('repair_error_types')
+                    .select('id, name')
+                    .ilike('name', trimmed)
+                    .maybeSingle();
+                if (dup?.id) return dup.id;
             }
-        } catch (error) {
-            toast.error('Lỗi thêm loại lỗi: ' + error.message);
-        } finally {
-            setIsLoading(false);
+            throw error;
         }
+
+        if (data) {
+            setErrorTypes((prev) =>
+                [...prev, data].sort((a, b) => a.name.localeCompare(b.name, 'vi', { sensitivity: 'base' }))
+            );
+            return data.id;
+        }
+        return null;
     };
 
     const uploadSelectedImages = async (files, folder) => {
@@ -461,14 +417,24 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
         e.preventDefault();
         setErrorMsg('');
 
+        if (!formData.errorCategory) {
+            setErrorMsg('Vui lòng chọn loại lỗi (Máy / Bình / Nâng cấp).');
+            return;
+        }
+        if (!formData.errorTypeName.trim()) {
+            setErrorMsg('Vui lòng nhập loại lỗi.');
+            return;
+        }
         if (!formData.customerId || !formData.machineSerial) {
-            setErrorMsg('Vui lòng chọn khách hàng và thiết bị.');
+            setErrorMsg('Vui lòng chọn khách hàng và mã thiết bị.');
             return;
         }
 
         setIsLoading(true);
 
         try {
+            const errorTypeId = await resolveErrorTypeId(formData.errorTypeName);
+
             // Upload selected files
             let newDetailImgUrls = formData.detailImages;
             if (newDetailFiles.length > 0) {
@@ -492,7 +458,7 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                 customer_id: formData.customerId,
                 machine_serial: formData.machineSerial,
                 machine_name: formData.machineName,
-                error_type_id: formData.errorTypeId || null,
+                error_type_id: errorTypeId,
                 error_details: formData.errorDetails,
                 error_images: newDetailImgUrls,
                 sales_id: formData.salesId || null,
@@ -626,6 +592,35 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                 <Ticket className="w-4 h-4 text-primary/80" /> 1. Thông tin thiết bị
                             </h4>
 
+                            <div className="space-y-2 pb-1">
+                                <label className="flex items-center gap-1.5 text-[14px] font-bold text-primary">
+                                    <Activity className="w-4 h-4 text-primary/80" />
+                                    Tên lỗi (Máy/Bình/Nâng cấp) <span className="text-red-500">*</span>
+                                </label>
+                                <div className="flex flex-wrap gap-3">
+                                    {ERROR_DEVICE_CATEGORIES.map((cat) => (
+                                        <button
+                                            key={cat}
+                                            type="button"
+                                            onClick={() => handleErrorCategorySelect(cat)}
+                                            className={clsx(
+                                                'px-5 py-2 rounded-2xl text-[14px] font-bold transition-all border-2',
+                                                formData.errorCategory === cat
+                                                    ? 'bg-primary border-primary text-white shadow-md shadow-primary/20'
+                                                    : 'bg-white border-slate-200 text-slate-500 hover:border-primary/40 hover:text-primary'
+                                            )}
+                                        >
+                                            {cat}
+                                        </button>
+                                    ))}
+                                    {!ERROR_DEVICE_CATEGORIES.includes(formData.errorCategory) && formData.errorCategory ? (
+                                        <div className="px-5 py-2 rounded-2xl text-[14px] font-bold bg-primary border-2 border-primary text-white">
+                                            {formData.errorCategory}
+                                        </div>
+                                    ) : null}
+                                </div>
+                            </div>
+
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {/* Khách hàng */}
                                 <div className="space-y-2">
@@ -635,8 +630,10 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                             className={`w-full h-12 px-5 border rounded-2xl text-[14px] transition-all cursor-pointer flex justify-between items-center ${isFetchingData ? 'bg-slate-50 text-slate-400 border-slate-200' : 'bg-slate-50 border-slate-200 text-slate-900 hover:border-primary/40 hover:bg-white shadow-sm font-semibold'}`}
                                             onClick={() => !isFetchingData && setIsCustomerDropdownOpen(!isCustomerDropdownOpen)}
                                         >
-                                            <span>
-                                                {formData.customerId ? customers.find(c => c.id === formData.customerId)?.name : 'Chọn khách hàng...'}
+                                            <span className="truncate">
+                                                {formData.customerId
+                                                    ? formatCustomerLabel(customers.find((c) => c.id === formData.customerId))
+                                                    : 'Chọn khách hàng...'}
                                             </span>
                                             <ChevronDown className="w-5 h-5 text-primary/60" />
                                         </div>
@@ -645,15 +642,24 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                                 <div className="p-3 border-b border-slate-100 bg-slate-50 flex items-center gap-3 sticky top-0 z-10">
                                                     <Search className="w-4 h-4 text-primary/40" />
                                                     <input
-                                                        type="text" className="w-full bg-transparent border-none outline-none text-[14px] font-bold placeholder-slate-400" placeholder="Tìm kiếm khách hàng theo tên..."
+                                                        type="text" className="w-full bg-transparent border-none outline-none text-[14px] font-bold placeholder-slate-400" placeholder="Tìm người đại diện, tên cơ sở, SĐT..."
                                                         value={customerSearchTerm} onChange={(e) => setCustomerSearchTerm(e.target.value)} onClick={(e) => e.stopPropagation()} autoFocus
                                                     />
                                                 </div>
                                                 <div className="overflow-y-auto custom-scrollbar flex-1 py-1">
                                                     {cFilteredCustomers.length > 0 ? cFilteredCustomers.map(customer => (
                                                         <div key={customer.id} className="px-5 py-3.5 cursor-pointer border-b border-slate-50 hover:bg-primary/5 transition-colors group" onClick={() => handleCustomerSelect(customer)}>
-                                                            <div className="font-bold text-[14px] text-slate-800 group-hover:text-primary">{customer.name}</div>
-                                                            <div className="text-[12px] text-slate-400 font-semibold">{customer.phone || 'Chưa cập nhật SĐT'}</div>
+                                                            <div className="font-bold text-[14px] text-slate-800 group-hover:text-primary">
+                                                                {getCustomerRepName(customer) || getCustomerFacilityName(customer) || '—'}
+                                                            </div>
+                                                            <div className="text-[12px] text-slate-400 font-semibold">
+                                                                {[
+                                                                    getCustomerRepName(customer) && getCustomerFacilityName(customer) && getCustomerRepName(customer) !== getCustomerFacilityName(customer)
+                                                                        ? getCustomerFacilityName(customer)
+                                                                        : null,
+                                                                    customer.phone,
+                                                                ].filter(Boolean).join(' · ') || 'Chưa cập nhật SĐT'}
+                                                            </div>
                                                         </div>
                                                     )) : <div className="px-5 py-6 text-center text-sm text-slate-500 font-semibold italic">Không tìm thấy khách hàng nào</div>}
                                                 </div>
@@ -664,11 +670,24 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
 
                                 {/* Mã thiết bị */}
                                 <div className="space-y-2">
-                                    <label className="flex items-center gap-1.5 text-[14px] font-bold text-primary"><MapPin className="w-4 h-4 text-primary/80" />Mã thiết bị <span className="text-red-500">*</span></label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-bold text-primary"><MapPin className="w-4 h-4 text-primary/80" />{deviceSerialLabel} <span className="text-red-500">*</span></label>
                                     <div className="relative" ref={machineDropdownRef}>
                                         <div
-                                            className={`w-full h-12 px-5 border rounded-2xl text-[14px] transition-all cursor-pointer flex justify-between items-center ${!formData.customerId ? 'bg-slate-50 border-slate-200 text-slate-400 font-medium' : 'bg-slate-50 border-slate-200 text-slate-900 hover:border-primary/40 hover:bg-white shadow-sm font-semibold'}`}
+                                            className={clsx(
+                                                'w-full h-12 px-5 border rounded-2xl text-[14px] transition-all flex justify-between items-center',
+                                                !formData.errorCategory || formData.errorCategory === 'Nâng cấp' || !formData.customerId
+                                                    ? 'bg-slate-50 border-slate-200 text-slate-400 font-medium cursor-not-allowed'
+                                                    : 'bg-slate-50 border-slate-200 text-slate-900 hover:border-primary/40 hover:bg-white shadow-sm font-semibold cursor-pointer'
+                                            )}
                                             onClick={() => {
+                                                if (!formData.errorCategory) {
+                                                    toast.info('Vui lòng chọn loại lỗi (Máy/Bình) trước', { position: 'top-center' });
+                                                    return;
+                                                }
+                                                if (formData.errorCategory === 'Nâng cấp') {
+                                                    toast.info('Nâng cấp không chọn mã từ danh sách máy/bình', { position: 'top-center' });
+                                                    return;
+                                                }
                                                 if (!formData.customerId) {
                                                     toast.info('Vui lòng chọn khách hàng trước', { position: 'top-center' });
                                                     return;
@@ -678,18 +697,18 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                         >
                                             <span className="flex items-center gap-2">
                                                 {isFetchingDevices && <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div>}
-                                                {formData.machineSerial || '-- Chọn mã thiết bị --'}
+                                                {formData.machineSerial || `-- Chọn ${deviceSerialLabel.toLowerCase()} --`}
                                             </span>
                                             <ChevronDown className="w-5 h-5 text-primary/60" />
                                         </div>
 
-                                        {isMachineDropdownOpen && (
+                                        {isMachineDropdownOpen && formData.errorCategory && formData.errorCategory !== 'Nâng cấp' && (
                                             <div className="absolute z-50 w-full mt-2 top-full bg-white border border-slate-200 shadow-2xl max-h-64 overflow-hidden flex flex-col rounded-2xl animate-in fade-in zoom-in-95 duration-200">
                                                 <div className="p-3 border-b border-slate-100 bg-slate-50 flex items-center gap-3 sticky top-0 z-10">
                                                     <Search className="w-4 h-4 text-primary/40" />
                                                     <div className="flex-1 flex items-center gap-2">
                                                         <input
-                                                            type="text" className="w-full bg-transparent border-none outline-none text-[14px] font-bold placeholder-slate-400" placeholder="Tìm mã hoặc tên máy..."
+                                                            type="text" className="w-full bg-transparent border-none outline-none text-[14px] font-bold placeholder-slate-400" placeholder={deviceSearchPlaceholder}
                                                             value={machineSearchTerm} 
                                                             onChange={(e) => setMachineSearchTerm(e.target.value)} 
                                                             onClick={(e) => e.stopPropagation()} autoFocus
@@ -716,8 +735,14 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                                         </div>
                                                     )) : (
                                                         <div className="px-5 py-6 text-center">
-                                                            <p className="text-sm text-slate-500 font-semibold italic mb-2">Không tìm thấy thiết bị trực thuộc khách hàng / cơ sở này</p>
-                                                            {machineSearchTerm.length >= 2 && (
+                                                            <p className="text-sm text-slate-500 font-semibold italic mb-2">
+                                                                {formData.errorCategory === 'Máy'
+                                                                    ? 'Không có máy nào của khách hàng / cơ sở này'
+                                                                    : formData.errorCategory === 'Bình'
+                                                                      ? 'Không có bình nào của khách hàng / cơ sở này'
+                                                                      : 'Không tìm thấy thiết bị'}
+                                                            </p>
+                                                            {machineSearchTerm.length >= 2 && formData.errorCategory !== 'Nâng cấp' && (
                                                                 <button 
                                                                     type="button"
                                                                     onClick={(e) => { e.stopPropagation(); fetchAnyDeviceBySerial(machineSearchTerm); }}
@@ -746,35 +771,6 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                             </div>
                         </div>
 
-                        {/* Section 1.5: Phân loại lỗi (Tên lỗi) */}
-                        <div id="section-category" className="scroll-mt-6 rounded-2xl border border-primary/10 bg-white p-4 sm:p-5 space-y-4 shadow-sm hover:shadow-md transition-shadow">
-                            <h4 className="flex items-center gap-2 text-[16px] !font-black !text-primary pb-1">
-                                <Activity className="w-4 h-4 text-primary/80" /> Tên lỗi (Máy/Bình/Nâng cấp)
-                            </h4>
-                            <div className="flex flex-wrap gap-4">
-                                {['Máy', 'Bình', 'Nâng cấp'].map(cat => (
-                                    <button
-                                        key={cat}
-                                        type="button"
-                                        onClick={() => setFormData(prev => ({ ...prev, errorCategory: cat }))}
-                                        className={clsx(
-                                            "px-6 py-2.5 rounded-2xl text-[14px] font-bold transition-all border-2",
-                                            formData.errorCategory === cat
-                                                ? "bg-primary border-primary text-white shadow-lg shadow-primary/20"
-                                                : "bg-white border-slate-200 text-slate-500 hover:border-primary/40 hover:text-primary"
-                                        )}
-                                    >
-                                        {cat}
-                                    </button>
-                                ))}
-                                {!['Máy', 'Bình', 'Nâng cấp'].includes(formData.errorCategory) && formData.errorCategory && (
-                                    <div className="px-6 py-2.5 rounded-2xl text-[14px] font-bold bg-primary border-primary text-white shadow-lg shadow-primary/20">
-                                        {formData.errorCategory}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
                         {/* Section 2: Tình trạng lỗi */}
                         <div id="section-error" className="scroll-mt-6 rounded-2xl border border-primary/10 bg-white p-4 sm:p-5 space-y-4 shadow-sm hover:shadow-md transition-shadow [&_label]:text-primary [&_label_svg]:text-primary/80">
                             <h4 className="flex items-center gap-2 text-[16px] !font-black !text-primary pb-2 border-b border-primary/10">
@@ -782,45 +778,31 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                             </h4>
 
                             <div className="space-y-4">
-                                {/* Loại lỗi Custom Dropdown với Nút Add */}
                                 <div className="space-y-2">
-                                    <label className="text-[14px] font-bold text-primary flex items-center gap-1.5"><Activity className="w-4 h-4" />Loại lỗi <span className="text-red-500">*</span></label>
-                                    <div className="relative" ref={errorTypeDropdownRef}>
-                                        <div className="w-full h-12 px-5 border bg-slate-50 border-slate-200 rounded-2xl flex justify-between items-center cursor-pointer hover:border-primary/40 hover:bg-white shadow-sm transition-all text-slate-900 font-semibold" onClick={() => setIsErrorTypeDropdownOpen(!isErrorTypeDropdownOpen)}>
-                                            <span>
-                                                {formData.errorTypeId ? errorTypes.find(e => e.id === formData.errorTypeId)?.name : '-- Chọn loại lỗi --'}
-                                            </span>
-                                            <ChevronDown className="w-5 h-5 text-primary/60" />
-                                        </div>
-                                        {isErrorTypeDropdownOpen && (
-                                            <div className="absolute z-50 w-full min-w-0 mt-2 bg-white border border-slate-200 shadow-2xl max-h-72 flex flex-col rounded-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                                                <div className="p-3 border-b border-slate-100 bg-slate-50 flex items-center gap-3">
-                                                    <Search className="w-4 h-4 text-primary/40" />
-                                                    <input
-                                                        type="text" className="w-full bg-transparent border-none outline-none text-[14px] font-bold placeholder-slate-400" placeholder="Tìm hoặc thêm mới lỗi..."
-                                                        value={errorTypeSearchTerm} onChange={(e) => setErrorTypeSearchTerm(e.target.value)} onClick={(e) => e.stopPropagation()}
-                                                    />
-                                                </div>
-                                                <div className="overflow-y-auto custom-scrollbar flex-1 py-1">
-                                                    {errorTypes.filter(e => e.name.toLowerCase().includes(errorTypeSearchTerm.toLowerCase())).map(err => (
-                                                        <div key={err.id} className="px-5 py-3 cursor-pointer hover:bg-primary/5 text-[14px] font-bold text-primary transition-colors" onClick={() => { setFormData(prev => ({ ...prev, errorTypeId: err.id })); setIsErrorTypeDropdownOpen(false); }}>
-                                                            {err.name}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                                <div className="p-3 border-t border-slate-100 bg-primary/5 flex items-center gap-2 min-w-0">
-                                                    <input type="text" value={newErrorTypeName} onChange={(e) => setNewErrorTypeName(e.target.value)} placeholder="Nhập tên lỗi mới..." onClick={(e) => e.stopPropagation()} className="min-w-0 flex-1 px-3 py-2 rounded-xl border border-slate-200 text-sm font-bold outline-none focus:border-primary/40 transition-all" />
-                                                    <button
-                                                        type="button"
-                                                        aria-label="Thêm loại lỗi mới"
-                                                        onClick={(e) => { e.stopPropagation(); handleAddErrorType(); }}
-                                                        className="!h-10 !w-10 !min-w-10 !max-w-10 !p-0 !m-0 bg-primary text-white rounded-xl hover:bg-primary/90 shadow-lg shadow-primary/20 inline-flex items-center justify-center shrink-0 transition-all"
-                                                    >
-                                                        <Plus className="text-white" size={20} strokeWidth={2.25} aria-hidden />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
+                                    <label className="text-[14px] font-bold text-primary flex items-center gap-1.5">
+                                        <Activity className="w-4 h-4" />
+                                        Loại lỗi <span className="text-red-500">*</span>
+                                    </label>
+                                    <div className="relative">
+                                        <input
+                                            type="text"
+                                            name="errorTypeName"
+                                            value={formData.errorTypeName}
+                                            onChange={handleChange}
+                                            placeholder="Nhập loại lỗi..."
+                                            className="w-full h-12 px-5 pr-10 border bg-white border-slate-200 rounded-2xl text-[14px] font-semibold text-slate-900 placeholder-slate-400 outline-none transition-all focus:border-primary/40 focus:ring-2 focus:ring-primary/10"
+                                        />
+                                        {formData.errorTypeName ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => setFormData((prev) => ({ ...prev, errorTypeName: '' }))}
+                                                className="!absolute !right-2 !top-1/2 !-translate-y-1/2 !h-8 !w-8 !min-h-0 !min-w-0 !p-0 !rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 inline-flex items-center justify-center"
+                                                title="Xóa"
+                                                aria-label="Xóa loại lỗi"
+                                            >
+                                                <X size={16} />
+                                            </button>
+                                        ) : null}
                                     </div>
                                 </div>
 

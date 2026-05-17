@@ -7,6 +7,7 @@ import { sidebarMenu } from '../../constants/sidebarMenu';
 import { actionModuleGroups } from '../../constants/actionModuleData';
 import { usePermissions } from '../../hooks/usePermissions';
 import { canAccessPath, normalizeRole } from '../../utils/accessControl';
+import { ModuleIconBox } from '../ui/ModuleIconBox';
 
 function Sidebar({ isOpen, setIsOpen }) {
   const { role, permissions } = usePermissions();
@@ -121,14 +122,18 @@ function NavItem({ item, onClick, isOpen }) {
 
       <div
         className={clsx(
-          'flex items-center justify-center shrink-0 transition-all duration-300 rounded-[14px]',
-          isActive
-            ? clsx('text-white shadow-lg', styles.bg, styles.shadow)
-            : 'text-slate-400 group-hover:bg-slate-50 group-hover:text-slate-600',
-          isOpen ? 'w-10 h-10 mr-3' : 'w-11 h-11'
+          'shrink-0 transition-all duration-300',
+          isOpen ? 'mr-3' : '',
+          isActive && 'ring-2 ring-primary/80 ring-offset-2 rounded-[12px]'
         )}
       >
-        <item.icon size={22} strokeWidth={2.25} />
+        <ModuleIconBox
+          icon={item.icon}
+          iconKey={item.path}
+          colorScheme={item.colorScheme || 'blue'}
+          size="sm"
+          variant="solid"
+        />
       </div>
 
       <span

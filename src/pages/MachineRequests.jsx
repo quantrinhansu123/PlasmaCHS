@@ -483,7 +483,7 @@ export default function MachineRequests() {
 
             {activeView === 'list' && (
                 <>
-                    <div className="hidden shrink-0 font-[family-name:Manrope,system-ui,sans-serif] md:-mt-1 md:mb-1 md:block">
+                    <div className="hidden shrink-0 font-sans md:-mt-1 md:mb-1 md:block">
                         <div className="sticky top-0 z-30 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                             <div className="flex min-h-10 flex-nowrap items-center gap-2 overflow-x-auto px-4 py-2 sm:px-5 scrollbar-hide">
                                 <h2 className="shrink-0 text-sm font-extrabold tracking-tight text-slate-900">
@@ -582,7 +582,7 @@ export default function MachineRequests() {
                         </div>
                     </div>
 
-                    <div className="machine-dnxm-bt-page hidden pb-1 pt-0 font-[family-name:Manrope,system-ui,sans-serif] md:block">
+                    <div className="machine-dnxm-bt-page hidden pb-1 pt-0 font-sans md:block">
                         <div className="flex flex-col gap-1 lg:flex-row lg:items-center lg:justify-between">
                             <div className="min-w-0 flex-1 space-y-1">
                                 <nav className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-slate-500">
@@ -751,7 +751,7 @@ export default function MachineRequests() {
                         </nav>
                     </div>
                     {/* Desktop View */}
-                    <div className="hidden min-h-0 flex-1 flex-col font-[family-name:Manrope,system-ui,sans-serif] md:flex">
+                    <div className="hidden min-h-0 flex-1 flex-col font-sans md:flex">
                         <div className="shrink-0 border-b border-slate-200 p-2">
                             <div className="mb-2 flex flex-wrap gap-2 rounded-lg border border-slate-100 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 shadow-sm ring-1 ring-slate-100">
                                 <span className="inline-flex flex-wrap items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-800">

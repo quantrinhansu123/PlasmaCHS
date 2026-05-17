@@ -57,7 +57,7 @@ const getWarehouseLabel = (warehousesList, id) => warehousesList?.find(w => w.id
 // Inline styles to bypass global !important overrides
 const S = {
     page: {
-        fontFamily: '"Times New Roman", Times, serif',
+        fontFamily: 'Roboto, Helvetica, Arial, sans-serif',
         fontSize: '11pt',
         lineHeight: '1.4',
         color: '#000',
@@ -146,7 +146,7 @@ const S = {
     },
     infoValue: {
         flex: '1',
-        fontFamily: '"Times New Roman", Times, serif',
+        fontFamily: 'Roboto, Helvetica, Arial, sans-serif',
         fontSize: '11pt',
         padding: '0 12px',
         minHeight: '20px',
@@ -154,7 +154,7 @@ const S = {
         borderBottom: 'none',
     },
     infoFixedValue: {
-        fontFamily: '"Times New Roman", Times, serif',
+        fontFamily: 'Roboto, Helvetica, Arial, sans-serif',
         fontSize: '11pt',
         padding: '0 4px',
         minHeight: '20px',
@@ -279,7 +279,7 @@ const S = {
         display: 'inline-block',
         minWidth: '60px',
         textAlign: 'center',
-        fontFamily: '"Times New Roman", Times, serif',
+        fontFamily: 'Roboto, Helvetica, Arial, sans-serif',
     },
 };
 

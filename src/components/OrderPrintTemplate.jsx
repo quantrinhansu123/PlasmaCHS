@@ -58,7 +58,7 @@ const formatNumber = (val) => {
 // All styles use inline CSS to bypass global !important overrides in index.css
 const S = {
     page: {
-        fontFamily: '"Times New Roman", Times, serif',
+        fontFamily: 'Roboto, Helvetica, Arial, sans-serif',
         fontSize: '11pt',
         lineHeight: '1.1',
         color: '#000',
@@ -145,7 +145,7 @@ const S = {
     },
     infoValue: {
         flex: '1',
-        fontFamily: '"Times New Roman", Times, serif',
+        fontFamily: 'Roboto, Helvetica, Arial, sans-serif',
         fontSize: '11pt',
         padding: '0 4px',
         minHeight: '20px',
@@ -268,7 +268,7 @@ const S = {
         display: 'inline-block',
         minWidth: '60px',
         textAlign: 'center',
-        fontFamily: '"Times New Roman", Times, serif',
+        fontFamily: 'Roboto, Helvetica, Arial, sans-serif',
     },
 };
 

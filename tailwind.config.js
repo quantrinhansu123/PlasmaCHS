@@ -9,8 +9,8 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        roboto: ['Roboto', 'Helvetica Neue', 'Helvetica', 'Arial', 'sans-serif'],
+        sans: ['Roboto', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        roboto: ['Roboto', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
       screens: {
         'xs': '480px',

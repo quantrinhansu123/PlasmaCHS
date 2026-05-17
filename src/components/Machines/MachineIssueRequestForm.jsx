@@ -1409,7 +1409,7 @@ Ghi chú: ${formData.notes}`,
             )}>
                 {/* Switch between different print templates based on printType */}
                 {printType === 'DNXM' && (
-                    <div id="print-area" className="text-black p-8 bg-white max-w-[210mm] mx-auto min-h-[297mm] shadow-2xl my-10" style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}>
+                    <div id="print-area" className="text-black p-8 bg-white max-w-[210mm] mx-auto min-h-[297mm] shadow-2xl my-10" style={{ fontFamily: 'Roboto, Helvetica, Arial, sans-serif' }}>
                         {/* Header section */}
                         <div className="flex justify-between items-start mb-6">
                             <div className="text-sm text-center">
@@ -1729,7 +1729,7 @@ Ghi chú: ${formData.notes}`,
                         overflow: visible !important;
                         position: static !important;
                         display: block !important;
-                        font-family: Arial, Helvetica, sans-serif !important;
+                        font-family: Roboto, Helvetica, Arial, sans-serif !important;
                     }
                     header, nav, aside, footer, .no-print { display: none !important; }
                     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: #fff !important; margin: 0; }
@@ -1743,7 +1743,7 @@ Ghi chú: ${formData.notes}`,
                         background: white !important;
                         box-shadow: none !important;
                         display: block !important;
-                        font-family: Arial, Helvetica, sans-serif !important;
+                        font-family: Roboto, Helvetica, Arial, sans-serif !important;
                         font-size: 13px !important;
                     }
                     
@@ -1775,7 +1775,7 @@ Ghi chú: ${formData.notes}`,
                         padding: 0 4px !important;
                         margin: 0 !important;
                         box-shadow: none !important;
-                        font-family: Arial, Helvetica, sans-serif !important;
+                        font-family: Roboto, Helvetica, Arial, sans-serif !important;
                         font-size: 13px !important;
                         color: black !important;
                         display: inline-block !important;

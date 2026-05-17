@@ -7,7 +7,7 @@ const getProductLabel = (id) => PRODUCT_TYPES.find(p => p.id === id)?.label || i
 // Inline styles to bypass global !important overrides
 const S = {
     page: {
-        fontFamily: '"Times New Roman", Times, serif',
+        fontFamily: 'Roboto, Helvetica, Arial, sans-serif',
         fontSize: '12pt',
         lineHeight: '1.5',
         color: '#000',
