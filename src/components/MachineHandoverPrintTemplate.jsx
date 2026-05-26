@@ -4,6 +4,56 @@ import { COMPANY_PRINT_ADDRESS_LINE, COMPANY_PRINT_ADDRESS_LINES } from '../cons
 
 const getProductLabel = (id) => PRODUCT_TYPES.find(p => p.id === id)?.label || id;
 
+const isCylinderProductType = (productType) => {
+    const u = String(productType || '').trim().toUpperCase();
+    return Boolean(u && (u.startsWith('BINH') || u.includes('BINH')));
+};
+
+const isMachineProductType = (productType) => {
+    const u = String(productType || '').trim().toUpperCase();
+    if (!u) return false;
+    return (
+        u === 'MAY' ||
+        u.startsWith('MAY') ||
+        u.includes('MÁY') ||
+        ['TM', 'SD', 'FM', 'KHAC', 'DNXM', 'MAY_ROSY', 'MAY_MED'].includes(u)
+    );
+};
+
+/** Xác định loại biên bản: chỉ bình, chỉ máy, hoặc hỗn hợp */
+const getHandoverDocumentKind = (order) => {
+    const types = [];
+    if (order?.items?.length) {
+        order.items.forEach((item) => types.push(item.product_type));
+    } else if (order?.product_type) {
+        types.push(order.product_type);
+    }
+    const hasCylinder = types.some(isCylinderProductType);
+    const hasMachine = types.some(isMachineProductType);
+    if (hasCylinder && !hasMachine) return 'cylinder';
+    if (hasMachine && !hasCylinder) return 'machine';
+    if (hasCylinder && hasMachine) return 'mixed';
+    return 'machine';
+};
+
+const HANDOVER_DOCUMENT_COPY = {
+    machine: {
+        title: 'Biên Bản Bàn Giao Máy',
+        footer: 'Biên bản bàn giao máy được lập thành 02 bản, mỗi bên giữ 01 bản có giá trị như nhau.',
+        serialColumn: 'Mã máy (Serial)',
+    },
+    cylinder: {
+        title: 'Biên Bản Bàn Giao Bình',
+        footer: 'Biên bản bàn giao bình được lập thành 02 bản, mỗi bên giữ 01 bản có giá trị như nhau.',
+        serialColumn: 'Mã bình (Serial)',
+    },
+    mixed: {
+        title: 'Biên Bản Bàn Giao Máy Và Bình',
+        footer: 'Biên bản bàn giao máy và bình được lập thành 02 bản, mỗi bên giữ 01 bản có giá trị như nhau.',
+        serialColumn: 'Mã máy / bình (Serial)',
+    },
+};
+
 // Inline styles to bypass global !important overrides
 const S = {
     page: {
@@ -195,6 +245,9 @@ const HandoverItem = ({ order }) => {
         });
     }
 
+    const docKind = getHandoverDocumentKind(order);
+    const docCopy = HANDOVER_DOCUMENT_COPY[docKind] || HANDOVER_DOCUMENT_COPY.machine;
+
     return (
         <div className="order-print-page" style={S.page}>
             {/* ===== HEADER ===== */}
@@ -205,7 +258,7 @@ const HandoverItem = ({ order }) => {
 
             {/* ===== TITLE ===== */}
             <div style={S.titleSection}>
-                <div style={S.titleH1}>Biên Bản Bàn Giao Máy</div>
+                <div style={S.titleH1}>{docCopy.title}</div>
             </div>
 
             {/* ===== DATE INTRO ===== */}
@@ -286,7 +339,7 @@ const HandoverItem = ({ order }) => {
                         <th style={{ ...S.th, width: '34%' }}>Nội dung</th>
                         <th style={{ ...S.th, width: '15%' }}>SL Yêu cầu</th>
                         <th style={{ ...S.th, width: '15%' }}>SL Phê duyệt</th>
-                        <th style={{ ...S.th, width: '30%' }}>Mã máy (Serial)</th>
+                        <th style={{ ...S.th, width: '30%' }}>{docCopy.serialColumn}</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -304,7 +357,7 @@ const HandoverItem = ({ order }) => {
 
             {/* ===== FOOTER NOTE ===== */}
             <div style={S.footerNote}>
-                Biên bản bàn giao máy được lập thành 02 bản, mỗi bên giữ 01 bản có giá trị như nhau.
+                {docCopy.footer}
             </div>
 
             {/* ===== SIGNATURES (2 blocks) ===== */}

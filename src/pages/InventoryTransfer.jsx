@@ -19,7 +19,8 @@ import {
     Warehouse,
     X,
     Plus,
-    Trash2
+    Trash2,
+    User,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -117,7 +118,9 @@ const InventoryTransfer = () => {
             id: 'bbbg_transfer',
             created_at: new Date().toISOString(),
             customer_name: warehouses.find(w => w.id === formData.to_warehouse_id)?.name || 'Kho Nhận',
-            recipient_name: 'Đại diện ' + (warehouses.find(w => w.id === formData.to_warehouse_id)?.name || 'Kho Nhận'),
+            recipient_name:
+                warehouses.find(w => w.id === formData.to_warehouse_id)?.manager_name?.trim() ||
+                `Thủ kho ${warehouses.find(w => w.id === formData.to_warehouse_id)?.name || 'nhận'}`,
             recipient_address: 'Luân chuyển nội bộ',
             items: orderItems,
             product_type: orderItems[0]?.product_type,
@@ -166,7 +169,11 @@ const InventoryTransfer = () => {
     }, [formData.from_warehouse_id]);
 
     const fetchWarehouses = async () => {
-        const { data } = await supabase.from('warehouses').select('id, name').eq('status', 'Đang hoạt động').order('name');
+        const { data } = await supabase
+            .from('warehouses')
+            .select('id, name, manager_name')
+            .eq('status', 'Đang hoạt động')
+            .order('name');
         if (data) {
             setWarehouses(data);
 
@@ -266,9 +273,42 @@ const InventoryTransfer = () => {
         }
     };
 
-    const warehouseOptions = useMemo(() =>
-        warehouses.map(w => ({ value: w.id, label: w.name })),
-        [warehouses]
+    const warehouseOptions = useMemo(
+        () =>
+            warehouses.map((w) => ({
+                value: w.id,
+                label: w.manager_name?.trim()
+                    ? `${w.name} · ${w.manager_name.trim()}`
+                    : w.name,
+            })),
+        [warehouses],
+    );
+
+    const selectedFromWarehouse = useMemo(
+        () => warehouses.find((w) => w.id === formData.from_warehouse_id),
+        [warehouses, formData.from_warehouse_id],
+    );
+
+    const selectedToWarehouse = useMemo(
+        () => warehouses.find((w) => w.id === formData.to_warehouse_id),
+        [warehouses, formData.to_warehouse_id],
+    );
+
+    const renderWarehouseRep = (warehouse, roleLabel) => (
+        <div className="flex items-start gap-2 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 min-h-[44px]">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <User className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                    {roleLabel}
+                </p>
+                <p className="text-[13px] font-bold text-slate-800 truncate">
+                    {warehouse?.manager_name?.trim() ||
+                        (warehouse ? '— Chưa gán thủ kho' : 'Chọn kho phía trên')}
+                </p>
+            </div>
+        </div>
     );
 
     // ── ROW MANAGEMENT ──
@@ -741,9 +781,10 @@ const InventoryTransfer = () => {
                                         value={formData.from_warehouse_id}
                                         onValueChange={(val) => setFormData(prev => ({ ...prev, from_warehouse_id: val }))}
                                         placeholder="Chọn kho xuất..."
-                                        searchPlaceholder="Tìm kho..."
+                                        searchPlaceholder="Tìm kho hoặc thủ kho..."
                                         disabled={isWarehouseRole(role) && department}
                                     />
+                                    {renderWarehouseRep(selectedFromWarehouse, 'Người đại diện kho xuất (thủ kho)')}
                                 </div>
                                 <div className="flex md:hidden items-center justify-center -my-2.5 text-primary/30 pointer-events-none">
                                     <ArrowDown size={22} />
@@ -757,8 +798,9 @@ const InventoryTransfer = () => {
                                         value={formData.to_warehouse_id}
                                         onValueChange={(val) => setFormData(prev => ({ ...prev, to_warehouse_id: val }))}
                                         placeholder="Chọn kho nhận..."
-                                        searchPlaceholder="Tìm kho..."
+                                        searchPlaceholder="Tìm kho hoặc thủ kho..."
                                     />
+                                    {renderWarehouseRep(selectedToWarehouse, 'Người đại diện kho nhận (thủ kho)')}
                                 </div>
                             </div>
                             <div className="hidden md:flex absolute left-1/2 top-[52px] -translate-x-1/2 -translate-y-1/2 w-8 h-8 items-center justify-center text-primary/40 z-10 pointer-events-none">
