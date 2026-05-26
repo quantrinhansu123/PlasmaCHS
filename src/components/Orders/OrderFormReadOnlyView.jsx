@@ -86,8 +86,8 @@ export default function OrderFormReadOnlyView({
                     </h4>
                 </div>
                 <Row label="Mã đơn hàng" value={formData.orderCode} />
-                <Row label="Khách hàng" value={displayCustomer} />
-                <Row label="Người nhận" value={formData.recipientName} />
+                <Row label="Khách hàng (cơ sở)" value={displayCustomer} />
+                <Row label="Người nhận (đại diện)" value={formData.recipientName} />
                 <Row label="Số điện thoại" value={formData.recipientPhone} />
                 <Row label="Địa chỉ giao hàng" value={formData.recipientAddress} />
 

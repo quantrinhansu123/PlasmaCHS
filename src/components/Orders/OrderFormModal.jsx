@@ -464,7 +464,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 id: c.id,
                 name: c.name,
                 address: c.address,
-                recipient: c.legal_rep || c.representative || c.name,
+                recipient: c.legal_rep || '',
                 phone: c.phone,
                 category: c.category,
                 warehouse_id: c.warehouse_id,
@@ -655,7 +655,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
             const next = {
                 ...prev,
                 customerId: customer.id,
-                recipientName: customer.recipient || customer.legal_rep || customer.name || '',
+                recipientName: customer.recipient || '',
                 recipientAddress: customer.address || '',
                 recipientPhone: customer.phone || '',
                 customerCategory: customer.category || 'TM',
@@ -675,7 +675,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                         id: f.id,
                         name: f.name,
                         address: f.address,
-                        recipient: f.legal_rep || f.name,
+                        recipient: f.legal_rep || '',
                         agency_name: f.agency_name,
                         warehouse_id: f.warehouse_id,
                         phone: f.phone,
@@ -698,7 +698,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
             const next = {
                 ...prev,
                 customerId: facility.id || prev.customerId,
-                recipientName: facility.recipient || facility.name,
+                recipientName: facility.recipient || '',
                 recipientAddress: facility.address || prev.recipientAddress,
                 customerCategory: facility.category || prev.customerCategory,
                 warehouse: whCode || prev.warehouse,
@@ -709,23 +709,27 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
         setIsFacilityDropdownOpen(false);
     };
 
-    const filteredCustomers = customers.filter(c => {
+    const filteredCustomers = customers.filter((c) => {
         const searchLow = customerSearchTerm.toLowerCase();
-        const searchMatch = !customerSearchTerm ||
+        if (!customerSearchTerm) return true;
+        return (
             c.name?.toLowerCase().includes(searchLow) ||
             (c.phone && c.phone.includes(customerSearchTerm)) ||
-            (c.recipient && c.recipient.toLowerCase().includes(searchLow));
-        return searchMatch;
+            (c.recipient && c.recipient.toLowerCase().includes(searchLow)) ||
+            (c.invoice_company_name && c.invoice_company_name.toLowerCase().includes(searchLow)) ||
+            (c.agency_name && c.agency_name.toLowerCase().includes(searchLow))
+        );
     });
 
-    /** Một dòng: tên người liên hệ + SĐT (đồng bộ với dropdown) */
-    const customerDropdownLabel = (c) => {
+    /** Khách hàng trên đơn = tên cơ sở (customers.name) */
+    const customerFacilityLabel = (c) => {
         if (!c) return '';
-        const nm = String(c.recipient || c.name || '').trim();
-        const phone = String(c.phone || '').trim();
-        if (nm && phone) return `${nm} · ${phone}`;
-        return nm || phone || '—';
+        return String(c.name || '').trim() || '—';
     };
+
+    const selectedCustomer = formData.customerId
+        ? customers.find((c) => String(c.id) === String(formData.customerId))
+        : null;
 
     const addItem = () => {
         setFormData(prev => ({
@@ -1221,7 +1225,13 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                 </div>
 
                                 <div className="space-y-1.5">
-                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800"><User className="w-4 h-4 text-primary/70" />Chọn khách hàng <span className="text-red-500">*</span></label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                        <User className="w-4 h-4 text-primary/70" />
+                                        Khách hàng (cơ sở) <span className="text-red-500">*</span>
+                                    </label>
+                                    <p className="text-[10px] text-slate-400 font-medium px-1 -mt-1">
+                                        Ví dụ: BV Hồng Ngọc — lấy tên cơ sở trong danh mục khách hàng
+                                    </p>
                                     <div className="relative" ref={customerDropdownRef}>
                                         <div
                                             className={`w-full h-12 px-4 border rounded-2xl text-[13px] transition-all flex justify-between items-center ${isFetchingCustomers || isReadOnly ? 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed shadow-none' : 'bg-slate-50 border-slate-200 text-slate-900 hover:border-primary/40 cursor-pointer'}`}
@@ -1230,9 +1240,9 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                             <span className={formData.customerId ? 'font-semibold text-[13px]' : 'text-slate-500 font-semibold text-[13px]'}>
                                                 {isFetchingCustomers
                                                     ? 'Đang tải thông tin...'
-                                                    : formData.customerId
-                                                        ? customerDropdownLabel(customers.find(c => c.id.toString() === formData.customerId.toString()))
-                                                        : 'Chọn khách hàng trong hệ thống'}
+                                                    : selectedCustomer
+                                                        ? customerFacilityLabel(selectedCustomer)
+                                                        : 'Chọn cơ sở / khách hàng'}
                                             </span>
                                             {!isReadOnly && <ChevronDown className={`w-4 h-4 transition-transform ${isCustomerDropdownOpen ? 'rotate-180 text-primary' : 'text-primary/70'}`} />}
                                         </div>
@@ -1244,7 +1254,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                                     <input
                                                         type="text"
                                                         className="w-full bg-transparent border-none outline-none text-sm font-semibold placeholder-slate-400 text-slate-700"
-                                                        placeholder="Tìm tên hoặc SĐT..."
+                                                        placeholder="Tìm tên cơ sở, người đại diện hoặc SĐT..."
                                                         value={customerSearchTerm}
                                                         onChange={(e) => setCustomerSearchTerm(e.target.value)}
                                                         onClick={(e) => e.stopPropagation()}
@@ -1259,8 +1269,19 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                                                 className={`px-4 py-2.5 cursor-pointer border-b border-slate-100 ${formData.customerId === customer.id ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
                                                                 onClick={() => handleCustomerSelect(customer)}
                                                             >
-                                                                <div className={`text-sm font-semibold truncate ${formData.customerId === customer.id ? 'text-primary' : 'text-slate-800'}`}>
-                                                                    {customerDropdownLabel(customer)}
+                                                                <div className={formData.customerId === customer.id ? 'text-primary' : 'text-slate-800'}>
+                                                                    <div className="text-sm font-bold truncate">
+                                                                        {customerFacilityLabel(customer)}
+                                                                    </div>
+                                                                    {(customer.recipient || customer.phone) && (
+                                                                        <div className="text-[11px] font-medium text-slate-500 truncate mt-0.5">
+                                                                            {customer.recipient
+                                                                                ? `Đại diện: ${customer.recipient}`
+                                                                                : ''}
+                                                                            {customer.recipient && customer.phone ? ' · ' : ''}
+                                                                            {customer.phone || ''}
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                             </div>
                                                         ))
@@ -1290,7 +1311,13 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                 </div>
 
                                 <div className="space-y-1.5 overflow-visible relative" ref={facilityDropdownRef}>
-                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800"><User className="w-4 h-4 text-primary/70" />Tên người nhận <span className="text-red-500">*</span></label>
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                        <User className="w-4 h-4 text-primary/70" />
+                                        Người nhận <span className="text-red-500">*</span>
+                                    </label>
+                                    <p className="text-[10px] text-slate-400 font-medium px-1 -mt-1">
+                                        Người đại diện cơ sở — mặc định từ hồ sơ KH, có thể sửa tay
+                                    </p>
                                     <div className="relative">
                                         <input
                                             name="recipientName"
@@ -1298,7 +1325,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                             onChange={handleChange}
                                             onFocus={() => facilities.length > 0 && setIsFacilityDropdownOpen(true)}
                                             readOnly={isReadOnly}
-                                            placeholder="Nhập tên người nhận"
+                                            placeholder="Tên người đại diện / người nhận hàng"
                                             className={clsx(
                                                 "w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold transition-all",
                                                 isReadOnly ? "text-slate-500 cursor-default" : "text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"

@@ -11,7 +11,11 @@ export function matchCustomerRecordForOrder(customers, orderLike = {}) {
         if (byId) return byId;
     }
 
-    const facilityKey = String(orderLike?.recipient_name || orderLike?.facilityName || '').trim().toLowerCase();
+    const facilityKey = String(
+        orderLike?.customer_name || orderLike?.facilityName || orderLike?.recipient_name || '',
+    )
+        .trim()
+        .toLowerCase();
     if (facilityKey) {
         const byFacility = customers.find((c) => {
             const candidates = [c.name, c.agency_name, c.invoice_company_name]

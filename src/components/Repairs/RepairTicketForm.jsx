@@ -14,6 +14,7 @@ import {
 } from '../../utils/repairTicketImages';
 import RepairTicketImageThumb from './RepairTicketImageThumb';
 import { fetchCustomerOwnedDevices } from '../../utils/customerOwnedDevices';
+import { appendCustomerTextSearch, CUSTOMER_PICKER_FIELDS } from '../../utils/customerTextSearch';
 
 export default function RepairTicketForm({ ticket, initialCustomer, onClose, onSuccess, fullPage = false }) {
     const { role, user } = usePermissions();
@@ -60,29 +61,61 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
             .trim()
             .toLowerCase();
 
-    const getCustomerRepName = (customer) =>
-        String(customer?.legal_rep || customer?.representative || '').trim();
+    const getCustomerRepName = (customer) => String(customer?.legal_rep || '').trim();
 
     const getCustomerFacilityName = (customer) => String(customer?.name || '').trim();
 
     const formatCustomerLabel = (customer) => {
         if (!customer) return 'Chọn khách hàng...';
-        const rep = getCustomerRepName(customer);
         const facility = getCustomerFacilityName(customer);
-        if (rep) {
-            return facility && facility !== rep ? `${rep} · ${facility}` : rep;
-        }
-        return facility || 'Chọn khách hàng...';
+        const rep = getCustomerRepName(customer);
+        if (facility && rep) return `${facility} · ${rep}`;
+        return facility || rep || 'Chọn khách hàng...';
     };
 
     const customerMatchesSearch = (customer, rawTerm) => {
         const term = normalizeCustomerText(rawTerm);
         if (!term) return true;
-        const haystack = [getCustomerRepName(customer), getCustomerFacilityName(customer), customer?.phone]
+        const haystack = [
+            getCustomerFacilityName(customer),
+            getCustomerRepName(customer),
+            customer?.phone,
+            customer?.address,
+            customer?.invoice_company_name,
+            customer?.agency_name,
+            customer?.code,
+        ]
             .filter(Boolean)
             .map(normalizeCustomerText)
             .join(' ');
         return haystack.includes(term);
+    };
+
+    const mergeCustomerPickerList = useCallback((incoming, keepId) => {
+        const map = new Map();
+        (incoming || []).forEach((c) => {
+            if (c?.id) map.set(c.id, c);
+        });
+        if (keepId) {
+            const existing = customersRef.current.find((c) => c.id === keepId);
+            if (existing && !map.has(keepId)) map.set(keepId, existing);
+        }
+        return [...map.values()].sort((a, b) =>
+            String(a.name || '').localeCompare(String(b.name || ''), 'vi', { sensitivity: 'base' }),
+        );
+    }, []);
+
+    const fetchCustomersForPicker = async (searchTerm) => {
+        const trimmed = String(searchTerm || '').trim();
+        let query = supabase
+            .from('customers')
+            .select(CUSTOMER_PICKER_FIELDS)
+            .order('name', { ascending: true })
+            .limit(trimmed ? 100 : 400);
+        query = appendCustomerTextSearch(query, trimmed);
+        const { data, error } = await query;
+        if (error) throw error;
+        return data || [];
     };
 
     const ERROR_DEVICE_CATEGORIES = ['Máy', 'Bình', 'Nâng cấp'];
@@ -184,12 +217,20 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
     const fetchMasterData = async () => {
         setIsFetchingData(true);
         try {
-            // 1. Fetch Customers
-            const { data: custData } = await supabase
-                .from('customers')
-                .select('id, name, address, phone, legal_rep, representative, invoice_company_name, machines_in_use')
-                .order('name');
-            if (custData) setCustomers(custData);
+            const custData = await fetchCustomersForPicker('');
+            let list = custData;
+            if (
+                initialCustomer?.id &&
+                !custData.some((c) => c.id === initialCustomer.id)
+            ) {
+                list = [initialCustomer, ...custData];
+            }
+            setCustomers(
+                mergeCustomerPickerList(
+                    list,
+                    formData.customerId || initialCustomer?.id || ticket?.customer_id,
+                ),
+            );
 
             // 2. Fetch Error Types
             const { data: errData } = await supabase.from('repair_error_types').select('*').order('name');
@@ -244,6 +285,30 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
         cskhList.sort((a, b) => a.name.localeCompare(b.name, 'vi', { sensitivity: 'base' }));
         setCskhUsers(cskhList);
     }, [user, allUsers, isEdit, ticket]);
+
+    useEffect(() => {
+        if (!isCustomerDropdownOpen) return undefined;
+        let cancelled = false;
+        const timer = setTimeout(async () => {
+            try {
+                const list = await fetchCustomersForPicker(customerSearchTerm);
+                if (!cancelled) {
+                    setCustomers(mergeCustomerPickerList(list, formData.customerId));
+                }
+            } catch (err) {
+                console.error('Lỗi tìm khách hàng:', err);
+                if (!cancelled) {
+                    toast.error('Không tải được danh sách cơ sở. Thử tìm lại hoặc kiểm tra kết nối.', {
+                        position: 'top-center',
+                    });
+                }
+            }
+        }, 280);
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+    }, [customerSearchTerm, isCustomerDropdownOpen, formData.customerId]);
 
     useEffect(() => {
         if (!formData.customerId || customers.length === 0) return;
@@ -642,26 +707,32 @@ export default function RepairTicketForm({ ticket, initialCustomer, onClose, onS
                                                 <div className="p-3 border-b border-slate-100 bg-slate-50 flex items-center gap-3 sticky top-0 z-10">
                                                     <Search className="w-4 h-4 text-primary/40" />
                                                     <input
-                                                        type="text" className="w-full bg-transparent border-none outline-none text-[14px] font-bold placeholder-slate-400" placeholder="Tìm người đại diện, tên cơ sở, SĐT..."
+                                                        type="text" className="w-full bg-transparent border-none outline-none text-[14px] font-bold placeholder-slate-400" placeholder="Tìm tên cơ sở (BV, PK...), đại diện, SĐT..."
                                                         value={customerSearchTerm} onChange={(e) => setCustomerSearchTerm(e.target.value)} onClick={(e) => e.stopPropagation()} autoFocus
                                                     />
                                                 </div>
                                                 <div className="overflow-y-auto custom-scrollbar flex-1 py-1">
                                                     {cFilteredCustomers.length > 0 ? cFilteredCustomers.map(customer => (
                                                         <div key={customer.id} className="px-5 py-3.5 cursor-pointer border-b border-slate-50 hover:bg-primary/5 transition-colors group" onClick={() => handleCustomerSelect(customer)}>
-                                                            <div className="font-bold text-[14px] text-slate-800 group-hover:text-primary">
-                                                                {getCustomerRepName(customer) || getCustomerFacilityName(customer) || '—'}
+                                                            <div className="font-bold text-[14px] text-slate-800 group-hover:text-primary truncate">
+                                                                {getCustomerFacilityName(customer) || '—'}
                                                             </div>
-                                                            <div className="text-[12px] text-slate-400 font-semibold">
+                                                            <div className="text-[12px] text-slate-400 font-semibold truncate">
                                                                 {[
-                                                                    getCustomerRepName(customer) && getCustomerFacilityName(customer) && getCustomerRepName(customer) !== getCustomerFacilityName(customer)
-                                                                        ? getCustomerFacilityName(customer)
+                                                                    getCustomerRepName(customer)
+                                                                        ? `Đại diện: ${getCustomerRepName(customer)}`
                                                                         : null,
                                                                     customer.phone,
-                                                                ].filter(Boolean).join(' · ') || 'Chưa cập nhật SĐT'}
+                                                                ].filter(Boolean).join(' · ') || 'Chưa cập nhật SĐT / đại diện'}
                                                             </div>
                                                         </div>
-                                                    )) : <div className="px-5 py-6 text-center text-sm text-slate-500 font-semibold italic">Không tìm thấy khách hàng nào</div>}
+                                                    )) : (
+                                                        <div className="px-5 py-6 text-center text-sm text-slate-500 font-semibold italic">
+                                                            {customerSearchTerm.trim()
+                                                                ? 'Không tìm thấy cơ sở phù hợp — thử tên BV, phòng khám hoặc SĐT'
+                                                                : 'Gõ tên cơ sở, người đại diện hoặc SĐT để tìm'}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         )}
