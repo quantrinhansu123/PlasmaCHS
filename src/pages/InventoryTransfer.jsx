@@ -34,6 +34,194 @@ import { isWarehouseRole } from '../utils/accessControl';
 import { supabase } from '../supabase/config';
 import { notificationService } from '../utils/notificationService';
 import { uploadFileToCloudinary } from '../utils/cloudinaryUpload';
+import { normalizeMachineSerialKey } from '../utils/machineCustomerFromOrders';
+
+/** Biến thể serial máy để .in() khớp DB (phân biệt hoa thường / khoảng trắng). */
+function machineSerialLookupVariants(raw) {
+    const t = String(raw || '').trim();
+    if (!t) return [];
+    const collapsed = normalizeMachineSerialKey(t);
+    return [...new Set([t, t.toUpperCase(), t.toLowerCase(), collapsed, collapsed.toLowerCase()])].filter(Boolean);
+}
+
+function normalizeSerialInput(raw, itemType) {
+    const t = String(raw || '').trim();
+    if (!t) return '';
+    if (itemType === 'MAY') return normalizeMachineSerialKey(t) || t.toUpperCase();
+    if (itemType === 'BINH') return t.replace(/\s+/g, '').toUpperCase();
+    return t.toUpperCase();
+}
+
+function indexSerialRecords(records, itemType) {
+    const map = {};
+    (records || []).forEach((row) => {
+        const sn = String(row?.serial_number || '').trim();
+        if (!sn) return;
+        const keys =
+            itemType === 'MAY'
+                ? machineSerialLookupVariants(sn)
+                : [...new Set([sn, sn.toUpperCase(), sn.replace(/\s+/g, '').toUpperCase()])];
+        keys.forEach((k) => {
+            map[k] = row;
+        });
+    });
+    return map;
+}
+
+function resolveDbRecord(map, code, itemType) {
+    if (!code) return null;
+    const direct = map[code];
+    if (direct) return direct;
+    const norm = normalizeSerialInput(code, itemType);
+    return map[norm] || null;
+}
+
+function resolveWarehouseRow(warehouseId, warehouseList = []) {
+    const key = String(warehouseId || '').trim();
+    if (!key) return null;
+    return (
+        warehouseList.find((w) => String(w.id) === key) ||
+        warehouseList.find((w) => String(w.code || '').trim() === key) ||
+        warehouseList.find((w) => String(w.name || '').trim() === key) ||
+        null
+    );
+}
+
+function warehouseStorageKeys(whRow) {
+    if (!whRow) return [];
+    const keys = new Set(
+        [whRow.code, whRow.name, whRow.id].map((v) => String(v || '').trim()).filter(Boolean),
+    );
+    String(whRow.name || '')
+        .split(/[\s,;/|()-]+/)
+        .map((t) => t.trim())
+        .filter((t) => t.length >= 2)
+        .forEach((t) => keys.add(t));
+    return [...keys];
+}
+
+function machineWarehouseCandidates(whRow) {
+    return warehouseStorageKeys(whRow);
+}
+
+function normalizeStatusKey(status) {
+    return String(status || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
+
+function isReadyMachineStatus(status) {
+    const s = normalizeStatusKey(status);
+    return s === 'san sang' || s === 'sẵn sàng' || s.includes('san sang') || s.includes('sẵn');
+}
+
+function isReadyCylinderStatus(status) {
+    const s = normalizeStatusKey(status);
+    return (
+        s === 'san sang' ||
+        s === 'sẵn sàng' ||
+        s === 'binh rong' ||
+        s === 'bình rỗng' ||
+        s.includes('san sang') ||
+        s.includes('binh rong')
+    );
+}
+
+async function fetchReadyMachinesAtWarehouse(supabaseClient, whRow, warehouseId) {
+    const keys = machineWarehouseCandidates(whRow);
+    const collected = new Map();
+
+    const absorb = (rows) => {
+        (rows || []).forEach((m) => {
+            if (!m?.id || !isReadyMachineStatus(m.status)) return;
+            collected.set(m.id, m);
+        });
+    };
+
+    if (keys.length > 0) {
+        const { data, error } = await supabaseClient
+            .from('machines')
+            .select('id, machine_type, status, serial_number, warehouse')
+            .in('warehouse', keys)
+            .limit(5000);
+        if (error) throw error;
+        absorb(data);
+    }
+
+    if (collected.size === 0 && whRow?.code) {
+        const { data, error } = await supabaseClient
+            .from('machines')
+            .select('id, machine_type, status, serial_number, warehouse')
+            .eq('warehouse', String(whRow.code).trim())
+            .limit(5000);
+        if (error) throw error;
+        absorb(data);
+    }
+
+    if (collected.size === 0 && keys.length > 0) {
+        for (const key of keys) {
+            const { data } = await supabaseClient
+                .from('machines')
+                .select('id, machine_type, status, serial_number, warehouse')
+                .ilike('warehouse', key)
+                .limit(800);
+            absorb(data);
+            if (collected.size > 0) break;
+        }
+    }
+
+    if (collected.size === 0 && warehouseId) {
+        const { data } = await supabaseClient
+            .from('machines')
+            .select('id, machine_type, status, serial_number, warehouse')
+            .eq('warehouse', warehouseId)
+            .limit(500);
+        absorb(data);
+    }
+
+    return [...collected.values()];
+}
+
+async function fetchReadyCylindersAtWarehouse(supabaseClient, cylinderWhId, whRow) {
+    const { data, error } = await supabaseClient
+        .from('cylinders')
+        .select('id, volume, status, serial_number, warehouse_id')
+        .eq('warehouse_id', cylinderWhId)
+        .limit(5000);
+    if (error) throw error;
+    const keys = machineWarehouseCandidates(whRow);
+    const rows = (data || []).filter((c) => isReadyCylinderStatus(c.status));
+
+    if (rows.length > 0 || !whRow?.code) return rows;
+
+    const { data: byCode } = await supabaseClient
+        .from('cylinders')
+        .select('id, volume, status, serial_number, warehouse_id')
+        .ilike('warehouse_id', whRow.code)
+        .limit(500);
+    return (byCode || []).filter((c) => isReadyCylinderStatus(c.status));
+}
+
+function machineBelongsToWarehouse(storedWarehouse, fromWarehouseId, warehouseList) {
+    const v = String(storedWarehouse || '').trim();
+    if (!v) return false;
+    const keys = machineWarehouseCandidates(resolveWarehouseRow(fromWarehouseId, warehouseList));
+    if (keys.length === 0) return v === String(fromWarehouseId || '').trim();
+    if (keys.includes(v)) return true;
+    const vLow = v.toLowerCase();
+    return keys.some((k) => {
+        const kl = k.toLowerCase();
+        return kl === vLow || vLow.includes(kl) || kl.includes(vLow);
+    });
+}
+
+function cylinderBelongsToWarehouse(storedWarehouseId, fromWarehouseId, warehouseList) {
+    const whRow = resolveWarehouseRow(fromWarehouseId, warehouseList);
+    const expected = String(whRow?.id || fromWarehouseId || '').trim();
+    return String(storedWarehouseId || '').trim() === expected;
+}
 
 // Helper functions for smart categorization
 const isMachine = (item) => {
@@ -59,6 +247,8 @@ const InventoryTransfer = () => {
     const [warehouses, setWarehouses] = useState([]);
     const [inventory, setInventory] = useState([]);
     const [serialOptionsByItemName, setSerialOptionsByItemName] = useState({});
+    /** Máy/bình đã tải theo kho xuất — dùng xác thực mã trùng danh sách gợi ý */
+    const [sourceWarehouseAssets, setSourceWarehouseAssets] = useState({ machines: [], cylinders: [] });
 
     const [formData, setFormData] = useState({
         from_warehouse_id: '',
@@ -159,19 +349,19 @@ const InventoryTransfer = () => {
 
     useEffect(() => {
         if (formData.from_warehouse_id) {
-            fetchInventory(formData.from_warehouse_id);
-            // Clear items when changing source warehouse
+            fetchInventory(formData.from_warehouse_id, warehouses);
             setTransferItems([{ id: Date.now().toString(), item_type: 'MAY', item_name: '', quantity: '', maxQuantity: 0, specific_codes: [] }]);
         } else {
             setInventory([]);
+            setSourceWarehouseAssets({ machines: [], cylinders: [] });
             setTransferItems([{ id: Date.now().toString(), item_type: 'MAY', item_name: '', quantity: '', maxQuantity: 0, specific_codes: [] }]);
         }
-    }, [formData.from_warehouse_id]);
+    }, [formData.from_warehouse_id, warehouses]);
 
     const fetchWarehouses = async () => {
         const { data } = await supabase
             .from('warehouses')
-            .select('id, name, manager_name')
+            .select('id, name, code, manager_name')
             .eq('status', 'Đang hoạt động')
             .order('name');
         if (data) {
@@ -187,29 +377,24 @@ const InventoryTransfer = () => {
         }
     };
 
-    const fetchInventory = async (warehouseId) => {
+    const fetchInventory = async (warehouseId, warehouseList = warehouses) => {
         try {
+            const whRow = resolveWarehouseRow(warehouseId, warehouseList);
+            const cylinderWhId = whRow?.id || warehouseId;
+
             // 1. Fetch Materials (VAT_TU)
             const { data: invData } = await supabase
                 .from('inventory')
                 .select('*')
-                .eq('warehouse_id', warehouseId)
+                .eq('warehouse_id', cylinderWhId)
                 .eq('item_type', 'VAT_TU')
                 .gt('quantity', 0);
 
-            // 2. Fetch Machines (MAY)
-            const { data: machinesData } = await supabase
-                .from('machines')
-                .select('machine_type, status, serial_number')
-                .eq('warehouse', warehouseId)
-                .eq('status', 'sẵn sàng');
+            // 2. Máy — machines.warehouse = mã kho (OCP1, CT…); lọc trạng thái linh hoạt (Sẵn sàng / sẵn sàng)
+            const machinesData = await fetchReadyMachinesAtWarehouse(supabase, whRow, warehouseId);
 
-            // 3. Fetch Cylinders (BINH)
-            const { data: cylindersData } = await supabase
-                .from('cylinders')
-                .select('volume, status, serial_number')
-                .eq('warehouse_id', warehouseId)
-                .in('status', ['sẵn sàng', 'bình rỗng']);
+            // 3. Bình
+            const cylindersData = await fetchReadyCylindersAtWarehouse(supabase, cylinderWhId, whRow);
 
             // Process counts
             const machCounts = (machinesData || []).reduce((acc, m) => {
@@ -225,7 +410,7 @@ const InventoryTransfer = () => {
             }, {});
             const machineSerials = (machinesData || []).reduce((acc, machine) => {
                 const name = `Máy ${machine.machine_type}`;
-                const serial = (machine.serial_number || '').trim().toUpperCase();
+                const serial = normalizeMachineSerialKey(machine.serial_number) || (machine.serial_number || '').trim().toUpperCase();
                 if (!serial) return acc;
                 if (!acc[name]) acc[name] = new Set();
                 acc[name].add(serial);
@@ -233,7 +418,7 @@ const InventoryTransfer = () => {
             }, {});
             const cylinderSerials = (cylindersData || []).reduce((acc, cylinder) => {
                 const name = `Bình ${cylinder.volume || 'khác'}`;
-                const serial = (cylinder.serial_number || '').trim().toUpperCase();
+                const serial = String(cylinder.serial_number || '').replace(/\s+/g, '').trim().toUpperCase();
                 if (!serial) return acc;
                 if (!acc[name]) acc[name] = new Set();
                 acc[name].add(serial);
@@ -267,8 +452,13 @@ const InventoryTransfer = () => {
                 serialMap[name] = Array.from(serialSet).sort();
             });
             setSerialOptionsByItemName(serialMap);
+            setSourceWarehouseAssets({
+                machines: machinesData || [],
+                cylinders: cylindersData || [],
+            });
         } catch (error) {
             console.error('Error fetching real inventory:', error);
+            setSourceWarehouseAssets({ machines: [], cylinders: [] });
             toast.error('Lỗi khi tải dữ liệu tồn thực tế');
         }
     };
@@ -402,9 +592,10 @@ const InventoryTransfer = () => {
     // ── SPECIFIC CODE HANDLING ──
 
     const handleCodeChange = (itemIdx, codeIdx, value) => {
-        const normalizedVal = value.trim().toUpperCase();
         setTransferItems(prev => {
             const next = [...prev];
+            const itemType = next[itemIdx]?.item_type;
+            const normalizedVal = normalizeSerialInput(value, itemType);
             const codes = [...next[itemIdx].specific_codes];
             codes[codeIdx] = { code: normalizedVal, status: 'pending' };
             next[itemIdx].specific_codes = codes;
@@ -479,47 +670,92 @@ const InventoryTransfer = () => {
                 if (item.item_type === 'MAY') machinesToVerify.push(...codes);
             });
 
-            const dbMap = {}; // { tableName: { code: dbItem } }
-            dbMap['cylinders'] = {};
-            dbMap['machines'] = {};
+            const dbMap = { cylinders: {}, machines: {} };
+            dbMap.cylinders = indexSerialRecords(sourceWarehouseAssets.cylinders, 'BINH');
+            dbMap.machines = indexSerialRecords(sourceWarehouseAssets.machines, 'MAY');
 
-            if (cylindersToVerify.length > 0) {
-                const { data: cyls } = await supabase.from('cylinders').select('id, serial_number, status, warehouse_id').in('serial_number', cylindersToVerify);
-                (cyls || []).forEach(c => dbMap['cylinders'][c.serial_number] = c);
+            const cylindersNeedRemote = cylindersToVerify.filter(
+                (code) => !resolveDbRecord(dbMap.cylinders, code, 'BINH'),
+            );
+            const machinesNeedRemote = machinesToVerify.filter(
+                (code) => !resolveDbRecord(dbMap.machines, code, 'MAY'),
+            );
+
+            if (cylindersNeedRemote.length > 0) {
+                const cylQuerySerials = [
+                    ...new Set(
+                        cylindersNeedRemote.flatMap((code) => {
+                            const t = String(code || '').trim();
+                            return [t, t.toUpperCase(), t.replace(/\s+/g, '').toUpperCase()].filter(Boolean);
+                        }),
+                    ),
+                ];
+                const { data: cyls } = await supabase
+                    .from('cylinders')
+                    .select('id, serial_number, status, warehouse_id')
+                    .in('serial_number', cylQuerySerials);
+                const remoteMap = indexSerialRecords(cyls, 'BINH');
+                dbMap.cylinders = { ...dbMap.cylinders, ...remoteMap };
             }
 
-            if (machinesToVerify.length > 0) {
-                const { data: macs } = await supabase.from('machines').select('id, serial_number, status, warehouse').in('serial_number', machinesToVerify);
-                (macs || []).forEach(m => dbMap['machines'][m.serial_number] = m);
+            if (machinesNeedRemote.length > 0) {
+                const macQuerySerials = [
+                    ...new Set(machinesNeedRemote.flatMap((code) => machineSerialLookupVariants(code))),
+                ];
+                const { data: macs } = await supabase
+                    .from('machines')
+                    .select('id, serial_number, status, warehouse')
+                    .in('serial_number', macQuerySerials);
+                const remoteMap = indexSerialRecords(macs, 'MAY');
+                dbMap.machines = { ...dbMap.machines, ...remoteMap };
             }
 
             const updatedItems = transferItems.map((item) => {
                 if (!item.item_name || item.item_type === 'VAT_TU') return item;
                 
                 const tableName = item.item_type === 'BINH' ? 'cylinders' : 'machines';
-                const whColumn = item.item_type === 'BINH' ? 'warehouse_id' : 'warehouse';
 
                 const updatedCodes = item.specific_codes.map(entry => {
                     if (!entry.code) return entry;
                     
-                    const dbItem = dbMap[tableName][entry.code];
+                    const dbItem = resolveDbRecord(dbMap[tableName], entry.code, item.item_type);
                     if (!dbItem) {
                         allValid = false;
                         return { ...entry, status: 'invalid', message: 'Mã không tồn tại' };
                     }
-                    if (dbItem[whColumn] !== formData.from_warehouse_id) {
+                    const canonicalCode = String(dbItem.serial_number || entry.code).trim();
+                    const atSourceWarehouse =
+                        item.item_type === 'BINH'
+                            ? cylinderBelongsToWarehouse(
+                                  dbItem.warehouse_id,
+                                  formData.from_warehouse_id,
+                                  warehouses,
+                              )
+                            : machineBelongsToWarehouse(
+                                  dbItem.warehouse,
+                                  formData.from_warehouse_id,
+                                  warehouses,
+                              );
+                    if (!atSourceWarehouse) {
                         allValid = false;
                         return { ...entry, status: 'invalid', message: 'Không thuộc kho xuất' };
                     }
-                    const currentStatus = (dbItem.status || '').toLowerCase();
-                    const isCylinderAndAllowedStatus = item.item_type === 'BINH' && (currentStatus === 'sẵn sàng' || currentStatus === 'bình rỗng');
-                    const isMachineAndAllowedStatus = item.item_type === 'MAY' && currentStatus === 'sẵn sàng';
+                    const isCylinderAndAllowedStatus =
+                        item.item_type === 'BINH' && isReadyCylinderStatus(dbItem.status);
+                    const isMachineAndAllowedStatus =
+                        item.item_type === 'MAY' && isReadyMachineStatus(dbItem.status);
 
                     if (!isCylinderAndAllowedStatus && !isMachineAndAllowedStatus) {
                         allValid = false;
                         return { ...entry, status: 'invalid', message: `Trạng thái: ${dbItem.status}` };
                     }
-                    return { ...entry, status: 'valid', message: 'Hợp lệ', dbId: dbItem.id };
+                    return {
+                        ...entry,
+                        code: canonicalCode,
+                        status: 'valid',
+                        message: 'Hợp lệ',
+                        dbId: dbItem.id,
+                    };
                 });
 
                 return { ...item, specific_codes: updatedCodes };
@@ -854,6 +1090,10 @@ const InventoryTransfer = () => {
                                 const optionsList = availableForThisType.map(i => ({
                                     value: i.item_name, label: `${i.item_name} (Tồn: ${i.quantity})`
                                 }));
+                                const noStockForType =
+                                    formData.from_warehouse_id &&
+                                    item.item_type !== 'VAT_TU' &&
+                                    optionsList.length === 0;
 
                                 return (
                                     <div key={item.id} className="relative rounded-2xl border border-slate-200 bg-slate-50/50 p-4 space-y-4 shadow-sm">
@@ -899,10 +1139,22 @@ const InventoryTransfer = () => {
                                                     value={item.item_name}
                                                     onValueChange={(val) => updateRowName(itemIdx, val)}
                                                     disabled={!formData.from_warehouse_id}
-                                                    placeholder="Chọn vật tư..."
+                                                    placeholder={
+                                                        noStockForType
+                                                            ? 'Không có hàng sẵn sàng tại kho xuất'
+                                                            : 'Chọn vật tư...'
+                                                    }
                                                     searchPlaceholder="Tìm kiếm..."
                                                     className="!h-10 !rounded-xl text-[13px]"
                                                 />
+                                                {noStockForType && (
+                                                    <p className="text-[11px] font-medium text-amber-700 px-1">
+                                                        Không thấy{' '}
+                                                        {item.item_type === 'MAY' ? 'máy' : 'bình'} trạng
+                                                        thái sẵn sàng tại kho đã chọn — kiểm tra mã kho
+                                                        (vd. OCP1) trên danh mục máy.
+                                                    </p>
+                                                )}
                                             </div>
 
                                             {/* Quantity */}
