@@ -26,6 +26,8 @@ import { notificationService } from '../../utils/notificationService';
 import { applyRecoveryCompletionInventory } from '../../utils/cylinderRecoveryCompletion';
 import BarcodeScanner from '../Common/BarcodeScanner';
 import { SearchableSelect } from '../ui/SearchableSelect';
+import usePermissions from '../../hooks/usePermissions';
+import { filterWarehousesForCurrentUser } from '../../utils/orderWarehouseScope';
 
 /** prefillComplete: mở form ở trạng thái Hoàn thành; recovery vẫn là bản ghi DB (để xử lý kho đúng). */
 export default function CylinderRecoveryFormModal({
@@ -36,6 +38,7 @@ export default function CylinderRecoveryFormModal({
     prefillComplete = false,
     prefill = null,
 }) {
+    const { role, user, department } = usePermissions();
     const isEdit = !!recovery;
     const [mode, setMode] = useState(initialMode);
     const isReadOnly = mode === 'view';
@@ -201,11 +204,16 @@ export default function CylinderRecoveryFormModal({
 
     const fetchWarehouses = async () => {
         try {
-            const { data } = await supabase.from('warehouses').select('id, name').eq('status', 'Đang hoạt động').order('name');
+            const { data } = await supabase
+                .from('warehouses')
+                .select('id, code, name, manager_name, branch_office, status')
+                .eq('status', 'Đang hoạt động')
+                .order('name');
             if (data) {
-                setWarehousesList(data);
-                if (!isEdit && data.length > 0) {
-                    setFormData(prev => !prev.warehouse_id ? { ...prev, warehouse_id: data[0].id } : prev);
+                const scoped = filterWarehousesForCurrentUser(data, { role, user, department });
+                setWarehousesList(scoped);
+                if (!isEdit && scoped.length > 0) {
+                    setFormData(prev => !prev.warehouse_id ? { ...prev, warehouse_id: scoped[0].id } : prev);
                 }
             }
         } catch (error) {

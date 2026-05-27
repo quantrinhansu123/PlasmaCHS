@@ -28,6 +28,7 @@ import { PRODUCT_TYPES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
 import usePermissions from '../../hooks/usePermissions';
 import { notificationService } from '../../utils/notificationService';
+import { filterWarehousesForCurrentUser } from '../../utils/orderWarehouseScope';
 
 /** goods_issues có thể lưu warehouses.id hoặc code/tên cũ — luôn map về dòng warehouses (UUID cylinders.warehouse_id). */
 function resolveWarehouseRowForForm(storedWarehouseId, warehousesList = []) {
@@ -49,7 +50,7 @@ function machineWarehouseCandidates(whRow) {
 }
 
 export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedType, prefill = null }) {
-    const { user } = usePermissions();
+    const { user, role, department } = usePermissions();
     const isEdit = !!issue;
     const isTransportEditable = !issue || ['CHO_DUYET', 'DA_XUAT'].includes(issue.status);
     const [isLoading, setIsLoading] = useState(false);
@@ -247,9 +248,10 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
         try {
             const { data } = await supabase.from('warehouses').select('id, name, code').eq('status', 'Đang hoạt động').order('name');
             if (data) {
-                setWarehousesList(data);
-                if (!isEdit && data.length > 0) {
-                    setFormData(prev => !prev.warehouse_id ? { ...prev, warehouse_id: data[0].id } : prev);
+                const scoped = filterWarehousesForCurrentUser(data, { role, user, department });
+                setWarehousesList(scoped);
+                if (!isEdit && scoped.length > 0) {
+                    setFormData(prev => !prev.warehouse_id ? { ...prev, warehouse_id: scoped[0].id } : prev);
                 }
             }
         } catch (error) {

@@ -40,6 +40,9 @@ import MachineRecoveryFormModal from '../components/MachineRecovery/MachineRecov
 import MachineRecoveryPrintTemplate from '../components/MachineRecovery/MachineRecoveryPrintTemplate';
 import { MACHINE_RECOVERY_STATUSES, MACHINE_RECOVERY_TABLE_COLUMNS } from '../constants/machineRecoveryConstants';
 import { supabase } from '../supabase/config';
+import usePermissions from '../hooks/usePermissions';
+import { isAccountantRole, isAdminRole, isWarehouseRole } from '../utils/accessControl';
+import { filterWarehousesForCurrentUser } from '../utils/orderWarehouseScope';
 
 // Register Chart.js components
 ChartJS.register(
@@ -56,6 +59,7 @@ ChartJS.register(
 
 export default function MachineRecoveries() {
     const navigate = useNavigate();
+    const { role, user, department, loading: permissionsLoading } = usePermissions();
     const [recoveries, setRecoveries] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
@@ -70,17 +74,43 @@ export default function MachineRecoveries() {
     const [warehouses, setWarehouses] = useState([]);
 
     useEffect(() => {
+        if (permissionsLoading) return;
         fetchData();
         loadMetadata();
-    }, []);
+    }, [permissionsLoading, role, user?.name, user?.username, user?.chi_nhanh, department]);
 
     const fetchData = async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
+            const fullAccess = isAdminRole(role) || isAccountantRole(role);
+
+            let query = supabase
                 .from('machine_recoveries')
-                .select('*')
-                .order('created_at', { ascending: false });
+                .select('*');
+
+            if (!fullAccess && isWarehouseRole(role)) {
+                const { data: warehouseRows, error: whError } = await supabase
+                    .from('warehouses')
+                    .select('id, code, name, manager_name, branch_office');
+                if (whError) throw whError;
+
+                const allowed = filterWarehousesForCurrentUser(warehouseRows || [], { role, user, department });
+                const allowedKeys = [
+                    ...new Set(
+                        (allowed || [])
+                            .flatMap((w) => [w.id, w.code, w.name])
+                            .map((v) => String(v || '').trim())
+                            .filter(Boolean)
+                    ),
+                ];
+                if (allowedKeys.length === 0) {
+                    setRecoveries([]);
+                    return;
+                }
+                query = query.in('warehouse_id', allowedKeys);
+            }
+
+            const { data, error } = await query.order('created_at', { ascending: false });
             if (error) throw error;
             setRecoveries(data || []);
         } catch (error) {
@@ -93,8 +123,12 @@ export default function MachineRecoveries() {
     const loadMetadata = async () => {
         const { data: custData } = await supabase.from('customers').select('id, name, address');
         if (custData) setCustomers(custData);
-        const { data: whData } = await supabase.from('warehouses').select('id, name');
-        if (whData) setWarehouses(whData);
+        const { data: whData } = await supabase.from('warehouses').select('id, code, name, manager_name, branch_office');
+        if (whData) {
+            const fullAccess = isAdminRole(role) || isAccountantRole(role);
+            const scoped = fullAccess ? whData : filterWarehousesForCurrentUser(whData, { role, user, department });
+            setWarehouses(scoped);
+        }
     };
 
     const getCustomerName = (id) => customers.find(c => c.id === id)?.name || '—';

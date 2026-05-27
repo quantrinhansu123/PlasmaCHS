@@ -70,9 +70,19 @@ export const isLeadSaleRole = (role) => {
     return r.includes('leadsale') || r.includes('truongkinhdoanh') || r.includes('lead');
 };
 
+export const isThuKhoRole = (role) => {
+    const r = normalizeRole(role);
+    return r.includes('thukho');
+};
+
 export const isWarehouseRole = (role) => {
     const r = normalizeRole(role);
-    return r.includes('thukho') || r.includes('kho') || r.includes('warehouse');
+    return isThuKhoRole(role) || r.includes('warehouse') || r === 'kho';
+};
+
+export const isAccountantRole = (role) => {
+    const r = normalizeRole(role);
+    return r.includes('ketoan') || r.includes('accountant') || r.includes('ke_toan');
 };
 
 export const isShipperRole = (role) => {
@@ -80,8 +90,17 @@ export const isShipperRole = (role) => {
     return r.includes('shipper') || r.includes('giaohang');
 };
 
+/**
+ * Phạm vi dữ liệu theo vai trò:
+ * - Admin / Kế toán: all
+ * - Trưởng nhóm: team
+ * - NVKD: own
+ * - Thủ kho / Kho: warehouse
+ * - Shipper: assigned_orders
+ */
 export const getDataVisibilityScope = (role) => {
     if (isAdminRole(role)) return 'all';
+    if (isAccountantRole(role)) return 'all';
     if (isLeadSaleRole(role)) return 'team';
     if (isSalesRole(role)) return 'own';
     if (isWarehouseRole(role)) return 'warehouse';

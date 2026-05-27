@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../supabase/config';
 import {
     getDataVisibilityScope,
+    isAccountantRole,
     isAdminRole,
     isLeadSaleRole,
     isSalesRole,
     isShipperRole,
+    isThuKhoRole,
     isWarehouseRole,
     normalizeRole,
 } from '../utils/accessControl';
@@ -108,7 +110,7 @@ export const usePermissions = () => {
                     return;
                 }
 
-                let query = supabase.from('app_users').select('id, name, role, username, department, chi_nhanh, nguoi_quan_ly');
+                let query = supabase.from('app_users').select('id, name, role, username, department, chi_nhanh, nguoi_quan_ly, approval_level, team');
 
                 if (userId) {
                     query = query.eq('id', userId);
@@ -179,6 +181,8 @@ export const usePermissions = () => {
         isCompanyRole,
         isSalesRole: isSalesRole(role),
         isLeadSaleRole: isLeadSaleRole(role),
+        isAccountantRole: isAccountantRole(role),
+        isThuKhoRole: isThuKhoRole(role),
         isWarehouseRole: isWarehouseRole(role),
         isShipperRole: isShipperRole(role),
         roleScope: getDataVisibilityScope(role),

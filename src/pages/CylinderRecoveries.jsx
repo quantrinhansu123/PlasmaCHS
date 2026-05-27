@@ -38,7 +38,8 @@ import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import { RECOVERY_STATUSES, RECOVERY_TABLE_COLUMNS } from '../constants/recoveryConstants';
 import usePermissions from '../hooks/usePermissions';
-import { isAdminRole } from '../utils/accessControl';
+import { isAccountantRole, isAdminRole, isWarehouseRole } from '../utils/accessControl';
+import { filterWarehousesForCurrentUser } from '../utils/orderWarehouseScope';
 import {
     ArcElement,
     BarElement,
@@ -88,7 +89,7 @@ const isRecoveryProcessingStatus = (status) => status !== 'HOAN_THANH' && status
 const CylinderRecoveries = () => {
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
-    const { role } = usePermissions();
+    const { role, user, department, loading: permissionsLoading } = usePermissions();
     const canDeleteRecoveries = isAdminRole(role);
     const [activeView, setActiveView] = useState('list');
     const [searchTerm, setSearchTerm] = useState('');
@@ -177,11 +178,12 @@ const CylinderRecoveries = () => {
 
     // Data Fetching
     useEffect(() => {
+        if (permissionsLoading) return;
         fetchRecoveries();
         fetchWarehouses();
         fetchCustomers();
         fetchOrders();
-    }, []);
+    }, [permissionsLoading, role, user?.name, user?.username, user?.chi_nhanh, department]);
 
     useEffect(() => {
         (async () => {
@@ -269,10 +271,35 @@ const CylinderRecoveries = () => {
     const fetchRecoveries = async () => {
         try {
             setLoading(true);
-            const { data, error } = await supabase
+            const fullAccess = isAdminRole(role) || isAccountantRole(role);
+
+            let query = supabase
                 .from('cylinder_recoveries')
-                .select('*')
-                .order('created_at', { ascending: false });
+                .select('*');
+
+            if (!fullAccess && isWarehouseRole(role)) {
+                const { data: warehouseRows, error: whError } = await supabase
+                    .from('warehouses')
+                    .select('id, code, name, manager_name, branch_office');
+                if (whError) throw whError;
+
+                const allowed = filterWarehousesForCurrentUser(warehouseRows || [], { role, user, department });
+                const allowedKeys = [
+                    ...new Set(
+                        (allowed || [])
+                            .flatMap((w) => [w.id, w.code, w.name])
+                            .map((v) => String(v || '').trim())
+                            .filter(Boolean)
+                    ),
+                ];
+                if (allowedKeys.length === 0) {
+                    setRecoveries([]);
+                    return;
+                }
+                query = query.in('warehouse_id', allowedKeys);
+            }
+
+            const { data, error } = await query.order('created_at', { ascending: false });
 
             if (error) throw error;
             setRecoveries(data || []);
@@ -292,9 +319,16 @@ const CylinderRecoveries = () => {
 
     const fetchWarehouses = async () => {
         try {
-            const { data, error } = await supabase.from('warehouses').select('*').order('name');
+            const { data, error } = await supabase
+                .from('warehouses')
+                .select('id, code, name, manager_name, branch_office, status')
+                .order('name');
             if (error) throw error;
-            setWarehousesList(data || []);
+            const fullAccess = isAdminRole(role) || isAccountantRole(role);
+            const scoped = fullAccess
+                ? (data || [])
+                : filterWarehousesForCurrentUser(data || [], { role, user, department });
+            setWarehousesList(scoped);
         } catch (error) {
             console.error('Error fetching warehouses:', error);
         }

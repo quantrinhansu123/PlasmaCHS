@@ -47,6 +47,11 @@ import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import usePermissions from '../hooks/usePermissions';
 import { isAdminRole } from '../utils/accessControl';
 import { scopeOrdersForWarehouseAccess } from '../utils/orderWarehouseScope';
+import {
+    appendOrderedByScope,
+    resolveVisibleSalesNames,
+    shouldScopeOrdersBySalesPerson,
+} from '../utils/salesVisibilityScope';
 import { resolveOrderStatusKey } from '../constants/orderConstants';
 
 const getApprovedQuantityFromRequest = (request) => {
@@ -141,7 +146,7 @@ const formatNumberBt = (num) => {
 
 export default function MachineRequests() {
     const navigate = useNavigate();
-    const { role, user, department } = usePermissions();
+    const { role, user, department, roleScope, loading: permissionsLoading } = usePermissions();
     const isAdmin = isAdminRole(role);
     const [requests, setRequests] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -209,8 +214,20 @@ export default function MachineRequests() {
     ];
 
     useEffect(() => {
+        if (permissionsLoading) return;
         fetchData();
-    }, [role, department, user?.name, user?.username, user?.chi_nhanh]);
+    }, [
+        permissionsLoading,
+        role,
+        roleScope,
+        department,
+        user?.name,
+        user?.username,
+        user?.chi_nhanh,
+        user?.nguoi_quan_ly,
+        user?.approval_level,
+        user?.team,
+    ]);
 
     // Mobile filter handlers
     const closeMobileFilter = () => {
@@ -239,10 +256,20 @@ export default function MachineRequests() {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
-                .from('orders')
-                .select('*')
-                .order('created_at', { ascending: false });
+            const { names: visibleRequesterNames } = await resolveVisibleSalesNames(user, role, {
+                approvalLevel: user?.approval_level,
+                roleScope,
+            });
+
+            let query = supabase.from('orders').select('*');
+
+            // NVKD / trưởng nhóm: lọc theo Người yêu cầu (ordered_by)
+            // Admin / Kế toán: full | Thủ kho: lọc theo kho ở bước dưới
+            if (shouldScopeOrdersBySalesPerson(role, user?.approval_level, roleScope)) {
+                query = appendOrderedByScope(query, visibleRequesterNames);
+            }
+
+            const { data, error } = await query.order('created_at', { ascending: false });
 
             if (error) throw error;
 

@@ -77,11 +77,17 @@ import useReports from '../hooks/useReports';
 import { supabase } from '../supabase/config';
 import {
     isAdminRole,
-    isLeadSaleRole,
     isShipperRole as isShipperRoleHelper,
+    isThuKhoRole as isThuKhoRoleHelper,
     isWarehouseRole as isWarehouseRoleHelper,
-    normalizeRole as normalizeRoleKey,
 } from '../utils/accessControl';
+import {
+    appendOrderedByScope,
+    hasFullOrderVisibility,
+    resolveVisibleSalesNames,
+    shouldScopeOrdersBySalesPerson,
+    shouldScopeOrdersByWarehouse,
+} from '../utils/salesVisibilityScope';
 import { deleteOrdersWithRollback } from '../utils/deleteOrderCascade';
 import { stripDeliveryMediaFromNote } from '../utils/orderNoteSanitize';
 
@@ -299,7 +305,7 @@ const collectCylinderSerialsFromOrder = (order) => {
 const ORDERS_LIST_DISPLAY_MODE_KEY = 'orders_list_display_mode';
 
 const Orders = () => {
-    const { role, department, user, loading: permissionsLoading } = usePermissions();
+    const { role, department, user, loading: permissionsLoading, roleScope } = usePermissions();
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
     const [searchTerm, setSearchTerm] = useState('');
@@ -441,7 +447,18 @@ const Orders = () => {
         if (permissionsLoading) return;
         fetchOrders();
         fetchWarehouses();
-    }, [permissionsLoading, role, department, user?.name, user?.username, user?.chi_nhanh, user?.nguoi_quan_ly]);
+    }, [
+        permissionsLoading,
+        role,
+        roleScope,
+        department,
+        user?.name,
+        user?.username,
+        user?.chi_nhanh,
+        user?.nguoi_quan_ly,
+        user?.approval_level,
+        user?.team,
+    ]);
 
     useEffect(() => {
         // Extract unique customers from orders
@@ -532,32 +549,19 @@ const Orders = () => {
     const fetchOrders = async () => {
         setIsLoading(true);
         try {
-            const normalizedRole = normalizeRoleKey(role);
             const isAdmin = isAdminRole(role);
-            const isLeader = isLeadSaleRole(role);
-            const isThuKhoRole = normalizedRole.includes('thukho');
+            const isThuKhoRole = isThuKhoRoleHelper(role);
             const isShipperRole = isShipperRoleHelper(role);
             const isWarehouseRole = isWarehouseRoleHelper(role);
+            const fullOrderAccess = hasFullOrderVisibility(role, user?.approval_level, roleScope);
             const storageUserName =
                 localStorage.getItem('user_name') ||
                 sessionStorage.getItem('user_name') ||
                 '';
-            const managedNames = (user?.nguoi_quan_ly || '')
-                .split(',')
-                .map(name => name.trim())
-                .filter(Boolean);
-            const visibleSalesNames = [
-                ...new Set(
-                    [
-                        user?.name,
-                        user?.username,
-                        storageUserName,
-                        ...managedNames
-                    ]
-                        .map(v => (v || '').trim())
-                        .filter(Boolean)
-                )
-            ];
+            const { names: visibleSalesNames } = await resolveVisibleSalesNames(user, role, {
+                approvalLevel: user?.approval_level,
+                roleScope,
+            });
 
             let query = supabase
                 .from('orders')
@@ -571,13 +575,12 @@ const Orders = () => {
             // Thủ kho: hiển thị đầy đủ đơn, không giới hạn cứng theo 1 trạng thái.
 
             // Shipper chỉ nhìn thấy đơn được giao cho mình
-            if (isShipperRole && !isAdmin) {
+            if (isShipperRole && !fullOrderAccess) {
                 query = query.eq('delivery_unit', storageUserName);
             }
 
             // Kho (không phải thủ kho): lọc theo mã kho suy ra từ department.
-            // Thủ kho không dùng .eq ở đây — họ xem theo danh sách kho phụ trách (warehouses.manager_name) ở bước lọc client bên dưới; .eq sai format warehouse sẽ làm mất hết đơn.
-            if (!isAdmin && isWarehouseRole && department && !isThuKhoRole) {
+            if (!fullOrderAccess && isWarehouseRole && department && !isThuKhoRole) {
                 // Logic: Extract warehouse code from department (e.g., "OCP1-CHS" -> "OCP1")
                 // We'll take the first part before the hyphen if it exists, otherwise use full string
                 const warehouseCode = department.includes('-') 
@@ -587,22 +590,10 @@ const Orders = () => {
                 query = query.eq('warehouse', warehouseCode);
             }
 
-            // Role-based visibility filtering
-            // Kho phải thấy đầy đủ đơn theo phạm vi kho, không bó theo ordered_by như NVKD.
-            if (!isAdmin && !isThuKhoRole && !isShipperRole && !isWarehouseRole) {
-                // Leaders see their own + managed staff's orders
-                if (isLeader) {
-                    if (visibleSalesNames.length > 0) {
-                        query = query.in('ordered_by', visibleSalesNames);
-                    }
-                } 
-                // Regular NVKD (Sales) only see their own orders
-                else {
-                    const myNames = [user?.name, user?.username, storageUserName].filter(Boolean);
-                    if (myNames.length > 0) {
-                        query = query.in('ordered_by', myNames);
-                    }
-                }
+            // NVKD / trưởng nhóm: lọc theo ordered_by (own | team)
+            // Admin / Kế toán: full | Thủ kho: theo kho | Shipper: đơn giao
+            if (shouldScopeOrdersBySalesPerson(role, user?.approval_level, roleScope)) {
+                query = appendOrderedByScope(query, visibleSalesNames);
             }
 
             const { data, error } = await query.order('created_at', { ascending: false });
@@ -612,8 +603,8 @@ const Orders = () => {
             let scopedOrders = data || [];
             const customerWarehouseById = await loadCustomerWarehouseMap(scopedOrders);
 
-            // Kho/Thủ kho: chỉ đơn thuộc kho phụ trách (thủ kho: theo kho phụ trách khách hàng).
-            if (!isAdmin && (isThuKhoRole || isWarehouseRole)) {
+            // Thủ kho / nhân viên kho: chỉ đơn thuộc kho phụ trách
+            if (shouldScopeOrdersByWarehouse(role)) {
                 const managerCandidates = getManagerCandidateKeys(user?.name, user?.username, storageUserName);
 
                 const { data: warehousesData } = await supabase

@@ -56,11 +56,14 @@ import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 import { notificationService } from '../utils/notificationService';
+import { isAdminRole } from '../utils/accessControl';
 import {
-    isAdminRole,
-    isLeadSaleRole,
-    isSalesRole,
-} from '../utils/accessControl';
+    appendCustomerAssigneeScope,
+    getCurrentUserNames,
+    getEffectiveVisibilityScope,
+    resolveVisibleSalesNames,
+    shouldScopeCustomersByAssignee,
+} from '../utils/salesVisibilityScope';
 
 ChartJS.register(
     CategoryScale,
@@ -136,7 +139,6 @@ function appendLeadCustomerFilters(query, {
 
 const normalizeSearchText = (value) => String(value || '').toLowerCase().trim();
 const normalizePhoneDigits = (value) => String(value || '').replace(/\D/g, '');
-
 const Customers = () => {
     const { role: rawRole, user, roleScope } = usePermissions();
     const normalizeRole = (r) => {
@@ -148,17 +150,34 @@ const Customers = () => {
     };
     const role = normalizeRole(rawRole);
     const isAdminOrManager = isAdminRole(role);
-    const currentUserNames = useMemo(() => {
-        const storageUserName =
-            localStorage.getItem('user_name') || sessionStorage.getItem('user_name') || '';
-        return [
-            ...new Set(
-                [user?.name, user?.username, storageUserName]
-                    .map((value) => String(value || '').trim())
-                    .filter(Boolean)
-            ),
-        ];
-    }, [user]);
+    const currentUserNames = useMemo(() => getCurrentUserNames(user), [user]);
+    const [assigneeScopeNames, setAssigneeScopeNames] = useState(null);
+    const effectiveVisibilityScope = useMemo(
+        () => getEffectiveVisibilityScope(rawRole, user?.approval_level, roleScope),
+        [rawRole, user?.approval_level, roleScope]
+    );
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            const { names } = await resolveVisibleSalesNames(user, rawRole, {
+                approvalLevel: user?.approval_level,
+                roleScope,
+            });
+            if (!cancelled) setAssigneeScopeNames(names);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [user, rawRole, roleScope, user?.approval_level, user?.team, user?.nguoi_quan_ly]);
+
+    const applyCustomerVisibilityScope = useCallback(
+        (query) => {
+            if (!shouldScopeCustomersByAssignee(rawRole, user?.approval_level, roleScope)) return query;
+            return appendCustomerAssigneeScope(query, assigneeScopeNames);
+        },
+        [rawRole, user?.approval_level, roleScope, assigneeScopeNames]
+    );
     const location = useLocation();
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
@@ -277,9 +296,13 @@ const Customers = () => {
                 String(customer.managed_by || '').trim(),
             ].filter(Boolean);
             if (assignees.length === 0) return false;
-            return currentUserNames.some((name) => assignees.includes(name));
+            const allowedNames =
+                effectiveVisibilityScope === 'team'
+                    ? (assigneeScopeNames || currentUserNames)
+                    : currentUserNames;
+            return allowedNames.some((name) => assignees.includes(name));
         },
-        [filterType, isAdminOrManager, currentUserNames]
+        [filterType, isAdminOrManager, currentUserNames, effectiveVisibilityScope, assigneeScopeNames]
     );
     const canChangeLeadCustomerStatus = useCallback(
         (customer) => {
@@ -383,7 +406,9 @@ const Customers = () => {
         if (filterType !== 'lead') return;
         let cancelled = false;
         (async () => {
-            const { data, error } = await supabase.from('customers').select('care_by,managed_by').limit(10000);
+            let distinctQuery = supabase.from('customers').select('care_by,managed_by').limit(10000);
+            distinctQuery = applyCustomerVisibilityScope(distinctQuery);
+            const { data, error } = await distinctQuery;
             if (cancelled || error) return;
             const rows = data || [];
             const care = [...new Set(rows.map((r) => r.care_by).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'vi'));
@@ -394,7 +419,7 @@ const Customers = () => {
         return () => {
             cancelled = true;
         };
-    }, [filterType]);
+    }, [filterType, applyCustomerVisibilityScope]);
 
     useEffect(() => {
         if (filterType !== 'lead') return;
@@ -431,6 +456,7 @@ const Customers = () => {
             let query = supabase
                 .from('customers')
                 .select('*', { count: 'exact' });
+            query = applyCustomerVisibilityScope(query);
 
             // Keep customer listing full on frontend; backend RLS (if any) remains the source of truth.
 
@@ -516,6 +542,7 @@ const Customers = () => {
         currentPage,
         pageSize,
         filterType,
+        applyCustomerVisibilityScope,
         debouncedSearchTerm,
         leadCreatedFrom,
         leadCreatedTo,

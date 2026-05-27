@@ -54,7 +54,8 @@ import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import { supabase } from '../supabase/config';
 import { ISSUE_STATUSES, ISSUE_TABLE_COLUMNS, ISSUE_TYPES } from '../constants/goodsIssueConstants';
 import usePermissions from '../hooks/usePermissions';
-import { isWarehouseRole } from '../utils/accessControl';
+import { isAccountantRole, isAdminRole, isWarehouseRole } from '../utils/accessControl';
+import { filterWarehousesForCurrentUser } from '../utils/orderWarehouseScope';
 
 // Register ChartJS components
 ChartJS.register(
@@ -96,7 +97,7 @@ function getKanbanCardBorderClass(typeId) {
 }
 
 const GoodsIssues = () => {
-    const { role, department } = usePermissions();
+    const { role, user, department, loading: permissionsLoading } = usePermissions();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
     const [issues, setIssues] = useState([]);
@@ -194,9 +195,10 @@ const GoodsIssues = () => {
     const [printData, setPrintData] = useState({ issue: null, items: [], warehouse: '', supplier: '' });
 
     useEffect(() => {
+        if (permissionsLoading) return;
         fetchData();
         fetchMasters();
-    }, []);
+    }, [permissionsLoading, role, user?.name, user?.username, user?.chi_nhanh, department]);
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -234,10 +236,34 @@ const GoodsIssues = () => {
                 .from('goods_issues')
                 .select('*');
 
-            // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-            if (isWarehouseRole(role) && department) {
-                const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-                query = query.eq('warehouse_id', userWhCode);
+            const fullAccess = isAdminRole(role) || isAccountantRole(role);
+
+            // Thủ kho / kho: chỉ xem phiếu thuộc kho mình quản lý (warehouse_id có thể là UUID hoặc code cũ)
+            if (!fullAccess && isWarehouseRole(role)) {
+                const { data: warehouseRows, error: whError } = await supabase
+                    .from('warehouses')
+                    .select('id, code, name, manager_name, branch_office')
+                    .eq('status', 'Đang hoạt động');
+                if (whError) throw whError;
+
+                const allowedWarehouses = filterWarehousesForCurrentUser(warehouseRows || [], {
+                    role,
+                    user,
+                    department,
+                });
+                const allowedKeys = [
+                    ...new Set(
+                        (allowedWarehouses || [])
+                            .flatMap((w) => [w.id, w.code, w.name])
+                            .map((v) => String(v || '').trim())
+                            .filter(Boolean)
+                    ),
+                ];
+                if (allowedKeys.length === 0) {
+                    setIssues([]);
+                    return;
+                }
+                query = query.in('warehouse_id', allowedKeys);
             }
 
             const { data, error } = await query.order('created_at', { ascending: false });
@@ -255,11 +281,17 @@ const GoodsIssues = () => {
     const fetchMasters = async () => {
         try {
             const [warehousesRes, suppliersRes] = await Promise.all([
-                supabase.from('warehouses').select('id, name').order('name'),
+                supabase.from('warehouses').select('id, code, name, manager_name, branch_office').order('name'),
                 supabase.from('suppliers').select('id, name').order('name')
             ]);
 
-            if (warehousesRes.data) setWarehouses(warehousesRes.data);
+            if (warehousesRes.data) {
+                const fullAccess = isAdminRole(role) || isAccountantRole(role);
+                const scoped = fullAccess
+                    ? warehousesRes.data
+                    : filterWarehousesForCurrentUser(warehousesRes.data, { role, user, department });
+                setWarehouses(scoped);
+            }
             if (suppliersRes.data) setSuppliers(suppliersRes.data);
         } catch (error) {
             console.error('Lỗi khi tải danh mục:', error);

@@ -57,7 +57,8 @@ import { RECEIPT_STATUSES, TABLE_COLUMNS } from '../constants/goodsReceiptConsta
 import { supabase } from '../supabase/config';
 import { notificationService } from '../utils/notificationService';
 import usePermissions from '../hooks/usePermissions';
-import { isWarehouseRole } from '../utils/accessControl';
+import { isAccountantRole, isAdminRole, isWarehouseRole } from '../utils/accessControl';
+import { filterWarehousesForCurrentUser } from '../utils/orderWarehouseScope';
 
 // Register Chart.js components
 ChartJS.register(
@@ -73,7 +74,7 @@ ChartJS.register(
 );
 
 const GoodsReceipts = () => {
-    const { role, department } = usePermissions();
+    const { role, user, department, loading: permissionsLoading } = usePermissions();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
     const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
@@ -184,9 +185,10 @@ const GoodsReceipts = () => {
     }, [searchTerm, selectedStatuses, selectedWarehouses, selectedTypes]);
 
     useEffect(() => {
+        if (permissionsLoading) return;
         fetchReceipts();
         fetchWarehouses();
-    }, []);
+    }, [permissionsLoading, role, user?.name, user?.username, user?.chi_nhanh, department]);
 
     useEffect(() => {
         localStorage.setItem('columns_goods_receipts_visible', JSON.stringify(visibleColumns));
@@ -239,13 +241,29 @@ const GoodsReceipts = () => {
                 .from('goods_receipts')
                 .select('*, items:goods_receipt_items(item_name, item_type)');
 
-            // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-            if (isWarehouseRole(role) && department) {
-                const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-                query = query.eq('warehouse_id', userWhCode);
-                // Note: If warehouse_id in DB is UUID and department is Name, 
-                // we might need a join or secondary lookup. 
-                // But usually the system uses names as identifiers in many places.
+            // Admin / Kế toán: xem full
+            const fullAccess = isAdminRole(role) || isAccountantRole(role);
+
+            // Thủ kho / kho: chỉ xem phiếu thuộc kho mình quản lý (theo warehouses.manager_name)
+            if (!fullAccess && isWarehouseRole(role)) {
+                const { data: warehouseRows, error: whError } = await supabase
+                    .from('warehouses')
+                    .select('id, code, name, manager_name, branch_office')
+                    .eq('status', 'Đang hoạt động');
+                if (whError) throw whError;
+
+                const allowedWarehouses = filterWarehousesForCurrentUser(warehouseRows || [], {
+                    role,
+                    user,
+                    department,
+                });
+                const allowedCodes = [...new Set((allowedWarehouses || []).map((w) => String(w.code || '').trim()).filter(Boolean))];
+                if (allowedCodes.length === 0) {
+                    setReceipts([]);
+                    setSelectedIds([]);
+                    return;
+                }
+                query = query.in('warehouse_id', allowedCodes);
             }
 
             const { data, error } = await query.order('created_at', { ascending: false });
@@ -262,10 +280,18 @@ const GoodsReceipts = () => {
 
     const fetchWarehouses = async () => {
         try {
-            const { data } = await supabase.from('warehouses').select('id, name').eq('status', 'Đang hoạt động').order('name');
-            if (data) {
-                setWarehousesList(data);
-            }
+            const { data, error } = await supabase
+                .from('warehouses')
+                .select('id, code, name, manager_name, branch_office')
+                .eq('status', 'Đang hoạt động')
+                .order('name');
+            if (error) throw error;
+
+            const fullAccess = isAdminRole(role) || isAccountantRole(role);
+            const scoped = fullAccess
+                ? (data || [])
+                : filterWarehousesForCurrentUser(data || [], { role, user, department });
+            setWarehousesList(scoped);
         } catch (error) {
             console.error('Error fetching warehouses:', error);
         }

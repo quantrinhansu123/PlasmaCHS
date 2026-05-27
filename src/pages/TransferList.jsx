@@ -35,6 +35,7 @@ import PrintOptionsModal from '../components/Orders/PrintOptionsModal';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 import { isAdminRole, isWarehouseRole } from '../utils/accessControl';
+import { filterTransfersForCurrentUser } from '../utils/orderWarehouseScope';
 import { persistTransferHandover } from '../utils/persistTransferHandover';
 
 const PAGE_SIZE = 30;
@@ -140,7 +141,7 @@ const columnTonePillClass = {
 export default function TransferList() {
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
-    const { role } = usePermissions();
+    const { role, user, department, loading: permissionsLoading } = usePermissions();
     const [records, setRecords] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -203,8 +204,9 @@ export default function TransferList() {
     };
 
     useEffect(() => {
+        if (permissionsLoading) return;
         fetchTransfers();
-    }, []);
+    }, [permissionsLoading, role, user?.name, user?.username, user?.chi_nhanh, department]);
 
     // Allow deep-linking with preset search. Example: /danh-sach-dieu-chuyen?q=TRF123
     useEffect(() => {
@@ -243,11 +245,17 @@ export default function TransferList() {
 
             const { data: warehouseRows, error: whError } = await supabase
                 .from('warehouses')
-                .select('id, name');
+                .select('id, name, code, manager_name, branch_office');
             if (whError) throw whError;
 
+            const scopedTransferRows = filterTransfersForCurrentUser(transferRows || [], warehouseRows || [], {
+                role,
+                user,
+                department,
+            });
+
             const whMap = Object.fromEntries((warehouseRows || []).map((w) => [w.id, w.name]));
-            const normalized = (transferRows || []).map((row) => {
+            const normalized = scopedTransferRows.map((row) => {
                 const items = Array.isArray(row.items_json) ? row.items_json : [];
                 const fromWarehouseName = whMap[row.from_warehouse_id] || row.from_warehouse_id || '—';
                 const toWarehouseName = whMap[row.to_warehouse_id] || row.to_warehouse_id || '—';

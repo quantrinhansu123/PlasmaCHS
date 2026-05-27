@@ -48,6 +48,7 @@ import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import { WAREHOUSE_STATUSES } from '../constants/warehouseConstants';
 import usePermissions from '../hooks/usePermissions';
 import { isAdminRole } from '../utils/accessControl';
+import { filterWarehousesForCurrentUser } from '../utils/orderWarehouseScope';
 import { supabase } from '../supabase/config';
 
 ChartJS.register(
@@ -72,7 +73,7 @@ const TABLE_COLUMNS_DEF = [
 ];
 
 const Warehouses = () => {
-    const { role: rawRole } = usePermissions();
+    const { role: rawRole, user, department, loading: permissionsLoading } = usePermissions();
     const isAdminOrManager = isAdminRole(rawRole);
     const navigate = useNavigate();
     const location = useLocation();
@@ -139,8 +140,9 @@ const Warehouses = () => {
     const warehouseIdFromQuery = new URLSearchParams(location.search).get('warehouseId');
 
     useEffect(() => {
+        if (permissionsLoading) return;
         fetchWarehouses();
-    }, []);
+    }, [permissionsLoading, rawRole, user?.name, user?.username, user?.chi_nhanh, department]);
 
     useEffect(() => {
         const managers = [...new Set(warehouses.map(w => w.manager_name).filter(Boolean))];
@@ -257,7 +259,11 @@ const Warehouses = () => {
 
             if (error && error.code !== '42P01') throw error;
 
-            const baseWarehouses = data || [];
+            const baseWarehouses = filterWarehousesForCurrentUser(data || [], {
+                role: rawRole,
+                user,
+                department,
+            });
             if (baseWarehouses.length === 0) {
                 setWarehouses([]);
                 setSelectedIds([]);

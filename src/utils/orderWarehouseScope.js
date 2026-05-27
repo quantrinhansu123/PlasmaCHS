@@ -1,5 +1,11 @@
 import { supabase } from '../supabase/config';
-import { isWarehouseRole as isWarehouseRoleHelper, normalizeRole } from './accessControl';
+import {
+    isAccountantRole,
+    isAdminRole,
+    isThuKhoRole as isThuKhoRoleHelper,
+    isWarehouseRole as isWarehouseRoleHelper,
+    normalizeRole,
+} from './accessControl';
 
 const normalizeText = (value) =>
     String(value || '')
@@ -64,6 +70,75 @@ const buildAllowedWarehouseKeys = (warehouses = []) => {
     return new Set(Array.from(allowedWarehouseValues).flatMap((key) => getWarehouseKeyVariants(key)));
 };
 
+/** Admin + Kế toán: xem toàn bộ danh sách kho */
+export const hasFullWarehouseListVisibility = (role) =>
+    isAdminRole(role) || isAccountantRole(role);
+
+/**
+ * Danh sách kho (/kho/danh-sach):
+ * - Admin / Kế toán: tất cả kho
+ * - Thủ kho: chỉ kho có manager_name khớp tên user
+ * - Nhân viên kho (không phải thủ kho): fallback theo department/chi nhánh
+ */
+export function filterWarehousesForCurrentUser(warehouses = [], { role, user, department } = {}) {
+    if (hasFullWarehouseListVisibility(role)) {
+        return warehouses || [];
+    }
+
+    const isThuKhoRole = isThuKhoRoleHelper(role);
+    const isWarehouseRole = isWarehouseRoleHelper(role);
+
+    if (!isThuKhoRole && !isWarehouseRole) {
+        return warehouses || [];
+    }
+
+    const storageUserName =
+        localStorage.getItem('user_name') || sessionStorage.getItem('user_name') || '';
+    const managerCandidates = getManagerCandidateKeys(user?.name, user?.username, storageUserName);
+
+    let scoped = (warehouses || []).filter((warehouse) =>
+        warehouseManagedByUser(warehouse, managerCandidates)
+    );
+
+    if (!isThuKhoRole && scoped.length === 0 && department) {
+        const branchTokens = getManagerCandidateKeys(department, user?.chi_nhanh);
+        if (branchTokens.length > 0) {
+            scoped = (warehouses || []).filter((warehouse) => {
+                const keys = getWarehouseAliases(warehouse);
+                return branchTokens.some((token) =>
+                    keys.some((key) => key.includes(token) || token.includes(key))
+                );
+            });
+        }
+    }
+
+    return scoped;
+}
+
+/** Phiếu điều chuyển: thủ kho chỉ thấy phiếu có kho xuất hoặc kho nhận thuộc kho mình quản lý */
+export function filterTransfersForCurrentUser(transferRows = [], warehouses = [], { role, user, department } = {}) {
+    if (hasFullWarehouseListVisibility(role)) {
+        return transferRows || [];
+    }
+
+    const isThuKhoRole = isThuKhoRoleHelper(role);
+    const isWarehouseRole = isWarehouseRoleHelper(role);
+
+    if (!isThuKhoRole && !isWarehouseRole) {
+        return transferRows || [];
+    }
+
+    const allowedWarehouses = filterWarehousesForCurrentUser(warehouses, { role, user, department });
+    const allowedIds = new Set(allowedWarehouses.map((w) => w.id).filter(Boolean));
+
+    if (allowedIds.size === 0) return [];
+
+    return (transferRows || []).filter(
+        (row) =>
+            allowedIds.has(row.from_warehouse_id) || allowedIds.has(row.to_warehouse_id)
+    );
+}
+
 export async function loadCustomerWarehouseMap(orders = []) {
     const customerIds = [...new Set(orders.map((order) => order.customer_id).filter(Boolean))];
     if (customerIds.length === 0) return {};
@@ -97,7 +172,7 @@ const orderMatchesWarehouseScope = (order, customerWarehouseById, allowedKeys, {
 
 export async function scopeOrdersForWarehouseAccess(orders = [], { role, department, user, isAdmin = false } = {}) {
     const normalizedRole = normalizeRole(role);
-    const isThuKhoRole = normalizedRole.includes('thukho');
+    const isThuKhoRole = isThuKhoRoleHelper(role);
     const isWarehouseRole = isWarehouseRoleHelper(role);
     const storageUserName =
         localStorage.getItem('user_name')
@@ -107,7 +182,7 @@ export async function scopeOrdersForWarehouseAccess(orders = [], { role, departm
     let scopedOrders = orders || [];
     const customerWarehouseById = await loadCustomerWarehouseMap(scopedOrders);
 
-    if (!isAdmin && (isThuKhoRole || isWarehouseRole)) {
+    if (!isAdmin && !isAccountantRole(role) && (isThuKhoRole || isWarehouseRole)) {
         const managerCandidates = getManagerCandidateKeys(user?.name, user?.username, storageUserName);
 
         const { data: warehousesData } = await supabase

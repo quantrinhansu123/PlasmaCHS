@@ -23,9 +23,11 @@ import { supabase } from '../../supabase/config';
 import { notificationService } from '../../utils/notificationService';
 import BarcodeScanner from '../Common/BarcodeScanner';
 import { SearchableSelect } from '../ui/SearchableSelect';
+import { filterWarehousesForCurrentUser } from '../../utils/orderWarehouseScope';
 
 export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess, initialMode = 'edit' }) {
     const isEdit = !!recovery;
+    const { user, role, department } = usePermissions();
     const [mode, setMode] = useState(initialMode);
     const isReadOnly = mode === 'view';
     const [isLoading, setIsLoading] = useState(false);
@@ -109,11 +111,16 @@ export default function MachineRecoveryFormModal({ recovery, onClose, onSuccess,
 
     const fetchWarehouses = async () => {
         try {
-            const { data } = await supabase.from('warehouses').select('id, name').eq('status', 'Đang hoạt động').order('name');
+            const { data } = await supabase
+                .from('warehouses')
+                .select('id, code, name, manager_name, branch_office, status')
+                .eq('status', 'Đang hoạt động')
+                .order('name');
             if (data) {
-                setWarehousesList(data);
-                if (!isEdit && data.length > 0) {
-                    setFormData(prev => !prev.warehouse_id ? { ...prev, warehouse_id: data[0].id } : prev);
+                const scoped = filterWarehousesForCurrentUser(data, { role, user, department });
+                setWarehousesList(scoped);
+                if (!isEdit && scoped.length > 0) {
+                    setFormData(prev => !prev.warehouse_id ? { ...prev, warehouse_id: scoped[0].id } : prev);
                 }
             }
         } catch (error) {

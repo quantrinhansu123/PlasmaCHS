@@ -34,8 +34,11 @@ import {
 import { PRODUCT_TYPES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
 import { notificationService } from '../../utils/notificationService';
+import usePermissions from '../../hooks/usePermissions';
+import { filterWarehousesForCurrentUser } from '../../utils/orderWarehouseScope';
 
 export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, viewOnly = false, prefill = null }) {
+    const { role, user, department } = usePermissions();
     const isEdit = !!receipt;
     const isReadOnly = viewOnly || (receipt && receipt.status !== 'CHO_DUYET');
     const isDeliveryEditable = !viewOnly && (!receipt || ['CHO_DUYET', 'DA_NHAP'].includes(receipt.status));
@@ -347,11 +350,16 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                     }
                 }
                 if (warehousesRes.data) {
-                    setWarehousesList(warehousesRes.data);
-                    if (!isEdit && warehousesRes.data.length > 0) {
+                    const scopedWarehouses = filterWarehousesForCurrentUser(warehousesRes.data, {
+                        role,
+                        user,
+                        department,
+                    });
+                    setWarehousesList(scopedWarehouses);
+                    if (!isEdit && scopedWarehouses.length > 0) {
                         setFormData((prev) => {
                             if (prev.warehouse_id) return prev;
-                            const w0 = warehousesRes.data[0];
+                            const w0 = scopedWarehouses[0];
                             return {
                                 ...prev,
                                 warehouse_id: w0.id,
@@ -386,7 +394,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
             }
         };
         loadInitialData();
-    }, [isEdit]);
+    }, [isEdit, role, user?.name, user?.username, user?.chi_nhanh, department]);
 
     const addItem = () => {
         setItems(prev => [...prev, { ...emptyItem, item_type: formData.receipt_type }]);

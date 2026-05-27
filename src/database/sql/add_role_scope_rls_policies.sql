@@ -67,6 +67,8 @@ BEGIN
 
     IF normalized_role IN ('admin', 'manager', 'quanly', 'quantri', 'congty', 'company') THEN
         RETURN 'all';
+    ELSIF normalized_role LIKE '%ketoan%' OR normalized_role LIKE '%accountant%' THEN
+        RETURN 'all';
     ELSIF normalized_role LIKE '%leadsale%' OR normalized_role LIKE '%truongkinhdoanh%' OR normalized_role LIKE '%lead%' THEN
         RETURN 'team';
     ELSIF normalized_role LIKE '%nvkd%' OR normalized_role LIKE '%nhanvienkinhdoanh%' OR normalized_role LIKE '%kinhdoanh%' OR normalized_role LIKE '%sale%' THEN
