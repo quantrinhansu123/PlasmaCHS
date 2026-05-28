@@ -14,8 +14,8 @@ CREATE TABLE app_users (
     phone VARCHAR(50) NOT NULL, -- 4. Số điện thoại
     department TEXT, -- 5. Phòng ban / Đại lý
     sales_group TEXT, -- 6. Nhóm kinh doanh
-    approval_level TEXT DEFAULT 'Staff', -- 7. Quyền hạn phê duyệt
-    status VARCHAR(50) NOT NULL DEFAULT 'Hoạt động', -- 8. Trạng thái
+    status VARCHAR(50) NOT NULL DEFAULT 'Hoạt động', -- 7. Trạng thái
+    password TEXT, -- 8. Mật khẩu (bcrypt hash, dùng cho đăng nhập app)
     
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -33,5 +33,5 @@ COMMENT ON COLUMN app_users.role IS 'Vai trò hoặc chức vụ để phân quy
 COMMENT ON COLUMN app_users.phone IS 'Số điện thoại liên hệ';
 COMMENT ON COLUMN app_users.department IS 'Phòng ban hoặc Đại lý mà nhân viên thuộc về';
 COMMENT ON COLUMN app_users.sales_group IS 'Nhóm kinh doanh (để phân tích doanh số nhóm)';
-COMMENT ON COLUMN app_users.approval_level IS 'Cấp bậc phê duyệt (Admin, Manager, Supervisor, Staff)';
 COMMENT ON COLUMN app_users.status IS 'Trạng thái hoạt động của tài khoản (Hoạt động / Dừng hoạt động)';
+COMMENT ON COLUMN app_users.password IS 'Mật khẩu đã được mã hóa bằng bcrypt';

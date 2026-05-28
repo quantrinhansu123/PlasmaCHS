@@ -1,13 +1,11 @@
 import { supabase } from '../supabase/config';
 import {
     getDataVisibilityScope,
-    isAccountantRole,
-    isAdminRole,
+    hasFullDataVisibility,
     isLeadSaleRole,
     isShipperRole,
     isThuKhoRole,
     isWarehouseRole,
-    normalizeRole,
 } from './accessControl';
 
 export const escapePostgrestValue = (value) =>
@@ -33,52 +31,51 @@ export const getManagedNamesFromUser = (user) =>
         .map((name) => name.trim())
         .filter(Boolean);
 
-/** Trưởng nhóm: role LeadSale hoặc approval_level Supervisor */
-export const isTeamLeaderUser = (role, approvalLevel) => {
-    if (isLeadSaleRole(role)) return true;
-    const level = normalizeRole(approvalLevel);
-    return level === 'supervisor' || level === 'totruong';
-};
+/** Trưởng nhóm: vai trò LeadSale (hoặc tương đương trong accessControl) */
+export const isTeamLeaderUser = (role) => isLeadSaleRole(role);
 
-export const getEffectiveVisibilityScope = (role, approvalLevel, roleScope) => {
-    if (isAdminRole(role) || isAccountantRole(role) || roleScope === 'all') return 'all';
+export const getEffectiveVisibilityScope = (role, roleScope) => {
+    if (hasFullDataVisibility(role) || roleScope === 'all') return 'all';
 
-    const approvalNorm = normalizeRole(approvalLevel);
-    if (approvalNorm === 'admin' || approvalNorm === 'manager' || approvalNorm === 'quanly') {
-        return 'all';
-    }
-
-    if (roleScope === 'team' || isTeamLeaderUser(role, approvalLevel)) return 'team';
+    if (roleScope === 'team' || isTeamLeaderUser(role)) return 'team';
     if (roleScope === 'own') return 'own';
 
     const fromRole = getDataVisibilityScope(role);
     if (fromRole === 'all') return 'all';
-    if (fromRole === 'team' || isTeamLeaderUser(role, approvalLevel)) return 'team';
+    if (fromRole === 'team' || isTeamLeaderUser(role)) return 'team';
     if (fromRole === 'warehouse' || fromRole === 'assigned_orders') return fromRole;
     return 'own';
 };
 
+/** Chưa sẵn sàng lọc theo NV — tránh query `__no_match__` khi role/profile đang tải */
+export const isSalesAssigneeScopePending = (role, roleScope, names) => {
+    if (hasFullDataVisibility(role) || roleScope === 'all') return false;
+    const scope = getEffectiveVisibilityScope(role, roleScope);
+    if (scope !== 'own' && scope !== 'team') return false;
+    return names === null || names === undefined;
+};
+
 /** Admin + Kế toán: xem toàn bộ đơn */
-export const hasFullOrderVisibility = (role, approvalLevel, roleScope) =>
-    getEffectiveVisibilityScope(role, approvalLevel, roleScope) === 'all';
+export const hasFullOrderVisibility = (role, roleScope) =>
+    getEffectiveVisibilityScope(role, roleScope) === 'all';
 
 /** Thủ kho / nhân viên kho: lọc đơn theo kho quản lý */
 export const shouldScopeOrdersByWarehouse = (role) => {
-    if (isAdminRole(role) || isAccountantRole(role)) return false;
+    if (hasFullDataVisibility(role)) return false;
     return isThuKhoRole(role) || isWarehouseRole(role);
 };
 
 /** NVKD / trưởng nhóm: lọc theo ordered_by (người yêu cầu / người đặt) */
-export const shouldScopeOrdersBySalesPerson = (role, approvalLevel, roleScope) => {
-    if (hasFullOrderVisibility(role, approvalLevel, roleScope)) return false;
+export const shouldScopeOrdersBySalesPerson = (role, roleScope) => {
+    if (hasFullOrderVisibility(role, roleScope)) return false;
     if (isShipperRole(role)) return false;
     if (shouldScopeOrdersByWarehouse(role)) return false;
     return true;
 };
 
 /** Khách hàng / lead: lọc theo managed_by + care_by */
-export const shouldScopeCustomersByAssignee = (role, approvalLevel, roleScope) => {
-    const scope = getEffectiveVisibilityScope(role, approvalLevel, roleScope);
+export const shouldScopeCustomersByAssignee = (role, roleScope) => {
+    const scope = getEffectiveVisibilityScope(role, roleScope);
     return scope === 'own' || scope === 'team';
 };
 
@@ -86,8 +83,8 @@ export const shouldScopeCustomersByAssignee = (role, approvalLevel, roleScope) =
  * Danh sách tên NVKD dùng lọc ordered_by / managed_by / care_by.
  * @returns {{ scope: 'all'|'team'|'own'|'warehouse'|'assigned_orders', names: string[]|null }}
  */
-export async function resolveVisibleSalesNames(user, role, { approvalLevel, roleScope } = {}) {
-    const scope = getEffectiveVisibilityScope(role, approvalLevel, roleScope);
+export async function resolveVisibleSalesNames(user, role, { roleScope } = {}) {
+    const scope = getEffectiveVisibilityScope(role, roleScope);
     const currentNames = getCurrentUserNames(user);
 
     if (scope === 'all' || scope === 'warehouse' || scope === 'assigned_orders') {
@@ -120,6 +117,9 @@ export async function resolveVisibleSalesNames(user, role, { approvalLevel, role
         };
     }
 
+    if (!currentNames.length) {
+        return { scope, names: null };
+    }
     return { scope, names: currentNames };
 }
 

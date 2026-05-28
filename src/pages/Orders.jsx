@@ -84,6 +84,7 @@ import {
 import {
     appendOrderedByScope,
     hasFullOrderVisibility,
+    isSalesAssigneeScopePending,
     resolveVisibleSalesNames,
     shouldScopeOrdersBySalesPerson,
     shouldScopeOrdersByWarehouse,
@@ -456,7 +457,6 @@ const Orders = () => {
         user?.username,
         user?.chi_nhanh,
         user?.nguoi_quan_ly,
-        user?.approval_level,
         user?.team,
     ]);
 
@@ -553,15 +553,17 @@ const Orders = () => {
             const isThuKhoRole = isThuKhoRoleHelper(role);
             const isShipperRole = isShipperRoleHelper(role);
             const isWarehouseRole = isWarehouseRoleHelper(role);
-            const fullOrderAccess = hasFullOrderVisibility(role, user?.approval_level, roleScope);
+            const fullOrderAccess = hasFullOrderVisibility(role, roleScope);
             const storageUserName =
                 localStorage.getItem('user_name') ||
                 sessionStorage.getItem('user_name') ||
                 '';
-            const { names: visibleSalesNames } = await resolveVisibleSalesNames(user, role, {
-                approvalLevel: user?.approval_level,
-                roleScope,
-            });
+            const { names: visibleSalesNames } = await resolveVisibleSalesNames(user, role, { roleScope });
+
+            if (isSalesAssigneeScopePending(role, roleScope, visibleSalesNames)) {
+                setIsLoading(false);
+                return;
+            }
 
             let query = supabase
                 .from('orders')
@@ -592,7 +594,7 @@ const Orders = () => {
 
             // NVKD / trưởng nhóm: lọc theo ordered_by (own | team)
             // Admin / Kế toán: full | Thủ kho: theo kho | Shipper: đơn giao
-            if (shouldScopeOrdersBySalesPerson(role, user?.approval_level, roleScope)) {
+            if (shouldScopeOrdersBySalesPerson(role, roleScope)) {
                 query = appendOrderedByScope(query, visibleSalesNames);
             }
 

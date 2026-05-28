@@ -49,6 +49,7 @@ import { isAdminRole } from '../utils/accessControl';
 import { scopeOrdersForWarehouseAccess } from '../utils/orderWarehouseScope';
 import {
     appendOrderedByScope,
+    isSalesAssigneeScopePending,
     resolveVisibleSalesNames,
     shouldScopeOrdersBySalesPerson,
 } from '../utils/salesVisibilityScope';
@@ -225,7 +226,6 @@ export default function MachineRequests() {
         user?.username,
         user?.chi_nhanh,
         user?.nguoi_quan_ly,
-        user?.approval_level,
         user?.team,
     ]);
 
@@ -256,16 +256,18 @@ export default function MachineRequests() {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const { names: visibleRequesterNames } = await resolveVisibleSalesNames(user, role, {
-                approvalLevel: user?.approval_level,
-                roleScope,
-            });
+            const { names: visibleRequesterNames } = await resolveVisibleSalesNames(user, role, { roleScope });
+
+            if (isSalesAssigneeScopePending(role, roleScope, visibleRequesterNames)) {
+                setLoading(false);
+                return;
+            }
 
             let query = supabase.from('orders').select('*');
 
             // NVKD / trưởng nhóm: lọc theo Người yêu cầu (ordered_by)
             // Admin / Kế toán: full | Thủ kho: lọc theo kho ở bước dưới
-            if (shouldScopeOrdersBySalesPerson(role, user?.approval_level, roleScope)) {
+            if (shouldScopeOrdersBySalesPerson(role, roleScope)) {
                 query = appendOrderedByScope(query, visibleRequesterNames);
             }
 

@@ -77,7 +77,6 @@ export const extraMenuItems = [
   { path: '/khuyen-mai', label: 'Khuyến mãi', icon: Layout },
   { path: '/khuyen-mai/tao', label: 'Tạo mã khuyến mãi', icon: Layout },
   { path: '/nguoi-dung', label: 'Người dùng', icon: Layout },
-  { path: '/nguoi-dung/tao', label: 'Thêm người dùng', icon: Layout },
   { path: '/phan-quyen', label: 'Phân quyền', icon: Layout },
   { path: '/phan-quyen/tao', label: 'Tạo phân quyền', icon: Layout },
   { path: '/phieu-sua-chua', label: 'Ticket sửa chữa', icon: Layout },

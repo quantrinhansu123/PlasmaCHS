@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabase/config';
+import { fetchAppUserProfile } from '../utils/appUserQuery';
 import {
     getDataVisibilityScope,
     isAccountantRole,
+    hasFullDataVisibility,
     isAdminRole,
     isLeadSaleRole,
     isSalesRole,
@@ -62,7 +64,7 @@ const applyRolePermissionOverrides = (permissions, roleName) => {
         normalized.includes('kinhdoanh') ||
         normalized.includes('sale');
 
-    // NVKD needs to be able to create DNXM but approval stays role-gated in workflow UI.
+    // NVKD needs to be able to create DNXM; workflow actions stay role-gated in page UI.
     if (isSalesRole) {
         merged.dnxm = {
             ...(merged.dnxm || {}),
@@ -110,15 +112,10 @@ export const usePermissions = () => {
                     return;
                 }
 
-                let query = supabase.from('app_users').select('id, name, role, username, department, chi_nhanh, nguoi_quan_ly, approval_level, team');
-
-                if (userId) {
-                    query = query.eq('id', userId);
-                } else if (userName) {
-                    query = query.or(`name.eq."${userName}",username.eq."${userName}"`);
-                }
-
-                const { data: userData, error: userError } = await query.maybeSingle();
+                const { data: userData, error: userError } = await fetchAppUserProfile({
+                    userId: userId || undefined,
+                    userName: !userId ? userName : undefined,
+                });
 
                 if (!userError && userData) {
                     setUser(userData);
@@ -127,7 +124,7 @@ export const usePermissions = () => {
                     const rolePermissions = await fetchRolePermissions(userData.role);
                     setPermissions(applyRolePermissionOverrides(rolePermissions, userData.role));
                 } else {
-                    const safeRole = userRoleFromStorage && userRoleFromStorage !== 'Admin' ? userRoleFromStorage : null;
+                    const safeRole = userRoleFromStorage || null;
 
                     setUser({
                         id: userId || '00000000-0000-0000-0000-000000000000',
@@ -141,8 +138,10 @@ export const usePermissions = () => {
                     setDepartment(userDeptFromStorage);
                     setPermissions(applyRolePermissionOverrides({}, safeRole));
 
-                    if (userRoleFromStorage === 'Admin' && !userData) {
-                        console.warn('Security Warning: User claimed Admin role from storage but was not found in database.');
+                    if (isAdminRole(safeRole) && !userData) {
+                        console.warn(
+                            'User profile could not be loaded from DB; using cached role for UI. Re-login after migrations if data looks wrong.'
+                        );
                     }
                 }
             } catch (err) {
@@ -185,7 +184,8 @@ export const usePermissions = () => {
         isThuKhoRole: isThuKhoRole(role),
         isWarehouseRole: isWarehouseRole(role),
         isShipperRole: isShipperRole(role),
-        roleScope: getDataVisibilityScope(role),
+        roleScope: hasFullDataVisibility(role) ? 'all' : getDataVisibilityScope(role),
+        hasFullDataVisibility: hasFullDataVisibility(role),
         normalizedRole: roleNormalization,
         canView,
         canCreate,

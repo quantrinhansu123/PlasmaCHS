@@ -31,7 +31,8 @@ import {
     CheckCircle,
     Package,
     Lock,
-    Building2
+    Building2,
+    Columns3
 } from 'lucide-react';
 import { useEffect, useState, useRef } from 'react';
 import MobilePageHeader from '../components/layout/MobilePageHeader';
@@ -44,7 +45,10 @@ import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import UserFormModal from '../components/Users/UserFormModal';
+import MultiValueTags from '../components/Users/MultiValueTags';
 import { USER_ROLES, USER_STATUSES, TABLE_COLUMNS } from '../constants/userConstants';
+import { collectUniqueMultiValues, splitMultiValue } from '../utils/multiValueField';
+import { toast } from 'react-toastify';
 import { supabase } from '../supabase/config';
 
 // Register Chart.js components
@@ -69,7 +73,7 @@ const Users = () => {
     const [loading, setLoading] = useState(true);
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [selectedUser, setSelectedUser] = useState(null);
-    const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
+    const [activeView, setActiveView] = useState('list'); // 'list', 'kanban' or 'stats'
     const [showMoreActions, setShowMoreActions] = useState(false);
     
     // Pagination State
@@ -98,13 +102,19 @@ const Users = () => {
         return defaultColOrder;
     });
 
+    const CORE_VISIBLE_USER_COLUMNS = ['info', 'department', 'chi_nhanh', 'nguoi_quan_ly', 'role', 'status'];
+
     const [visibleColumns, setVisibleColumns] = useState(() => {
         try {
             const saved = JSON.parse(localStorage.getItem('columns_users') || 'null');
             if (Array.isArray(saved) && saved.length > 0) {
                 const valid = saved.filter(key => defaultColOrder.includes(key));
                 const missing = defaultColOrder.filter(key => !valid.includes(key));
-                return [...valid, ...missing];
+                const merged = [...valid, ...missing];
+                CORE_VISIBLE_USER_COLUMNS.forEach((key) => {
+                    if (!merged.includes(key)) merged.push(key);
+                });
+                return merged;
             }
         } catch { }
         return defaultColOrder;
@@ -176,6 +186,8 @@ const Users = () => {
             setSelectedIds([]);
         } catch (error) {
             console.error('Error fetching users:', error);
+            setUsers([]);
+            toast.error('Không tải được danh sách người dùng: ' + (error?.message || 'Lỗi không xác định'));
         } finally {
             setLoading(false);
         }
@@ -279,11 +291,9 @@ const Users = () => {
             case 'department':
                 return <div className="text-[13px] font-medium text-foreground tracking-tight">{user.department || '-'}</div>;
             case 'chi_nhanh':
-                return <div className="text-[13px] font-medium text-foreground tracking-tight">{user.chi_nhanh || '-'}</div>;
-            case 'sales_group':
-                return <div className="text-[13px] font-medium text-foreground tracking-tight">{user.sales_group || '-'}</div>;
+                return <MultiValueTags value={user.chi_nhanh} />;
             case 'nguoi_quan_ly':
-                return <div className="text-[13px] font-medium text-foreground tracking-tight">{user.nguoi_quan_ly || '-'}</div>;
+                return <MultiValueTags value={user.nguoi_quan_ly} />;
             case 'team':
                 return <div className="text-[13px] font-medium text-foreground tracking-tight">{user.team || '-'}</div>;
             case 'role':
@@ -292,12 +302,6 @@ const Users = () => {
                         {user.role === 'Admin' ? <ShieldCheck className="w-3.5 h-3.5 text-blue-600" /> : <Briefcase className="w-3.5 h-3.5 text-slate-400" />}
                         <span className="text-[13px] font-medium text-foreground">{user.role}</span>
                     </div>
-                );
-            case 'approval_level':
-                return (
-                    <span className="px-2.5 py-1 rounded-lg bg-primary/5 text-primary text-[11px] font-black border border-primary/10 uppercase tracking-tight">
-                        {user.approval_level || 'Staff'}
-                    </span>
                 );
             case 'status':
                 return (
@@ -456,14 +460,12 @@ const Users = () => {
             count: users.filter(u => (u.team || '').trim() === team).length
         }));
 
-    const chiNhanhOptions = Array.from(
-        new Set(users.map(u => (u.chi_nhanh || '').trim()).filter(Boolean))
-    )
+    const chiNhanhOptions = collectUniqueMultiValues(users, 'chi_nhanh')
         .sort((a, b) => a.localeCompare(b, 'vi', { sensitivity: 'base' }))
         .map((cn) => ({
             id: cn,
             label: cn,
-            count: users.filter(u => (u.chi_nhanh || '').trim() === cn).length
+            count: users.filter((u) => splitMultiValue(u.chi_nhanh).includes(cn)).length,
         }));
 
     const filteredUsers = users.filter(user => {
@@ -472,17 +474,18 @@ const Users = () => {
             user.username?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             user.phone?.includes(searchTerm) ||
             user.role?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            user.nguoi_quan_ly?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             user.team?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            (user.chi_nhanh || '').toLowerCase().includes(searchTerm.toLowerCase())
+            (user.chi_nhanh || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (user.nguoi_quan_ly || '').toLowerCase().includes(searchTerm.toLowerCase())
         );
 
         const matchesRole = selectedRoles.length === 0 || selectedRoles.includes(user.role);
         const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(user.status);
         const matchesDepartment = selectedDepartments.length === 0 || selectedDepartments.includes(user.department);
+        const userChiNhanh = splitMultiValue(user.chi_nhanh);
         const matchesChiNhanh =
             selectedChiNhanh.length === 0 ||
-            selectedChiNhanh.includes((user.chi_nhanh || '').trim());
+            selectedChiNhanh.some((cn) => userChiNhanh.includes(cn));
         const matchesTeam = selectedTeams.length === 0 || selectedTeams.includes(user.team);
 
         return matchesSearch && matchesRole && matchesStatus && matchesDepartment && matchesChiNhanh && matchesTeam;
@@ -527,6 +530,32 @@ const Users = () => {
 
     const paginatedUsers = filteredUsers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
     const totalRecords = filteredUsers.length;
+    const kanbanDepartments = Object.entries(
+        filteredUsers.reduce((departmentAcc, user) => {
+            const departmentName = (user.department || '').trim() || 'Chưa có phòng ban';
+            const teamName = (user.team || '').trim() || 'Chưa có team';
+            if (!departmentAcc[departmentName]) {
+                departmentAcc[departmentName] = { total: 0, teams: {} };
+            }
+            if (!departmentAcc[departmentName].teams[teamName]) {
+                departmentAcc[departmentName].teams[teamName] = [];
+            }
+            departmentAcc[departmentName].teams[teamName].push(user);
+            departmentAcc[departmentName].total += 1;
+            return departmentAcc;
+        }, {})
+    )
+        .sort(([a], [b]) => a.localeCompare(b, 'vi', { sensitivity: 'base' }))
+        .map(([departmentName, departmentData]) => ({
+            name: departmentName,
+            total: departmentData.total,
+            teams: Object.entries(departmentData.teams)
+                .sort(([a], [b]) => a.localeCompare(b, 'vi', { sensitivity: 'base' }))
+                .map(([teamName, teamUsers]) => ({
+                    name: teamName,
+                    users: teamUsers,
+                })),
+        }));
 
     // Reset pagination when filters change
     useEffect(() => {
@@ -540,6 +569,7 @@ const Users = () => {
                 setActiveView={setActiveView}
                 views={[
                     { id: 'list', label: 'Danh sách', icon: <List size={16} /> },
+                    { id: 'kanban', label: 'Kanban', icon: <Columns3 size={16} /> },
                     { id: 'stats', label: 'Thống kê', icon: <BarChart2 size={16} /> },
                 ]}
             />
@@ -828,8 +858,32 @@ const Users = () => {
                                     <div className="w-20 h-20 bg-slate-50 rounded-[2rem] flex items-center justify-center mb-6 border border-slate-100 shadow-inner">
                                         <UsersIcon className="w-10 h-10 text-slate-200" />
                                     </div>
-                                    <h3 className="text-lg font-black text-slate-800 mb-1 uppercase tracking-tight">Không tìm thấy kết quả</h3>
-                                    <p className="text-slate-400 font-bold text-xs uppercase tracking-widest">Hãy thử đổi từ khóa tìm kiếm</p>
+                                    <h3 className="text-lg font-black text-slate-800 mb-1 uppercase tracking-tight">
+                                        {users.length === 0 ? 'Không có dữ liệu người dùng' : 'Không tìm thấy kết quả'}
+                                    </h3>
+                                    <p className="text-slate-400 font-bold text-xs uppercase tracking-widest max-w-sm">
+                                        {users.length === 0
+                                            ? 'Kiểm tra quyền Supabase (RLS) hoặc đăng nhập lại bằng tài khoản Admin'
+                                            : hasActiveFilters || searchTerm
+                                                ? 'Hãy thử đổi từ khóa hoặc xóa bộ lọc'
+                                                : 'Hãy thử đổi từ khóa tìm kiếm'}
+                                    </p>
+                                    {(hasActiveFilters || searchTerm) && users.length > 0 ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setSearchTerm('');
+                                                setSelectedRoles([]);
+                                                setSelectedStatuses([]);
+                                                setSelectedDepartments([]);
+                                                setSelectedChiNhanh([]);
+                                                setSelectedTeams([]);
+                                            }}
+                                            className="mt-4 px-4 py-2 rounded-xl bg-primary text-white text-xs font-bold uppercase tracking-wider"
+                                        >
+                                            Xóa tìm kiếm &amp; bộ lọc
+                                        </button>
+                                    ) : null}
                                 </div>
                             ) : (
                                 <>
@@ -936,7 +990,7 @@ const Users = () => {
                                                         </span>
                                                     </div>
 
-                                                    <div className="grid grid-cols-2 gap-2 mb-3 rounded-xl bg-muted/10 border border-border/60 p-2.5">
+                                                    <div className="grid grid-cols-1 gap-2 mb-3 rounded-xl bg-muted/10 border border-border/60 p-2.5">
                                                         <div>
                                                             <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Vai trò</p>
                                                             <p className="text-[12px] text-foreground font-medium mt-0.5">
@@ -947,14 +1001,6 @@ const Users = () => {
                                                             </p>
                                                         </div>
                                                         <div>
-                                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Cấp duyệt</p>
-                                                            <p className="text-[12px] text-foreground font-medium mt-0.5">
-                                                                <span className="px-2 py-0.5 rounded-md bg-primary/5 text-primary text-[10px] font-bold border border-primary/10 uppercase">
-                                                                    {user.approval_level || 'Staff'}
-                                                                </span>
-                                                            </p>
-                                                        </div>
-                                                        <div className="col-span-2">
                                                             <div className="space-y-3 mt-1">
                                                                 <div className="flex items-center gap-2">
                                                                     <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
@@ -969,26 +1015,39 @@ const Users = () => {
                                                                 </div>
                                                                 <div className="flex items-center gap-2">
                                                                     <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0">
-                                                                        <UsersIcon size={14} />
+                                                                        <Building2 size={14} />
                                                                     </div>
                                                                     <div className="min-w-0 flex-1">
-                                                                        <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Phòng / Nhóm</p>
-                                                                        <p className="text-[12px] text-foreground font-bold truncate capitalize">
-                                                                            {user.department || '-'} / {user.sales_group || '-'}
+                                                                        <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Phòng ban</p>
+                                                                        <p className="text-[12px] text-foreground font-bold truncate">
+                                                                            {user.department || '—'}
                                                                         </p>
                                                                     </div>
                                                                 </div>
-                                                                <div className="flex items-center gap-2">
+                                                                <div className="flex items-start gap-2">
                                                                     <div className="w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center text-violet-600 shrink-0">
                                                                         <Building2 size={14} />
                                                                     </div>
                                                                     <div className="min-w-0 flex-1">
                                                                         <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Chi nhánh</p>
-                                                                        <p className="text-[12px] text-foreground font-bold truncate">
-                                                                            {user.chi_nhanh || '—'}
-                                                                        </p>
+                                                                        <div className="mt-1">
+                                                                            <MultiValueTags value={user.chi_nhanh} />
+                                                                        </div>
                                                                     </div>
                                                                 </div>
+                                                                {splitMultiValue(user.nguoi_quan_ly).length > 0 ? (
+                                                                    <div className="flex items-start gap-2">
+                                                                        <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
+                                                                            <UsersIcon size={14} />
+                                                                        </div>
+                                                                        <div className="min-w-0 flex-1">
+                                                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Người quản lý</p>
+                                                                            <div className="mt-1">
+                                                                                <MultiValueTags value={user.nguoi_quan_ly} />
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                ) : null}
                                                             </div>
                                                         </div>
                                                     </div>
@@ -1067,6 +1126,206 @@ const Users = () => {
                         )}
                     </div>
                 )}
+
+            {activeView === 'kanban' && (
+                <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0 w-full">
+                    <div className="hidden md:flex items-center justify-between gap-3 p-3 border-b border-border">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <button
+                                onClick={() => navigate(-1)}
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground text-[12px] font-bold transition-all bg-white shadow-sm shrink-0"
+                            >
+                                <ChevronLeft size={16} />
+                                Quay lại
+                            </button>
+                            <div className="relative flex-1 max-w-md">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
+                                <input
+                                    type="text"
+                                    placeholder="Tìm kiếm tên, username, SĐT..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="w-full pl-10 pr-8 py-1.5 bg-muted/20 border border-border/80 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all font-medium"
+                                />
+                                {searchTerm && (
+                                    <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                                        <X size={14} />
+                                    </button>
+                                )}
+                            </div>
+                            <button
+                                onClick={openMobileFilter}
+                                className={clsx(
+                                    'flex items-center gap-2 px-4 py-1.5 rounded-xl border text-[13px] font-bold transition-all bg-white shadow-sm',
+                                    hasActiveFilters ? 'border-primary bg-primary/5 text-primary' : 'border-border text-muted-foreground hover:bg-muted/20'
+                                )}
+                            >
+                                <Filter size={16} />
+                                Bộ lọc
+                                {hasActiveFilters && (
+                                    <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold">
+                                        {totalActiveFilters}
+                                    </span>
+                                )}
+                            </button>
+                            {hasActiveFilters && (
+                                <button
+                                    onClick={() => {
+                                        setSelectedRoles([]);
+                                        setSelectedStatuses([]);
+                                        setSelectedDepartments([]);
+                                        setSelectedChiNhanh([]);
+                                        setSelectedTeams([]);
+                                    }}
+                                    className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-dashed border-red-300 text-red-500 text-[12px] font-bold hover:bg-red-50 transition-all"
+                                >
+                                    <X size={14} />
+                                    Xóa bộ lọc
+                                </button>
+                            )}
+                        </div>
+                        <button
+                            onClick={handleCreateNew}
+                            className="flex items-center gap-2 px-6 py-1.5 rounded-xl bg-primary text-white text-[13px] font-bold hover:bg-primary/90 shadow-md shadow-primary/20 transition-all shrink-0"
+                        >
+                            <Plus size={18} />
+                            Thêm nhân sự
+                        </button>
+                    </div>
+
+                    <MobilePageHeader
+                        searchTerm={searchTerm}
+                        setSearchTerm={setSearchTerm}
+                        searchPlaceholder="Tìm kiếm..."
+                        onFilterClick={openMobileFilter}
+                        hasActiveFilters={hasActiveFilters}
+                        totalActiveFilters={totalActiveFilters}
+                        actions={
+                            <button onClick={handleCreateNew} className="p-2 rounded-xl bg-primary text-white shrink-0 shadow-lg shadow-primary/30 active:scale-95 transition-all">
+                                <Plus size={20} />
+                            </button>
+                        }
+                    />
+
+                    <div className="flex-1 overflow-auto custom-scrollbar bg-slate-50/60">
+                        {loading ? (
+                            <div className="flex flex-col justify-center items-center py-20 space-y-4">
+                                <div className="w-10 h-10 border-[3px] border-primary/10 border-t-primary rounded-full animate-spin"></div>
+                                <p className="text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em] animate-pulse">Đang tải Kanban...</p>
+                            </div>
+                        ) : filteredUsers.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
+                                <div className="w-20 h-20 bg-white rounded-[2rem] flex items-center justify-center mb-6 border border-slate-100 shadow-inner">
+                                    <Columns3 className="w-10 h-10 text-slate-200" />
+                                </div>
+                                <h3 className="text-lg font-black text-slate-800 mb-1 uppercase tracking-tight">Không tìm thấy kết quả</h3>
+                                <p className="text-slate-400 font-bold text-xs uppercase tracking-widest">Hãy thử đổi từ khóa hoặc bộ lọc</p>
+                            </div>
+                        ) : (
+                            <div className="p-3 md:p-4 space-y-4">
+                                <div className="flex flex-wrap items-center gap-2 text-[12px] font-bold text-muted-foreground">
+                                    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5">
+                                        <Building2 size={14} className="text-indigo-600" />
+                                        {kanbanDepartments.length} phòng ban
+                                    </span>
+                                    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5">
+                                        <UsersIcon size={14} className="text-emerald-600" />
+                                        {filteredUsers.length} nhân sự
+                                    </span>
+                                </div>
+
+                                {kanbanDepartments.map((department) => (
+                                    <section key={department.name} className="rounded-2xl border border-border bg-white shadow-sm overflow-hidden">
+                                        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border bg-white">
+                                            <div className="flex items-center gap-3 min-w-0">
+                                                <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 border border-indigo-100">
+                                                    <Building2 size={18} />
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <h3 className="text-[14px] md:text-[15px] font-black text-foreground truncate">{department.name}</h3>
+                                                    <p className="text-[11px] font-bold text-muted-foreground mt-0.5">{department.teams.length} team</p>
+                                                </div>
+                                            </div>
+                                            <span className="rounded-full bg-primary/5 text-primary border border-primary/10 px-3 py-1 text-[12px] font-black shrink-0">
+                                                {department.total}
+                                            </span>
+                                        </div>
+
+                                        <div className="overflow-x-auto custom-scrollbar">
+                                            <div className="flex gap-3 p-3 min-w-full">
+                                                {department.teams.map((team) => (
+                                                    <div key={`${department.name}-${team.name}`} className="w-[280px] md:w-[320px] shrink-0 rounded-xl border border-border bg-slate-50/80">
+                                                        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 px-3 py-2.5 border-b border-border bg-slate-50/95 rounded-t-xl">
+                                                            <div className="flex items-center gap-2 min-w-0">
+                                                                <UsersIcon size={15} className="text-emerald-600 shrink-0" />
+                                                                <h4 className="text-[13px] font-black text-foreground truncate">{team.name}</h4>
+                                                            </div>
+                                                            <span className="rounded-full bg-white border border-border px-2 py-0.5 text-[11px] font-black text-muted-foreground shrink-0">
+                                                                {team.users.length}
+                                                            </span>
+                                                        </div>
+
+                                                        <div className="p-2.5 space-y-2 max-h-[58vh] overflow-y-auto custom-scrollbar">
+                                                            {team.users.map((user) => {
+                                                                const statusConfig = getStatusConfig(user.status);
+                                                                return (
+                                                                    <div key={user.id} className="group rounded-xl border border-border bg-white p-3 shadow-sm hover:border-primary/30 hover:shadow-md transition-all">
+                                                                        <div className="flex items-start justify-between gap-2">
+                                                                            <div className="flex items-center gap-2 min-w-0">
+                                                                                <div className="w-9 h-9 rounded-xl bg-primary/5 flex items-center justify-center text-primary font-black text-[11px] border border-primary/10 shrink-0">
+                                                                                    {getInitials(user.name)}
+                                                                                </div>
+                                                                                <div className="min-w-0">
+                                                                                    <p className="text-[13px] font-black text-foreground truncate">{user.name}</p>
+                                                                                    <p className="text-[11px] font-bold text-muted-foreground truncate">@{user.username || '—'}</p>
+                                                                                </div>
+                                                                            </div>
+                                                                            <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0">
+                                                                                <button onClick={() => handleEditUser(user)} className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-all" title="Chỉnh sửa">
+                                                                                    <Edit className="w-3.5 h-3.5" />
+                                                                                </button>
+                                                                                <button onClick={() => handleDeleteUser(user.id, user.name)} className="p-1.5 text-muted-foreground hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all" title="Xóa">
+                                                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+
+                                                                        <div className="mt-3 space-y-2">
+                                                                            <div className="flex items-center gap-2 text-[12px] font-bold text-slate-700 min-w-0">
+                                                                                {user.role === 'Admin' ? <ShieldCheck className="w-3.5 h-3.5 text-blue-600 shrink-0" /> : <Briefcase className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
+                                                                                <span className="truncate">{user.role || '—'}</span>
+                                                                            </div>
+                                                                            <div className="flex items-center justify-between gap-2">
+                                                                                <span className={getStatusBadgeClass(statusConfig.color)}>
+                                                                                    <div className={clsx(
+                                                                                        "w-1.5 h-1.5 rounded-full animate-pulse",
+                                                                                        statusConfig.color === 'green' ? "bg-emerald-500" : "bg-rose-500"
+                                                                                    )} />
+                                                                                    {user.status || '—'}
+                                                                                </span>
+                                                                                {user.phone ? (
+                                                                                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-muted-foreground min-w-0">
+                                                                                        <Phone className="w-3 h-3 shrink-0" />
+                                                                                        <span className="truncate">{user.phone}</span>
+                                                                                    </span>
+                                                                                ) : null}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </section>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {activeView === 'stats' && (
                 <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col w-full">

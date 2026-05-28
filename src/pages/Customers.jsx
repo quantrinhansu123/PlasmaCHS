@@ -56,11 +56,12 @@ import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 import { notificationService } from '../utils/notificationService';
-import { isAdminRole } from '../utils/accessControl';
+import { hasFullDataVisibility, isAdminRole } from '../utils/accessControl';
 import {
     appendCustomerAssigneeScope,
     getCurrentUserNames,
     getEffectiveVisibilityScope,
+    isSalesAssigneeScopePending,
     resolveVisibleSalesNames,
     shouldScopeCustomersByAssignee,
 } from '../utils/salesVisibilityScope';
@@ -140,7 +141,7 @@ function appendLeadCustomerFilters(query, {
 const normalizeSearchText = (value) => String(value || '').toLowerCase().trim();
 const normalizePhoneDigits = (value) => String(value || '').replace(/\D/g, '');
 const Customers = () => {
-    const { role: rawRole, user, roleScope } = usePermissions();
+    const { role: rawRole, user, roleScope, loading: permissionsLoading } = usePermissions();
     const normalizeRole = (r) => {
         if (!r) return '';
         return r.toLowerCase()
@@ -149,34 +150,32 @@ const Customers = () => {
             .replace(/\s+/g, '_');
     };
     const role = normalizeRole(rawRole);
-    const isAdminOrManager = isAdminRole(role);
+    const isAdminOrManager = hasFullDataVisibility(rawRole) || isAdminRole(rawRole);
     const currentUserNames = useMemo(() => getCurrentUserNames(user), [user]);
     const [assigneeScopeNames, setAssigneeScopeNames] = useState(null);
     const effectiveVisibilityScope = useMemo(
-        () => getEffectiveVisibilityScope(rawRole, user?.approval_level, roleScope),
-        [rawRole, user?.approval_level, roleScope]
+        () => getEffectiveVisibilityScope(rawRole, roleScope),
+        [rawRole, roleScope]
     );
 
     useEffect(() => {
         let cancelled = false;
         (async () => {
-            const { names } = await resolveVisibleSalesNames(user, rawRole, {
-                approvalLevel: user?.approval_level,
-                roleScope,
-            });
+            const { names } = await resolveVisibleSalesNames(user, rawRole, { roleScope });
             if (!cancelled) setAssigneeScopeNames(names);
         })();
         return () => {
             cancelled = true;
         };
-    }, [user, rawRole, roleScope, user?.approval_level, user?.team, user?.nguoi_quan_ly]);
+    }, [user, rawRole, roleScope, user?.team, user?.nguoi_quan_ly]);
 
     const applyCustomerVisibilityScope = useCallback(
         (query) => {
-            if (!shouldScopeCustomersByAssignee(rawRole, user?.approval_level, roleScope)) return query;
+            if (!shouldScopeCustomersByAssignee(rawRole, roleScope)) return query;
+            if (isSalesAssigneeScopePending(rawRole, roleScope, assigneeScopeNames)) return query;
             return appendCustomerAssigneeScope(query, assigneeScopeNames);
         },
-        [rawRole, user?.approval_level, roleScope, assigneeScopeNames]
+        [rawRole, roleScope, assigneeScopeNames]
     );
     const location = useLocation();
     const navigate = useNavigate();
@@ -553,8 +552,10 @@ const Customers = () => {
     ]);
 
     useEffect(() => {
+        if (permissionsLoading) return;
+        if (isSalesAssigneeScopePending(rawRole, roleScope, assigneeScopeNames)) return;
         fetchCustomers();
-    }, [fetchCustomers]);
+    }, [permissionsLoading, rawRole, roleScope, assigneeScopeNames, fetchCustomers]);
 
     useEffect(() => {
         if (location.pathname === '/khach-hang/tao') {

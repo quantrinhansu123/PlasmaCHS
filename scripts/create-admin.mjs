@@ -6,7 +6,6 @@
  *   username : admin
  *   password : Admin@2024
  *   role     : Admin
- *   approval : Admin
  */
 
 import { createClient } from '@supabase/supabase-js';
@@ -24,7 +23,6 @@ const ADMIN_CONFIG = {
     password:       'Admin@2024',         // ← đổi mật khẩu tại đây nếu muốn
     phone:          '0901234567',
     role:           'Admin',
-    approval_level: 'Admin',
     department:     'Ban Giám Đốc',
     team:           '',
     sales_group:    '',
@@ -65,7 +63,6 @@ async function main() {
         password:       hashedPassword,
         phone:          ADMIN_CONFIG.phone,
         role:           ADMIN_CONFIG.role,
-        approval_level: ADMIN_CONFIG.approval_level,
         department:     ADMIN_CONFIG.department,
         team:           ADMIN_CONFIG.team,
         sales_group:    ADMIN_CONFIG.sales_group,
@@ -91,7 +88,6 @@ async function main() {
     console.log(`  Username : ${inserted.username}`);
     console.log(`  Password : ${ADMIN_CONFIG.password}   ← (đây là mật khẩu gốc, lưu lại!)`);
     console.log(`  Role     : ${inserted.role}`);
-    console.log(`  Approval : ${ADMIN_CONFIG.approval_level}`);
     console.log('────────────────────────────────────────\n');
     console.log('🌐 Đăng nhập tại: http://localhost:6060');
 }

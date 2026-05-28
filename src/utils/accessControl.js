@@ -57,7 +57,16 @@ export const normalizeRole = (role) => {
 
 export const isAdminRole = (role) => {
     const r = normalizeRole(role);
-    return r === 'admin' || r === 'quantri' || r === 'company' || r === 'congty' || r === 'manager' || r === 'quanly';
+    if (!r) return false;
+    return (
+        r === 'admin' ||
+        r.includes('admin') ||
+        r.includes('quantri') ||
+        r === 'company' ||
+        r === 'congty' ||
+        r === 'manager' ||
+        r === 'quanly'
+    );
 };
 
 export const isSalesRole = (role) => {
@@ -67,7 +76,12 @@ export const isSalesRole = (role) => {
 
 export const isLeadSaleRole = (role) => {
     const r = normalizeRole(role);
-    return r.includes('leadsale') || r.includes('truongkinhdoanh') || r.includes('lead');
+    return (
+        r.includes('leadsale') ||
+        r.includes('truongkinhdoanh') ||
+        r.includes('truongnhom') ||
+        r === 'leadsale'
+    );
 };
 
 export const isThuKhoRole = (role) => {
@@ -90,6 +104,18 @@ export const isShipperRole = (role) => {
     return r.includes('shipper') || r.includes('giaohang');
 };
 
+/** Admin + Kế toán: không lọc dữ liệu theo NV / team / kho */
+export const hasFullDataVisibility = (role) =>
+    isAdminRole(role) || isAccountantRole(role);
+
+/** Menu/item có `roles: [...]` — Admin luôn được xem */
+export const roleMatchesAllowedList = (currentRole, allowedRoles) => {
+    if (!allowedRoles?.length) return true;
+    if (isAdminRole(currentRole)) return true;
+    const normalizedCurrent = normalizeRole(currentRole);
+    return allowedRoles.some((allowed) => normalizeRole(allowed) === normalizedCurrent);
+};
+
 /**
  * Phạm vi dữ liệu theo vai trò:
  * - Admin / Kế toán: all
@@ -99,8 +125,7 @@ export const isShipperRole = (role) => {
  * - Shipper: assigned_orders
  */
 export const getDataVisibilityScope = (role) => {
-    if (isAdminRole(role)) return 'all';
-    if (isAccountantRole(role)) return 'all';
+    if (hasFullDataVisibility(role)) return 'all';
     if (isLeadSaleRole(role)) return 'team';
     if (isSalesRole(role)) return 'own';
     if (isWarehouseRole(role)) return 'warehouse';

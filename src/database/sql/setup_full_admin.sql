@@ -28,7 +28,7 @@ SET permissions = EXCLUDED.permissions,
 
 -- 2. Tạo hoặc Cập nhật tài khoản User 'admin'
 -- Mật khẩu mặc định: admin123
-INSERT INTO app_users (name, username, role, phone, department, sales_group, approval_level, status, password)
+INSERT INTO app_users (name, username, role, phone, department, sales_group, status, password)
 VALUES (
     'Quản trị tối cao',
     'admin',
@@ -36,13 +36,11 @@ VALUES (
     '0988888888',
     'Ban Giám Đốc',
     'Hệ thống',
-    'Admin',
     'Hoạt động',
     '$2a$10$86/5l4K5L9O7b8V9B0N1M2Q3W4E5R6T7Y8U9I0O1P2A3S4D5F6G7H8' -- Hash của admin123
 )
 ON CONFLICT (username) DO UPDATE 
 SET role = 'Admin', 
-    approval_level = 'Admin',
     status = 'Hoạt động',
     password = EXCLUDED.password;
 

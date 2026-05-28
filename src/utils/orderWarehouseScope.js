@@ -1,7 +1,6 @@
 import { supabase } from '../supabase/config';
 import {
-    isAccountantRole,
-    isAdminRole,
+    hasFullDataVisibility,
     isThuKhoRole as isThuKhoRoleHelper,
     isWarehouseRole as isWarehouseRoleHelper,
     normalizeRole,
@@ -71,8 +70,7 @@ const buildAllowedWarehouseKeys = (warehouses = []) => {
 };
 
 /** Admin + Kế toán: xem toàn bộ danh sách kho */
-export const hasFullWarehouseListVisibility = (role) =>
-    isAdminRole(role) || isAccountantRole(role);
+export const hasFullWarehouseListVisibility = (role) => hasFullDataVisibility(role);
 
 /**
  * Danh sách kho (/kho/danh-sach):
@@ -182,7 +180,7 @@ export async function scopeOrdersForWarehouseAccess(orders = [], { role, departm
     let scopedOrders = orders || [];
     const customerWarehouseById = await loadCustomerWarehouseMap(scopedOrders);
 
-    if (!isAdmin && !isAccountantRole(role) && (isThuKhoRole || isWarehouseRole)) {
+    if (!hasFullDataVisibility(role) && !isAdmin && (isThuKhoRole || isWarehouseRole)) {
         const managerCandidates = getManagerCandidateKeys(user?.name, user?.username, storageUserName);
 
         const { data: warehousesData } = await supabase

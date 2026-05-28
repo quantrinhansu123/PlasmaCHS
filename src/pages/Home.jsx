@@ -188,13 +188,6 @@ const dashboardModules = [
     colorScheme: 'blue',
   },
   {
-    icon: Users,
-    title: 'Thêm người dùng',
-    description: 'Cấp tài khoản mới cho nhân viên hoặc người quản lý trên hệ thống.',
-    href: '/tao-nguoi-dung',
-    colorScheme: 'pink',
-  },
-  {
     icon: Layers,
     title: 'Phân quyền chi tiết',
     description: 'Thiết lập quyền truy cập và chức năng cho từng nhóm người dùng.',

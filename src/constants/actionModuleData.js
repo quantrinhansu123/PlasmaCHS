@@ -13,7 +13,6 @@ import {
   Settings,
   ShoppingCart,
   Truck,
-  UserPlus,
   Users,
   Warehouse,
   Ticket,
@@ -339,13 +338,6 @@ export const actionModuleGroups = [
         description: 'Quản lý tài khoản, phân quyền tự động và theo dõi lịch sử truy cập.',
         href: '/nguoi-dung',
         colorScheme: 'blue',
-      },
-      {
-        icon: UserPlus,
-        title: 'Thêm người dùng',
-        description: 'Cấp tài khoản mới cho nhân viên hoặc người quản lý trên hệ thống.',
-        href: '/nguoi-dung/tao',
-        colorScheme: 'pink',
       },
       {
         icon: Settings,

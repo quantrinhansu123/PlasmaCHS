@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 import {
-  isAdminRole,
+  hasFullDataVisibility,
   isLeadSaleRole,
   isSalesRole,
   isWarehouseRole,
@@ -28,7 +28,7 @@ export const useReports = () => {
   ].filter(Boolean))];
 
   const resolveVisibleSalesNames = async () => {
-    if (isAdminRole(role)) return [];
+    if (hasFullDataVisibility(role)) return [];
     if (isSalesRole(role) || roleScope === 'own') return currentUserNames;
 
     if (isLeadSaleRole(role) || roleScope === 'team') {
@@ -55,7 +55,7 @@ export const useReports = () => {
         .select('*');
 
       // Apply warehouse filter only for warehouse scope
-      if (isWarehouseRole(role) && department) {
+      if (isWarehouseRole(role) && !hasFullDataVisibility(role) && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
         query = query.eq('kho', userWhCode);
       }
@@ -83,7 +83,7 @@ export const useReports = () => {
       const visibleSalesNames = await resolveVisibleSalesNames();
 
       // Apply warehouse filter only for warehouse scope
-      if (isWarehouseRole(role) && department) {
+      if (isWarehouseRole(role) && !hasFullDataVisibility(role) && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
         query = query.eq('warehouse_id', userWhCode);
       } else if (filters.warehouse_id) {
@@ -122,7 +122,7 @@ export const useReports = () => {
       const visibleSalesNames = await resolveVisibleSalesNames();
 
       // Apply warehouse filter only for warehouse scope
-      if (isWarehouseRole(role) && department) {
+      if (isWarehouseRole(role) && !hasFullDataVisibility(role) && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
         query = query.eq('warehouse_id', userWhCode);
       } else if (filters.warehouse_id) {
@@ -153,7 +153,7 @@ export const useReports = () => {
         .select('*');
 
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-      if (isWarehouseRole(role) && department) {
+      if (isWarehouseRole(role) && !hasFullDataVisibility(role) && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
         query = query.eq('kho', userWhCode);
       } else if (filters.warehouse_id) {
@@ -187,7 +187,7 @@ export const useReports = () => {
         .select('*');
 
       // Apply warehouse filter only for warehouse scope
-      if (isWarehouseRole(role) && department) {
+      if (isWarehouseRole(role) && !hasFullDataVisibility(role) && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
         query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse_id) {
@@ -217,7 +217,7 @@ export const useReports = () => {
         .select('*');
 
       // Apply warehouse filter only for warehouse scope
-      if (isWarehouseRole(role) && department) {
+      if (isWarehouseRole(role) && !hasFullDataVisibility(role) && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
         query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse_id) {
@@ -248,7 +248,7 @@ export const useReports = () => {
         .select('*');
 
       // Apply warehouse filter only for warehouse scope
-      if (isWarehouseRole(role) && department) {
+      if (isWarehouseRole(role) && !hasFullDataVisibility(role) && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
         query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse) {
@@ -278,7 +278,7 @@ export const useReports = () => {
         .select('*');
 
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-      if (isWarehouseRole(role) && department) {
+      if (isWarehouseRole(role) && !hasFullDataVisibility(role) && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
         query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.kho) {
@@ -321,7 +321,7 @@ export const useReports = () => {
       }
       
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-      if (isWarehouseRole(role) && department) {
+      if (isWarehouseRole(role) && !hasFullDataVisibility(role) && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
         query = query.eq('kho', userWhCode);
       } else if (filters.warehouse) {
@@ -353,7 +353,7 @@ export const useReports = () => {
         .select('*');
 
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-      if (isWarehouseRole(role) && department) {
+      if (isWarehouseRole(role) && !hasFullDataVisibility(role) && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
         query = query.eq('khoa', userWhCode);
       } else if (filters.khoa) {
@@ -406,7 +406,7 @@ export const useReports = () => {
       if (filters.month) query = query.eq('thang', filters.month);
       
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-      if (isWarehouseRole(role) && department) {
+      if (isWarehouseRole(role) && !hasFullDataVisibility(role) && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
         query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse) {
@@ -453,7 +453,7 @@ export const useReports = () => {
       if (filters.month) query = query.eq('thang', filters.month);
 
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-      if (isWarehouseRole(role) && department) {
+      if (isWarehouseRole(role) && !hasFullDataVisibility(role) && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
         query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse) {
@@ -485,7 +485,7 @@ export const useReports = () => {
       if (filters.month) query = query.eq('thang', filters.month);
 
       // Apply warehouse filter only for warehouse scope
-      if (isWarehouseRole(role) && department) {
+      if (isWarehouseRole(role) && !hasFullDataVisibility(role) && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
         query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse) {
@@ -523,7 +523,7 @@ export const useReports = () => {
       if (filters.category) query = query.eq('error_category', filters.category);
 
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-      if (isWarehouseRole(role) && department) {
+      if (isWarehouseRole(role) && !hasFullDataVisibility(role) && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
         query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse) {
@@ -571,7 +571,7 @@ export const useReports = () => {
         .select('*');
 
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-      if (isWarehouseRole(role) && department) {
+      if (isWarehouseRole(role) && !hasFullDataVisibility(role) && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
         query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse_id) {
@@ -598,7 +598,7 @@ export const useReports = () => {
         .select('*');
 
       // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-      if (isWarehouseRole(role) && department) {
+      if (isWarehouseRole(role) && !hasFullDataVisibility(role) && department) {
         const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
         query = query.ilike('kho', `%${userWhCode}%`);
       } else if (filters.warehouse_id) {

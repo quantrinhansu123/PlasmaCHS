@@ -30,6 +30,8 @@ export function Combobox({
     onChange, 
     placeholder = "Chọn hoặc nhập...", 
     emptyMessage = "Không tìm thấy kết quả.",
+    createLabel,
+    allowCreate = true,
     className,
     disabled = false,
     disableBrowserAutofill = true,
@@ -46,9 +48,21 @@ export function Combobox({
     }, [value]);
 
     // Simple filtering logic
+    const trimmedSearch = (searchTerm || "").trim();
     const filteredOptions = (options || []).filter(option => 
         (option || "").toLowerCase().includes((searchTerm || "").toLowerCase())
     ).slice(0, 50);
+
+    const hasExactMatch = trimmedSearch
+        ? (options || []).some(
+            (option) => String(option || '').trim().toLowerCase() === trimmedSearch.toLowerCase()
+        )
+        : false;
+
+    const showCreateOption =
+        allowCreate &&
+        trimmedSearch.length > 0 &&
+        !hasExactMatch;
 
     const handleInputChange = (e) => {
         const newVal = e.target.value;
@@ -89,6 +103,17 @@ export function Combobox({
                         disabled={disabled}
                         value={searchTerm}
                         onChange={handleInputChange}
+                        onKeyDown={(e) => {
+                            if (
+                                e.key === 'Enter' &&
+                                allowCreate &&
+                                trimmedSearch &&
+                                !hasExactMatch
+                            ) {
+                                e.preventDefault();
+                                handleSelect(trimmedSearch);
+                            }
+                        }}
                         onFocus={() => {
                             if (disableBrowserAutofill) setBlockBrowserAutofill(false);
                         }}
@@ -156,6 +181,18 @@ export function Combobox({
                 sideOffset={6}
             >
                 <div className="p-1">
+                    {showCreateOption ? (
+                        <button
+                            type="button"
+                            onPointerDown={(e) => e.preventDefault()}
+                            onClick={() => handleSelect(trimmedSearch)}
+                            className="w-full text-left px-3 py-2.5 rounded-lg text-[13px] font-bold text-primary bg-primary/5 border border-primary/15 hover:bg-primary/10 mb-1"
+                        >
+                            {createLabel
+                                ? createLabel(trimmedSearch)
+                                : `+ Dùng giá trị mới: "${trimmedSearch}"`}
+                        </button>
+                    ) : null}
                     {filteredOptions.length > 0 ? (
                         filteredOptions.map((option) => (
                             <button
@@ -173,14 +210,14 @@ export function Combobox({
                                 {option}
                             </button>
                         ))
-                    ) : (
+                    ) : !showCreateOption ? (
                         <div className="px-3 py-4 text-center text-xs text-slate-400 font-semibold italic">
                             {(!options || options.length === 0) 
-                             ? "Không có dữ liệu gợi ý." 
-                             : (searchTerm ? emptyMessage : "Hãy gõ để tìm kiếm...")
+                             ? "Không có dữ liệu gợi ý — gõ để thêm mới." 
+                             : (trimmedSearch ? emptyMessage : "Chọn trong danh sách hoặc gõ để thêm mới...")
                             }
                         </div>
-                    )}
+                    ) : null}
                 </div>
             </PopoverContent>
         </Popover>

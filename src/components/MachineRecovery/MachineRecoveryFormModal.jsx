@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'react-toastify';
 import { MACHINE_ITEM_CONDITIONS } from '../../constants/machineRecoveryConstants';
+import usePermissions from '../../hooks/usePermissions';
 import { supabase } from '../../supabase/config';
 import { notificationService } from '../../utils/notificationService';
 import BarcodeScanner from '../Common/BarcodeScanner';

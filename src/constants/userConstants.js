@@ -19,13 +19,11 @@ export const USER_STATUSES = [
 
 export const TABLE_COLUMNS = [
     { key: 'info', label: 'Thông tin nhân sự' },
-    { key: 'nguoi_quan_ly', label: 'Người quản lý' },
     { key: 'team', label: 'Team' },
     { key: 'department', label: 'Phòng ban' },
     { key: 'chi_nhanh', label: 'Chi nhánh' },
-    { key: 'sales_group', label: 'Nhóm kinh doanh' },
+    { key: 'nguoi_quan_ly', label: 'Người quản lý' },
     { key: 'role', label: 'Vai trò / Công việc' },
-    { key: 'approval_level', label: 'Quyền Duyệt' },
     { key: 'password', label: 'Mật khâu' },
     { key: 'status', label: 'Trạng thái' },
 ];

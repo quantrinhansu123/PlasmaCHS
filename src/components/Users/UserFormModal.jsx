@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { Briefcase, CheckCircle2, ChevronDown, Phone, ShieldCheck, UserCircle, X } from 'lucide-react';
+import { Briefcase, Building2, CheckCircle2, ChevronDown, Phone, ShieldCheck, UserCircle, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import bcrypt from 'bcryptjs';
@@ -8,6 +8,8 @@ import { supabase } from '../../supabase/config';
 import { validatePhone, formatPhoneNumber } from '../../utils/taxUtils';
 import { Eye, EyeOff, Lock } from 'lucide-react';
 import Combobox from '../ui/Combobox';
+import CheckboxSearchList from '../ui/CheckboxSearchList';
+import { collectUniqueMultiValues, joinMultiValue, splitMultiValue } from '../../utils/multiValueField';
 
 export default function UserFormModal({ user, onClose, onSuccess }) {
     const isEdit = !!user;
@@ -20,61 +22,49 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
         username: '',
         role: USER_ROLES[0].id,
         phone: '',
-        nguoi_quan_ly: '',
         team: '',
         department: '',
-        chi_nhanh: '',
-        sales_group: '',
-        approval_level: 'Staff',
         status: 'Hoạt động',
         password: '',
     };
 
     const [formData, setFormData] = useState(defaultState);
     const [showPassword, setShowPassword] = useState(false);
-    const [managerSuggestions, setManagerSuggestions] = useState([]);
     const [departmentSuggestions, setDepartmentSuggestions] = useState([]);
-    const [salesGroupSuggestions, setSalesGroupSuggestions] = useState([]);
     const [teamSuggestions, setTeamSuggestions] = useState([]);
-    const [chiNhanhSuggestions, setChiNhanhSuggestions] = useState([]);
+    const [chiNhanhOptions, setChiNhanhOptions] = useState([]);
+    const [managerOptions, setManagerOptions] = useState([]);
+    const [selectedChiNhanh, setSelectedChiNhanh] = useState([]);
+    const [selectedManagers, setSelectedManagers] = useState([]);
 
     useEffect(() => {
         let cancelled = false;
         (async () => {
             try {
-                const [usersRes, custRes, whRes] = await Promise.all([
-                    supabase.from('app_users').select('name, department, sales_group, team, chi_nhanh'),
-                    supabase.from('customers').select('agency_name, business_group'),
+                const [usersRes, whRes] = await Promise.all([
+                    supabase.from('app_users').select('name, department, team, chi_nhanh, nguoi_quan_ly'),
                     supabase.from('warehouses').select('branch_office'),
                 ]);
                 if (cancelled) return;
-                const managers = new Set();
                 const dep = new Set();
-                const sg = new Set();
                 const teams = new Set();
-                const chiNhanh = new Set();
+                const chiNhanh = new Set(collectUniqueMultiValues(usersRes.data, 'chi_nhanh'));
+                const managers = new Set(collectUniqueMultiValues(usersRes.data, 'nguoi_quan_ly'));
                 (usersRes.data || []).forEach((u) => {
-                    if (u.name?.trim()) managers.add(u.name.trim());
                     if (u.department?.trim()) dep.add(u.department.trim());
-                    if (u.sales_group?.trim()) sg.add(u.sales_group.trim());
                     if (u.team?.trim()) teams.add(u.team.trim());
-                    if (u.chi_nhanh?.trim()) chiNhanh.add(u.chi_nhanh.trim());
+                    if (u.name?.trim()) managers.add(u.name.trim());
                 });
                 (whRes.data || []).forEach((w) => {
                     if (w.branch_office?.trim()) chiNhanh.add(w.branch_office.trim());
                 });
-                (custRes.data || []).forEach((c) => {
-                    if (c.agency_name?.trim()) dep.add(c.agency_name.trim());
-                    if (c.business_group?.trim()) sg.add(c.business_group.trim());
-                });
                 const sortVi = (a, b) => a.localeCompare(b, 'vi', { sensitivity: 'base' });
-                setManagerSuggestions([...managers].sort(sortVi));
                 setDepartmentSuggestions([...dep].sort(sortVi));
-                setSalesGroupSuggestions([...sg].sort(sortVi));
                 setTeamSuggestions([...teams].sort(sortVi));
-                setChiNhanhSuggestions([...chiNhanh].sort(sortVi));
+                setChiNhanhOptions([...chiNhanh].sort(sortVi));
+                setManagerOptions([...managers].sort(sortVi));
             } catch (e) {
-                console.error('Load manager/department/sales_group/team/chi_nhanh suggestions:', e);
+                console.error('Load department/team/chi_nhanh suggestions:', e);
             }
         })();
         return () => {
@@ -96,15 +86,16 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                 username: user.username || '',
                 role: user.role || USER_ROLES[0].id,
                 phone: user.phone || '',
-                nguoi_quan_ly: user.nguoi_quan_ly || '',
                 team: user.team || '',
                 department: user.department || '',
-                chi_nhanh: user.chi_nhanh || '',
-                sales_group: user.sales_group || '',
-                approval_level: user.approval_level || 'Staff',
                 status: user.status || 'Hoạt động',
                 password: '', // Password is never shown in edit mode
             });
+            setSelectedChiNhanh(splitMultiValue(user.chi_nhanh));
+            setSelectedManagers(splitMultiValue(user.nguoi_quan_ly));
+        } else {
+            setSelectedChiNhanh([]);
+            setSelectedManagers([]);
         }
     }, [user, isEdit]);
 
@@ -164,12 +155,12 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                 username: formData.username.trim(),
                 role: formData.role,
                 phone: formData.phone.trim(),
-                nguoi_quan_ly: formData.nguoi_quan_ly.trim(),
                 team: formData.team.trim(),
                 department: formData.department.trim(),
-                chi_nhanh: formData.chi_nhanh.trim(),
-                sales_group: formData.sales_group.trim(),
-                approval_level: formData.approval_level,
+                chi_nhanh: joinMultiValue(selectedChiNhanh),
+                nguoi_quan_ly: joinMultiValue(
+                    selectedManagers.filter((name) => name !== formData.name.trim())
+                ),
                 status: formData.status,
                 updated_at: new Date().toISOString()
             };
@@ -180,8 +171,6 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                 payload.password = bcrypt.hashSync(formData.password.trim(), salt);
             }
 
-            let savedUserId = user?.id;
-
             if (isEdit) {
                 const { error } = await supabase
                     .from('app_users')
@@ -189,44 +178,27 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                     .eq('id', user.id);
                 if (error) throw error;
             } else {
-                const { data: insertedUser, error } = await supabase
+                const { error } = await supabase
                     .from('app_users')
-                    .insert([payload])
-                    .select('id')
-                    .single();
+                    .insert([payload]);
                 if (error) throw error;
-                savedUserId = insertedUser?.id;
             }
-
-            // Business rule:
-            // - approval_level = Supervisor: nguoi_quan_ly = danh sách toàn bộ nhân sự cùng team
-            // - các cấp khác: nguoi_quan_ly = chính tên user đó
-            let managerListValue = payload.name;
-            if (payload.approval_level === 'Supervisor' && payload.team) {
-                const { data: teamUsers, error: teamErr } = await supabase
-                    .from('app_users')
-                    .select('name')
-                    .eq('team', payload.team);
-                if (teamErr) throw teamErr;
-
-                const members = [...new Set(
-                    (teamUsers || [])
-                        .map(u => u.name?.trim())
-                        .filter(Boolean)
-                )];
-                managerListValue = members.length > 0 ? members.join(', ') : payload.name;
-            }
-
-            const { error: updateManagerErr } = await supabase
-                .from('app_users')
-                .update({ nguoi_quan_ly: managerListValue })
-                .eq('id', savedUserId);
-            if (updateManagerErr) throw updateManagerErr;
 
             onSuccess();
         } catch (error) {
             console.error('Error saving user:', error);
-            setErrorMsg(error.message || 'Có lỗi xảy ra khi lưu nhân sự.');
+            const msg = String(error?.message || '');
+            if (msg.includes("'password'") && msg.includes('schema cache')) {
+                setErrorMsg(
+                    'Database chưa có cột password. Chạy file SQL ensure_app_users_profile_columns.sql trên Supabase rồi thử lại.'
+                );
+            } else if (msg.includes('row-level security') && msg.includes('app_users')) {
+                setErrorMsg(
+                    'Bị chặn bởi RLS trên app_users. Chạy file SQL fix_app_users_rls.sql trên Supabase SQL Editor rồi thử lại.'
+                );
+            } else {
+                setErrorMsg(msg || 'Có lỗi xảy ra khi lưu nhân sự.');
+            }
         } finally {
             setIsLoading(false);
         }
@@ -388,120 +360,71 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                                         </div>
                                     </div>
                                 </div>
-                                
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <div className="space-y-1.5">
-                                        <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
-                                            Người quản lý
-                                        </label>
-                                        <Combobox
-                                            options={managerSuggestions.filter((name) => name !== formData.name)}
-                                            value={formData.nguoi_quan_ly}
-                                            onChange={(v) =>
-                                                setFormData((prev) => ({ ...prev, nguoi_quan_ly: v }))
-                                            }
-                                            placeholder="Chọn quản lý hoặc nhập mới..."
-                                            emptyMessage="Không khớp gợi ý — Enter để dùng text đã gõ."
-                                            className="!h-12 rounded-2xl text-[15px] font-semibold bg-slate-50 border-slate-200"
-                                        />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
-                                            Team
-                                        </label>
-                                        <Combobox
-                                            options={teamSuggestions}
-                                            value={formData.team}
-                                            onChange={(v) =>
-                                                setFormData((prev) => ({ ...prev, team: v }))
-                                            }
-                                            placeholder="Chọn team hoặc nhập mới..."
-                                            emptyMessage="Không khớp gợi ý — Enter để dùng text đã gõ."
-                                            className="!h-12 rounded-2xl text-[15px] font-semibold bg-slate-50 border-slate-200"
-                                        />
-                                    </div>
-                                </div>
 
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <div className="space-y-1.5">
-                                        <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
-                                            Phòng ban / Đại lý
-                                        </label>
-                                        <Combobox
-                                            options={departmentSuggestions}
-                                            value={formData.department}
-                                            onChange={(v) =>
-                                                setFormData((prev) => ({ ...prev, department: v }))
-                                            }
-                                            placeholder="Chọn trong danh sách hoặc nhập mới..."
-                                            emptyMessage="Không khớp gợi ý — Enter để dùng text đã gõ."
-                                            className="!h-12 rounded-2xl text-[15px] font-semibold bg-slate-50 border-slate-200"
-                                        />
-                                        <p className="text-[10px] text-slate-400 font-medium ml-1">
-                                            Gợi ý từ nhân sự và trường Đại lý (khách hàng); có thể thêm giá trị mới.
-                                        </p>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
-                                            Nhóm kinh doanh
-                                        </label>
-                                        <Combobox
-                                            options={salesGroupSuggestions}
-                                            value={formData.sales_group}
-                                            onChange={(v) =>
-                                                setFormData((prev) => ({ ...prev, sales_group: v }))
-                                            }
-                                            placeholder="Chọn trong danh sách hoặc nhập mới..."
-                                            emptyMessage="Không khớp gợi ý — Enter để dùng text đã gõ."
-                                            className="!h-12 rounded-2xl text-[15px] font-semibold bg-slate-50 border-slate-200"
-                                        />
-                                        <p className="text-[10px] text-slate-400 font-medium ml-1">
-                                            Gợi ý từ nhân sự và Nhóm KD (khách hàng); có thể thêm giá trị mới.
-                                        </p>
-                                    </div>
+                                <div className="space-y-1.5">
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                        <Building2 className="w-3.5 h-3.5" />
+                                        Phòng ban
+                                    </label>
+                                    <Combobox
+                                        options={departmentSuggestions}
+                                        value={formData.department}
+                                        onChange={(v) =>
+                                            setFormData((prev) => ({ ...prev, department: v }))
+                                        }
+                                        placeholder="Chọn phòng ban hoặc gõ mới..."
+                                        createLabel={(text) => `+ Thêm phòng ban: "${text}"`}
+                                        emptyMessage="Gõ tên phòng ban mới ở trên, chọn dòng «Thêm phòng ban»."
+                                        className="!h-12 rounded-2xl text-[15px] font-semibold bg-slate-50 border-slate-200"
+                                    />
+                                </div>
+                                
+                                <div className="space-y-1.5">
+                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                        Team
+                                    </label>
+                                    <Combobox
+                                        options={teamSuggestions}
+                                        value={formData.team}
+                                        onChange={(v) =>
+                                            setFormData((prev) => ({ ...prev, team: v }))
+                                        }
+                                        placeholder="Chọn team hoặc nhập mới..."
+                                        emptyMessage="Không khớp gợi ý — Enter để dùng text đã gõ."
+                                        className="!h-12 rounded-2xl text-[15px] font-semibold bg-slate-50 border-slate-200"
+                                    />
                                 </div>
 
                                 <div className="space-y-1.5">
                                     <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
                                         Chi nhánh
                                     </label>
-                                    <Combobox
-                                        options={chiNhanhSuggestions}
-                                        value={formData.chi_nhanh}
-                                        onChange={(v) =>
-                                            setFormData((prev) => ({ ...prev, chi_nhanh: v }))
-                                        }
-                                        placeholder="Chọn chi nhánh hoặc nhập mới..."
-                                        emptyMessage="Không khớp gợi ý — Enter để dùng text đã gõ."
-                                        className="!h-12 rounded-2xl text-[15px] font-semibold bg-slate-50 border-slate-200"
+                                    <CheckboxSearchList
+                                        options={chiNhanhOptions}
+                                        selected={selectedChiNhanh}
+                                        onChange={setSelectedChiNhanh}
+                                        placeholder="Tìm chi nhánh..."
+                                        emptyMessage="Chưa có chi nhánh — gõ và thêm mới."
+                                        customAddLabel={(text) => `+ Thêm chi nhánh: "${text}"`}
                                     />
-                                    <p className="text-[10px] text-slate-400 font-medium ml-1">
-                                        Gợi ý từ kho (chi nhánh) và nhân sự hiện có.
-                                    </p>
                                 </div>
 
                                 <div className="space-y-1.5">
                                     <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
-                                        Quyền hạn phê duyệt (Approval)
+                                        Người quản lý
                                     </label>
-                                    <div className="relative">
-                                        <select
-                                            name="approval_level"
-                                            value={formData.approval_level}
-                                            onChange={handleChange}
-                                            className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-800 appearance-none transition-all focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
-                                        >
-                                            <option value="Staff">Nhân viên (Staff)</option>
-                                            <option value="Supervisor">Tổ trưởng (Supervisor)</option>
-                                            <option value="Manager">Quản lý (Manager)</option>
-                                            <option value="Admin">Giám đốc / Admin</option>
-                                        </select>
-                                        <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-primary/70">
-                                            <ChevronDown className="w-4 h-4" />
-                                        </div>
-                                    </div>
+                                    <CheckboxSearchList
+                                        options={managerOptions.filter(
+                                            (name) => name !== formData.name.trim()
+                                        )}
+                                        selected={selectedManagers}
+                                        onChange={setSelectedManagers}
+                                        placeholder="Tìm người quản lý..."
+                                        emptyMessage="Chưa có gợi ý — chọn từ danh sách nhân sự."
+                                        allowCustom={false}
+                                    />
                                 </div>
-                                
+
                                 <div className="space-y-1.5">
                                     <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
                                         <Phone className="w-3.5 h-3.5" />
