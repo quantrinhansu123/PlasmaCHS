@@ -13,6 +13,7 @@ import {
     isWarehouseRole,
     normalizeRole,
 } from '../utils/accessControl';
+import { buildPermissionGroupKey } from '../utils/permissionGroupKey';
 
 const normalizeRoleKey = (value) => {
     if (!value) return '';
@@ -38,8 +39,12 @@ const getCanonicalRoleNames = (roleName) => {
     return [...names].filter(Boolean);
 };
 
-const fetchRolePermissions = async (roleName) => {
+const fetchRolePermissions = async (roleName, departmentName = '') => {
     const candidates = getCanonicalRoleNames(roleName);
+    const groupKey = buildPermissionGroupKey(departmentName, roleName);
+    if (groupKey) {
+        candidates.unshift(groupKey);
+    }
     const { data } = await supabase
         .from('app_roles')
         .select('permissions, name')
@@ -64,12 +69,11 @@ const applyRolePermissionOverrides = (permissions, roleName) => {
         normalized.includes('kinhdoanh') ||
         normalized.includes('sale');
 
-    // NVKD needs to be able to create DNXM; workflow actions stay role-gated in page UI.
+    // NVKD: đảm bảo thấy module DNXM; thao tác thêm/sửa/xóa theo rule từng màn.
     if (isSalesRole) {
         merged.dnxm = {
             ...(merged.dnxm || {}),
             view: true,
-            create: true,
         };
     }
 
@@ -121,7 +125,7 @@ export const usePermissions = () => {
                     setUser(userData);
                     setRole(userData.role);
                     setDepartment(userData.department || '');
-                    const rolePermissions = await fetchRolePermissions(userData.role);
+                    const rolePermissions = await fetchRolePermissions(userData.role, userData.department || '');
                     setPermissions(applyRolePermissionOverrides(rolePermissions, userData.role));
                 } else {
                     const safeRole = userRoleFromStorage || null;

@@ -1,10 +1,28 @@
-import { Save, ShieldCheck, UserCircle, Users, X } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { ChevronDown, Save, ShieldCheck, UserCircle, Users, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
 import PermissionMatrixView from './PermissionMatrixView';
-import { ACTION_TYPES, MODULE_PERMISSIONS, buildPermissionRows } from '../../constants/permissionConstants';
+import {
+    buildPermissionRows,
+    createEmptyViewPermissions,
+    toViewOnlyPermissions,
+} from '../../constants/permissionConstants';
 import { supabase } from '../../supabase/config';
+import { USER_ROLES } from '../../constants/userConstants';
+
+const normalizeDept = (value = '') =>
+    String(value || '')
+        .trim()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+import {
+    buildPermissionGroupKey,
+    buildPermissionGroupLabel,
+} from '../../utils/permissionGroupKey';
+
+const sortVi = (a, b) => a.localeCompare(b, 'vi', { sensitivity: 'base' });
 
 export default function PermissionFormModal({ role, isUserRole, defaultPermissionType = 'role', onClose, onSuccess }) {
     const isEdit = !!role;
@@ -22,20 +40,50 @@ export default function PermissionFormModal({ role, isUserRole, defaultPermissio
     const [permissionType, setPermissionType] = useState(
         isEdit ? (isUserRole ? 'user' : 'role') : defaultPermissionType,
     );
-    const [roleName, setRoleName] = useState(isEdit && !isUserRole ? role.name : '');
+    const [departmentName, setDepartmentName] = useState(isEdit && !isUserRole ? (role.departmentName || '') : '');
+    const [positionName, setPositionName] = useState(
+        isEdit && !isUserRole ? (role.positionName || role.name || '') : '',
+    );
     const [usersList, setUsersList] = useState([]);
+    const [usersWithProfile, setUsersWithProfile] = useState([]);
+    const [departmentOptions, setDepartmentOptions] = useState([]);
     const [selectedUserId, setSelectedUserId] = useState('');
 
-    const initialPermissions = MODULE_PERMISSIONS.reduce((acc, module) => {
-        acc[module.id] = ACTION_TYPES.reduce((actions, action) => {
-            actions[action.id] = false;
-            return actions;
-        }, {});
-        return acc;
-    }, {});
-
-    const [permissions, setPermissions] = useState(isEdit ? role.permissions : initialPermissions);
+    const [permissions, setPermissions] = useState(
+        isEdit ? toViewOnlyPermissions(role.permissions) : createEmptyViewPermissions(),
+    );
     const [permissionQuery, setPermissionQuery] = useState('');
+
+    const departmentSelectOptions = useMemo(() => {
+        const set = new Set(departmentOptions);
+        if (departmentName.trim()) set.add(departmentName.trim());
+        return [...set].sort(sortVi);
+    }, [departmentOptions, departmentName]);
+
+    const positionSelectOptions = useMemo(() => {
+        const dep = departmentName.trim();
+        if (!dep) return [];
+
+        const depKey = normalizeDept(dep);
+        const set = new Set();
+        (usersWithProfile || []).forEach((u) => {
+            const userDep = (u.department || '').trim();
+            const userRole = (u.role || '').trim();
+            if (!userRole || normalizeDept(userDep) !== depKey) return;
+            set.add(userRole);
+        });
+
+        if (positionName.trim() && !set.has(positionName.trim())) {
+            set.add(positionName.trim());
+        }
+
+        return [...set].sort(sortVi);
+    }, [usersWithProfile, departmentName, positionName]);
+
+    const handleDepartmentChange = (value) => {
+        setDepartmentName(value);
+        setPositionName('');
+    };
 
     useEffect(() => {
         fetchUsers();
@@ -45,10 +93,17 @@ export default function PermissionFormModal({ role, isUserRole, defaultPermissio
         try {
             const { data, error } = await supabase
                 .from('app_users')
-                .select('id, name, username')
+                .select('id, name, username, department, role')
                 .order('name');
             if (error) throw error;
             setUsersList(data || []);
+            setUsersWithProfile(data || []);
+
+            const dep = new Set();
+            (data || []).forEach((u) => {
+                if (u.department?.trim()) dep.add(u.department.trim());
+            });
+            setDepartmentOptions([...dep].sort(sortVi));
 
             if (isEdit && isUserRole) {
                 const u = data.find(user => user.username === role.username);
@@ -58,6 +113,8 @@ export default function PermissionFormModal({ role, isUserRole, defaultPermissio
             console.error('Error fetching users:', error);
         }
     };
+
+    const getRoleLabel = (roleId) => USER_ROLES.find((r) => r.id === roleId)?.label || roleId;
 
     const handleCheckboxChange = (moduleId, actionId) => {
         setPermissions(prev => ({
@@ -88,8 +145,8 @@ export default function PermissionFormModal({ role, isUserRole, defaultPermissio
         e.preventDefault();
         setErrorMsg('');
 
-        if (permissionType === 'role' && !roleName.trim()) {
-            setErrorMsg('Vui lòng nhập Tên nhóm quyền.');
+        if (permissionType === 'role' && (!departmentName.trim() || !positionName.trim())) {
+            setErrorMsg('Vui lòng nhập đầy đủ Bộ phận và Vị trí.');
             return;
         }
 
@@ -102,10 +159,13 @@ export default function PermissionFormModal({ role, isUserRole, defaultPermissio
 
         try {
             if (permissionType === 'role') {
+                const groupKey = buildPermissionGroupKey(departmentName, positionName);
+                const roleLabel = buildPermissionGroupLabel(departmentName, positionName);
+                const viewOnlyPermissions = toViewOnlyPermissions(permissions);
                 const payload = {
-                    name: roleName.trim(),
+                    name: groupKey,
                     type: 'group',
-                    permissions: permissions,
+                    permissions: viewOnlyPermissions,
                     updated_at: new Date().toISOString()
                 };
 
@@ -120,11 +180,11 @@ export default function PermissionFormModal({ role, isUserRole, defaultPermissio
                     const { data: existing } = await supabase
                         .from('app_roles')
                         .select('id')
-                        .eq('name', roleName.trim())
+                        .eq('name', groupKey)
                         .eq('type', 'group')
                         .single();
                     if (existing) {
-                        setErrorMsg(`Nhóm quyền "${roleName}" đã tồn tại.`);
+                        setErrorMsg(`Nhóm quyền "${roleLabel}" đã tồn tại.`);
                         setIsLoading(false);
                         return;
                     }
@@ -140,12 +200,13 @@ export default function PermissionFormModal({ role, isUserRole, defaultPermissio
                 const userRoleName = `@user:${user.username}`;
 
                 // Upsert to app_roles
+                const viewOnlyPermissions = toViewOnlyPermissions(permissions);
                 const { error: roleError } = await supabase
                     .from('app_roles')
                     .upsert({
                         name: userRoleName,
                         type: 'user',
-                        permissions: permissions,
+                        permissions: viewOnlyPermissions,
                         updated_at: new Date().toISOString()
                     }, { onConflict: 'name' });
                 if (roleError) throw roleError;
@@ -153,7 +214,7 @@ export default function PermissionFormModal({ role, isUserRole, defaultPermissio
                 // Update app_users.permissions
                 const { error: userError } = await supabase
                     .from('app_users')
-                    .update({ permissions: permissions })
+                    .update({ permissions: viewOnlyPermissions })
                     .eq('id', selectedUserId);
                 if (userError) throw userError;
             }
@@ -201,7 +262,7 @@ export default function PermissionFormModal({ role, isUserRole, defaultPermissio
                                 {isEdit ? 'Cấu hình Quyền' : 'Thiết lập Quyền mới'}
                             </h3>
                             <p className="text-slate-500 text-[12px] font-bold mt-0.5 uppercase tracking-widest opacity-60">
-                                {isEdit ? `Đối tượng: ${role.name}` : 'Tạo ma trận truy cập mới'}
+                                {isEdit ? `Đối tượng: ${role.displayName || role.name}` : 'Tạo ma trận truy cập mới'}
                             </p>
                         </div>
                     </div>
@@ -248,16 +309,73 @@ export default function PermissionFormModal({ role, isUserRole, defaultPermissio
                                 </div>
 
                                 <div className="flex-1 w-full">
-                                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Tên đối tượng xác thực <span className="text-red-500">*</span></label>
+                                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Đối tượng xác thực <span className="text-red-500">*</span></label>
                                     {permissionType === 'role' ? (
-                                        <input
-                                            type="text"
-                                            value={roleName}
-                                            onChange={(e) => setRoleName(e.target.value)}
-                                            placeholder="Ví dụ: Thủ kho, Kế toán..."
-                                            className="w-full h-12 px-5 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 font-bold text-[15px] shadow-sm transition-all text-slate-900"
-                                            required
-                                        />
+                                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                            <div>
+                                                <label className="mb-1.5 block text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                                    Bộ phận
+                                                </label>
+                                                <div className="relative">
+                                                    <select
+                                                        value={departmentName}
+                                                        onChange={(e) => handleDepartmentChange(e.target.value)}
+                                                        className="w-full h-12 appearance-none cursor-pointer rounded-2xl border border-slate-200 bg-slate-50 px-5 pr-10 text-[15px] font-bold text-slate-900 shadow-sm outline-none transition-all focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                                                        required
+                                                    >
+                                                        <option value="">Chọn bộ phận...</option>
+                                                        {departmentSelectOptions.map((dep) => (
+                                                            <option key={dep} value={dep}>
+                                                                {dep}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="mb-1.5 block text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                                    Vị trí
+                                                </label>
+                                                <div className="relative">
+                                                    <select
+                                                        value={positionName}
+                                                        onChange={(e) => setPositionName(e.target.value)}
+                                                        disabled={!departmentName.trim()}
+                                                        className="w-full h-12 appearance-none cursor-pointer rounded-2xl border border-slate-200 bg-slate-50 px-5 pr-10 text-[15px] font-bold text-slate-900 shadow-sm outline-none transition-all focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                        required
+                                                    >
+                                                        <option value="">
+                                                            {!departmentName.trim()
+                                                                ? 'Chọn bộ phận trước'
+                                                                : positionSelectOptions.length === 0
+                                                                  ? 'Chưa có vị trí trong phòng ban này'
+                                                                  : 'Chọn vị trí...'}
+                                                        </option>
+                                                        {positionSelectOptions.map((pos) => (
+                                                            <option key={pos} value={pos}>
+                                                                {getRoleLabel(pos)}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                                </div>
+                                                {departmentName.trim() && positionSelectOptions.length > 0 ? (
+                                                    <p className="mt-1.5 text-[10px] font-semibold text-slate-400">
+                                                        Chỉ hiển thị vị trí đang có trong phòng ban «{departmentName}».
+                                                    </p>
+                                                ) : null}
+                                            </div>
+                                            <div className="sm:col-span-2 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-[11px] font-semibold text-blue-700 space-y-0.5">
+                                                <p>
+                                                    Tên nhóm:{' '}
+                                                    {buildPermissionGroupLabel(departmentName, positionName) || '(chưa đủ thông tin)'}
+                                                </p>
+                                                <p className="text-[10px] font-medium text-blue-600/80">
+                                                    Key: {buildPermissionGroupKey(departmentName, positionName) || '—'}
+                                                </p>
+                                            </div>
+                                        </div>
                                     ) : (
                                         <div className="relative">
                                             <select
@@ -284,8 +402,8 @@ export default function PermissionFormModal({ role, isUserRole, defaultPermissio
                         <div className="rounded-3xl border border-blue-600/10 bg-white p-4 md:p-6 shadow-sm space-y-4">
                             <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
                                 <div>
-                                    <h4 className="text-[14px] font-black uppercase tracking-tight text-slate-800">Danh sách quyền theo phân hệ</h4>
-                                    <p className="mt-1 text-[11px] font-semibold text-slate-400">Bật/tắt từng quyền theo module và thao tác.</p>
+                                    <h4 className="text-[14px] font-black uppercase tracking-tight text-slate-800">Quyền xem theo phân hệ</h4>
+                                    <p className="mt-1 text-[11px] font-semibold text-slate-400">Chỉ cấu hình quyền truy cập/xem module. Thêm, sửa, xóa theo rule riêng từng màn hình.</p>
                                 </div>
                                 <div className="w-full md:max-w-sm">
                                     <label className="mb-1 block text-[10px] font-black uppercase tracking-widest text-slate-400">Tìm nhanh quyền</label>
@@ -293,7 +411,7 @@ export default function PermissionFormModal({ role, isUserRole, defaultPermissio
                                         type="text"
                                         value={permissionQuery}
                                         onChange={(e) => setPermissionQuery(e.target.value)}
-                                        placeholder="Nhập tên quyền để tìm nhanh"
+                                        placeholder="Tên module, đường dẫn..."
                                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-[13px] font-semibold text-slate-700 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
                                     />
                                 </div>

@@ -46,7 +46,7 @@ import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import UserFormModal from '../components/Users/UserFormModal';
 import MultiValueTags from '../components/Users/MultiValueTags';
-import { USER_ROLES, USER_STATUSES, TABLE_COLUMNS } from '../constants/userConstants';
+import { USER_STATUSES, TABLE_COLUMNS } from '../constants/userConstants';
 import { collectUniqueMultiValues, splitMultiValue } from '../utils/multiValueField';
 import { toast } from 'react-toastify';
 import { supabase } from '../supabase/config';
@@ -428,11 +428,15 @@ const Users = () => {
         selectedTeams.length;
 
     // Filter options
-    const roleOptions = USER_ROLES.map(r => ({
-        id: r.id,
-        label: r.label,
-        count: users.filter(u => u.role === r.id).length
-    }));
+    const roleOptions = Array.from(
+        new Set(users.map((u) => (u.role || '').trim()).filter(Boolean)),
+    )
+        .sort((a, b) => a.localeCompare(b, 'vi', { sensitivity: 'base' }))
+        .map((role) => ({
+            id: role,
+            label: role,
+            count: users.filter((u) => u.role === role).length,
+        }));
 
     const statusOptions = USER_STATUSES.map(s => ({
         id: s.id,
@@ -658,7 +662,7 @@ const Users = () => {
                                         )}
                                     >
                                         <Briefcase size={14} className={getFilterIconClass(activeDropdown === 'role' || selectedRoles.length > 0, "text-blue-600")} />
-                                        Vai trò
+                                        Vị trí
                                         {selectedRoles.length > 0 && (
                                             <span className="px-1.5 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-bold">
                                                 {selectedRoles.length}
@@ -992,7 +996,7 @@ const Users = () => {
 
                                                     <div className="grid grid-cols-1 gap-2 mb-3 rounded-xl bg-muted/10 border border-border/60 p-2.5">
                                                         <div>
-                                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Vai trò</p>
+                                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Vị trí</p>
                                                             <p className="text-[12px] text-foreground font-medium mt-0.5">
                                                                 <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-white border border-border">
                                                                     {user.role === 'Admin' ? <ShieldCheck className="w-3 h-3 text-blue-600" /> : <Briefcase className="w-3 h-3 text-slate-400" />}
@@ -1370,7 +1374,7 @@ const Users = () => {
                                         )}
                                     >
                                         <Briefcase size={14} className={getFilterIconClass(activeDropdown === 'role' || selectedRoles.length > 0, "text-blue-600")} />
-                                        Vai trò
+                                        Vị trí
                                         {selectedRoles.length > 0 && (
                                             <span className="px-1.5 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-bold">
                                                 {selectedRoles.length}
@@ -1564,7 +1568,7 @@ const Users = () => {
                                 <div className="bg-white border border-border rounded-xl p-6 shadow-sm">
                                     <h3 className="text-[14px] font-bold text-foreground mb-6 uppercase tracking-tight flex items-center gap-2">
                                         <div className="w-1.5 h-4 bg-primary rounded-full" />
-                                        Phân bổ theo Vai trò
+                                        Phân bổ theo Vị trí
                                     </h3>
                                     <div style={{ height: '300px' }}>
                                         <PieChartJS
@@ -1631,7 +1635,7 @@ const Users = () => {
                     sections={[
                         {
                             id: 'role',
-                            label: 'Vai trò',
+                            label: 'Vị trí',
                             icon: <Briefcase size={16} />,
                             options: roleOptions,
                             selectedValues: pendingRoles,

@@ -3,7 +3,7 @@ import { Briefcase, Building2, CheckCircle2, ChevronDown, Phone, ShieldCheck, Us
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import bcrypt from 'bcryptjs';
-import { USER_ROLES, USER_STATUSES } from '../../constants/userConstants';
+import { USER_STATUSES } from '../../constants/userConstants';
 import { supabase } from '../../supabase/config';
 import { validatePhone, formatPhoneNumber } from '../../utils/taxUtils';
 import { Eye, EyeOff, Lock } from 'lucide-react';
@@ -20,7 +20,7 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
     const defaultState = {
         name: '',
         username: '',
-        role: USER_ROLES[0].id,
+        role: '',
         phone: '',
         team: '',
         department: '',
@@ -30,6 +30,7 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
 
     const [formData, setFormData] = useState(defaultState);
     const [showPassword, setShowPassword] = useState(false);
+    const [positionSuggestions, setPositionSuggestions] = useState([]);
     const [departmentSuggestions, setDepartmentSuggestions] = useState([]);
     const [teamSuggestions, setTeamSuggestions] = useState([]);
     const [chiNhanhOptions, setChiNhanhOptions] = useState([]);
@@ -42,16 +43,18 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
         (async () => {
             try {
                 const [usersRes, whRes] = await Promise.all([
-                    supabase.from('app_users').select('name, department, team, chi_nhanh, nguoi_quan_ly'),
+                    supabase.from('app_users').select('name, role, department, team, chi_nhanh, nguoi_quan_ly'),
                     supabase.from('warehouses').select('branch_office'),
                 ]);
                 if (cancelled) return;
                 const dep = new Set();
+                const positions = new Set();
                 const teams = new Set();
                 const chiNhanh = new Set(collectUniqueMultiValues(usersRes.data, 'chi_nhanh'));
                 const managers = new Set(collectUniqueMultiValues(usersRes.data, 'nguoi_quan_ly'));
                 (usersRes.data || []).forEach((u) => {
                     if (u.department?.trim()) dep.add(u.department.trim());
+                    if (u.role?.trim()) positions.add(u.role.trim());
                     if (u.team?.trim()) teams.add(u.team.trim());
                     if (u.name?.trim()) managers.add(u.name.trim());
                 });
@@ -59,6 +62,7 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                     if (w.branch_office?.trim()) chiNhanh.add(w.branch_office.trim());
                 });
                 const sortVi = (a, b) => a.localeCompare(b, 'vi', { sensitivity: 'base' });
+                setPositionSuggestions([...positions].sort(sortVi));
                 setDepartmentSuggestions([...dep].sort(sortVi));
                 setTeamSuggestions([...teams].sort(sortVi));
                 setChiNhanhOptions([...chiNhanh].sort(sortVi));
@@ -113,7 +117,7 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
         e.preventDefault();
         setErrorMsg('');
 
-        if (!formData.name.trim() || !formData.username.trim() || !formData.phone.trim()) {
+        if (!formData.name.trim() || !formData.username.trim() || !formData.phone.trim() || !formData.role.trim()) {
             setErrorMsg('Vui lòng điền đầy đủ các thông tin bắt buộc (*)');
             return;
         }
@@ -153,7 +157,7 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
             const payload = {
                 name: formData.name.trim(),
                 username: formData.username.trim(),
-                role: formData.role,
+                role: formData.role.trim(),
                 phone: formData.phone.trim(),
                 team: formData.team.trim(),
                 department: formData.department.trim(),
@@ -342,23 +346,17 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                             <div className="space-y-4">
                                 <div className="space-y-1.5">
                                     <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
-                                        Vai trò hệ thống <span className="text-rose-500">*</span>
+                                        Vị trí <span className="text-rose-500">*</span>
                                     </label>
-                                    <div className="relative">
-                                        <select
-                                            name="role"
-                                            value={formData.role}
-                                            onChange={handleChange}
-                                            className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-800 appearance-none transition-all focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white"
-                                        >
-                                            {USER_ROLES.map(role => (
-                                                <option key={role.id} value={role.id}>{role.label}</option>
-                                            ))}
-                                        </select>
-                                        <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-primary/70">
-                                            <ChevronDown className="w-4 h-4" />
-                                        </div>
-                                    </div>
+                                    <Combobox
+                                        options={positionSuggestions}
+                                        value={formData.role}
+                                        onChange={(v) => setFormData((prev) => ({ ...prev, role: v }))}
+                                        placeholder="Chọn vị trí hoặc gõ mới..."
+                                        createLabel={(text) => `+ Thêm vị trí: "${text}"`}
+                                        emptyMessage="Gõ tên vị trí mới ở trên, chọn dòng «Thêm vị trí»."
+                                        className="!h-12 rounded-2xl text-[15px] font-semibold bg-slate-50 border-slate-200"
+                                    />
                                 </div>
 
                                 <div className="space-y-1.5">

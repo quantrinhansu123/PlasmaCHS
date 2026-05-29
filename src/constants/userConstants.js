@@ -23,7 +23,7 @@ export const TABLE_COLUMNS = [
     { key: 'department', label: 'Phòng ban' },
     { key: 'chi_nhanh', label: 'Chi nhánh' },
     { key: 'nguoi_quan_ly', label: 'Người quản lý' },
-    { key: 'role', label: 'Vai trò / Công việc' },
+    { key: 'role', label: 'Vị trí' },
     { key: 'password', label: 'Mật khâu' },
     { key: 'status', label: 'Trạng thái' },
 ];

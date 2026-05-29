@@ -7,6 +7,14 @@ export const PERMISSION_GROUPS = [
     { id: 'warehouse', label: 'Quản lý kho & hàng hóa' },
 ];
 
+/** Đường dẫn wildcard theo nhóm phân hệ (hiển thị ma trận quyền) */
+export const PERMISSION_GROUP_PATHS = {
+    system: '/he-thong/*',
+    data: '/danh-muc/*',
+    delivery: '/giao-nhan/*',
+    warehouse: '/kho-hang/*',
+};
+
 export const MODULE_PERMISSIONS = [
     { id: 'users', label: 'Quản lý người dùng', path: '/nguoi-dung', group: 'system' },
     { id: 'permissions', label: 'Phân quyền chi tiết', path: '/phan-quyen', group: 'system' },
@@ -34,16 +42,32 @@ export const ACTION_TYPES = [
     { id: 'delete', label: 'Xóa', colorClass: 'text-rose-700 bg-rose-50 focus:ring-rose-500' },
 ];
 
+/** Ma trận /phan-quyen chỉ cấu hình quyền xem; thêm/sửa/xóa theo rule riêng từng màn. */
+export const PERMISSION_MATRIX_ACTIONS = ACTION_TYPES.filter((action) => action.id === 'view');
+
+export const createEmptyViewPermissions = () =>
+    MODULE_PERMISSIONS.reduce((acc, module) => {
+        acc[module.id] = { view: false };
+        return acc;
+    }, {});
+
+/** Chỉ giữ cờ view khi lưu/đọc ma trận phân quyền. */
+export const toViewOnlyPermissions = (permissions = {}) =>
+    MODULE_PERMISSIONS.reduce((acc, module) => {
+        acc[module.id] = { view: Boolean(permissions?.[module.id]?.view) };
+        return acc;
+    }, {});
+
 export const buildPermissionRows = () =>
     PERMISSION_GROUPS.map((group) => ({
         ...group,
-        items: MODULE_PERMISSIONS.filter((module) => module.group === group.id).flatMap((module) =>
-            ACTION_TYPES.map((action) => ({
-                key: `${module.id}:${action.id}`,
-                moduleId: module.id,
-                actionId: action.id,
-                title: `${action.label} — ${module.label}`,
-                description: module.path || module.id,
-            })),
-        ),
+        pathPattern: PERMISSION_GROUP_PATHS[group.id] || `/${group.id}/*`,
+        items: MODULE_PERMISSIONS.filter((module) => module.group === group.id).map((module) => ({
+            key: `${module.id}:view`,
+            moduleId: module.id,
+            actionId: 'view',
+            title: module.label,
+            path: module.path || `/${module.id}`,
+            description: module.path || module.id,
+        })),
     })).filter((group) => group.items.length > 0);
