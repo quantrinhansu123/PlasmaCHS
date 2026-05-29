@@ -30,7 +30,11 @@ import BarcodeScanner from '../components/Common/BarcodeScanner';
 import MachineHandoverPrintTemplate from '../components/MachineHandoverPrintTemplate';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
 import usePermissions from '../hooks/usePermissions';
-import { isWarehouseRole } from '../utils/accessControl';
+import { isThuKhoRole } from '../utils/accessControl';
+import {
+    canViewAllWarehouses,
+    filterWarehousesForCurrentUser,
+} from '../utils/orderWarehouseScope';
 import { supabase } from '../supabase/config';
 import { notificationService } from '../utils/notificationService';
 import { uploadFileToCloudinary } from '../utils/cloudinaryUpload';
@@ -240,11 +244,14 @@ const isCylinder = (item) => {
 };
 
 const InventoryTransfer = () => {
-    const { role, department } = usePermissions();
+    const { role, user, department } = usePermissions();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
     const [loading, setLoading] = useState(false);
+    /** Kho xuất — theo phân quyền (thủ kho: chỉ kho phụ trách) */
     const [warehouses, setWarehouses] = useState([]);
+    /** Kho nhận — Admin/Kế toán: tất cả; thủ kho vẫn chọn kho đích khi điều chuyển ra */
+    const [destinationWarehouses, setDestinationWarehouses] = useState([]);
     const [inventory, setInventory] = useState([]);
     const [serialOptionsByItemName, setSerialOptionsByItemName] = useState({});
     /** Máy/bình đã tải theo kho xuất — dùng xác thực mã trùng danh sách gợi ý */
@@ -307,16 +314,16 @@ const InventoryTransfer = () => {
         return {
             id: 'bbbg_transfer',
             created_at: new Date().toISOString(),
-            customer_name: warehouses.find(w => w.id === formData.to_warehouse_id)?.name || 'Kho Nhận',
+            customer_name: destinationWarehouses.find(w => w.id === formData.to_warehouse_id)?.name || 'Kho Nhận',
             recipient_name:
-                warehouses.find(w => w.id === formData.to_warehouse_id)?.manager_name?.trim() ||
-                `Thủ kho ${warehouses.find(w => w.id === formData.to_warehouse_id)?.name || 'nhận'}`,
+                destinationWarehouses.find(w => w.id === formData.to_warehouse_id)?.manager_name?.trim() ||
+                `Thủ kho ${destinationWarehouses.find(w => w.id === formData.to_warehouse_id)?.name || 'nhận'}`,
             recipient_address: 'Luân chuyển nội bộ',
             items: orderItems,
             product_type: orderItems[0]?.product_type,
             quantity: orderItems[0]?.quantity,
         };
-    }, [formData, warehouses, transferItems]);
+    }, [formData, destinationWarehouses, transferItems]);
 
     const handlePrintBBBG = () => {
         setPrintBBBG(true);
@@ -345,7 +352,7 @@ const InventoryTransfer = () => {
 
     useEffect(() => {
         fetchWarehouses();
-    }, []);
+    }, [role, user?.name, user?.username, user?.chi_nhanh, department]);
 
     useEffect(() => {
         if (formData.from_warehouse_id) {
@@ -361,19 +368,22 @@ const InventoryTransfer = () => {
     const fetchWarehouses = async () => {
         const { data } = await supabase
             .from('warehouses')
-            .select('id, name, code, manager_name')
+            .select('id, name, code, manager_name, branch_office, status')
             .eq('status', 'Đang hoạt động')
             .order('name');
-        if (data) {
-            setWarehouses(data);
 
-            if (isWarehouseRole(role) && department) {
-                const userWhCode = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-                const userWh = data.find(w => w.id === userWhCode);
-                if (userWh) {
-                    setFormData(prev => ({ ...prev, from_warehouse_id: userWh.id }));
-                }
-            }
+        const activeRows = data || [];
+        const ctx = { role, user, department };
+        const scopedSource = filterWarehousesForCurrentUser(activeRows, ctx);
+
+        setWarehouses(scopedSource);
+        setDestinationWarehouses(canViewAllWarehouses(role) ? activeRows : activeRows);
+
+        if (isThuKhoRole(role) && scopedSource.length === 1) {
+            setFormData((prev) => ({
+                ...prev,
+                from_warehouse_id: scopedSource[0].id,
+            }));
         }
     };
 
@@ -463,7 +473,7 @@ const InventoryTransfer = () => {
         }
     };
 
-    const warehouseOptions = useMemo(
+    const sourceWarehouseOptions = useMemo(
         () =>
             warehouses.map((w) => ({
                 value: w.id,
@@ -474,15 +484,28 @@ const InventoryTransfer = () => {
         [warehouses],
     );
 
+    const destinationWarehouseOptions = useMemo(
+        () =>
+            destinationWarehouses.map((w) => ({
+                value: w.id,
+                label: w.manager_name?.trim()
+                    ? `${w.name} · ${w.manager_name.trim()}`
+                    : w.name,
+            })),
+        [destinationWarehouses],
+    );
+
     const selectedFromWarehouse = useMemo(
         () => warehouses.find((w) => w.id === formData.from_warehouse_id),
         [warehouses, formData.from_warehouse_id],
     );
 
     const selectedToWarehouse = useMemo(
-        () => warehouses.find((w) => w.id === formData.to_warehouse_id),
-        [warehouses, formData.to_warehouse_id],
+        () => destinationWarehouses.find((w) => w.id === formData.to_warehouse_id),
+        [destinationWarehouses, formData.to_warehouse_id],
     );
+
+    const lockSourceWarehouseSelect = isThuKhoRole(role) && warehouses.length <= 1;
 
     const renderWarehouseRep = (warehouse, roleLabel) => (
         <div className="flex items-start gap-2 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 min-h-[44px]">
@@ -907,7 +930,7 @@ const InventoryTransfer = () => {
         setLoading(true);
         try {
             const transferCode = `TRF${Date.now().toString().slice(-6)}`;
-            const toName = warehouses.find(w => w.id === formData.to_warehouse_id)?.name;
+            const toName = destinationWarehouses.find(w => w.id === formData.to_warehouse_id)?.name;
             const fromName = warehouses.find(w => w.id === formData.from_warehouse_id)?.name;
             const currentUserName =
                 localStorage.getItem('user_name') ||
@@ -1013,12 +1036,16 @@ const InventoryTransfer = () => {
                                         <Warehouse className="w-4 h-4 text-primary/70" /> Kho xuất (Nguồn) <span className="text-red-500">*</span>
                                     </label>
                                     <SearchableSelect
-                                        options={warehouseOptions}
+                                        options={sourceWarehouseOptions}
                                         value={formData.from_warehouse_id}
                                         onValueChange={(val) => setFormData(prev => ({ ...prev, from_warehouse_id: val }))}
-                                        placeholder="Chọn kho xuất..."
+                                        placeholder={
+                                            warehouses.length === 0
+                                                ? 'Chưa có kho bạn phụ trách'
+                                                : 'Chọn kho xuất...'
+                                        }
                                         searchPlaceholder="Tìm kho hoặc thủ kho..."
-                                        disabled={isWarehouseRole(role) && department}
+                                        disabled={lockSourceWarehouseSelect || warehouses.length === 0}
                                     />
                                     {renderWarehouseRep(selectedFromWarehouse, 'Người đại diện kho xuất (thủ kho)')}
                                 </div>
@@ -1030,7 +1057,7 @@ const InventoryTransfer = () => {
                                         <Warehouse className="w-4 h-4 text-emerald-600" /> Kho nhận (Đích) <span className="text-red-500">*</span>
                                     </label>
                                     <SearchableSelect
-                                        options={warehouseOptions}
+                                        options={destinationWarehouseOptions}
                                         value={formData.to_warehouse_id}
                                         onValueChange={(val) => setFormData(prev => ({ ...prev, to_warehouse_id: val }))}
                                         placeholder="Chọn kho nhận..."

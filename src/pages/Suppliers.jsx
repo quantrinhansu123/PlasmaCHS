@@ -42,6 +42,7 @@ import ColumnPicker from '../components/ui/ColumnPicker';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 import { isAdminRole } from '../utils/accessControl';
+import { filterSuppliersListForUser } from '../utils/supplierVisibilityScope';
 
 ChartJS.register(
     CategoryScale,
@@ -115,8 +116,9 @@ const Suppliers = () => {
     const totalCount = defaultColOrder.length;
 
     useEffect(() => {
+        if (permissionsLoading) return;
         fetchSuppliers();
-    }, []);
+    }, [permissionsLoading, role, department, user?.id, user?.name]);
 
     useEffect(() => {
         // Reset to first page when search changes
@@ -163,7 +165,12 @@ const Suppliers = () => {
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
-            setSuppliers(data || []);
+            const scoped = await filterSuppliersListForUser(data || [], {
+                role,
+                user,
+                department,
+            });
+            setSuppliers(scoped);
             setSelectedIds([]); // Clear selection on refresh
         } catch (error) {
             console.error('Error fetching suppliers:', error);

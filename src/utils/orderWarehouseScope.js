@@ -69,14 +69,21 @@ const buildAllowedWarehouseKeys = (warehouses = []) => {
     return new Set(Array.from(allowedWarehouseValues).flatMap((key) => getWarehouseKeyVariants(key)));
 };
 
-/** Admin + Kế toán: xem toàn bộ danh sách kho */
+/**
+ * Quyền xem dữ liệu Kho & luân chuyển kho:
+ * 1. Thủ kho: full dữ liệu các kho có manager_name = user (kho mình phụ trách)
+ * 2. Kế toán: full tất cả kho
+ * 3. Admin: full tất cả kho
+ */
 export const hasFullWarehouseListVisibility = (role) => hasFullDataVisibility(role);
 
+export const canViewAllWarehouses = (role) => hasFullWarehouseListVisibility(role);
+
 /**
- * Danh sách kho (/kho/danh-sach):
+ * Danh sách kho user được phép thao tác/xem chi tiết.
  * - Admin / Kế toán: tất cả kho
- * - Thủ kho: chỉ kho có manager_name khớp tên user
- * - Nhân viên kho (không phải thủ kho): fallback theo department/chi nhánh
+ * - Thủ kho: chỉ kho có manager_name khớp tên user (không fallback department)
+ * - Nhân viên kho khác: fallback department/chi nhánh nếu không khớp manager
  */
 export function filterWarehousesForCurrentUser(warehouses = [], { role, user, department } = {}) {
     if (hasFullWarehouseListVisibility(role)) {
@@ -113,7 +120,11 @@ export function filterWarehousesForCurrentUser(warehouses = [], { role, user, de
     return scoped;
 }
 
-/** Phiếu điều chuyển: thủ kho chỉ thấy phiếu có kho xuất hoặc kho nhận thuộc kho mình quản lý */
+/**
+ * Phiếu điều chuyển / luân chuyển kho:
+ * - Admin / Kế toán: tất cả phiếu
+ * - Thủ kho: phiếu có kho xuất HOẶC kho nhận thuộc kho mình phụ trách (full luồng liên quan kho đó)
+ */
 export function filterTransfersForCurrentUser(transferRows = [], warehouses = [], { role, user, department } = {}) {
     if (hasFullWarehouseListVisibility(role)) {
         return transferRows || [];
@@ -159,16 +170,33 @@ export async function loadCustomerWarehouseMap(orders = []) {
     return customerWarehouseById;
 }
 
-const orderMatchesWarehouseScope = (order, customerWarehouseById, allowedKeys, { customerWarehouseOnly = false } = {}) => {
+const orderMatchesWarehouseScope = (
+    order,
+    customerWarehouseById,
+    allowedKeys,
+    { customerWarehouseOnly = false, orderWarehouseOnly = false } = {},
+) => {
     const customerWarehouse = customerWarehouseById[order.customer_id];
-    const sources = customerWarehouseOnly
-        ? [customerWarehouse]
-        : [customerWarehouse, order.warehouse, extractWarehouseFromNote(order.note)];
+    let sources;
+    if (orderWarehouseOnly) {
+        sources = [order.warehouse, extractWarehouseFromNote(order.note)];
+    } else if (customerWarehouseOnly) {
+        sources = [customerWarehouse];
+    } else {
+        sources = [customerWarehouse, order.warehouse, extractWarehouseFromNote(order.note)];
+    }
     const candidates = sources.flatMap((candidate) => getWarehouseKeyVariants(candidate));
     return candidates.some((candidateKey) => allowedKeys.has(candidateKey));
 };
 
-export async function scopeOrdersForWarehouseAccess(orders = [], { role, department, user, isAdmin = false } = {}) {
+/**
+ * @param {object} options
+ * @param {boolean} [options.matchOrderWarehouseFields] — ĐNXM/thủ kho: lọc theo cột Kho trên phiếu (order.warehouse, note), không chỉ kho KH
+ */
+export async function scopeOrdersForWarehouseAccess(
+    orders = [],
+    { role, department, user, isAdmin = false, matchOrderWarehouseFields = false } = {},
+) {
     const normalizedRole = normalizeRole(role);
     const isThuKhoRole = isThuKhoRoleHelper(role);
     const isWarehouseRole = isWarehouseRoleHelper(role);
@@ -205,10 +233,12 @@ export async function scopeOrdersForWarehouseAccess(orders = [], { role, departm
 
         if (scopedWarehouses.length > 0) {
             const allowedKeys = buildAllowedWarehouseKeys(scopedWarehouses);
+            const scopeMatchOptions = matchOrderWarehouseFields && isThuKhoRole
+                ? { orderWarehouseOnly: true }
+                : { customerWarehouseOnly: isThuKhoRole };
+
             scopedOrders = scopedOrders.filter((order) =>
-                orderMatchesWarehouseScope(order, customerWarehouseById, allowedKeys, {
-                    customerWarehouseOnly: isThuKhoRole,
-                })
+                orderMatchesWarehouseScope(order, customerWarehouseById, allowedKeys, scopeMatchOptions),
             );
         } else if (!isThuKhoRole && department) {
             const fallbackWarehouseCode = department.includes('-')

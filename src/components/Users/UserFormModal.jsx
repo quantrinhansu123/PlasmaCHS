@@ -1,6 +1,6 @@
 import { clsx } from 'clsx';
 import { Briefcase, Building2, CheckCircle2, ChevronDown, Phone, ShieldCheck, UserCircle, X } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import bcrypt from 'bcryptjs';
 import { USER_STATUSES } from '../../constants/userConstants';
@@ -34,7 +34,7 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
     const [departmentSuggestions, setDepartmentSuggestions] = useState([]);
     const [teamSuggestions, setTeamSuggestions] = useState([]);
     const [chiNhanhOptions, setChiNhanhOptions] = useState([]);
-    const [managerOptions, setManagerOptions] = useState([]);
+    const [usersRoster, setUsersRoster] = useState([]);
     const [selectedChiNhanh, setSelectedChiNhanh] = useState([]);
     const [selectedManagers, setSelectedManagers] = useState([]);
 
@@ -51,12 +51,16 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                 const positions = new Set();
                 const teams = new Set();
                 const chiNhanh = new Set(collectUniqueMultiValues(usersRes.data, 'chi_nhanh'));
-                const managers = new Set(collectUniqueMultiValues(usersRes.data, 'nguoi_quan_ly'));
+                const roster = (usersRes.data || [])
+                    .filter((u) => u.name?.trim())
+                    .map((u) => ({
+                        name: u.name.trim(),
+                        team: (u.team || '').trim(),
+                    }));
                 (usersRes.data || []).forEach((u) => {
                     if (u.department?.trim()) dep.add(u.department.trim());
                     if (u.role?.trim()) positions.add(u.role.trim());
                     if (u.team?.trim()) teams.add(u.team.trim());
-                    if (u.name?.trim()) managers.add(u.name.trim());
                 });
                 (whRes.data || []).forEach((w) => {
                     if (w.branch_office?.trim()) chiNhanh.add(w.branch_office.trim());
@@ -66,7 +70,7 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                 setDepartmentSuggestions([...dep].sort(sortVi));
                 setTeamSuggestions([...teams].sort(sortVi));
                 setChiNhanhOptions([...chiNhanh].sort(sortVi));
-                setManagerOptions([...managers].sort(sortVi));
+                setUsersRoster(roster);
             } catch (e) {
                 console.error('Load department/team/chi_nhanh suggestions:', e);
             }
@@ -102,6 +106,30 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
             setSelectedManagers([]);
         }
     }, [user, isEdit]);
+
+    const managerOptions = useMemo(() => {
+        const team = formData.team.trim();
+        if (!team) return [];
+        const selfName = formData.name.trim();
+        return usersRoster
+            .filter((row) => row.team === team && row.name !== selfName)
+            .map((row) => row.name)
+            .sort((a, b) => a.localeCompare(b, 'vi', { sensitivity: 'base' }));
+    }, [usersRoster, formData.team, formData.name]);
+
+    useEffect(() => {
+        const team = formData.team.trim();
+        if (!team) {
+            setSelectedManagers([]);
+            return;
+        }
+        if (usersRoster.length === 0) return;
+        setSelectedManagers((prev) =>
+            prev.filter((name) =>
+                usersRoster.some((row) => row.team === team && row.name === name)
+            )
+        );
+    }, [formData.team, usersRoster]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -412,13 +440,19 @@ export default function UserFormModal({ user, onClose, onSuccess }) {
                                         Người quản lý
                                     </label>
                                     <CheckboxSearchList
-                                        options={managerOptions.filter(
-                                            (name) => name !== formData.name.trim()
-                                        )}
+                                        options={managerOptions}
                                         selected={selectedManagers}
                                         onChange={setSelectedManagers}
-                                        placeholder="Tìm người quản lý..."
-                                        emptyMessage="Chưa có gợi ý — chọn từ danh sách nhân sự."
+                                        placeholder={
+                                            formData.team.trim()
+                                                ? 'Tìm người quản lý cùng team...'
+                                                : 'Chọn Team trước...'
+                                        }
+                                        emptyMessage={
+                                            formData.team.trim()
+                                                ? 'Không có nhân sự khác trong team này.'
+                                                : 'Nhập/chọn Team trước để hiện người quản lý cùng team.'
+                                        }
                                         allowCustom={false}
                                     />
                                 </div>

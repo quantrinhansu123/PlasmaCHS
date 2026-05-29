@@ -15,9 +15,17 @@ import {
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
+import usePermissions from '../../hooks/usePermissions';
 import { supabase } from '../../supabase/config';
+import {
+    filterGoodsIssuesForSupplierScope,
+    filterGoodsReceiptsForSupplierScope,
+    filterSupplierTransactionsByCreator,
+    getSupplierVisibilityScope,
+} from '../../utils/supplierVisibilityScope';
 
 export default function SupplierDetailsModal({ supplier, onClose }) {
+    const { role, user, department, hasFullDataVisibility } = usePermissions();
     const [activeTab, setActiveTab] = useState('overview'); // overview, receipts, transactions
     const [loading, setLoading] = useState(true);
     const [isClosing, setIsClosing] = useState(false);
@@ -82,18 +90,26 @@ export default function SupplierDetailsModal({ supplier, onClose }) {
 
             if (err2) throw err2;
 
-            setReceipts(receiptsData || []);
-            setIssues(issuesData || []);
-            setTransactions(txData || []);
+            const scope = await getSupplierVisibilityScope({ role, user, department });
+            const scopedReceipts = filterGoodsReceiptsForSupplierScope(receiptsData || [], scope);
+            const scopedIssues = filterGoodsIssuesForSupplierScope(issuesData || [], scope);
+            const scopedTransactions = filterSupplierTransactionsByCreator(txData || [], {
+                role,
+                user,
+            });
 
-            // 4. Tính toán công nợ
-            const validReceipts = (receiptsData || []).filter(r => r.status === 'DA_NHAP' || r.status === 'HOAN_THANH');
+            setReceipts(scopedReceipts);
+            setIssues(scopedIssues);
+            setTransactions(scopedTransactions);
+
+            // 4. Tính toán công nợ (theo phạm vi được xem)
+            const validReceipts = scopedReceipts.filter(r => r.status === 'DA_NHAP' || r.status === 'HOAN_THANH');
             const totalImport = validReceipts.reduce((sum, r) => sum + (Number(r.total_amount) || 0), 0);
 
             let totalPaid = 0;
             let totalRefund = 0; // Tương lai nếu NCC hoàn tiền
 
-            (txData || []).forEach(tx => {
+            scopedTransactions.forEach(tx => {
                 const amt = Number(tx.amount) || 0;
                 if (tx.transaction_type === 'CHI') totalPaid += amt;
                 else if (tx.transaction_type === 'THU') totalRefund += amt;
@@ -148,7 +164,7 @@ export default function SupplierDetailsModal({ supplier, onClose }) {
                 transaction_date: paymentDate,
                 payment_method: paymentMethod,
                 note: paymentNote,
-                created_by: 'Kế toán'
+                created_by: user?.name || localStorage.getItem('user_name') || sessionStorage.getItem('user_name') || 'Hệ thống',
             };
 
             const { error } = await supabase.from('supplier_transactions').insert([payload]);
@@ -304,14 +320,14 @@ export default function SupplierDetailsModal({ supplier, onClose }) {
                                     </div>
 
                                     <div className="pt-4 border-t border-slate-200/60">
-                                        {!showPaymentForm ? (
+                                        {hasFullDataVisibility && !showPaymentForm ? (
                                             <button
                                                 onClick={() => setShowPaymentForm(true)}
                                                 className="px-8 py-4 bg-slate-900 text-white rounded-2xl font-black text-[13px] uppercase tracking-widest shadow-xl shadow-slate-200 hover:bg-primary transition-all flex items-center gap-3"
                                             >
                                                 <CreditCard className="w-4 h-4" /> Lập phiếu chi trả nợ
                                             </button>
-                                        ) : (
+                                        ) : hasFullDataVisibility && showPaymentForm ? (
                                             <div className="bg-white border border-primary/20 rounded-[2.5rem] p-8 shadow-xl animate-in slide-in-from-top-4 duration-300">
                                                 <div className="flex items-center justify-between mb-8">
                                                     <h3 className="text-lg font-black text-slate-900 tracking-tight flex items-center gap-3">
@@ -379,7 +395,7 @@ export default function SupplierDetailsModal({ supplier, onClose }) {
                                                     </div>
                                                 </form>
                                             </div>
-                                        )}
+                                        ) : null}
                                     </div>
                                 </div>
                             )}

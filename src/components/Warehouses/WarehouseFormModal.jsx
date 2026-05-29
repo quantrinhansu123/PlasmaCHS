@@ -1,9 +1,10 @@
-import { Activity, Building2, MapPin, Save, User, Warehouse, X } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { Activity, Building2, ChevronDown, MapPin, Save, User, Warehouse, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import { WAREHOUSE_STATUSES } from '../../constants/warehouseConstants';
 import { supabase } from '../../supabase/config';
+import { filterWarehouseKeeperUsers } from '../../utils/warehouseKeeperUsers';
 
 export default function WarehouseFormModal({ warehouse, onClose, onSuccess }) {
     const isEdit = !!warehouse;
@@ -21,6 +22,45 @@ export default function WarehouseFormModal({ warehouse, onClose, onSuccess }) {
     };
 
     const [formData, setFormData] = useState(defaultState);
+    const [keeperUsers, setKeeperUsers] = useState([]);
+    const [keepersLoading, setKeepersLoading] = useState(true);
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            setKeepersLoading(true);
+            try {
+                const { data, error } = await supabase
+                    .from('app_users')
+                    .select('id, name, username, department, role, status')
+                    .order('name');
+                if (error) throw error;
+                if (!cancelled) {
+                    setKeeperUsers(filterWarehouseKeeperUsers(data));
+                }
+            } catch (err) {
+                console.error('Load warehouse keepers:', err);
+                if (!cancelled) setKeeperUsers([]);
+            } finally {
+                if (!cancelled) setKeepersLoading(false);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    const keeperSelectOptions = useMemo(() => {
+        const options = keeperUsers.map((user) => ({
+            value: user.name.trim(),
+            label: user.role ? `${user.name} — ${user.role}` : user.name,
+        }));
+        const current = formData.manager_name?.trim();
+        if (current && !options.some((opt) => opt.value === current)) {
+            options.unshift({ value: current, label: `${current} (hiện tại)` });
+        }
+        return options;
+    }, [keeperUsers, formData.manager_name]);
 
     useEffect(() => {
         if (isEdit) {
@@ -166,15 +206,33 @@ export default function WarehouseFormModal({ warehouse, onClose, onSuccess }) {
                                     <User className="w-4 h-4 text-primary/60" />
                                     Thủ kho phụ trách <span className="text-red-500">*</span>
                                 </label>
-                                <input
-                                    type="text"
-                                    name="manager_name"
-                                    value={formData.manager_name}
-                                    onChange={handleChange}
-                                    placeholder="Tên nhân sự quản lý trực tiếp"
-                                    className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-semibold text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white transition-all"
-                                    required
-                                />
+                                <div className="relative">
+                                    <select
+                                        name="manager_name"
+                                        value={formData.manager_name}
+                                        onChange={handleChange}
+                                        disabled={keepersLoading}
+                                        className="w-full h-12 appearance-none cursor-pointer rounded-2xl border border-slate-200 bg-slate-50 px-4 pr-10 text-[15px] font-semibold text-slate-800 transition-all focus:border-primary/40 focus:bg-white focus:outline-none focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                                        required
+                                    >
+                                        <option value="">
+                                            {keepersLoading
+                                                ? 'Đang tải nhân sự kho...'
+                                                : keeperSelectOptions.length === 0
+                                                  ? 'Chưa có user bộ phận Kho'
+                                                  : 'Chọn thủ kho phụ trách...'}
+                                        </option>
+                                        {keeperSelectOptions.map((opt) => (
+                                            <option key={opt.value} value={opt.value}>
+                                                {opt.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-primary/70" />
+                                </div>
+                                <p className="text-[11px] font-medium text-slate-500">
+                                    Chỉ hiển thị user có phòng ban «Kho» trong module Người dùng.
+                                </p>
                             </div>
 
                             <div className="space-y-1.5">

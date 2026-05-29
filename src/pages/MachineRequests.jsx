@@ -45,7 +45,7 @@ import { deleteOrdersWithRollback } from '../utils/deleteOrderCascade';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import usePermissions from '../hooks/usePermissions';
-import { isAdminRole } from '../utils/accessControl';
+import { isAdminRole, isThuKhoRole } from '../utils/accessControl';
 import { scopeOrdersForWarehouseAccess } from '../utils/orderWarehouseScope';
 import {
     appendOrderedByScope,
@@ -280,6 +280,7 @@ export default function MachineRequests() {
                 department,
                 user,
                 isAdmin: isAdminRole(role),
+                matchOrderWarehouseFields: isThuKhoRole(role),
             });
 
             setRequests(scopedOrders);
