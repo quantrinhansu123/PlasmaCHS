@@ -10,7 +10,8 @@ import {
     ChevronRight,
     Calendar,
     ArrowRightLeft,
-    Box
+    Box,
+    Warehouse
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -23,6 +24,7 @@ import {
     fetchOrderItemsForMachineSerialVariants,
     isOrderDeliveredCompleted,
     resolveOrderCustomerDisplay,
+    resolveOrderWarehouseForMachine,
 } from '../../utils/machineCustomerFromOrders';
 
 function escapeIlikePattern(text) {
@@ -51,6 +53,11 @@ function isMachineProductLine(productType) {
 export default function MachineDetailsModal({ machine, onClose }) {
     const [loading, setLoading] = useState(true);
     const [usingCustomerLabel, setUsingCustomerLabel] = useState(() => String(machine?.customer_name || '').trim() || '—');
+    const [customersById, setCustomersById] = useState({});
+    const [customerWarehouseById, setCustomerWarehouseById] = useState({});
+    const [usingWarehouseLabel, setUsingWarehouseLabel] = useState('—');
+    const [customerWarehouseLabel, setCustomerWarehouseLabel] = useState('—');
+    const [warehouseNameByKey, setWarehouseNameByKey] = useState({});
     /** Đơn hoàn thành dùng để suy ra khách — hiện mã đơn cho rõ có biên bản. */
     const [usingCustomerOrderCode, setUsingCustomerOrderCode] = useState('');
     const [orders, setOrders] = useState([]);
@@ -131,19 +138,46 @@ export default function MachineDetailsModal({ machine, onClose }) {
             const customerIdsFromOrders = [
                 ...new Set((ordersData || []).map((o) => o.customer_id).filter(Boolean)),
             ];
-            /** @type {Record<string, { name?: string | null }>} */
-            let customersById = {};
+            /** @type {Record<string, { name?: string | null; warehouse_id?: string | null }>} */
+            let customersByIdLocal = {};
+            /** @type {Record<string, string>} */
+            let customerWarehouseByIdLocal = {};
             if (customerIdsFromOrders.length > 0) {
                 const { data: custRows } = await supabase
                     .from('customers')
-                    .select('id, name')
+                    .select('id, name, warehouse_id')
                     .in('id', customerIdsFromOrders);
                 (custRows || []).forEach((c) => {
-                    if (c?.id) customersById[c.id] = c;
+                    if (c?.id) {
+                        customersByIdLocal[c.id] = c;
+                        if (c.warehouse_id) {
+                            customerWarehouseByIdLocal[c.id] = String(c.warehouse_id).trim();
+                        }
+                    }
                 });
             }
+            setCustomersById(customersByIdLocal);
+            setCustomerWarehouseById(customerWarehouseByIdLocal);
+
+            const { data: whRows } = await supabase.from('warehouses').select('id, code, name');
+            const whNameMap = {};
+            (whRows || []).forEach((w) => {
+                if (w.code) whNameMap[String(w.code).trim()] = w.name || w.code;
+                if (w.id) whNameMap[String(w.id).trim()] = w.name || w.code;
+                if (w.name) whNameMap[String(w.name).trim()] = w.name;
+            });
+            setWarehouseNameByKey(whNameMap);
+
+            const warehouseLabelFromCode = (code) => {
+                const key = String(code || '').trim();
+                if (!key) return '—';
+                return whNameMap[key] || key;
+            };
 
             let custLabel = '';
+            let warehouseCode = String(machine.warehouse || '').trim();
+            /** @type {Record<string, unknown> | null | undefined} */
+            let displayOrder = null;
             setUsingCustomerOrderCode('');
 
             if (serial) {
@@ -163,16 +197,32 @@ export default function MachineDetailsModal({ machine, onClose }) {
                 const hoanMatched = (ordersData || [])
                     .filter((o) => isOrderDeliveredCompleted(o.status) && machineItemOrderIds.has(o.id))
                     .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-                custLabel = resolveOrderCustomerDisplay(hoanMatched[0], customersById);
-                let sourceOrderCode = hoanMatched[0]?.order_code ? String(hoanMatched[0].order_code) : '';
+                const sourceOrder = hoanMatched[0];
+                displayOrder = sourceOrder;
+                custLabel = resolveOrderCustomerDisplay(sourceOrder, customersByIdLocal);
+                warehouseCode =
+                    resolveOrderWarehouseForMachine(sourceOrder, customerWarehouseByIdLocal) ||
+                    warehouseCode;
+                let sourceOrderCode = sourceOrder?.order_code ? String(sourceOrder.order_code) : '';
 
-                if (!custLabel) {
+                if (!custLabel || !warehouseCode) {
                     const hoanRelated = (ordersData || [])
                         .filter((o) => isOrderDeliveredCompleted(o.status))
                         .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-                    custLabel = resolveOrderCustomerDisplay(hoanRelated[0], customersById);
-                    if (!sourceOrderCode && hoanRelated[0]?.order_code) {
-                        sourceOrderCode = String(hoanRelated[0].order_code);
+                    const fallbackOrder = hoanRelated[0];
+                    if (!displayOrder) displayOrder = fallbackOrder;
+                    if (!custLabel) {
+                        custLabel = resolveOrderCustomerDisplay(fallbackOrder, customersByIdLocal);
+                    }
+                    if (!warehouseCode) {
+                        warehouseCode =
+                            resolveOrderWarehouseForMachine(
+                                fallbackOrder,
+                                customerWarehouseByIdLocal,
+                            ) || warehouseCode;
+                    }
+                    if (!sourceOrderCode && fallbackOrder?.order_code) {
+                        sourceOrderCode = String(fallbackOrder.order_code);
                     }
                 }
 
@@ -182,10 +232,26 @@ export default function MachineDetailsModal({ machine, onClose }) {
             if (!custLabel) custLabel = String(machine.customer_name || '').trim();
 
             setUsingCustomerLabel(custLabel || '—');
+            setUsingWarehouseLabel(warehouseLabelFromCode(warehouseCode));
+
+            let customerWhCode = '';
+            if (displayOrder?.customer_id && customerWarehouseByIdLocal[displayOrder.customer_id]) {
+                customerWhCode = customerWarehouseByIdLocal[displayOrder.customer_id];
+            } else if (custLabel) {
+                const { data: byName } = await supabase
+                    .from('customers')
+                    .select('warehouse_id')
+                    .eq('name', custLabel)
+                    .maybeSingle();
+                customerWhCode = String(byName?.warehouse_id || '').trim();
+            }
+            setCustomerWarehouseLabel(warehouseLabelFromCode(customerWhCode));
         } catch (error) {
             console.error('Error fetching machine history:', error);
             setUsingCustomerOrderCode('');
             setUsingCustomerLabel(String(machine?.customer_name || '').trim() || '—');
+            setUsingWarehouseLabel('—');
+            setCustomerWarehouseLabel('—');
         } finally {
             setLoading(false);
         }
@@ -287,7 +353,7 @@ export default function MachineDetailsModal({ machine, onClose }) {
                         </div>
                         <div className="min-w-0 flex-1">
                             <p className="text-[11px] font-black text-sky-800 uppercase tracking-widest mb-2">
-                                Khách hàng đang sử dụng máy
+                                Cơ sở đang sử dụng máy
                             </p>
                             <p className={clsx(
                                 'text-[18px] font-black leading-snug break-words tracking-tight',
@@ -295,6 +361,24 @@ export default function MachineDetailsModal({ machine, onClose }) {
                             )}>
                                 {usingCustomerLabel}
                             </p>
+                            {customerWarehouseLabel && customerWarehouseLabel !== '—' ? (
+                                <p className="text-[13px] font-semibold text-slate-700 mt-2 flex items-center gap-2">
+                                    <Warehouse size={14} className="text-emerald-600 shrink-0" />
+                                    <span>
+                                        Kho phụ trách KH:{' '}
+                                        <span className="font-bold text-slate-900">{customerWarehouseLabel}</span>
+                                    </span>
+                                </p>
+                            ) : null}
+                            {usingWarehouseLabel && usingWarehouseLabel !== '—' ? (
+                                <p className="text-[13px] font-semibold text-slate-700 mt-2 flex items-center gap-2">
+                                    <Warehouse size={14} className="text-indigo-500 shrink-0" />
+                                    <span>
+                                        Kho quản lý máy:{' '}
+                                        <span className="font-bold text-slate-900">{usingWarehouseLabel}</span>
+                                    </span>
+                                </p>
+                            ) : null}
                             {usingCustomerOrderCode ? (
                                 <p className="text-[13px] font-semibold text-slate-700 mt-2">
                                     Theo đơn:{' '}
@@ -367,7 +451,7 @@ export default function MachineDetailsModal({ machine, onClose }) {
                                                             <MapPin size={12} className="text-indigo-400" />
                                                             Khách hàng & Loại đơn
                                                         </div>
-                                                        <p className="font-black text-[14px] text-slate-800 leading-tight">{o.customer_name || o.recipient_name || '—'}</p>
+                                                        <p className="font-black text-[14px] text-slate-800 leading-tight">{resolveOrderCustomerDisplay(o, customersById) || '—'}</p>
                                                     </div>
                                                     <div className="bg-slate-50/80 border border-slate-100 rounded-xl p-3">
                                                         <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">

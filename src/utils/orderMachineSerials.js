@@ -3,11 +3,17 @@
  * Không chỉ dựa orders.department vì đơn đa dòng có serial trong order_items và checklist MAY:...
  */
 
-/** Khách hiển thị trên máy/bình: ưu tiên customer_name đơn, fallback người nhận */
+import { isDnxmOrder } from './machineCustomerFromOrders';
+
+/** Tên cơ sở gắn máy/bình từ đơn (không ưu tiên người đại diện trên ĐNXM). */
 export function resolvedOrderCustomerAssetName(order) {
-    const a = String(order?.customer_name || '').trim();
-    const b = String(order?.recipient_name || '').trim();
-    return a || b || null;
+    if (!order) return null;
+    if (isDnxmOrder(order)) {
+        const facility = String(order.recipient_name || order.customer_name || '').trim();
+        return facility || null;
+    }
+    const facility = String(order.customer_name || order.recipient_name || '').trim();
+    return facility || null;
 }
 
 /** Tên cơ sở / phòng trên đơn — không dùng orders.department khi đó là danh sách mã máy (ĐNXM). */

@@ -32,12 +32,13 @@ import {
 } from '../utils/cloudinaryUpload';
 import RecoveryDeliveryConfirmModal from '../components/CylinderRecovery/RecoveryDeliveryConfirmModal';
 import { tryQuickCompleteRecovery } from '../utils/cylinderRecoveryCompletion';
-
-/** Chỉ các đơn này còn được mở modal «Xác nhận giao hàng». */
-const ORDER_STATUSES_NEED_DELIVERY_CONFIRM = ['CHO_GIAO_HANG', 'DANG_GIAO_HANG'];
-
-/** Luồng giao/trả/đối soát còn cần thao tác — không hiển thị đơn HOAN_THANH trên màn nhiệm vụ giao. */
-const ORDER_STATUSES_PIPELINE_NO_SUCCESS_PREFIX = ['CHO_GIAO_HANG', 'DANG_GIAO_HANG', 'CHO_DOI_SOAT', 'DOI_SOAT_THAT_BAI', 'TRA_HANG'];
+import {
+    canOpenShippingDeliveryConfirm,
+    deliveryUnitMatchesShipper,
+    isShippingPipelineOrderStatus,
+    isTerminalShippingOrderStatus,
+    ORDER_STATUSES_SHIPPING_PIPELINE,
+} from '../utils/shippingTaskStatus';
 
 const isTransferHandoverCompleted = (tr) =>
     Boolean(tr?.handover_image_url) ||
@@ -54,7 +55,7 @@ const ShippingTasks = () => {
     const [searchParams, setSearchParams] = useSearchParams();
     const focusOrderId = searchParams.get('focusOrderId');
     const focusTransferId = searchParams.get('focusTransferId');
-    const { role } = usePermissions();
+    const { role, loading: permissionsLoading } = usePermissions();
     const [orders, setOrders] = useState([]);
     const [transferTasks, setTransferTasks] = useState([]);
     const [recoveryTasks, setRecoveryTasks] = useState([]);
@@ -87,8 +88,9 @@ const ShippingTasks = () => {
     const [handoverProofBase64, setHandoverProofBase64] = useState('');
     const [isSubmittingTransferHandover, setIsSubmittingTransferHandover] = useState(false);
     useEffect(() => {
+        if (permissionsLoading) return;
         fetchShippingTasks();
-    }, [role]);
+    }, [role, permissionsLoading]);
 
     const fetchShippingTasks = async () => {
         setIsLoading(true);
@@ -100,20 +102,23 @@ const ShippingTasks = () => {
             const shipperOnly = isShipperRole(role) && !isAdminRole(role);
 
             const shipperKey = String(storageUserName || '').trim();
-            /** Chỉ đơn còn trong luồng giao — không tải HOAN_THANH vào nhiệm vụ giao. */
-            let orderQuery = supabase.from('orders').select('*');
-            if (shipperOnly) {
-                orderQuery = orderQuery
-                    .in('status', ORDER_STATUSES_PIPELINE_NO_SUCCESS_PREFIX)
-                    .eq('delivery_unit', shipperKey || '__NO_SHIPPER_NAME__');
-            } else {
-                orderQuery = orderQuery.in('status', ORDER_STATUSES_PIPELINE_NO_SUCCESS_PREFIX);
-            }
-            orderQuery = orderQuery.order('created_at', { ascending: false });
+            let orderQuery = supabase
+                .from('orders')
+                .select('*')
+                .in('status', ORDER_STATUSES_SHIPPING_PIPELINE)
+                .order('created_at', { ascending: false });
             const { data: orderData, error: orderError } = await orderQuery;
             if (orderError) throw orderError;
 
-            setOrders(orderData || []);
+            let pipelineOrders = (orderData || []).filter((o) =>
+                isShippingPipelineOrderStatus(o.status),
+            );
+            if (shipperOnly) {
+                pipelineOrders = pipelineOrders.filter((o) =>
+                    deliveryUnitMatchesShipper(o.delivery_unit, shipperKey),
+                );
+            }
+            setOrders(pipelineOrders);
 
             // Also load inventory transfer requests so "Luân chuyển" shows up in Vận chuyển.
             let recoveryQuery = supabase
@@ -341,7 +346,7 @@ const ShippingTasks = () => {
                 return;
             }
             if (task.kind === 'ORDER') {
-                if (!ORDER_STATUSES_NEED_DELIVERY_CONFIRM.includes(task.row.status)) {
+                if (!canOpenShippingDeliveryConfirm(task.row.status)) {
                     toast.info('Đơn không còn ở bước xác nhận giao trên màn nhiệm vụ.');
                     return;
                 }
@@ -415,7 +420,7 @@ const ShippingTasks = () => {
         );
         if (order) {
             setActiveView('list');
-            if (ORDER_STATUSES_NEED_DELIVERY_CONFIRM.includes(order.status)) {
+            if (canOpenShippingDeliveryConfirm(order.status)) {
                 void openDeliveryConfirmModal(order);
             } else {
                 toast.info(
@@ -622,7 +627,7 @@ const ShippingTasks = () => {
 
     const q = searchTerm.toLowerCase();
     const filteredOrders = orders.filter((order) => {
-        if (order.status === 'HOAN_THANH') return false;
+        if (isTerminalShippingOrderStatus(order.status)) return false;
         return (
             !searchTerm ||
             order.order_code?.toLowerCase().includes(q) ||
@@ -888,7 +893,7 @@ const ShippingTasks = () => {
                         <a href={`tel:${order.recipient_phone}`} className="text-[11px] text-primary font-bold hover:underline">{order.recipient_phone}</a>
                     ) : null}
                     <p className="text-[10px] text-slate-500">{order.product_type || '—'} — SL: {order.quantity ?? '—'}</p>
-                    {ORDER_STATUSES_NEED_DELIVERY_CONFIRM.includes(order.status) ? (
+                    {canOpenShippingDeliveryConfirm(order.status) ? (
                         <button type="button" className={clsx(giaoHangActionBtnCls, 'w-full py-2 text-[10px]')} onClick={() => openGiaoHangTask(it)}>
                             Giao hàng
                         </button>
@@ -1178,7 +1183,7 @@ const ShippingTasks = () => {
                                                                     </div>
                                                                     <p className="text-[12px] font-bold text-slate-800 line-clamp-2">{order.recipient_name || order.customer_name}</p>
                                                                     <div className="flex flex-wrap items-stretch gap-1 pt-1.5 border-t border-slate-200/80">
-                                                                        {ORDER_STATUSES_NEED_DELIVERY_CONFIRM.includes(order.status) ? (
+                                                                        {canOpenShippingDeliveryConfirm(order.status) ? (
                                                                             <button type="button" className="flex-1 min-w-[100px] py-1.5 rounded-md bg-primary text-white text-[10px] font-bold shadow-sm active:opacity-90 !h-auto" onClick={() => openGiaoHangTask({ kind: 'ORDER', row: order })}>
                                                                                 Giao hàng
                                                                             </button>
@@ -1205,7 +1210,7 @@ const ShippingTasks = () => {
                                         acc[k].push(o);
                                         return acc;
                                     }, {});
-                                    const statusOrder = ORDER_STATUSES_PIPELINE_NO_SUCCESS_PREFIX;
+                                    const statusOrder = ORDER_STATUSES_SHIPPING_PIPELINE;
                                     const cols = statusOrder
                                         .filter((k) => byStatus[k]?.length)
                                         .concat(Object.keys(byStatus).filter((k) => !statusOrder.includes(k)));
@@ -1230,7 +1235,7 @@ const ShippingTasks = () => {
                                                                     </div>
                                                                     <p className="text-[12px] font-bold text-slate-800 line-clamp-2">{order.recipient_name || order.customer_name}</p>
                                                                     <div className="flex flex-wrap items-stretch gap-1 pt-1.5 border-t border-slate-200/80">
-                                                                        {ORDER_STATUSES_NEED_DELIVERY_CONFIRM.includes(order.status) ? (
+                                                                        {canOpenShippingDeliveryConfirm(order.status) ? (
                                                                             <button type="button" className="flex-1 min-w-[100px] py-1.5 rounded-md bg-primary text-white text-[10px] font-bold shadow-sm active:opacity-90 !h-auto" onClick={() => openGiaoHangTask({ kind: 'ORDER', row: order })}>
                                                                                 Giao hàng
                                                                             </button>
@@ -1272,7 +1277,7 @@ const ShippingTasks = () => {
                                                             </div>
                                                             <p className="text-[12px] font-bold text-slate-800 line-clamp-2">{order.recipient_name || order.customer_name}</p>
                                                             <div className="flex flex-wrap items-stretch gap-1 pt-1.5 border-t border-slate-200/80">
-                                                                {ORDER_STATUSES_NEED_DELIVERY_CONFIRM.includes(order.status) ? (
+                                                                {canOpenShippingDeliveryConfirm(order.status) ? (
                                                                     <button type="button" className="flex-1 min-w-[100px] py-1.5 rounded-md bg-primary text-white text-[10px] font-bold shadow-sm active:opacity-90 !h-auto" onClick={() => openGiaoHangTask({ kind: 'ORDER', row: order })}>
                                                                         Giao hàng
                                                                     </button>

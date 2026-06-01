@@ -37,6 +37,14 @@ import { supabase } from '../supabase/config';
 import { isAdminRole, isWarehouseRole } from '../utils/accessControl';
 import { filterTransfersForCurrentUser } from '../utils/orderWarehouseScope';
 import { persistTransferHandover } from '../utils/persistTransferHandover';
+import {
+    collectSerialQueryVariants,
+    cylinderBelongsToWarehouse,
+    indexSerialRecords,
+    machineBelongsToWarehouse,
+    resolveDbRecord,
+    resolveWarehouseRow,
+} from '../utils/transferWarehouseMatch';
 
 const PAGE_SIZE = 30;
 const DEFAULT_COLUMN_ORDER = ['code', 'status', 'transaction_type', 'from', 'to', 'items', 'qty', 'note', 'date'];
@@ -143,6 +151,7 @@ export default function TransferList() {
     const [searchParams, setSearchParams] = useSearchParams();
     const { role, user, department, loading: permissionsLoading } = usePermissions();
     const [records, setRecords] = useState([]);
+    const [warehousesList, setWarehousesList] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [activeView, setActiveView] = useState('list');
@@ -247,6 +256,8 @@ export default function TransferList() {
                 .from('warehouses')
                 .select('id, name, code, manager_name, branch_office');
             if (whError) throw whError;
+
+            setWarehousesList(warehouseRows || []);
 
             const scopedTransferRows = filterTransfersForCurrentUser(transferRows || [], warehouseRows || [], {
                 role,
@@ -561,6 +572,14 @@ export default function TransferList() {
             'Hệ thống';
 
         try {
+            let whList = warehousesList;
+            if (!whList?.length) {
+                const { data: whRows } = await supabase
+                    .from('warehouses')
+                    .select('id, name, code, manager_name, branch_office');
+                whList = whRows || [];
+            }
+
             for (const item of record.items || []) {
                 const itemType = item.itemType;
                 const itemName = item.itemName;
@@ -576,18 +595,37 @@ export default function TransferList() {
                     if (serializedCodes.length !== qty) {
                         throw new Error(`Mặt hàng "${itemName}" cần đúng ${qty} mã, hiện có ${serializedCodes.length} mã.`);
                     }
+                    const queryVariants = collectSerialQueryVariants(serializedCodes, itemType);
                     const { data: serialRows, error: serialCheckErr } = await supabase
                         .from(sourceTable)
                         .select(`id, serial_number, ${sourceWarehouseColumn}`)
-                        .in('serial_number', serializedCodes);
+                        .in('serial_number', queryVariants.length ? queryVariants : serializedCodes);
                     if (serialCheckErr) throw serialCheckErr;
 
+                    const serialMap = indexSerialRecords(serialRows, itemType);
                     const invalidCodes = serializedCodes.filter((code) => {
-                        const found = (serialRows || []).find((row) => row.serial_number === code);
-                        return !found || found[sourceWarehouseColumn] !== record.fromWarehouseId;
+                        const found = resolveDbRecord(serialMap, code, itemType);
+                        if (!found) return true;
+                        const storedWh = found[sourceWarehouseColumn];
+                        if (itemType === 'MAY') {
+                            return !machineBelongsToWarehouse(
+                                storedWh,
+                                record.fromWarehouseId,
+                                whList,
+                            );
+                        }
+                        return !cylinderBelongsToWarehouse(
+                            storedWh,
+                            record.fromWarehouseId,
+                            whList,
+                        );
                     });
                     if (invalidCodes.length > 0) {
-                        throw new Error(`Mã không nằm ở kho xuất: ${invalidCodes.join(', ')}`);
+                        const fromWh = resolveWarehouseRow(record.fromWarehouseId, whList);
+                        const fromLabel = fromWh?.name || fromWh?.code || record.fromWarehouseId;
+                        throw new Error(
+                            `Mã không nằm ở kho xuất (${fromLabel}): ${invalidCodes.join(', ')}`,
+                        );
                     }
                 }
 

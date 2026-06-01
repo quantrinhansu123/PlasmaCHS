@@ -689,8 +689,7 @@ const GoodsReceipts = () => {
                                 .update({
                                     status: 'sẵn sàng',
                                     warehouse: receipt.warehouse_id,
-                                    customer_id: null,
-                                    customer_name: null
+                                    customer_name: null,
                                 })
                                 .eq('id', existingMach.id);
                             if (machSyncError) throw new Error(`Không thể cập nhật máy ${normalizedSerial}: ${machSyncError.message}`);

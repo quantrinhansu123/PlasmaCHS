@@ -41,7 +41,9 @@ import {
     MACHINE_STATUSES_ENRICH_CUSTOMER_FROM_ORDERS,
     isOrderDeliveredCompleted,
     normalizeMachineSerialKey,
+    attachCustomerWarehousesToMachines,
     resolveOrderCustomerDisplay,
+    resolveOrderWarehouseForMachine,
 } from '../utils/machineCustomerFromOrders';
 import { isAdminRole } from '../utils/accessControl';
 import { supabase } from '../supabase/config';
@@ -92,7 +94,11 @@ async function enrichInUseMachineCustomersFromOrders(supabaseClient, machineRows
             MACHINE_STATUSES_ENRICH_CUSTOMER_FROM_ORDERS.has(m.status) &&
             String(m.serial_number || '').trim(),
     );
-    if (!targets.length) return rows;
+    let result = rows;
+
+    if (!targets.length) {
+        return attachCustomerWarehousesToMachines(supabaseClient, result);
+    }
 
     const variantSet = new Set();
     targets.forEach((m) => {
@@ -114,7 +120,7 @@ async function enrichInUseMachineCustomersFromOrders(supabaseClient, machineRows
             .in('serial_number', part);
         if (itemErr) {
             console.warn('[Machines] enrich customer (order_items):', itemErr);
-            return rows;
+            return attachCustomerWarehousesToMachines(supabaseClient, result);
         }
         allItems.push(...(itemChunk || []));
     }
@@ -122,8 +128,8 @@ async function enrichInUseMachineCustomersFromOrders(supabaseClient, machineRows
     const machineItems = allItems.filter((it) => isMachineProductLine(it?.product_type));
 
     const orderIds = [...new Set(machineItems.map((r) => r.order_id).filter(Boolean))];
-    if (!orderIds.length) return rows;
 
+    if (orderIds.length) {
     /** @type {Record<string, unknown>} */
     const orderMap = {};
     /** @type {Set<string>} */
@@ -133,12 +139,12 @@ async function enrichInUseMachineCustomersFromOrders(supabaseClient, machineRows
         const part = orderIds.slice(i, i + chunkSize);
         const { data: ordChunk, error: ordErr } = await supabaseClient
             .from('orders')
-            .select('id, customer_name, recipient_name, customer_id, status, created_at')
+            .select('id, customer_name, recipient_name, customer_id, status, created_at, order_type, order_code, warehouse, note')
             .in('id', part);
 
         if (ordErr) {
             console.warn('[Machines] enrich customer (orders):', ordErr);
-            return rows;
+            return attachCustomerWarehousesToMachines(supabaseClient, result);
         }
         (ordChunk || []).forEach((o) => {
             if (!isOrderDeliveredCompleted(o.status)) return;
@@ -147,46 +153,73 @@ async function enrichInUseMachineCustomersFromOrders(supabaseClient, machineRows
         });
     }
 
-    /** @type {Record<string, { name?: string | null }>} */
+    /** @type {Record<string, { name?: string | null; warehouse_id?: string | null }>} */
     const customersById = {};
+    /** @type {Record<string, string>} */
+    const customerWarehouseById = {};
     const cidList = [...customerIds];
     for (let i = 0; i < cidList.length; i += chunkSize) {
         const part = cidList.slice(i, i + chunkSize);
-        const { data: custChunk } = await supabaseClient.from('customers').select('id, name').in('id', part);
+        const { data: custChunk } = await supabaseClient
+            .from('customers')
+            .select('id, name, warehouse_id')
+            .in('id', part);
         (custChunk || []).forEach((c) => {
-            if (c?.id) customersById[c.id] = c;
+            if (c?.id) {
+                customersById[c.id] = c;
+                if (c.warehouse_id) customerWarehouseById[c.id] = String(c.warehouse_id).trim();
+            }
         });
     }
 
-    /** @type {Record<string, { created_at?: string; label: string }>} */
+    /** @type {Record<string, { created_at?: string; customerLabel?: string; warehouseCode?: string; customerWarehouseKh?: string }>} */
     const bestByNormSerial = {};
     machineItems.forEach((r) => {
         const o = orderMap[r.order_id];
         if (!o?.created_at) return;
         const nkItem = normalizeMachineSerialKey(r.serial_number);
         if (!nkItem) return;
-        const label = resolveOrderCustomerDisplay(o, customersById);
-        if (!label) return;
+        const customerLabel = resolveOrderCustomerDisplay(o, customersById);
+        const warehouseCode = resolveOrderWarehouseForMachine(o, customerWarehouseById);
+        const customerWarehouseKh = o.customer_id
+            ? customerWarehouseById[o.customer_id] || ''
+            : '';
+        if (!customerLabel && !warehouseCode && !customerWarehouseKh) return;
         const prev = bestByNormSerial[nkItem];
         if (!prev || new Date(o.created_at) > new Date(prev.created_at || 0)) {
-            bestByNormSerial[nkItem] = { created_at: o.created_at, label };
+            bestByNormSerial[nkItem] = {
+                created_at: o.created_at,
+                customerLabel,
+                warehouseCode,
+                customerWarehouseKh,
+            };
         }
     });
 
-    return rows.map((m) => {
+    result = rows.map((m) => {
         if (!MACHINE_STATUSES_ENRICH_CUSTOMER_FROM_ORDERS.has(m.status)) return m;
         const nk = normalizeMachineSerialKey(m.serial_number);
         const hit = bestByNormSerial[nk];
-        if (!hit?.label) return m;
-        return { ...m, customer_name: hit.label };
+        if (!hit?.customerLabel && !hit?.warehouseCode && !hit?.customerWarehouseKh) return m;
+        const managingWh = hit.warehouseCode || hit.customerWarehouseKh || '';
+        return {
+            ...m,
+            ...(hit.customerLabel ? { customer_name: hit.customerLabel } : {}),
+            ...(managingWh ? { warehouse: managingWh } : {}),
+            ...(hit.customerWarehouseKh ? { customer_warehouse: hit.customerWarehouseKh } : {}),
+        };
     });
+    }
+
+    return attachCustomerWarehousesToMachines(supabaseClient, result);
 }
 
 const TABLE_COLUMNS = [
     { key: 'serial_number', label: 'Mã Máy (Serial)' },
     { key: 'machine_type', label: 'Loại Máy' },
     { key: 'warehouse', label: 'Kho Quản Lý' },
-    { key: 'customer_name', label: 'Khách hàng đang sử dụng máy' },
+    { key: 'customer_name', label: 'Cơ sở đang sử dụng máy' },
+    { key: 'customer_warehouse', label: 'Kho phụ trách KH' },
     { key: 'status', label: 'Trạng Thái' },
     { key: 'department_in_charge', label: 'Đại lý' },
 ];
@@ -635,7 +668,7 @@ const Machines = () => {
             'Loại đầu phát',
             'Đại lý',
             'Kho quản lý',
-            'Khách hàng đang sử dụng máy',
+            'Cơ sở đang sử dụng máy',
             'Trạng thái',
             'Ngày bảo trì gần nhất (YYYY-MM-DD)',
             'Loại bảo trì',
@@ -657,7 +690,7 @@ const Machines = () => {
                 'Loại đầu phát': 'Tia thường',
                 'Đại lý': 'Đại lý A',
                 'Kho quản lý': warehousesList[0]?.name || 'Kho tổng',
-                'Khách hàng đang sử dụng máy': 'Bệnh viện Đa khoa Tỉnh',
+                'Cơ sở đang sử dụng máy': 'Bệnh viện Đa khoa Tỉnh',
                 'Trạng thái': 'thuộc khách hàng',
                 'Ngày bảo trì gần nhất (YYYY-MM-DD)': '2023-10-01',
                 'Loại bảo trì': 'Bảo dưỡng',
@@ -718,9 +751,14 @@ const Machines = () => {
                         } else {
                             machineStatus = statusVal.toLowerCase();
                         }
-                    } else if (row['Khách hàng đang sử dụng máy']) {
+                    } else if (row['Cơ sở đang sử dụng máy'] || row['Khách hàng đang sử dụng máy']) {
                         machineStatus = 'thuộc khách hàng';
                     }
+
+                    const facilityName =
+                        row['Cơ sở đang sử dụng máy']?.toString() ||
+                        row['Khách hàng đang sử dụng máy']?.toString() ||
+                        null;
 
                     return {
                         serial_number: row['Mã máy (Serial)']?.toString(),
@@ -734,7 +772,7 @@ const Machines = () => {
                         emission_head_type: row['Loại đầu phát']?.toString(),
                         department_in_charge: row['Đại lý']?.toString(),
                         warehouse: warehouseMap[row['Kho quản lý']?.toString()?.toLowerCase()] || null,
-                        customer_name: row['Khách hàng đang sử dụng máy']?.toString() || null,
+                        customer_name: facilityName,
                         status: machineStatus,
                         maintenance_date: row['Ngày bảo trì gần nhất (YYYY-MM-DD)'] || null,
                         maintenance_type: row['Loại bảo trì']?.toString() || null,
@@ -832,6 +870,9 @@ const Machines = () => {
         return resolveWarehouse(warehouseId)?.name || warehouseId;
     };
 
+    /** Kho quản lý hiển thị: ưu tiên kho máy/đơn, fallback kho phụ trách KH khi máy đang thuộc khách. */
+    const getMachineManagingWarehouseLabel = (machine) =>
+        getWarehouseLabel(machine?.warehouse || machine?.customer_warehouse);
 
     const readyCount = stats.ready;
     const inUseCount = stats.inUse;
@@ -1223,17 +1264,21 @@ const Machines = () => {
                                                     <User size={14} />
                                                 </div>
                                                 <div className="min-w-0 flex-1">
-                                                    <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Khách hàng</p>
+                                                    <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Cơ sở</p>
                                                     <p className="text-[12px] text-foreground font-bold truncate">{machine.customer_name || '—'}</p>
                                                 </div>
                                             </div>
+                                        </div>
+                                        <div className="col-span-2">
+                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Kho phụ trách KH</p>
+                                            <p className="text-[12px] text-foreground font-medium truncate">{getWarehouseLabel(machine.customer_warehouse)}</p>
                                         </div>
                                     </div>
 
                                     <div className="flex items-center justify-between pt-2 border-t border-border/70">
                                         <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                                             <Warehouse size={12} />
-                                            <span>{getWarehouseLabel(machine.warehouse)}</span>
+                                            <span>Kho QL: {getMachineManagingWarehouseLabel(machine)}</span>
                                         </div>
                                         <div className="flex items-center gap-3">
                                             <button onClick={() => handleViewMachine(machine)} className="p-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg"><Eye size={16} /></button>
@@ -1588,8 +1633,9 @@ const Machines = () => {
                                         {columnOrder.filter(isColumnVisible).map(colKey => {
                                             if (colKey === 'serial_number') return <td key={colKey} className={getSerialCellClass(machine.status)}>{machine.serial_number}</td>;
                                             if (colKey === 'machine_type') return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{getLabel(MACHINE_TYPES, machine.machine_type)}</td>;
-                                            if (colKey === 'warehouse') return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{getWarehouseLabel(machine.warehouse)}</td>;
+                                            if (colKey === 'warehouse') return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{getMachineManagingWarehouseLabel(machine)}</td>;
                                             if (colKey === 'customer_name') return <td key={colKey} className="px-4 py-4 text-sm font-semibold text-foreground">{machine.customer_name || '—'}</td>;
+                                            if (colKey === 'customer_warehouse') return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{getWarehouseLabel(machine.customer_warehouse)}</td>;
                                             if (colKey === 'status') return (
                                                 <td key={colKey} className="px-4 py-4">
                                                     <span className={clsx('inline-flex items-center px-3 py-1 text-[11px] font-bold rounded-full border', getStatusBadgeClass(machine.status))}>
@@ -1807,8 +1853,16 @@ const Machines = () => {
                                                             <p className="text-[12px] font-semibold text-slate-700 line-clamp-2">{machine.customer_name || '-'}</p>
                                                         </div>
                                                         <div className="flex items-center gap-2">
+                                                            <Warehouse size={13} className="text-emerald-600 shrink-0" />
+                                                            <p className="text-[12px] text-muted-foreground truncate">
+                                                                Kho KH: {getWarehouseLabel(machine.customer_warehouse)}
+                                                            </p>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
                                                             <Warehouse size={13} className="text-indigo-500 shrink-0" />
-                                                            <p className="text-[12px] text-muted-foreground truncate">{getWarehouseLabel(machine.warehouse)}</p>
+                                                            <p className="text-[12px] text-muted-foreground truncate">
+                                                                Kho QL: {getMachineManagingWarehouseLabel(machine)}
+                                                            </p>
                                                         </div>
                                                         <div className="flex items-center gap-2">
                                                             <Activity size={13} className="text-amber-500 shrink-0" />

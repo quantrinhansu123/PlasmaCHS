@@ -47,6 +47,8 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
     const [isClosing, setIsClosing] = useState(false);
     const [suppliers, setSuppliers] = useState([]);
     const [warehousesList, setWarehousesList] = useState([]);
+    /** Toàn bộ kho (không scope) — dùng nhận diện kho nhà máy cho gợi ý RFID */
+    const [allWarehousesList, setAllWarehousesList] = useState([]);
     const [scannerIndex, setScannerIndex] = useState(null);
     const [cylindersList, setCylindersList] = useState([]);
     const [machinesList, setMachinesList] = useState([]);
@@ -62,6 +64,66 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
 
     const normalizeSerial = (value) => value?.toString().trim().toUpperCase() || '';
     const hasValue = (value) => value !== null && value !== undefined && value !== '';
+
+    const normalizeReceiptType = (itemType) => {
+        const t = String(itemType || '').trim().toUpperCase();
+        if (t === 'MAY' || t.startsWith('MAY_')) return 'MAY';
+        if (t === 'BINH' || t.startsWith('BINH')) return 'BINH';
+        return itemType || 'MAY';
+    };
+
+    const isSerializedReceiptType = (receiptType) => {
+        const t = String(receiptType || '').toUpperCase();
+        return t === 'BINH' || t === 'MAY' || t.startsWith('BINH_') || t.startsWith('MAY_');
+    };
+
+    const getSerializedSlotCount = (quantity, assignedSerials = []) => {
+        const qty = Math.max(0, Math.ceil(parseFloat(quantity) || 0));
+        const slotLen = (assignedSerials || []).length;
+        return Math.max(qty, slotLen, qty > 0 ? qty : slotLen > 0 ? slotLen : 1);
+    };
+
+    const buildAssignedSerials = (quantity, serialNumbers = []) => {
+        const normalizedSerials = serialNumbers.map((s) => normalizeSerial(s)).filter(Boolean);
+        const slotCount = getSerializedSlotCount(quantity, normalizedSerials.map((serial) => ({ serial })));
+        return Array.from({ length: slotCount }, (_, i) => ({
+            serial: normalizedSerials[i] || '',
+            scan_time: null,
+        }));
+    };
+
+    const mergeReceiptItemsForForm = (rows) => {
+        const groups = new Map();
+        for (const row of rows) {
+            const machineType = normalizeMachineType(row.machine_type || parseMachineTypeFromNote(row.note));
+            const key = `${row.item_type}|${row.item_name}|${machineType}`;
+            if (!groups.has(key)) {
+                groups.set(key, {
+                    ...row,
+                    machine_type: machineType,
+                    quantity: 0,
+                    total_price: 0,
+                    collectedSerials: [],
+                });
+            }
+            const group = groups.get(key);
+            group.quantity += parseFloat(row.quantity) || 0;
+            group.total_price += parseFloat(row.total_price) || 0;
+            const sn = normalizeSerial(row.serial_number);
+            if (sn) group.collectedSerials.push(sn);
+        }
+        return Array.from(groups.values()).map((group) => {
+            const quantity = group.quantity > 0 ? group.quantity : 1;
+            const assignedSerials = buildAssignedSerials(quantity, group.collectedSerials);
+            const firstSerial = assignedSerials.find((s) => s.serial)?.serial || '';
+            return {
+                ...group,
+                quantity,
+                serial_number: firstSerial,
+                assigned_serials: assignedSerials,
+            };
+        });
+    };
     const MACHINE_TYPE_OPTIONS = [
         { id: 'BV', label: 'BV' },
         { id: 'TM', label: 'TM' },
@@ -105,60 +167,127 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
             .replace(/[\u0300-\u036f]/g, '')
             .replace(/[đĐ]/g, (m) => (m === 'đ' ? 'd' : 'D'));
 
+    const normalizeLooseKey = (value) =>
+        String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[đĐ]/g, (m) => (m === 'đ' ? 'd' : 'D'))
+            .trim()
+            .toLowerCase();
+
+    const normalizeCylinderStatus = (status) => normalizeLooseKey(status);
+
+    const isReturnedToNccStatus = (status) => normalizeCylinderStatus(status) === 'da tra ncc';
+
+    const isReadyWarehouseCylinderStatus = (status) => {
+        const key = normalizeCylinderStatus(status);
+        return key === 'san sang' || key === 'binh rong' || key === 'cho nap';
+    };
+
+    const normalizeSupplierNameKey = (value) => normalizeLooseKey(value);
+
     const resolveFactoryWarehouse = () => {
-        if (!warehousesList.length) return null;
-        return warehousesList.find((warehouse) => {
-            const code = normalizeWarehouseKey(warehouse.code);
-            const name = normalizeWarehouseKey(warehouse.name);
-            return code === 'nm' || name.includes('nha may');
-        }) || null;
+        const list = allWarehousesList.length ? allWarehousesList : warehousesList;
+        if (!list.length) return null;
+        return (
+            list.find((warehouse) => {
+                const code = normalizeWarehouseKey(warehouse.code);
+                const name = normalizeWarehouseKey(warehouse.name);
+                return (
+                    code === 'nm'
+                    || name === 'nm'
+                    || name.startsWith('nm ')
+                    || name.includes('nha may')
+                    || name.includes('nhamay')
+                );
+            }) || null
+        );
+    };
+
+    const getReceiptWarehouseIds = () => {
+        const ids = new Set();
+        if (formData.warehouse_id) ids.add(String(formData.warehouse_id));
+        const factory = resolveFactoryWarehouse();
+        if (factory?.id) ids.add(String(factory.id));
+        return ids;
+    };
+
+    const cylinderWarehouseMatches = (option, warehouseIds) => {
+        if (!warehouseIds.size || !hasValue(option?.warehouse_id)) return false;
+        return warehouseIds.has(String(option.warehouse_id));
     };
 
     const isAtFactorySerialOption = (option, type) => {
         if (!option?.serial_number) return false;
         if (option.customer_name?.toString().trim()) return false;
 
-        const factoryWarehouse = resolveFactoryWarehouse();
-        if (!factoryWarehouse) return false;
+        const warehouseIds = getReceiptWarehouseIds();
+        if (!warehouseIds.size) return false;
 
         if (type === 'MAY') {
             const storedWarehouse = normalizeWarehouseKey(option.warehouse);
             if (!storedWarehouse) return false;
+            const factoryWarehouse = resolveFactoryWarehouse();
+            if (!factoryWarehouse) return false;
             const factoryKeys = [factoryWarehouse.id, factoryWarehouse.code, factoryWarehouse.name]
                 .map((value) => normalizeWarehouseKey(value))
                 .filter(Boolean);
             return factoryKeys.includes(storedWarehouse);
         }
 
-        if (!hasValue(option.warehouse_id)) return false;
-        return String(option.warehouse_id) === String(factoryWarehouse.id);
+        if (!cylinderWarehouseMatches(option, warehouseIds)) return false;
+        return isReadyWarehouseCylinderStatus(option.status);
     };
 
     /** UUID NCC đang chọn trên phiếu (khớp tên ↔ bảng suppliers) — dùng gợi ý vỏ đã trả NCC trên /binh */
     const getReceiptSupplierId = () => {
-        const name = String(formData.supplier_name || '').trim();
-        if (!name) return null;
-        const row = suppliers.find((s) => String(s.name || '').trim() === name);
+        const nameKey = normalizeSupplierNameKey(formData.supplier_name);
+        if (!nameKey) return null;
+        const row = suppliers.find((s) => normalizeSupplierNameKey(s.name) === nameKey);
         return row?.id ?? null;
+    };
+
+    const cylinderMatchesSelectedSupplier = (option) => {
+        const supplierId = getReceiptSupplierId();
+        const supplierNameKey = normalizeSupplierNameKey(formData.supplier_name);
+        if (!supplierId && !supplierNameKey) return false;
+
+        if (supplierId && option?.supplier_id && String(option.supplier_id) === String(supplierId)) {
+            return true;
+        }
+
+        const optionSupplierName = normalizeSupplierNameKey(option?.suppliers?.name);
+        if (supplierNameKey && optionSupplierName && optionSupplierName === supplierNameKey) {
+            return true;
+        }
+
+        return false;
     };
 
     /** Khớp loại dòng (vd. Bình 4L) với cột volume trên cylinders */
     const binhVolumeMatchesProductLine = (cylinderVolume, itemName) => {
         const name = String(itemName || '').toLowerCase();
-        const vol = String(cylinderVolume || '').toLowerCase();
+        const vol = String(cylinderVolume || '').toLowerCase().trim();
         if (!name || name === 'sản phẩm khác...') return true;
-        if (name.includes('4l') || name.includes('bình 4')) return vol.includes('4l') || vol.includes('bình 4');
-        if (name.includes('8l') || name.includes('bình 8')) return vol.includes('8l') || vol.includes('bình 8');
+        if (!vol) return true;
+        if (name.includes('binh_4l') || name.includes('4l') || name.includes('bình 4')) {
+            return vol.includes('4l') || vol.includes('bình 4') || vol.includes('binh_4');
+        }
+        if (name.includes('binh_8l') || name.includes('8l') || name.includes('bình 8')) {
+            return vol.includes('8l') || vol.includes('bình 8') || vol.includes('binh_8');
+        }
         return true;
     };
 
-    /** Vỏ đang ở NCC (đã trả ncc + supplier_id) — cùng logic hiển thị vị trí trên /binh */
-    const isCylinderReturnedAtSelectedNcc = (option, supplierId, itemName) => {
-        if (!supplierId || !option?.supplier_id) return false;
-        if (String(option.supplier_id) !== String(supplierId)) return false;
-        const st = (option.status || '').toLowerCase();
-        if (st !== 'đã trả ncc') return false;
-        return binhVolumeMatchesProductLine(option.volume, itemName);
+    /** Vỏ đã trả NCC — khớp NCC trên phiếu (id hoặc tên join), cùng loại bình */
+    const isCylinderReturnedAtSelectedNcc = (option, itemName) => {
+        if (!isReturnedToNccStatus(option?.status)) return false;
+        if (!binhVolumeMatchesProductLine(option.volume, itemName)) return false;
+        if (!getReceiptSupplierId() && !formData.supplier_name?.trim()) return false;
+        if (option?.supplier_id || option?.suppliers?.name) {
+            return cylinderMatchesSelectedSupplier(option);
+        }
+        return true;
     };
 
     /**
@@ -188,19 +317,18 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
 
         const rows = [];
 
-        if (type === 'BINH') {
-            const supplierId = getReceiptSupplierId();
+        if (type === 'BINH' || String(type || '').toUpperCase().startsWith('BINH')) {
             sourceOptions.forEach((option) => {
-                if (isCylinderReturnedAtSelectedNcc(option, supplierId, item?.item_name)) {
+                if (isCylinderReturnedAtSelectedNcc(option, item?.item_name)) {
                     pushUnique(rows, option.serial_number, 'return_ncc');
                 }
             });
             sourceOptions.forEach((option) => {
                 if (!isAtFactorySerialOption(option, type)) return;
-                if (type === 'BINH' && !binhVolumeMatchesProductLine(option.volume, item?.item_name)) return;
+                if (!binhVolumeMatchesProductLine(option.volume, item?.item_name)) return;
                 pushUnique(rows, option.serial_number, 'factory');
             });
-            return rows.slice(0, 20);
+            return rows.slice(0, 40);
         }
 
         sourceOptions.forEach((option) => {
@@ -272,25 +400,11 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                     .select('*')
                     .eq('receipt_id', receipt.id);
                 if (data && data.length > 0) {
-                    setItems(data.map((item) => {
-                        const quantity = parseInt(item.quantity, 10) || 0;
-                        const normalizedSerial = normalizeSerial(item.serial_number);
-                        const assignedSerials = normalizedSerial
-                            ? [{ serial: normalizedSerial, scan_time: null }]
-                            : Array.from(
-                                { length: Math.max(quantity, 1) },
-                                () => ({ serial: '', scan_time: null })
-                            );
-
-                        return {
-                            ...item,
-                            machine_type: normalizeMachineType(item.machine_type || parseMachineTypeFromNote(item.note)),
-                            quantity: quantity || 1,
-                            serial_number: normalizedSerial,
-                            assigned_serials: assignedSerials
-                        };
+                    setItems(mergeReceiptItemsForForm(data));
+                    setFormData((prev) => ({
+                        ...prev,
+                        receipt_type: normalizeReceiptType(data[0].item_type),
                     }));
-                    setFormData(prev => ({ ...prev, receipt_type: data[0].item_type }));
                 }
             };
             fetchItems();
@@ -339,7 +453,10 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                 const [suppliersRes, warehousesRes, cylindersRes, machinesRes] = await Promise.all([
                     supabase.from('suppliers').select('id, name, address, phone').order('name'),
                     supabase.from('warehouses').select('id, code, name, manager_name, address').eq('status', 'Đang hoạt động').order('name'),
-                    supabase.from('cylinders').select('serial_number, status, warehouse_id, customer_name, supplier_id, volume').order('serial_number'),
+                    supabase
+                        .from('cylinders')
+                        .select('serial_number, status, warehouse_id, customer_name, supplier_id, volume, suppliers(id, name)')
+                        .order('serial_number'),
                     supabase.from('machines').select('serial_number, status, warehouse, customer_name').order('serial_number')
                 ]);
 
@@ -350,6 +467,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                     }
                 }
                 if (warehousesRes.data) {
+                    setAllWarehousesList(warehousesRes.data);
                     const scopedWarehouses = filterWarehousesForCurrentUser(warehousesRes.data, {
                         role,
                         user,
@@ -369,7 +487,17 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                         });
                     }
                 }
-                if (cylindersRes.data) {
+                if (cylindersRes.error) {
+                    console.warn('cylinders join suppliers failed, retry without join:', cylindersRes.error);
+                    const { data: cylFallback } = await supabase
+                        .from('cylinders')
+                        .select('serial_number, status, warehouse_id, customer_name, supplier_id, volume')
+                        .order('serial_number');
+                    if (cylFallback) {
+                        setCylinderOptions(cylFallback);
+                        setCylindersList([...new Set(cylFallback.map((c) => normalizeSerial(c.serial_number)).filter(Boolean))]);
+                    }
+                } else if (cylindersRes.data) {
                     setCylinderOptions(cylindersRes.data);
                     setCylindersList([...new Set(cylindersRes.data.map(c => normalizeSerial(c.serial_number)).filter(Boolean))]);
                 }
@@ -410,19 +538,13 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
             const updated = [...prev];
             const updatedItem = { ...updated[index], [field]: value };
             
-            // Sync serials array if quantity changes
-            if (field === 'quantity') {
-                const isSerialized = formData.receipt_type === 'BINH' || formData.receipt_type === 'MAY';
-                const targetQty = parseInt(value, 10) || 0;
-                
-                if (isSerialized) {
-                    let currentSerials = [...(updatedItem.assigned_serials || [])];
-                    if (targetQty > currentSerials.length) {
-                        for (let i = currentSerials.length; i < targetQty; i++) {
-                            currentSerials.push({ serial: '', scan_time: null });
-                        }
-                    } else if (targetQty < currentSerials.length && targetQty >= 0) {
-                        currentSerials = currentSerials.slice(0, targetQty);
+            // Khi đang gõ SL: chỉ thêm ô RFID (không xóa) — thu gọn khi blur
+            if (field === 'quantity' && isSerializedReceiptType(formData.receipt_type)) {
+                const targetQty = Math.max(0, Math.ceil(parseFloat(value) || 0));
+                let currentSerials = [...(updatedItem.assigned_serials || [])];
+                if (targetQty > currentSerials.length) {
+                    for (let i = currentSerials.length; i < targetQty; i++) {
+                        currentSerials.push({ serial: '', scan_time: null });
                     }
                     updatedItem.assigned_serials = currentSerials;
                 }
@@ -434,7 +556,25 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
     };
 
     const handleQuantityBlur = (index) => {
-        // No longer needed as updateItem handles sync immediately
+        if (!isSerializedReceiptType(formData.receipt_type)) return;
+        setItems((prev) => {
+            const updated = [...prev];
+            const item = { ...updated[index] };
+            const targetQty = Math.max(0, Math.ceil(parseFloat(item.quantity) || 0));
+            if (targetQty <= 0) return prev;
+
+            let currentSerials = [...(item.assigned_serials || [])];
+            if (currentSerials.length < targetQty) {
+                for (let i = currentSerials.length; i < targetQty; i++) {
+                    currentSerials.push({ serial: '', scan_time: null });
+                }
+            } else if (currentSerials.length > targetQty) {
+                currentSerials = currentSerials.slice(0, targetQty);
+            }
+            item.assigned_serials = currentSerials;
+            updated[index] = item;
+            return updated;
+        });
     };
 
     useEffect(() => {
@@ -555,7 +695,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
         }
 
         // Warn (not block) if BINH/MAY items have no serials — status sync won't happen on approve
-        if (formData.receipt_type === 'BINH' || formData.receipt_type === 'MAY') {
+        if (isSerializedReceiptType(formData.receipt_type)) {
             const allMissingSerials = items.every(item => {
                 const serials = (item.assigned_serials || [])
                     .map(s => (typeof s === 'string' ? s : s?.serial)?.trim())
@@ -592,7 +732,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
             // Flatten items for DB storage
             const flattenedItems = [];
             items.forEach(item => {
-                const isSerialized = formData.receipt_type === 'BINH' || formData.receipt_type === 'MAY';
+                const isSerialized = isSerializedReceiptType(formData.receipt_type);
                 if (isSerialized) {
                     const serials = (item.assigned_serials || []).map(s => normalizeSerial(typeof s === 'string' ? s : s?.serial)).filter(Boolean);
                     
@@ -1004,7 +1144,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
 
                                 <div className="space-y-4">
                                     {items.map((item, idx) => (
-                                        <div key={idx} className="bg-slate-50/50 border border-slate-200 p-4 rounded-2xl space-y-4 transition-all hover:border-primary/40 hover:shadow-sm">
+                                        <div key={idx} className="bg-slate-50/50 border border-slate-200 p-4 rounded-2xl space-y-4 transition-all hover:border-primary/40 hover:shadow-sm overflow-visible">
                                             <div className="flex items-center justify-between border-b border-slate-200/60 pb-2">
                                                 <div className="flex items-center gap-2">
                                                     <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-[10px] font-black">{idx + 1}</span>
@@ -1146,14 +1286,14 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                                 </div>
 
                                                 {/* Multi-Serial Input Grid */}
-                                                {(formData.receipt_type === 'BINH' || formData.receipt_type === 'MAY') && item.quantity > 0 && (
-                                                    <div className="pt-4 border-t border-slate-100 col-span-full">
+                                                {isSerializedReceiptType(formData.receipt_type) && Number(item.quantity) > 0 && (
+                                                    <div className="pt-4 border-t border-slate-100 col-span-full overflow-visible">
                                                         <div className="flex items-center justify-between mb-3 px-1 gap-2">
                                                             <div className="min-w-0">
                                                                 <label className="text-[12px] font-black text-primary flex items-center gap-2">
-                                                                    <ScanLine className="w-4 h-4 shrink-0" /> Gán mã RFID cho {item.item_name} ({item.assigned_serials?.length || 0})
+                                                                    <ScanLine className="w-4 h-4 shrink-0" /> Gán mã RFID cho {item.item_name} ({getSerializedSlotCount(item.quantity, item.assigned_serials)})
                                                                 </label>
-                                                                {formData.receipt_type === 'BINH' && (
+                                                                {(formData.receipt_type === 'BINH' || String(formData.receipt_type || '').startsWith('BINH')) && (
                                                                     <p className="text-[10px] font-semibold text-slate-500 mt-1 leading-snug pl-6">
                                                                         Gõ mã RFID mới hoặc chọn gợi ý: vỏ <span className="font-bold text-orange-700">đã trả NCC</span> đúng nhà cung cấp đã chọn (như trên /binh), và vỏ <span className="font-bold text-emerald-700">đang ở nhà máy</span>.
                                                                     </p>
@@ -1169,7 +1309,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                                                 </button>
                                                             )}
                                                         </div>
-                                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 overflow-visible">
                                                             {(item.assigned_serials || []).map((ser, sIdx) => {
                                                                 const dropKey = `it-${idx}-ser-${sIdx}`;
                                                                 const currentVal = (typeof ser === 'string' ? ser : (ser?.serial || ''));
@@ -1207,7 +1347,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                                                             )}
                                                                         </div>
                                                                         {isOpen && !isReadOnly && (
-                                                                            <div className="absolute z-[100] left-0 right-0 top-11 bg-white border border-primary/20 rounded-xl shadow-2xl max-h-48 overflow-y-auto">
+                                                                            <div className="absolute z-[100010] left-0 right-0 bottom-full mb-1 bg-white border border-primary/20 rounded-xl shadow-2xl max-h-48 overflow-y-auto">
                                                                                 {filteredSuggestions.map((row) => (
                                                                                     <button
                                                                                         key={`${row.serial}-${row.source}`}
@@ -1229,7 +1369,15 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                                                                                     </button>
                                                                                 ))}
                                                                                 {filteredSuggestions.length === 0 && (
-                                                                                    <div className="px-4 py-3 text-xs text-slate-400 italic">Không có mã gợi ý — bạn vẫn có thể nhập mã RFID mới.</div>
+                                                                                    <div className="px-4 py-3 text-xs text-slate-500 leading-snug">
+                                                                                        {!formData.supplier_name?.trim() ? (
+                                                                                            <span className="italic text-amber-700 font-semibold">Chọn nhà cung cấp trên phiếu để gợi ý vỏ đã trả NCC.</span>
+                                                                                        ) : !formData.warehouse_id ? (
+                                                                                            <span className="italic text-amber-700 font-semibold">Chọn kho nhập để gợi ý vỏ sẵn sàng tại kho.</span>
+                                                                                        ) : (
+                                                                                            <span className="italic text-slate-400">Không có mã gợi ý — vẫn gõ tay mã RFID mới (bình phải có trên /binh).</span>
+                                                                                        )}
+                                                                                    </div>
                                                                                 )}
                                                                             </div>
                                                                         )}
