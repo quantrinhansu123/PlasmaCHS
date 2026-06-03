@@ -2,7 +2,13 @@ import { AlertCircle, AlertTriangle, ArrowRightCircle, Camera, Check, CheckCircl
 import clsx from 'clsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ORDER_STATE_TRANSITIONS, PRODUCT_TYPES } from '../../constants/orderConstants';
+import {
+    ORDER_ROLES,
+    ORDER_STATE_TRANSITIONS,
+    PRODUCT_TYPES,
+    getOrderStatusMeta,
+    resolveOrderStatusKey,
+} from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
 import BarcodeScanner from '../Common/BarcodeScanner';
 import { notificationService } from '../../utils/notificationService';
@@ -30,6 +36,51 @@ import {
     resolveWarehouseCode,
     resolveWarehouseCodeFromCustomer,
 } from '../../utils/customerOrderMatch';
+import {
+    isAdminRole,
+    isThuKhoRole,
+    isWarehouseRole,
+    normalizeRole,
+} from '../../utils/accessControl';
+
+const readCachedUserRole = () =>
+    localStorage.getItem('user_role') ||
+    sessionStorage.getItem('user_role') ||
+    '';
+
+/** Thủ kho / nhân viên kho: thao tác đơn như Admin. */
+const hasWarehouseOrderAdminAccess = (role, department = '') =>
+    isThuKhoRole(role) ||
+    isThuKhoRole(department) ||
+    isWarehouseRole(role) ||
+    (normalizeRole(department).includes('kho') &&
+        (isWarehouseRole(role) || normalizeRole(role).includes('kho')));
+
+/** Map vai trò DB → ORDER_ROLES (Thủ kho / Kho = quyền thao tác như Admin). */
+const mapUserRoleToOrderRole = (role, department = '') => {
+    if (isAdminRole(role) || isAdminRole(department)) return ORDER_ROLES.ADMIN;
+    if (hasWarehouseOrderAdminAccess(role, department)) return ORDER_ROLES.ADMIN;
+
+    const r = normalizeRole(role);
+    if (!r) return '';
+    if (r.includes('shipper') || r.includes('giaohang')) return ORDER_ROLES.SHIPPER;
+    if (
+        r.includes('leadsale') ||
+        r.includes('truongkinhdoanh') ||
+        r.includes('truongnhom') ||
+        r.includes('truongphong')
+    ) {
+        return ORDER_ROLES.LEAD_SALE;
+    }
+    if (r.includes('nvkd') || r.includes('kinhdoanh') || r.includes('sale')) return ORDER_ROLES.SALE;
+    return r;
+};
+
+const orderRoleCanRunTransition = (orderRole, transition) => {
+    if (!orderRole || !transition) return false;
+    if (orderRole === ORDER_ROLES.ADMIN || orderRole === ORDER_ROLES.THU_KHO) return true;
+    return (transition.allowedRoles || []).includes(orderRole);
+};
 
 const parseNoteFieldList = (noteText, prefix) => {
     const lines = (noteText || '').split('\n').map(l => l.trim());
@@ -113,7 +164,7 @@ const getWarehouseLabelFromList = (value, warehouses = []) => {
 };
 
 export default function OrderStatusUpdater({ order, warehouseName, userRole, onClose, onUpdateSuccess }) {
-    const { user } = usePermissions();
+    const { user, role: permissionsRole, department: permissionsDepartment } = usePermissions();
     const [isLoading, setIsLoading] = useState(false);
     const [deliveryUnit, setDeliveryUnit] = useState(order?.delivery_unit || '');
     const [selectedFile, setSelectedFile] = useState(null);
@@ -616,31 +667,24 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
 
     if (!order) return null;
 
-    // Get transitions available for current status
-    const transitions = ORDER_STATE_TRANSITIONS[order.status] || [];
+    const effectiveUserRole =
+        userRole ||
+        permissionsRole ||
+        user?.role ||
+        readCachedUserRole() ||
+        '';
+    const effectiveDepartment =
+        permissionsDepartment ||
+        user?.department ||
+        localStorage.getItem('user_department') ||
+        sessionStorage.getItem('user_department') ||
+        '';
 
-    // Normalize Vietnamese role names from DB to match ORDER_ROLES constants
-    const normalizeRole = (role) => {
-        if (!role) return '';
-        const r = role.toLowerCase().trim();
-        
-        // Exact matches first
-        if (r === 'admin' || r === 'quản trị' || r === 'quan tri') return 'admin';
-        
-        // Pattern matches
-        if (r.includes('thủ kho') || r.includes('thu kho') || r.includes('kho')) return 'thu_kho';
-        if (r.includes('shipper') || r.includes('giao hàng') || r.includes('giao hang')) return 'shipper';
-        if (r.includes('lead') || r.includes('trưởng') || r.includes('truong')) return 'lead_sale';
-        if (r.includes('kinh doanh') || r.includes('sale')) return 'sale';
-        
-        return r;
-    };
+    const statusKey = resolveOrderStatusKey(order.status);
+    const transitions = ORDER_STATE_TRANSITIONS[statusKey] || [];
 
-    const normalizedRole = normalizeRole(userRole);
-    const availableActions = transitions.filter(t => {
-        if (!normalizedRole) return false;
-        return normalizedRole === 'admin' || t.allowedRoles.includes(normalizedRole);
-    });
+    const orderRole = mapUserRoleToOrderRole(effectiveUserRole, effectiveDepartment);
+    const availableActions = transitions.filter((t) => orderRoleCanRunTransition(orderRole, t));
 
     const handleUpdateStatus = async (transition) => {
         try {
@@ -1871,7 +1915,11 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                 <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Các thao tác khả dụng</label>
                                 {availableActions.length === 0 ? (
                                     <div className="p-5 text-center bg-white rounded-2xl border border-dashed border-slate-300">
-                                        <p className="text-sm font-bold text-slate-500 italic">Không có quyền thao tác</p>
+                                        <p className="text-sm font-bold text-slate-500 italic">
+                                            {transitions.length === 0
+                                                ? `Đơn đang ở trạng thái «${getOrderStatusMeta(order.status).label}» — không còn bước thao tác.`
+                                                : 'Không có quyền thao tác cho vai trò hiện tại.'}
+                                        </p>
                                     </div>
                                 ) : (
                                     <div className="grid grid-cols-1 gap-3">

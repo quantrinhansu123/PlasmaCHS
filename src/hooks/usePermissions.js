@@ -14,6 +14,7 @@ import {
     normalizeRole,
 } from '../utils/accessControl';
 import { fetchRolePermissions } from '../utils/fetchRolePermissions';
+import { applyThuKhoOperationPermissions } from '../constants/departmentViewPermissions';
 
 export const usePermissions = () => {
     const [permissions, setPermissions] = useState({});
@@ -44,7 +45,10 @@ export const usePermissions = () => {
                     setUser(userData);
                     setRole(userData.role);
                     setDepartment(userData.department || '');
-                    const rolePermissions = await fetchRolePermissions(userData.role, userData.department || '');
+                    const rolePermissions = applyThuKhoOperationPermissions(
+                        await fetchRolePermissions(userData.role, userData.department || ''),
+                        userData.role,
+                    );
                     setPermissions(rolePermissions);
                 } else {
                     const safeRole = userRoleFromStorage || null;
@@ -59,7 +63,10 @@ export const usePermissions = () => {
                     });
                     setRole(safeRole);
                     setDepartment(userDeptFromStorage);
-                    const rolePermissions = await fetchRolePermissions(safeRole, userDeptFromStorage);
+                    const rolePermissions = applyThuKhoOperationPermissions(
+                        await fetchRolePermissions(safeRole, userDeptFromStorage),
+                        safeRole,
+                    );
                     setPermissions(rolePermissions);
 
                     if (isAdminRole(safeRole) && !userData) {
@@ -80,10 +87,14 @@ export const usePermissions = () => {
 
     const isCompanyRole = isAdminRole(role);
 
-    const canView = (module) => isCompanyRole || permissions[module]?.view || false;
-    const canCreate = (module) => isCompanyRole || permissions[module]?.create || false;
-    const canEdit = (module) => isCompanyRole || permissions[module]?.edit || false;
-    const canDelete = (module) => isCompanyRole || permissions[module]?.delete || false;
+    const canView = (module) =>
+        isCompanyRole || permissions[module]?.view || false;
+    const canCreate = (module) =>
+        isCompanyRole || permissions[module]?.create || false;
+    const canEdit = (module) =>
+        isCompanyRole || permissions[module]?.edit || false;
+    const canDelete = (module) =>
+        isCompanyRole || permissions[module]?.delete || false;
 
     const canViewAllReports = () => isCompanyRole || permissions.reports?.view_all || false;
     const canViewOwnReports = () => isCompanyRole || permissions.reports?.view_own || false;

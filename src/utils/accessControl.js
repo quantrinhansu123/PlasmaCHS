@@ -98,8 +98,28 @@ export const isDepartmentHeadRole = (role) => {
 
 export const isThuKhoRole = (role) => {
     const r = normalizeRole(role);
-    return r.includes('thukho');
+    if (!r) return false;
+    return r.includes('thukho') || r === 'thukho' || r.includes('warehousekeeper');
 };
+
+/** Module Thủ kho được mở quyền vận hành (xem + thao tác). */
+export const THU_KHO_OPERATION_MODULES = [
+    'dashboard',
+    'orders',
+    'dnxm',
+    'warehouses',
+    'machines',
+    'cylinders',
+    'suppliers',
+    'shipping_tasks',
+    'shippers',
+    'reports',
+    'customers',
+    'cylinder_recoveries',
+    'machine_recoveries',
+    'materials',
+    'promotions',
+];
 
 export const isWarehouseRole = (role) => {
     const r = normalizeRole(role);
@@ -152,6 +172,12 @@ export const hasModuleView = (permissions, moduleId) => {
 export const canAccessPath = (pathname, role, permissions) => {
     if (!pathname) return false;
     if (isAdminRole(role)) return true;
+    if (isThuKhoRole(role)) {
+        const rule = SORTED_RULES.find((r) => pathname === r.prefix || pathname.startsWith(`${r.prefix}/`));
+        if (!rule) return PUBLIC_PATHS.has(pathname);
+        const modules = rule.module ? [rule.module] : rule.anyOfModules || [];
+        if (modules.some((id) => THU_KHO_OPERATION_MODULES.includes(id))) return true;
+    }
     if (PUBLIC_PATHS.has(pathname)) return true;
 
     const rule = SORTED_RULES.find((r) => pathname === r.prefix || pathname.startsWith(`${r.prefix}/`));

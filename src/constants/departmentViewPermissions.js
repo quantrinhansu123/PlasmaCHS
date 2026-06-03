@@ -3,7 +3,7 @@ import {
     HOME_VIEWERS,
     buildUserHomeViewerTags,
 } from '../utils/homeModuleVisibility';
-import { isAdminRole } from '../utils/accessControl';
+import { isAdminRole, isThuKhoRole, THU_KHO_OPERATION_MODULES } from '../utils/accessControl';
 
 /** Module «xem» theo từng phân hệ (đồng bộ với lưới Trang chủ). */
 const MODULES_BY_AREA = {
@@ -31,6 +31,8 @@ const VIEWER_AREAS = {
 /** Ticket sửa chữa: mọi nhóm đều xem được danh sách máy (route /phieu-sua-chua). */
 const UNIVERSAL_VIEW_MODULES = ['machines'];
 
+export { THU_KHO_OPERATION_MODULES };
+
 const setView = (permissions, moduleIds, enabled = true) => {
     moduleIds.forEach((id) => {
         if (!permissions[id]) permissions[id] = { view: false };
@@ -44,11 +46,11 @@ const setView = (permissions, moduleIds, enabled = true) => {
 export const getDefaultViewPermissions = (department = '', position = '') => {
     const permissions = createEmptyViewPermissions();
 
-    if (isAdminRole(position) || isAdminRole(department)) {
+    if (isAdminRole(position) || isAdminRole(department) || isThuKhoRole(position)) {
         Object.keys(permissions).forEach((id) => {
             permissions[id].view = true;
         });
-        return permissions;
+        return applyThuKhoOperationPermissions(permissions, position);
     }
 
     const tags = buildUserHomeViewerTags(position, department);
@@ -62,6 +64,22 @@ export const getDefaultViewPermissions = (department = '', position = '') => {
     setView(permissions, UNIVERSAL_VIEW_MODULES);
 
     return permissions;
+};
+
+/** Ghi đè quyền runtime: Thủ kho thao tác đầy đủ module vận hành (dữ liệu vẫn lọc theo kho). */
+export const applyThuKhoOperationPermissions = (permissions = {}, role = '') => {
+    if (!isThuKhoRole(role)) return permissions;
+
+    const merged = { ...(permissions || {}) };
+    THU_KHO_OPERATION_MODULES.forEach((moduleId) => {
+        merged[moduleId] = {
+            view: true,
+            create: true,
+            edit: true,
+            delete: true,
+        };
+    });
+    return merged;
 };
 
 /** Gộp quyền DB với mẫu: module đã lưu trong DB giữ nguyên; module thiếu thì lấy mẫu phòng ban. */

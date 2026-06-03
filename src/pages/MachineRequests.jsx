@@ -151,6 +151,7 @@ export default function MachineRequests() {
     const navigate = useNavigate();
     const { role, user, department, roleScope, loading: permissionsLoading } = usePermissions();
     const isAdmin = isAdminRole(role);
+    const canManageAllRequests = isAdmin || isThuKhoRole(role);
     const [requests, setRequests] = useState([]);
     const [warehousesList, setWarehousesList] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -621,7 +622,7 @@ export default function MachineRequests() {
                                         Đã chọn{' '}
                                         <span className="text-[#00288e]">{selectedRequestIds.length}</span> phiếu
                                     </span>
-                                    {isAdmin ? (
+                                    {canManageAllRequests ? (
                                         <button
                                             type="button"
                                             onClick={handleBulkDelete}
@@ -780,7 +781,7 @@ export default function MachineRequests() {
                                             <div className="flex flex-col gap-2.5 pl-1.5">
                                                 <div className="flex items-center justify-between">
                                                     <div className="flex items-center gap-1.5">
-                                                        <input type="checkbox" checked={selectedRequestIds.includes(r.id)} disabled={!isAdmin} onChange={() => toggleSelectOne(r.id)} className="h-3.5 w-3.5 rounded border-gray-300 bg-white/50 text-blue-600" />
+                                                        <input type="checkbox" checked={selectedRequestIds.includes(r.id)} disabled={!canManageAllRequests} onChange={() => toggleSelectOne(r.id)} className="h-3.5 w-3.5 rounded border-gray-300 bg-white/50 text-blue-600" />
                                                         <span className="text-[11px] font-extrabold uppercase tracking-wider text-gray-400">#{((currentPage - 1) * pageSize) + index + 1}</span>
                                                         <h3 className="cursor-pointer text-[14px] font-black leading-none tracking-tight text-gray-900" onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)}>{r.order_code}</h3>
                                                     </div>
@@ -972,7 +973,7 @@ export default function MachineRequests() {
                                         <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider w-10">
                                             <input
                                                 type="checkbox"
-                                                disabled={!isAdmin || paginatedRequests.length === 0}
+                                                disabled={!canManageAllRequests || paginatedRequests.length === 0}
                                                 checked={
                                                     paginatedRequests.length > 0 &&
                                                     paginatedRequests.every((r) => selectedRequestIds.includes(r.id))
@@ -1012,7 +1013,7 @@ export default function MachineRequests() {
                                                 <td className="px-5 py-3.5 w-10">
                                                     <input
                                                         type="checkbox"
-                                                        disabled={!isAdmin}
+                                                        disabled={!canManageAllRequests}
                                                         checked={selectedRequestIds.includes(r.id)}
                                                         onChange={() => toggleSelectOne(r.id)}
                                                         className="w-5 h-5 rounded-lg border-slate-300 text-primary focus:ring-primary/20 transition-all cursor-pointer shadow-sm"
