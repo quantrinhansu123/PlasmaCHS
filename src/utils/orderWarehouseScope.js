@@ -13,11 +13,51 @@ const normalizeText = (value) =>
         .trim()
         .toLowerCase();
 
-const extractWarehouseFromNote = (note) => {
+export const extractWarehouseFromNote = (note) => {
     const text = String(note || '');
     if (!text) return '';
     const match = text.match(/Kho:\s*([^\n\r.]+)/i);
     return (match?.[1] || '').trim();
+};
+
+/** Giá trị thô cột Kho (mã / id / tên — dùng lọc). */
+export const getOrderWarehouseLabel = (order) =>
+    String(order?.warehouse || '').trim() || extractWarehouseFromNote(order?.note);
+
+/** Map id / code / tên kho → tên hiển thị. */
+export const buildWarehouseLabelMap = (warehouses = []) => {
+    const map = new Map();
+    for (const warehouse of warehouses) {
+        const name = String(warehouse?.name || '').trim();
+        if (!name) continue;
+        const id = String(warehouse?.id || '').trim();
+        const code = String(warehouse?.code || '').trim();
+        if (id) map.set(id, name);
+        if (code) map.set(code, name);
+        map.set(name, name);
+        map.set(normalizeText(name), name);
+        if (code) map.set(normalizeText(code), name);
+    }
+    return map;
+};
+
+export const resolveWarehouseDisplayName = (rawValue, labelMap) => {
+    const raw = String(rawValue || '').trim();
+    if (!raw) return '';
+    if (!labelMap?.size) return raw;
+    return (
+        labelMap.get(raw) ||
+        labelMap.get(normalizeText(raw)) ||
+        raw
+    );
+};
+
+/** Tên kho hiển thị trên list (ưu tiên tên từ danh mục warehouses). */
+export const getOrderWarehouseDisplayName = (order, labelMap) => {
+    const raw = getOrderWarehouseLabel(order);
+    if (!raw) return '';
+    const resolved = resolveWarehouseDisplayName(raw, labelMap);
+    return resolved || raw;
 };
 
 const getWarehouseAliases = (warehouse) => {
@@ -233,7 +273,10 @@ export async function scopeOrdersForWarehouseAccess(
 
         if (scopedWarehouses.length > 0) {
             const allowedKeys = buildAllowedWarehouseKeys(scopedWarehouses);
-            const scopeMatchOptions = matchOrderWarehouseFields && isThuKhoRole
+            // TK kho / thủ kho: khớp cột Kho trên phiếu (warehouse + note), không chỉ kho KH
+            const matchWarehouseColumn =
+                matchOrderWarehouseFields || isThuKhoRole || isWarehouseRole;
+            const scopeMatchOptions = matchWarehouseColumn
                 ? { orderWarehouseOnly: true }
                 : { customerWarehouseOnly: isThuKhoRole };
 
@@ -247,6 +290,7 @@ export async function scopeOrdersForWarehouseAccess(
             const fallbackKeys = new Set(getWarehouseKeyVariants(fallbackWarehouseCode));
             scopedOrders = scopedOrders.filter((order) =>
                 orderMatchesWarehouseScope(order, customerWarehouseById, fallbackKeys, {
+                    orderWarehouseOnly: isWarehouseRole,
                     customerWarehouseOnly: false,
                 })
             );

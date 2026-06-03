@@ -37,7 +37,7 @@ import {
     X,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useEffect, useState, cloneElement, useRef, useMemo } from 'react';
+import { useCallback, useEffect, useState, cloneElement, useRef, useMemo } from 'react';
 import { toast } from 'react-toastify';
 import { supabase } from '../supabase/config';
 import OrderStatusUpdater from '../components/Orders/OrderStatusUpdater';
@@ -45,10 +45,19 @@ import { deleteOrdersWithRollback } from '../utils/deleteOrderCascade';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import usePermissions from '../hooks/usePermissions';
-import { isAdminRole, isThuKhoRole } from '../utils/accessControl';
-import { scopeOrdersForWarehouseAccess } from '../utils/orderWarehouseScope';
 import {
-    appendOrderedByScope,
+    isAdminRole,
+    isThuKhoRole,
+    isWarehouseRole as isWarehouseRoleHelper,
+} from '../utils/accessControl';
+import {
+    buildWarehouseLabelMap,
+    getOrderWarehouseDisplayName,
+    scopeOrdersForWarehouseAccess,
+} from '../utils/orderWarehouseScope';
+import {
+    filterOrdersByVisibleMachineRequest,
+    getOrderMachineManagerLabel,
     isSalesAssigneeScopePending,
     resolveVisibleSalesNames,
     shouldScopeOrdersBySalesPerson,
@@ -70,13 +79,6 @@ const normalizeText = (value) =>
         .replace(/[\u0300-\u036f]/g, '')
         .trim()
         .toLowerCase();
-
-const extractWarehouseFromNote = (note) => {
-    const text = String(note || '');
-    if (!text) return '';
-    const match = text.match(/Kho:\s*([^\n\r.]+)/i);
-    return (match?.[1] || '').trim();
-};
 
 const getWarehouseAliases = (warehouse) => {
     const rawName = String(warehouse?.name || '').trim();
@@ -150,6 +152,7 @@ export default function MachineRequests() {
     const { role, user, department, roleScope, loading: permissionsLoading } = usePermissions();
     const isAdmin = isAdminRole(role);
     const [requests, setRequests] = useState([]);
+    const [warehousesList, setWarehousesList] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
     const [searchTerm, setSearchTerm] = useState('');
@@ -214,6 +217,31 @@ export default function MachineRequests() {
         { id: 'HUY_DON', label: 'Hủy đơn' },
     ];
 
+    const warehouseLabelMap = useMemo(
+        () => buildWarehouseLabelMap(warehousesList),
+        [warehousesList],
+    );
+
+    const getWarehouseName = useCallback(
+        (row) => getOrderWarehouseDisplayName(row, warehouseLabelMap) || '—',
+        [warehouseLabelMap],
+    );
+
+    useEffect(() => {
+        const fetchWarehouses = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('warehouses')
+                    .select('id, name, code')
+                    .order('name');
+                if (!error) setWarehousesList(data || []);
+            } catch (err) {
+                console.error('Error fetching warehouses for DNXM:', err);
+            }
+        };
+        fetchWarehouses();
+    }, []);
+
     useEffect(() => {
         if (permissionsLoading) return;
         fetchData();
@@ -263,24 +291,29 @@ export default function MachineRequests() {
                 return;
             }
 
-            let query = supabase.from('orders').select('*');
-
-            // NVKD / trưởng nhóm: lọc theo Người yêu cầu (ordered_by)
-            // Admin / Kế toán: full | Thủ kho: lọc theo kho ở bước dưới
-            if (shouldScopeOrdersBySalesPerson(role, roleScope)) {
-                query = appendOrderedByScope(query, visibleRequesterNames);
-            }
+            let query = supabase
+                .from('orders')
+                .select('*')
+                .or('order_type.eq.DNXM,order_code.ilike.%DNXM%,note.ilike.%Phụ trách máy:%');
 
             const { data, error } = await query.order('created_at', { ascending: false });
 
             if (error) throw error;
 
-            const { orders: scopedOrders } = await scopeOrdersForWarehouseAccess(data || [], {
+            let rows = (data || []).filter(isMachineRequestOrder);
+
+            if (shouldScopeOrdersBySalesPerson(role, roleScope) && visibleRequesterNames?.length) {
+                rows = filterOrdersByVisibleMachineRequest(rows, visibleRequesterNames);
+            }
+
+            const isWarehouseStaff =
+                isThuKhoRole(role) || isWarehouseRoleHelper(role);
+            const { orders: scopedOrders } = await scopeOrdersForWarehouseAccess(rows, {
                 role,
                 department,
                 user,
                 isAdmin: isAdminRole(role),
-                matchOrderWarehouseFields: isThuKhoRole(role),
+                matchOrderWarehouseFields: isWarehouseStaff,
             });
 
             setRequests(scopedOrders);
@@ -294,9 +327,11 @@ export default function MachineRequests() {
     const dnxmOrders = useMemo(() => requests.filter(isMachineRequestOrder), [requests]);
 
     const filteredRequests = dnxmOrders.filter((r) => {
+        const managerLabel = getOrderMachineManagerLabel(r).toLowerCase();
         const matchesSearch = (r.order_code || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
             (r.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-            (r.ordered_by || '').toLowerCase().includes(searchTerm.toLowerCase());
+            (r.ordered_by || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+            managerLabel.includes(searchTerm.toLowerCase());
         
         const matchesStatus =
             selectedStatuses.length === 0 ||
@@ -756,10 +791,10 @@ export default function MachineRequests() {
                                                     <span className="text-[11px] font-bold tracking-tight text-gray-500">{new Date(r.created_at).toLocaleDateString('vi-VN')}</span>
                                                 </div>
                                                 <div className="flex items-center justify-between border-t border-gray-100/80 pt-1.5">
-                                                    <div className="flex items-center gap-1.5"><span className="text-[9px] font-black uppercase tracking-widest text-gray-400">Nguoi yc:</span><span className="truncate text-xs font-bold text-gray-700">{r.ordered_by || '-'}</span></div>
+                                                    <div className="flex items-center gap-1.5"><span className="text-[9px] font-black uppercase tracking-widest text-gray-400">Phụ trách:</span><span className="truncate text-xs font-bold text-gray-700">{getOrderMachineManagerLabel(r) || '-'}</span></div>
                                                     <div className="flex items-center gap-1.5"><span className="text-[9px] font-black uppercase tracking-widest text-gray-400">SL:</span><span className="text-sm font-black text-blue-600">{getApprovedQuantityFromRequest(r)}</span></div>
                                                 </div>
-                                                <div className="rounded-lg border border-gray-100 bg-gray-50 px-2 py-1.5 text-[11px] font-semibold text-gray-600">Kho: {r.warehouse || extractWarehouseFromNote(r.note) || '-'}</div>
+                                                <div className="rounded-lg border border-gray-100 bg-gray-50 px-2 py-1.5 text-[11px] font-semibold text-gray-600">Kho: {getWarehouseName(r)}</div>
                                                 <div className="flex items-center justify-end gap-2 border-t border-gray-100/80 pt-2">
                                                     <button type="button" onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)} className="rounded-lg border border-blue-100 bg-blue-50 p-2 text-blue-600"><Eye size={16} /></button>
                                                     <button type="button" onClick={() => handleViewAsOrder(r)} className="rounded-lg border border-emerald-100 bg-emerald-50 p-2 text-emerald-700"><Package size={16} /></button>
@@ -958,7 +993,8 @@ export default function MachineRequests() {
                                         <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Mã phiếu</th>
                                         <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Ngày tạo</th>
                                         <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Khách hàng</th>
-                                        <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Người yêu cầu</th>
+                                        <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Người đề nghị</th>
+                                        <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">NV phụ trách máy</th>
                                         <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Kho</th>
                                         <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Số lượng</th>
                                         <th className="px-5 py-3.5 text-[12px] font-bold text-slate-500 uppercase tracking-wider">Trạng thái</th>
@@ -967,9 +1003,9 @@ export default function MachineRequests() {
                                 </thead>
                                 <tbody className="divide-y divide-border/60 bg-white">
                                     {loading ? (
-                                        <tr><td colSpan={9} className="px-6 py-20 text-center text-slate-400 font-bold italic">Đang tải dữ liệu...</td></tr>
+                                        <tr><td colSpan={10} className="px-6 py-20 text-center text-slate-400 font-bold italic">Đang tải dữ liệu...</td></tr>
                                     ) : paginatedRequests.length === 0 ? (
-                                        <tr><td colSpan={9} className="px-6 py-20 text-center text-slate-400 font-bold italic">Không tìm thấy phiếu nào</td></tr>
+                                        <tr><td colSpan={10} className="px-6 py-20 text-center text-slate-400 font-bold italic">Không tìm thấy phiếu nào</td></tr>
                                     ) : (
                                         paginatedRequests.map(r => (
                                             <tr key={r.id} className="group hover:bg-muted/30 transition-colors">
@@ -986,7 +1022,10 @@ export default function MachineRequests() {
                                                 <td className="px-5 py-3.5 text-[13px] font-semibold text-slate-600">{new Date(r.created_at).toLocaleDateString('vi-VN')}</td>
                                                 <td className="px-5 py-3.5"><div className="text-[14px] font-bold text-slate-900 line-clamp-1">{r.customer_name}</div></td>
                                                 <td className="px-5 py-3.5 text-[13px] font-medium text-slate-500">{r.ordered_by || '—'}</td>
-                                                <td className="px-5 py-3.5 text-[13px] font-medium text-slate-600">{r.warehouse || extractWarehouseFromNote(r.note) || '—'}</td>
+                                                <td className="px-5 py-3.5 text-[13px] font-semibold text-slate-700">
+                                                    {getOrderMachineManagerLabel(r) || '—'}
+                                                </td>
+                                                <td className="px-5 py-3.5 text-[13px] font-medium text-slate-600">{getWarehouseName(r)}</td>
                                                 <td className="px-5 py-3.5"><span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-md font-bold text-[12px]">{getApprovedQuantityFromRequest(r)} máy</span></td>
                                                 <td className="px-5 py-3.5">
                                                     {(() => {
@@ -1108,10 +1147,10 @@ export default function MachineRequests() {
 
                                                                 <div className="pt-3">
                                                                     <div className="text-[12px] text-muted-foreground">
-                                                                        Kho: {r.warehouse || extractWarehouseFromNote(r.note) || '—'}
+                                                                        Kho: {getWarehouseName(r)}
                                                                     </div>
                                                                     <div className="mt-1 text-[12px] text-muted-foreground">
-                                                                        YC: {r.ordered_by || '—'} • SL:{' '}
+                                                                        PT: {getOrderMachineManagerLabel(r) || '—'} • SL:{' '}
                                                                         {getApprovedQuantityFromRequest(r)}
                                                                     </div>
                                                                 </div>

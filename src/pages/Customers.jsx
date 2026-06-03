@@ -60,7 +60,6 @@ import { hasFullDataVisibility, isAdminRole } from '../utils/accessControl';
 import {
     appendCustomerAssigneeScope,
     getCurrentUserNames,
-    getEffectiveVisibilityScope,
     isSalesAssigneeScopePending,
     resolveVisibleSalesNames,
     shouldScopeCustomersByAssignee,
@@ -153,11 +152,6 @@ const Customers = () => {
     const isAdminOrManager = hasFullDataVisibility(rawRole) || isAdminRole(rawRole);
     const currentUserNames = useMemo(() => getCurrentUserNames(user), [user]);
     const [assigneeScopeNames, setAssigneeScopeNames] = useState(null);
-    const effectiveVisibilityScope = useMemo(
-        () => getEffectiveVisibilityScope(rawRole, roleScope),
-        [rawRole, roleScope]
-    );
-
     useEffect(() => {
         let cancelled = false;
         (async () => {
@@ -295,13 +289,10 @@ const Customers = () => {
                 String(customer.managed_by || '').trim(),
             ].filter(Boolean);
             if (assignees.length === 0) return false;
-            const allowedNames =
-                effectiveVisibilityScope === 'team'
-                    ? (assigneeScopeNames || currentUserNames)
-                    : currentUserNames;
+            const allowedNames = assigneeScopeNames?.length ? assigneeScopeNames : currentUserNames;
             return allowedNames.some((name) => assignees.includes(name));
         },
-        [filterType, isAdminOrManager, currentUserNames, effectiveVisibilityScope, assigneeScopeNames]
+        [filterType, isAdminOrManager, currentUserNames, assigneeScopeNames]
     );
     const canChangeLeadCustomerStatus = useCallback(
         (customer) => {

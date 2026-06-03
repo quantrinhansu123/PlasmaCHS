@@ -83,6 +83,8 @@ import {
 } from '../utils/accessControl';
 import {
     appendOrderedByScope,
+    filterOrdersByVisibleSalesPerson,
+    getOrderSalesPersonLabel,
     hasFullOrderVisibility,
     isSalesAssigneeScopePending,
     resolveVisibleSalesNames,
@@ -90,6 +92,7 @@ import {
     shouldScopeOrdersByWarehouse,
 } from '../utils/salesVisibilityScope';
 import { deleteOrdersWithRollback } from '../utils/deleteOrderCascade';
+import { scopeOrdersForWarehouseAccess } from '../utils/orderWarehouseScope';
 import { stripDeliveryMediaFromNote } from '../utils/orderNoteSanitize';
 
 // Register Chart.js components
@@ -581,17 +584,6 @@ const Orders = () => {
                 query = query.eq('delivery_unit', storageUserName);
             }
 
-            // Kho (không phải thủ kho): lọc theo mã kho suy ra từ department.
-            if (!fullOrderAccess && isWarehouseRole && department && !isThuKhoRole) {
-                // Logic: Extract warehouse code from department (e.g., "OCP1-CHS" -> "OCP1")
-                // We'll take the first part before the hyphen if it exists, otherwise use full string
-                const warehouseCode = department.includes('-') 
-                    ? department.split('-')[0].trim() 
-                    : department.trim();
-                
-                query = query.eq('warehouse', warehouseCode);
-            }
-
             // NVKD / trưởng nhóm: lọc theo ordered_by (own | team)
             // Admin / Kế toán: full | Thủ kho: theo kho | Shipper: đơn giao
             if (shouldScopeOrdersBySalesPerson(role, roleScope)) {
@@ -603,56 +595,28 @@ const Orders = () => {
             if (error) throw error;
 
             let scopedOrders = data || [];
-            const customerWarehouseById = await loadCustomerWarehouseMap(scopedOrders);
 
-            // Thủ kho / nhân viên kho: chỉ đơn thuộc kho phụ trách
-            if (shouldScopeOrdersByWarehouse(role)) {
-                const managerCandidates = getManagerCandidateKeys(user?.name, user?.username, storageUserName);
-
-                const { data: warehousesData } = await supabase
-                    .from('warehouses')
-                    .select('id, name, code, manager_name');
-
-                let scopedWarehouses = (warehousesData || []).filter((warehouse) =>
-                    warehouseManagedByUser(warehouse, managerCandidates)
-                );
-
-                if (!isThuKhoRole && scopedWarehouses.length === 0) {
-                    const branchTokens = getManagerCandidateKeys(department, user?.chi_nhanh);
-                    if (branchTokens.length > 0) {
-                        scopedWarehouses = (warehousesData || []).filter((warehouse) => {
-                            const keys = getWarehouseAliases(warehouse);
-                            return branchTokens.some((token) =>
-                                keys.some((key) => key.includes(token) || token.includes(key))
-                            );
-                        });
-                    }
-                }
-
-                if (scopedWarehouses.length > 0) {
-                    const allowedKeys = buildAllowedWarehouseKeys(scopedWarehouses);
-
-                    scopedOrders = scopedOrders.filter((order) =>
-                        orderMatchesWarehouseScope(order, customerWarehouseById, allowedKeys, {
-                            customerWarehouseOnly: isThuKhoRole,
-                        })
-                    );
-                } else if (!isThuKhoRole && department) {
-                    const fallbackWarehouseCode = department.includes('-')
-                        ? department.split('-')[0].trim()
-                        : department.trim();
-                    const fallbackKeys = new Set(getWarehouseKeyVariants(fallbackWarehouseCode));
-                    scopedOrders = scopedOrders.filter((order) =>
-                        orderMatchesWarehouseScope(order, customerWarehouseById, fallbackKeys, {
-                            customerWarehouseOnly: false,
-                        })
-                    );
-                } else {
-                    scopedOrders = [];
-                }
+            // Nhân viên KD = ordered_by; quản lý thấy đơn của NV có Người quản lý trùng mình
+            if (shouldScopeOrdersBySalesPerson(role, roleScope) && visibleSalesNames?.length) {
+                scopedOrders = filterOrdersByVisibleSalesPerson(scopedOrders, visibleSalesNames);
             }
 
-            setCustomerWarehouseById(customerWarehouseById);
+            // TK kho / thủ kho: chỉ dòng có cột Kho khớp kho phụ trách (manager_name trên danh mục kho)
+            if (shouldScopeOrdersByWarehouse(role)) {
+                const warehouseScoped = await scopeOrdersForWarehouseAccess(scopedOrders, {
+                    role,
+                    department,
+                    user,
+                    isAdmin,
+                    matchOrderWarehouseFields: isThuKhoRole || isWarehouseRole,
+                });
+                scopedOrders = warehouseScoped.orders;
+                setCustomerWarehouseById(warehouseScoped.customerWarehouseById);
+            } else {
+                const customerWarehouseById = await loadCustomerWarehouseMap(scopedOrders);
+                setCustomerWarehouseById(customerWarehouseById);
+            }
+
             setOrders(scopedOrders);
         } catch (error) {
             console.error('Error fetching orders:', error);
@@ -1249,7 +1213,11 @@ const Orders = () => {
                     </span>
                 );
             case 'sales':
-                return <span className="text-[13px] text-muted-foreground font-medium">{order.ordered_by || '—'}</span>;
+                return (
+                    <span className="text-[13px] text-muted-foreground font-medium">
+                        {getOrderSalesPersonLabel(order) || '—'}
+                    </span>
+                );
             case 'recipient':
                 return <span className="text-[13px] text-muted-foreground font-normal">{order.recipient_name}</span>;
             case 'type':

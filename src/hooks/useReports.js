@@ -3,10 +3,9 @@ import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 import {
   hasFullDataVisibility,
-  isLeadSaleRole,
-  isSalesRole,
   isWarehouseRole,
 } from '../utils/accessControl';
+import { resolveVisibleSalesNames as resolveVisibleSalesNamesScope } from '../utils/salesVisibilityScope';
 
 const buildTextOrClause = (field, values) => {
   return (values || [])
@@ -28,22 +27,8 @@ export const useReports = () => {
   ].filter(Boolean))];
 
   const resolveVisibleSalesNames = async () => {
-    if (hasFullDataVisibility(role)) return [];
-    if (isSalesRole(role) || roleScope === 'own') return currentUserNames;
-
-    if (isLeadSaleRole(role) || roleScope === 'team') {
-      const managedNames = (user?.nguoi_quan_ly || '')
-        .split(',')
-        .map((name) => name.trim())
-        .filter(Boolean);
-
-      return [...new Set([
-        ...currentUserNames,
-        ...managedNames,
-      ])];
-    }
-
-    return [];
+    const { names } = await resolveVisibleSalesNamesScope(user, role, { roleScope });
+    return names || [];
   };
 
   const fetchDashboardSummary = async () => {

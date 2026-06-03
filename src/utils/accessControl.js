@@ -84,6 +84,18 @@ export const isLeadSaleRole = (role) => {
     );
 };
 
+/** Trưởng phòng / trưởng nhóm — xem dữ liệu NV trong phòng ban / team */
+export const isDepartmentHeadRole = (role) => {
+    if (isLeadSaleRole(role)) return true;
+    const r = normalizeRole(role);
+    return (
+        r.includes('truongphong') ||
+        r.includes('photruong') ||
+        r.includes('truongban') ||
+        r.includes('truongphongkinhdoanh')
+    );
+};
+
 export const isThuKhoRole = (role) => {
     const r = normalizeRole(role);
     return r.includes('thukho');
@@ -126,7 +138,7 @@ export const roleMatchesAllowedList = (currentRole, allowedRoles) => {
  */
 export const getDataVisibilityScope = (role) => {
     if (hasFullDataVisibility(role)) return 'all';
-    if (isLeadSaleRole(role)) return 'team';
+    if (isDepartmentHeadRole(role)) return 'team';
     if (isSalesRole(role)) return 'own';
     if (isWarehouseRole(role)) return 'warehouse';
     if (isShipperRole(role)) return 'assigned_orders';
