@@ -25,6 +25,7 @@ import {
     isPermissionGroupKey,
     parsePermissionGroupKey,
 } from '../utils/permissionGroupKey';
+import { getDefaultViewPermissions } from '../constants/departmentViewPermissions';
 
 const Permissions = () => {
     const [searchTerm, setSearchTerm] = useState('');
@@ -292,6 +293,18 @@ const Permissions = () => {
         setSaveMessage('');
     };
 
+    const handleApplyDepartmentTemplate = () => {
+        if (activeTab !== 'roles' || !activeRole) return;
+        const dep = (activeRole.departmentName || '').trim();
+        const pos = (activeRole.positionName || '').trim();
+        if (!dep || !pos) {
+            setSaveMessage('Lỗi: Nhóm quyền thiếu thông tin Phòng ban / Vị trí.');
+            return;
+        }
+        setDraftPermissions(toViewOnlyPermissions(getDefaultViewPermissions(dep, pos)));
+        setSaveMessage('Đã áp dụng mẫu quyền xem theo phòng ban. Bấm «Lưu thay đổi» để ghi DB.');
+    };
+
     const handleSavePermissions = async () => {
         if (!activePermissionItem) return;
         setIsSavingPermissions(true);
@@ -387,7 +400,9 @@ const Permissions = () => {
                             </div>
                             <div>
                                 <h1 className="text-xl font-black text-slate-800 tracking-tight leading-none uppercase">Phân quyền</h1>
-                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em] mt-1">Quyền xem theo phân hệ (module)</p>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em] mt-1">
+                                    Quyền xem theo phân hệ — đồng bộ Trang chủ & menu
+                                </p>
                             </div>
                         </div>
                     </div>
@@ -554,7 +569,17 @@ const Permissions = () => {
                                                 : selectedUser?.name}
                                         </p>
                                     </div>
-                                    <div className="flex shrink-0 items-center gap-2">
+                                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                                        {activeTab === 'roles' ? (
+                                            <button
+                                                type="button"
+                                                onClick={handleApplyDepartmentTemplate}
+                                                disabled={isSavingPermissions}
+                                                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                                            >
+                                                Áp dụng mẫu phòng ban
+                                            </button>
+                                        ) : null}
                                         <button
                                             type="button"
                                             onClick={handleRefreshPermissions}

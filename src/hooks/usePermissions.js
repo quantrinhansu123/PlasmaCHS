@@ -13,88 +13,7 @@ import {
     isWarehouseRole,
     normalizeRole,
 } from '../utils/accessControl';
-import { buildPermissionGroupKey } from '../utils/permissionGroupKey';
-
-const normalizeRoleKey = (value) => {
-    if (!value) return '';
-    return String(value)
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-zA-Z0-9]/g, '')
-        .toLowerCase();
-};
-
-const getCanonicalRoleNames = (roleName) => {
-    const normalized = normalizeRoleKey(roleName);
-    const names = new Set([roleName]);
-
-    if (normalized.includes('admin') || normalized.includes('quantri')) names.add('Admin');
-    if (normalized.includes('thukho') || normalized.includes('thukho')) names.add('ThuKho');
-    if (normalized.includes('shipper') || normalized.includes('giaohang')) names.add('Shipper');
-    if (normalized.includes('nvkd') || normalized.includes('nhanvienkinhdoanh') || normalized.includes('kinhdoanh') || normalized.includes('sale')) names.add('NVKD');
-    if (normalized.includes('leadsale') || normalized.includes('truongkinhdoanh')) names.add('LeadSale');
-    if (normalized.includes('cskh') || normalized.includes('chamsockhachhang')) names.add('CSKH');
-    if (normalized.includes('quanly') || normalized.includes('quantri')) names.add('QuanLy');
-
-    return [...names].filter(Boolean);
-};
-
-const fetchRolePermissions = async (roleName, departmentName = '') => {
-    const candidates = getCanonicalRoleNames(roleName);
-    const groupKey = buildPermissionGroupKey(departmentName, roleName);
-    if (groupKey) {
-        candidates.unshift(groupKey);
-    }
-    const { data } = await supabase
-        .from('app_roles')
-        .select('permissions, name')
-        .in('name', candidates)
-        .maybeSingle();
-
-    if (data) return data.permissions || {};
-
-    const { data: allRoles } = await supabase.from('app_roles').select('permissions, name');
-    const normalizedRole = normalizeRoleKey(roleName);
-    const fallback = (allRoles || []).find((item) => normalizeRoleKey(item.name) === normalizedRole);
-    return fallback?.permissions || {};
-};
-
-const applyRolePermissionOverrides = (permissions, roleName) => {
-    const normalized = normalizeRoleKey(roleName);
-    const merged = { ...(permissions || {}) };
-
-    const isSalesRole =
-        normalized.includes('nvkd') ||
-        normalized.includes('nhanvienkinhdoanh') ||
-        normalized.includes('kinhdoanh') ||
-        normalized.includes('sale');
-
-    // NVKD: đảm bảo thấy module DNXM; thao tác thêm/sửa/xóa theo rule từng màn.
-    if (isSalesRole) {
-        merged.dnxm = {
-            ...(merged.dnxm || {}),
-            view: true,
-        };
-    }
-
-    const isWarehouseKeeperRole =
-        normalized.includes('thukho') ||
-        normalized.includes('kho') ||
-        normalized.includes('warehouse');
-
-    // Thủ kho needs full module cards in "Đơn hàng & Kinh doanh".
-    // Keep action-level restrictions in each page; this only guarantees module visibility.
-    if (isWarehouseKeeperRole) {
-        ['orders', 'customers', 'promotions', 'dnxm', 'reports', 'shipping_tasks'].forEach((moduleKey) => {
-            merged[moduleKey] = {
-                ...(merged[moduleKey] || {}),
-                view: true,
-            };
-        });
-    }
-
-    return merged;
-};
+import { fetchRolePermissions } from '../utils/fetchRolePermissions';
 
 export const usePermissions = () => {
     const [permissions, setPermissions] = useState({});
@@ -126,7 +45,7 @@ export const usePermissions = () => {
                     setRole(userData.role);
                     setDepartment(userData.department || '');
                     const rolePermissions = await fetchRolePermissions(userData.role, userData.department || '');
-                    setPermissions(applyRolePermissionOverrides(rolePermissions, userData.role));
+                    setPermissions(rolePermissions);
                 } else {
                     const safeRole = userRoleFromStorage || null;
 
@@ -140,7 +59,8 @@ export const usePermissions = () => {
                     });
                     setRole(safeRole);
                     setDepartment(userDeptFromStorage);
-                    setPermissions(applyRolePermissionOverrides({}, safeRole));
+                    const rolePermissions = await fetchRolePermissions(safeRole, userDeptFromStorage);
+                    setPermissions(rolePermissions);
 
                     if (isAdminRole(safeRole) && !userData) {
                         console.warn(

@@ -24,9 +24,6 @@ export const sidebarMenu = [
     icon: group.icon,
     color: MODULE_SIDEBAR_COLORS[group.colorScheme] || 'text-blue-500',
     colorScheme: group.colorScheme,
-    ...(group.path === '/van-chuyen'
-      ? { roles: ['Admin', 'Manager', 'Shipper'] }
-      : {}),
   })),
 ];
 

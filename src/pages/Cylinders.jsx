@@ -17,6 +17,7 @@ import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import {
     ActivitySquare,
     BarChart2,
+    Building2,
     ChevronDown,
     ChevronLeft,
     ChevronRight,
@@ -149,6 +150,7 @@ const TABLE_COLUMNS = [
     { key: 'customer_name', label: 'Khách hàng' },
     { key: 'department', label: 'Vị trí' },
     { key: 'warehouse', label: 'Kho Quản Lý' },
+    { key: 'supplier_ncc', label: 'NCC nhận vỏ' },
     { key: 'status', label: 'Trạng Thái' },
     { key: 'expiry_date', label: 'Hạn kiểm định' },
 ];
@@ -1404,6 +1406,19 @@ const Cylinders = () => {
                                                         </p>
                                                     </div>
                                                 </div>
+                                                {cylinder.status === 'đã trả ncc' && (
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center text-orange-600 shrink-0">
+                                                            <Building2 size={14} />
+                                                        </div>
+                                                        <div className="min-w-0 flex-1">
+                                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">NCC nhận vỏ</p>
+                                                            <p className="text-[12px] text-orange-800 font-bold truncate">
+                                                                {resolveCylinderNccSupplierName(cylinder) || '—'}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                )}
                                                 <div className="flex items-center gap-2">
                                                     <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
                                                         <ActivitySquare size={14} />
@@ -1637,6 +1652,14 @@ const Cylinders = () => {
                                                 return (
                                                     <td key={col.key} className="px-4 py-4 text-sm text-muted-foreground font-bold">
                                                         {cylinder.warehouses?.name || '—'}
+                                                    </td>
+                                                );
+                                            }
+                                            if (col.key === 'supplier_ncc') {
+                                                const nccName = resolveCylinderNccSupplierName(cylinder);
+                                                return (
+                                                    <td key={col.key} className="px-4 py-4 text-sm font-semibold text-orange-800">
+                                                        {cylinder.status === 'đã trả ncc' ? (nccName || '—') : '—'}
                                                     </td>
                                                 );
                                             }

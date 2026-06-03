@@ -11,11 +11,6 @@ import { ModuleIconBox } from '../ui/ModuleIconBox';
 
 function Sidebar({ isOpen, setIsOpen }) {
   const { role, permissions } = usePermissions();
-  const hasRoleAccess = (allowedRoles, currentRole) => {
-    if (!allowedRoles || allowedRoles.length === 0) return true;
-    const normalizedCurrent = normalizeRole(currentRole);
-    return allowedRoles.some((r) => normalizeRole(r) === normalizedCurrent);
-  };
 
   return (
     <>
@@ -54,7 +49,10 @@ function Sidebar({ isOpen, setIsOpen }) {
 
         <nav className="flex-1 overflow-y-auto py-6 space-y-2 custom-scrollbar flex flex-col items-center lg:items-stretch">
           {sidebarMenu
-            .filter(item => roleMatchesAllowedList(role, item.roles) && canAccessPath(item.path, role, permissions))
+            .filter(
+              (item) =>
+                roleMatchesAllowedList(role, item.roles) && canAccessPath(item.path, role, permissions),
+            )
             .map((item) => (
               <NavItem
                 key={item.path}

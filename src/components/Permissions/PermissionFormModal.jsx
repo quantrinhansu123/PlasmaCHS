@@ -10,6 +10,11 @@ import {
 } from '../../constants/permissionConstants';
 import { supabase } from '../../supabase/config';
 import { USER_ROLES } from '../../constants/userConstants';
+import { getDefaultViewPermissions } from '../../constants/departmentViewPermissions';
+import {
+    buildPermissionGroupKey,
+    buildPermissionGroupLabel,
+} from '../../utils/permissionGroupKey';
 
 const normalizeDept = (value = '') =>
     String(value || '')
@@ -17,10 +22,6 @@ const normalizeDept = (value = '') =>
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase();
-import {
-    buildPermissionGroupKey,
-    buildPermissionGroupLabel,
-} from '../../utils/permissionGroupKey';
 
 const sortVi = (a, b) => a.localeCompare(b, 'vi', { sensitivity: 'base' });
 
@@ -84,6 +85,14 @@ export default function PermissionFormModal({ role, isUserRole, defaultPermissio
         setDepartmentName(value);
         setPositionName('');
     };
+
+    useEffect(() => {
+        if (permissionType !== 'role' || isEdit) return;
+        const dep = departmentName.trim();
+        const pos = positionName.trim();
+        if (!dep || !pos) return;
+        setPermissions(toViewOnlyPermissions(getDefaultViewPermissions(dep, pos)));
+    }, [permissionType, departmentName, positionName, isEdit]);
 
     useEffect(() => {
         fetchUsers();
@@ -182,7 +191,7 @@ export default function PermissionFormModal({ role, isUserRole, defaultPermissio
                         .select('id')
                         .eq('name', groupKey)
                         .eq('type', 'group')
-                        .single();
+                        .maybeSingle();
                     if (existing) {
                         setErrorMsg(`Nhóm quyền "${roleLabel}" đã tồn tại.`);
                         setIsLoading(false);

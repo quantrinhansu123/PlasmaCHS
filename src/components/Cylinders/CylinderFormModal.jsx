@@ -9,6 +9,7 @@ import {
     HANDLE_TYPES,
     VALVE_TYPES
 } from '../../constants/machineConstants';
+import { toast } from 'react-toastify';
 import { supabase } from '../../supabase/config';
 import BarcodeScanner from '../Common/BarcodeScanner';
 
@@ -49,6 +50,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
     const [customersList, setCustomersList] = useState([]);
     const [warehousesList, setWarehousesList] = useState([]);
     const [suppliersList, setSuppliersList] = useState([]);
+    const [suppliersLoading, setSuppliersLoading] = useState(false);
 
     useEffect(() => {
         const fetchCustomers = async () => {
@@ -87,14 +89,25 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
         };
 
         const fetchSuppliers = async () => {
+            setSuppliersLoading(true);
             try {
                 const { data, error } = await supabase
                     .from('suppliers')
                     .select('id, name')
                     .order('name');
-                if (!error && data) setSuppliersList(data);
+                if (error) {
+                    console.error('Error fetching suppliers:', error);
+                    toast.error('Không tải được danh sách NCC: ' + error.message);
+                    setSuppliersList([]);
+                    return;
+                }
+                setSuppliersList(data || []);
             } catch (err) {
                 console.error('Error fetching suppliers:', err);
+                toast.error('Không tải được danh sách NCC.');
+                setSuppliersList([]);
+            } finally {
+                setSuppliersLoading(false);
             }
         };
 
@@ -130,8 +143,20 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
         const { name, value } = e.target;
         setFormData((prev) => {
             const next = { ...prev, [name]: value };
-            if (name === 'status' && value !== 'đã trả ncc') {
-                next.supplier_id = '';
+            if (name === 'status') {
+                if (value === 'đã trả ncc') {
+                    next.warehouse_id = '';
+                    next.customer_id = '';
+                    next.department = '';
+                } else if (prev.status === 'đã trả ncc') {
+                    next.supplier_id = '';
+                }
+            }
+            if (name === 'supplier_id' && value) {
+                next.status = 'đã trả ncc';
+                next.warehouse_id = '';
+                next.customer_id = '';
+                next.department = '';
             }
             return next;
         });
@@ -182,11 +207,14 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             return;
         }
 
-        if (formData.status !== 'đã trả ncc') {
-            if (!formData.warehouse_id) {
-                setErrorMsg('Vui lòng chọn Kho quản lý.');
+        if (formData.status === 'đã trả ncc') {
+            if (!String(formData.supplier_id || '').trim()) {
+                setErrorMsg('Vui lòng chọn NCC nhận vỏ (danh sách từ mục NCC).');
                 return;
             }
+        } else if (!formData.warehouse_id) {
+            setErrorMsg('Vui lòng chọn Kho quản lý.');
+            return;
         }
 
         setIsLoading(true);
@@ -212,12 +240,17 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             payload.customer_id = payload.customer_id || null;
             payload.expiry_date = payload.expiry_date || null;
             payload.cylinder_code = payload.cylinder_code || null;
-            payload.warehouse_id = payload.warehouse_id && String(payload.warehouse_id).trim()
-                ? String(payload.warehouse_id).trim()
-                : null;
-            payload.supplier_id = payload.supplier_id && String(payload.supplier_id).trim()
-                ? String(payload.supplier_id).trim()
-                : null;
+            if (payload.status === 'đã trả ncc') {
+                payload.supplier_id = String(payload.supplier_id).trim();
+                payload.warehouse_id = null;
+                payload.customer_id = null;
+                payload.customer_name = '';
+            } else {
+                payload.supplier_id = null;
+                payload.warehouse_id = payload.warehouse_id && String(payload.warehouse_id).trim()
+                    ? String(payload.warehouse_id).trim()
+                    : null;
+            }
             // Remove local only field
             delete payload.department;
 
@@ -341,25 +374,35 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                                 </select>
                             </div>
 
-                            {formData.status === 'đã trả ncc' && (
-                                <div className="space-y-1.5 md:col-span-2">
-                                    <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
-                                        <Building2 className="w-4 h-4 text-primary/60" />
-                                        NCC nhận vỏ
-                                    </label>
-                                    <select
-                                        name="supplier_id"
-                                        value={formData.supplier_id || ''}
-                                        onChange={handleChange}
-                                        className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-[14px] font-bold text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white transition-all shadow-sm"
-                                    >
-                                        <option value="">-- Chọn NCC --</option>
-                                        {suppliersList.map((s) => (
-                                            <option key={s.id} value={s.id}>{s.name}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                            )}
+                            <div className="space-y-1.5 md:col-span-2">
+                                <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">
+                                    <Building2 className="w-4 h-4 text-primary/60" />
+                                    NCC nhận vỏ
+                                    {formData.status === 'đã trả ncc' && <span className="text-red-500">*</span>}
+                                </label>
+                                <select
+                                    name="supplier_id"
+                                    value={formData.supplier_id || ''}
+                                    onChange={handleChange}
+                                    disabled={suppliersLoading}
+                                    className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-[14px] font-bold text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 transition-all shadow-sm cursor-pointer disabled:opacity-60"
+                                >
+                                    <option value="">
+                                        {suppliersLoading
+                                            ? 'Đang tải danh sách NCC...'
+                                            : '-- Chọn NCC (từ danh sách NCC) --'}
+                                    </option>
+                                    {suppliersList.map((s) => (
+                                        <option key={s.id} value={s.id}>{s.name}</option>
+                                    ))}
+                                </select>
+                                <p className="text-[11px] font-semibold text-slate-500 leading-snug">
+                                    Chọn NCC từ dropdown — hệ thống tự chuyển trạng thái «Đã trả NCC» (hoặc chọn trạng thái đó trước).
+                                    {suppliersList.length === 0 && !suppliersLoading && (
+                                        <span className="block text-amber-700 mt-0.5">Chưa có NCC — thêm tại mục Nhà cung cấp.</span>
+                                    )}
+                                </p>
+                            </div>
 
                             <div className="space-y-1.5">
                                 <label className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-800">

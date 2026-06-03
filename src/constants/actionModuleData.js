@@ -22,6 +22,7 @@ import {
   Calendar,
   List
 } from 'lucide-react';
+import { HOME_VIEWERS } from '../utils/homeModuleVisibility';
 
 export const actionModuleGroups = [
   {
@@ -30,6 +31,7 @@ export const actionModuleGroups = [
     description: 'Quản lý đơn hàng, báo giá và doanh thu.',
     icon: Package,
     colorScheme: 'blue',
+    homeViewers: [HOME_VIEWERS.KINH_DOANH, HOME_VIEWERS.KHO, HOME_VIEWERS.KE_TOAN],
     items: [
       {
         icon: Package,
@@ -123,6 +125,7 @@ export const actionModuleGroups = [
     description: 'Theo dõi và quản lý thiết bị hệ thống.',
     icon: Monitor,
     colorScheme: 'purple',
+    homeViewers: [HOME_VIEWERS.KHO, HOME_VIEWERS.ADMIN, HOME_VIEWERS.KE_TOAN],
     items: [
       {
         icon: Monitor,
@@ -181,6 +184,7 @@ export const actionModuleGroups = [
     description: 'Quản lý kho hàng, tồn kho và xuất nhập.',
     icon: Warehouse,
     colorScheme: 'amber',
+    homeViewers: [HOME_VIEWERS.KHO, HOME_VIEWERS.ADMIN, HOME_VIEWERS.KE_TOAN],
     items: [
       {
         icon: Warehouse,
@@ -218,6 +222,7 @@ export const actionModuleGroups = [
     description: 'Quản lý mua hàng và nhà cung cấp.',
     icon: ShoppingCart,
     colorScheme: 'orange',
+    homeViewers: [HOME_VIEWERS.KHO, HOME_VIEWERS.ADMIN, HOME_VIEWERS.KE_TOAN],
     items: [
       {
         icon: Building2,
@@ -255,6 +260,7 @@ export const actionModuleGroups = [
     description: 'Quản lý vận chuyển và giao nhận hàng.',
     icon: Truck,
     colorScheme: 'cyan',
+    homeViewers: [HOME_VIEWERS.VAN_CHUYEN],
     items: [
       {
         icon: Truck,
@@ -285,6 +291,12 @@ export const actionModuleGroups = [
     description: 'Quản lý thu hồi sản phẩm, thiết bị.',
     icon: RefreshCw,
     colorScheme: 'teal',
+    homeViewers: [
+      HOME_VIEWERS.KINH_DOANH,
+      HOME_VIEWERS.CSKH,
+      HOME_VIEWERS.ADMIN,
+      HOME_VIEWERS.HE_THONG,
+    ],
     items: [
       {
         icon: PackageCheck,
@@ -354,6 +366,7 @@ export const actionModuleGroups = [
     description: 'Quản lý ticket sửa chữa và bảo trì.',
     icon: Ticket,
     colorScheme: 'amber',
+    homeViewers: [HOME_VIEWERS.ALL],
     items: [
       {
         icon: Ticket,

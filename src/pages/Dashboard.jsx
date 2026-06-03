@@ -21,7 +21,7 @@ const Dashboard = () => {
     .filter(
       (group) =>
         canAccessPath(group.path, role, permissions) &&
-        group.items?.some((item) => canAccessPath(item.href || item.path, role, permissions))
+        group.items?.some((item) => canAccessPath(item.href || item.path, role, permissions)),
     )
     .map((group) => ({
       icon: group.icon,

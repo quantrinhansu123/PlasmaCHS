@@ -31,6 +31,9 @@ import {
     uploadDeliveryProofFile,
 } from '../utils/cloudinaryUpload';
 import RecoveryDeliveryConfirmModal from '../components/CylinderRecovery/RecoveryDeliveryConfirmModal';
+import GoodsIssueFormModal from '../components/GoodsIssues/GoodsIssueFormModal';
+import GoodsReceiptFormModal from '../components/GoodsReceipts/GoodsReceiptFormModal';
+import ShippingTransportConfirmModal from '../components/Shipping/ShippingTransportConfirmModal';
 import { tryQuickCompleteRecovery } from '../utils/cylinderRecoveryCompletion';
 import {
     canOpenShippingDeliveryConfirm,
@@ -87,6 +90,11 @@ const ShippingTasks = () => {
     const [confirmTransferCheck, setConfirmTransferCheck] = useState(false);
     const [handoverProofBase64, setHandoverProofBase64] = useState('');
     const [isSubmittingTransferHandover, setIsSubmittingTransferHandover] = useState(false);
+    const [selectedGoodsIssue, setSelectedGoodsIssue] = useState(null);
+    const [isGoodsIssueModalOpen, setIsGoodsIssueModalOpen] = useState(false);
+    const [selectedGoodsReceipt, setSelectedGoodsReceipt] = useState(null);
+    const [isGoodsReceiptModalOpen, setIsGoodsReceiptModalOpen] = useState(false);
+    const [transportConfirm, setTransportConfirm] = useState(null);
     useEffect(() => {
         if (permissionsLoading) return;
         fetchShippingTasks();
@@ -334,6 +342,61 @@ const ShippingTasks = () => {
         }
     };
 
+    const openTransportConfirmModal = useCallback(async (kind, row) => {
+        if (!row?.id) return;
+        const table = kind === 'ISSUE' ? 'goods_issues' : 'goods_receipts';
+        try {
+            const { data, error } = await supabase.from(table).select('*').eq('id', row.id).single();
+            if (error) throw error;
+            const partyName =
+                kind === 'ISSUE'
+                    ? suppliersMap[String(data.supplier_id)]?.name || '—'
+                    : data.supplier_name || '—';
+            setTransportConfirm({ kind, record: data, partyName });
+        } catch (err) {
+            console.error(err);
+            toast.error('Không tải được phiếu: ' + (err?.message || ''));
+        }
+    }, [suppliersMap]);
+
+    const closeTransportConfirmModal = useCallback(() => {
+        setTransportConfirm(null);
+    }, []);
+
+    const openGoodsIssueEditModal = useCallback(async (issueRow) => {
+        if (!issueRow?.id) return;
+        try {
+            const { data, error } = await supabase.from('goods_issues').select('*').eq('id', issueRow.id).single();
+            if (error) throw error;
+            setSelectedGoodsIssue(data);
+            setIsGoodsIssueModalOpen(true);
+        } catch (err) {
+            toast.error('Không tải được phiếu xuất: ' + (err?.message || ''));
+        }
+    }, []);
+
+    const closeGoodsIssueEditModal = useCallback(() => {
+        setIsGoodsIssueModalOpen(false);
+        setSelectedGoodsIssue(null);
+    }, []);
+
+    const openGoodsReceiptEditModal = useCallback(async (receiptRow) => {
+        if (!receiptRow?.id) return;
+        try {
+            const { data, error } = await supabase.from('goods_receipts').select('*').eq('id', receiptRow.id).single();
+            if (error) throw error;
+            setSelectedGoodsReceipt(data);
+            setIsGoodsReceiptModalOpen(true);
+        } catch (err) {
+            toast.error('Không tải được phiếu nhập: ' + (err?.message || ''));
+        }
+    }, []);
+
+    const closeGoodsReceiptEditModal = useCallback(() => {
+        setIsGoodsReceiptModalOpen(false);
+        setSelectedGoodsReceipt(null);
+    }, []);
+
     const openGiaoHangTask = useCallback(
         (task) => {
             if (!task?.row) return;
@@ -345,6 +408,14 @@ const ShippingTasks = () => {
                 void openRecoveryConfirmModal(task.row);
                 return;
             }
+            if (task.kind === 'RECEIPT') {
+                void openTransportConfirmModal('RECEIPT', task.row);
+                return;
+            }
+            if (task.kind === 'ISSUE') {
+                void openTransportConfirmModal('ISSUE', task.row);
+                return;
+            }
             if (task.kind === 'ORDER') {
                 if (!canOpenShippingDeliveryConfirm(task.row.status)) {
                     toast.info('Đơn không còn ở bước xác nhận giao trên màn nhiệm vụ.');
@@ -353,7 +424,12 @@ const ShippingTasks = () => {
                 void openDeliveryConfirmModal(task.row);
             }
         },
-        [openDeliveryConfirmModal, openRecoveryConfirmModal, openTransferHandover],
+        [
+            openDeliveryConfirmModal,
+            openTransportConfirmModal,
+            openRecoveryConfirmModal,
+            openTransferHandover,
+        ],
     );
 
     const closeTransferHandover = useCallback(() => {
@@ -813,8 +889,8 @@ const ShippingTasks = () => {
                         </div>
                         
                         <div className="mt-auto pt-1">
-                            <button type="button" className={clsx(giaoHangActionBtnCls, 'w-full py-2 text-[10px] bg-teal-500 border-teal-500 text-white hover:bg-teal-600')} onClick={() => navigate(`/nhap-hang`)}>
-                                Thực hiện vận chuyển
+                            <button type="button" className={clsx(giaoHangActionBtnCls, 'w-full py-2 text-[10px] bg-teal-500 border-teal-500 text-white hover:bg-teal-600')} onClick={() => openTransportConfirmModal('RECEIPT', rec)}>
+                                Xác nhận vận chuyển
                             </button>
                         </div>
                     </article>
@@ -841,8 +917,8 @@ const ShippingTasks = () => {
                         </div>
                         
                         <div className="mt-auto pt-1">
-                            <button type="button" className={clsx(giaoHangActionBtnCls, 'w-full py-2 text-[10px] bg-rose-500 border-rose-500 text-white hover:bg-rose-600')} onClick={() => navigate(`/xuat-tra-ncc`)}>
-                                Thực hiện vận chuyển
+                            <button type="button" className={clsx(giaoHangActionBtnCls, 'w-full py-2 text-[10px] bg-rose-500 border-rose-500 text-white hover:bg-rose-600')} onClick={() => openTransportConfirmModal('ISSUE', iss)}>
+                                Xác nhận vận chuyển
                             </button>
                         </div>
                     </article>
@@ -1595,6 +1671,49 @@ const ShippingTasks = () => {
                     isSubmitting={isSubmittingRecoveryConfirm}
                     onClose={closeRecoveryConfirmModal}
                     onConfirm={confirmRecoveryDelivery}
+                />
+            )}
+
+            {transportConfirm && (
+                <ShippingTransportConfirmModal
+                    kind={transportConfirm.kind}
+                    record={transportConfirm.record}
+                    partyName={transportConfirm.partyName}
+                    onClose={closeTransportConfirmModal}
+                    onSuccess={() => {
+                        closeTransportConfirmModal();
+                        fetchShippingTasks();
+                    }}
+                    onEditDetails={(row) => {
+                        closeTransportConfirmModal();
+                        if (transportConfirm.kind === 'ISSUE') {
+                            openGoodsIssueEditModal(row);
+                        } else {
+                            openGoodsReceiptEditModal(row);
+                        }
+                    }}
+                />
+            )}
+
+            {isGoodsIssueModalOpen && selectedGoodsIssue && (
+                <GoodsIssueFormModal
+                    issue={selectedGoodsIssue}
+                    onClose={closeGoodsIssueEditModal}
+                    onSuccess={() => {
+                        closeGoodsIssueEditModal();
+                        fetchShippingTasks();
+                    }}
+                />
+            )}
+
+            {isGoodsReceiptModalOpen && selectedGoodsReceipt && (
+                <GoodsReceiptFormModal
+                    receipt={selectedGoodsReceipt}
+                    onClose={closeGoodsReceiptEditModal}
+                    onSuccess={() => {
+                        closeGoodsReceiptEditModal();
+                        fetchShippingTasks();
+                    }}
                 />
             )}
 
