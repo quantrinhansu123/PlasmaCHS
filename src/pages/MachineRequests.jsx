@@ -60,6 +60,7 @@ import {
     getOrderMachineManagerLabel,
     isSalesAssigneeScopePending,
     resolveVisibleSalesNames,
+    hasFullOrderVisibility,
     shouldScopeOrdersBySalesPerson,
 } from '../utils/salesVisibilityScope';
 import { resolveOrderStatusKey } from '../constants/orderConstants';
@@ -285,9 +286,13 @@ export default function MachineRequests() {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const { names: visibleRequesterNames } = await resolveVisibleSalesNames(user, role, { roleScope });
+            const fullAccess = hasFullOrderVisibility(role, roleScope, department);
+            const { names: visibleRequesterNames } = await resolveVisibleSalesNames(user, role, {
+                roleScope,
+                department,
+            });
 
-            if (isSalesAssigneeScopePending(role, roleScope, visibleRequesterNames)) {
+            if (isSalesAssigneeScopePending(role, roleScope, visibleRequesterNames, department)) {
                 setLoading(false);
                 return;
             }
@@ -303,21 +308,24 @@ export default function MachineRequests() {
 
             let rows = (data || []).filter(isMachineRequestOrder);
 
-            if (shouldScopeOrdersBySalesPerson(role, roleScope) && visibleRequesterNames?.length) {
-                rows = filterOrdersByVisibleMachineRequest(rows, visibleRequesterNames);
+            if (!fullAccess) {
+                if (shouldScopeOrdersBySalesPerson(role, roleScope, department) && visibleRequesterNames?.length) {
+                    rows = filterOrdersByVisibleMachineRequest(rows, visibleRequesterNames);
+                }
+
+                const isWarehouseStaff =
+                    isThuKhoRole(role) || isWarehouseRoleHelper(role);
+                const { orders: scopedOrders } = await scopeOrdersForWarehouseAccess(rows, {
+                    role,
+                    department,
+                    user,
+                    isAdmin: isAdminRole(role),
+                    matchOrderWarehouseFields: isWarehouseStaff,
+                });
+                rows = scopedOrders;
             }
 
-            const isWarehouseStaff =
-                isThuKhoRole(role) || isWarehouseRoleHelper(role);
-            const { orders: scopedOrders } = await scopeOrdersForWarehouseAccess(rows, {
-                role,
-                department,
-                user,
-                isAdmin: isAdminRole(role),
-                matchOrderWarehouseFields: isWarehouseStaff,
-            });
-
-            setRequests(scopedOrders);
+            setRequests(rows);
         } catch (error) {
             toast.error('Lỗi tải dữ liệu: ' + error.message);
         } finally {

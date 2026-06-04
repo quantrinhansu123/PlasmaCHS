@@ -27,7 +27,7 @@ export const useReports = () => {
   ].filter(Boolean))];
 
   const resolveVisibleSalesNames = async () => {
-    const { names } = await resolveVisibleSalesNamesScope(user, role, { roleScope });
+    const { names } = await resolveVisibleSalesNamesScope(user, role, { roleScope, department });
     return names || [];
   };
 

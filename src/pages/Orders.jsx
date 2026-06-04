@@ -556,14 +556,17 @@ const Orders = () => {
             const isThuKhoRole = isThuKhoRoleHelper(role);
             const isShipperRole = isShipperRoleHelper(role);
             const isWarehouseRole = isWarehouseRoleHelper(role);
-            const fullOrderAccess = hasFullOrderVisibility(role, roleScope);
+            const fullOrderAccess = hasFullOrderVisibility(role, roleScope, department);
             const storageUserName =
                 localStorage.getItem('user_name') ||
                 sessionStorage.getItem('user_name') ||
                 '';
-            const { names: visibleSalesNames } = await resolveVisibleSalesNames(user, role, { roleScope });
+            const { names: visibleSalesNames } = await resolveVisibleSalesNames(user, role, {
+                roleScope,
+                department,
+            });
 
-            if (isSalesAssigneeScopePending(role, roleScope, visibleSalesNames)) {
+            if (isSalesAssigneeScopePending(role, roleScope, visibleSalesNames, department)) {
                 setIsLoading(false);
                 return;
             }
@@ -572,8 +575,8 @@ const Orders = () => {
                 .from('orders')
                 .select('*, order_items(*)');
 
-            // Thủ kho cần nhìn thấy cả DNXM để xử lý luồng kho.
-            if (!isThuKhoRole) {
+            // Admin/Kế toán/Thủ kho: giữ DNXM; các vai trò khác xem DNXM ở trang riêng.
+            if (!isThuKhoRole && !fullOrderAccess) {
                 query = query.neq('order_type', 'DNXM');
             }
 
@@ -586,7 +589,7 @@ const Orders = () => {
 
             // NVKD / trưởng nhóm: lọc theo ordered_by (own | team)
             // Admin / Kế toán: full | Thủ kho: theo kho | Shipper: đơn giao
-            if (shouldScopeOrdersBySalesPerson(role, roleScope)) {
+            if (shouldScopeOrdersBySalesPerson(role, roleScope, department)) {
                 query = appendOrderedByScope(query, visibleSalesNames);
             }
 
@@ -597,12 +600,12 @@ const Orders = () => {
             let scopedOrders = data || [];
 
             // Nhân viên KD = ordered_by; quản lý thấy đơn của NV có Người quản lý trùng mình
-            if (shouldScopeOrdersBySalesPerson(role, roleScope) && visibleSalesNames?.length) {
+            if (shouldScopeOrdersBySalesPerson(role, roleScope, department) && visibleSalesNames?.length) {
                 scopedOrders = filterOrdersByVisibleSalesPerson(scopedOrders, visibleSalesNames);
             }
 
             // TK kho / thủ kho: chỉ dòng có cột Kho khớp kho phụ trách (manager_name trên danh mục kho)
-            if (shouldScopeOrdersByWarehouse(role)) {
+            if (!fullOrderAccess && shouldScopeOrdersByWarehouse(role, department)) {
                 const warehouseScoped = await scopeOrdersForWarehouseAccess(scopedOrders, {
                     role,
                     department,

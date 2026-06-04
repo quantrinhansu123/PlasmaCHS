@@ -33,35 +33,35 @@ export const getCurrentUserNames = (user) => {
     ];
 };
 
-/** Admin + Kế toán: xem toàn bộ đơn */
-export const hasFullOrderVisibility = (role, roleScope) =>
-    hasFullDataVisibility(role) || roleScope === 'all';
+/** Admin + Kế toán (+ phòng Admin): xem toàn bộ đơn */
+export const hasFullOrderVisibility = (role, roleScope, department = '') =>
+    hasFullDataVisibility(role, department) || roleScope === 'all';
 
 /** Thủ kho / nhân viên kho: lọc đơn theo kho quản lý */
-export const shouldScopeOrdersByWarehouse = (role) => {
-    if (hasFullDataVisibility(role)) return false;
+export const shouldScopeOrdersByWarehouse = (role, department = '') => {
+    if (hasFullDataVisibility(role, department)) return false;
     return isThuKhoRole(role) || isWarehouseRole(role);
 };
 
 /**
  * Lọc danh sách đơn: cột Nhân viên KD (`ordered_by`) = tên mình hoặc NV có Người quản lý trùng mình.
  */
-export const shouldScopeOrdersBySalesPerson = (role, roleScope) => {
-    if (hasFullOrderVisibility(role, roleScope)) return false;
+export const shouldScopeOrdersBySalesPerson = (role, roleScope, department = '') => {
+    if (hasFullOrderVisibility(role, roleScope, department)) return false;
     if (isShipperRole(role)) return false;
     if (shouldScopeOrdersByWarehouse(role)) return false;
     return true;
 };
 
 /** Chưa sẵn sàng lọc — tránh query rỗng khi profile đang tải */
-export const isSalesAssigneeScopePending = (role, roleScope, names) => {
-    if (!shouldScopeOrdersBySalesPerson(role, roleScope)) return false;
+export const isSalesAssigneeScopePending = (role, roleScope, names, department = '') => {
+    if (!shouldScopeOrdersBySalesPerson(role, roleScope, department)) return false;
     return names === null || names === undefined;
 };
 
 /** Khách hàng / lead: lọc theo managed_by + care_by */
-export const shouldScopeCustomersByAssignee = (role, roleScope) =>
-    shouldScopeOrdersBySalesPerson(role, roleScope);
+export const shouldScopeCustomersByAssignee = (role, roleScope, department = '') =>
+    shouldScopeOrdersBySalesPerson(role, roleScope, department);
 
 const nameKeyMatchesAllowed = (candidate, allowedKeys) => {
     const key = normalizeSalesPersonKey(candidate);
@@ -235,8 +235,8 @@ export const appendMachineRequestAssigneeScope = (query, names) => {
  * - chính mình
  * - NV có Người quản lý (app_users.nguoi_quan_ly) khớp tên đăng nhập
  */
-export async function resolveVisibleSalesNames(user, role, { roleScope } = {}) {
-    if (hasFullOrderVisibility(role, roleScope)) {
+export async function resolveVisibleSalesNames(user, role, { roleScope, department } = {}) {
+    if (hasFullOrderVisibility(role, roleScope, department)) {
         return { scope: 'all', names: null };
     }
 

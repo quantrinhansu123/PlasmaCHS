@@ -237,6 +237,11 @@ export async function scopeOrdersForWarehouseAccess(
     orders = [],
     { role, department, user, isAdmin = false, matchOrderWarehouseFields = false } = {},
 ) {
+    if (hasFullDataVisibility(role, department) || isAdmin) {
+        const customerWarehouseById = await loadCustomerWarehouseMap(orders || []);
+        return { orders: orders || [], customerWarehouseById };
+    }
+
     const normalizedRole = normalizeRole(role);
     const isThuKhoRole = isThuKhoRoleHelper(role);
     const isWarehouseRole = isWarehouseRoleHelper(role);
@@ -248,7 +253,7 @@ export async function scopeOrdersForWarehouseAccess(
     let scopedOrders = orders || [];
     const customerWarehouseById = await loadCustomerWarehouseMap(scopedOrders);
 
-    if (!hasFullDataVisibility(role) && !isAdmin && (isThuKhoRole || isWarehouseRole)) {
+    if (isThuKhoRole || isWarehouseRole) {
         const managerCandidates = getManagerCandidateKeys(user?.name, user?.username, storageUserName);
 
         const { data: warehousesData } = await supabase

@@ -136,9 +136,12 @@ export const isShipperRole = (role) => {
     return r.includes('shipper') || r.includes('giaohang');
 };
 
-/** Admin + Kế toán: không lọc dữ liệu theo NV / team / kho */
-export const hasFullDataVisibility = (role) =>
-    isAdminRole(role) || isAccountantRole(role);
+/** Admin + Kế toán (+ phòng Admin/Kế toán): không lọc dữ liệu theo NV / team / kho */
+export const hasFullDataVisibility = (role, department = '') =>
+    isAdminRole(role) ||
+    isAdminRole(department) ||
+    isAccountantRole(role) ||
+    isAccountantRole(department);
 
 /** Menu/item có `roles: [...]` — Admin luôn được xem */
 export const roleMatchesAllowedList = (currentRole, allowedRoles) => {
@@ -156,8 +159,8 @@ export const roleMatchesAllowedList = (currentRole, allowedRoles) => {
  * - Thủ kho / Kho: warehouse
  * - Shipper: assigned_orders
  */
-export const getDataVisibilityScope = (role) => {
-    if (hasFullDataVisibility(role)) return 'all';
+export const getDataVisibilityScope = (role, department = '') => {
+    if (hasFullDataVisibility(role, department)) return 'all';
     if (isDepartmentHeadRole(role)) return 'team';
     if (isSalesRole(role)) return 'own';
     if (isWarehouseRole(role)) return 'warehouse';

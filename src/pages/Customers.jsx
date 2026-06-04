@@ -140,7 +140,7 @@ function appendLeadCustomerFilters(query, {
 const normalizeSearchText = (value) => String(value || '').toLowerCase().trim();
 const normalizePhoneDigits = (value) => String(value || '').replace(/\D/g, '');
 const Customers = () => {
-    const { role: rawRole, user, roleScope, loading: permissionsLoading } = usePermissions();
+    const { role: rawRole, user, department, roleScope, loading: permissionsLoading } = usePermissions();
     const normalizeRole = (r) => {
         if (!r) return '';
         return r.toLowerCase()
@@ -149,27 +149,27 @@ const Customers = () => {
             .replace(/\s+/g, '_');
     };
     const role = normalizeRole(rawRole);
-    const isAdminOrManager = hasFullDataVisibility(rawRole) || isAdminRole(rawRole);
+    const isAdminOrManager = hasFullDataVisibility(rawRole, department) || isAdminRole(rawRole);
     const currentUserNames = useMemo(() => getCurrentUserNames(user), [user]);
     const [assigneeScopeNames, setAssigneeScopeNames] = useState(null);
     useEffect(() => {
         let cancelled = false;
         (async () => {
-            const { names } = await resolveVisibleSalesNames(user, rawRole, { roleScope });
+            const { names } = await resolveVisibleSalesNames(user, rawRole, { roleScope, department });
             if (!cancelled) setAssigneeScopeNames(names);
         })();
         return () => {
             cancelled = true;
         };
-    }, [user, rawRole, roleScope, user?.team, user?.nguoi_quan_ly]);
+    }, [user, rawRole, roleScope, department, user?.team, user?.nguoi_quan_ly]);
 
     const applyCustomerVisibilityScope = useCallback(
         (query) => {
-            if (!shouldScopeCustomersByAssignee(rawRole, roleScope)) return query;
-            if (isSalesAssigneeScopePending(rawRole, roleScope, assigneeScopeNames)) return query;
+            if (!shouldScopeCustomersByAssignee(rawRole, roleScope, department)) return query;
+            if (isSalesAssigneeScopePending(rawRole, roleScope, assigneeScopeNames, department)) return query;
             return appendCustomerAssigneeScope(query, assigneeScopeNames);
         },
-        [rawRole, roleScope, assigneeScopeNames]
+        [rawRole, roleScope, department, assigneeScopeNames]
     );
     const location = useLocation();
     const navigate = useNavigate();
@@ -544,9 +544,9 @@ const Customers = () => {
 
     useEffect(() => {
         if (permissionsLoading) return;
-        if (isSalesAssigneeScopePending(rawRole, roleScope, assigneeScopeNames)) return;
+        if (isSalesAssigneeScopePending(rawRole, roleScope, assigneeScopeNames, department)) return;
         fetchCustomers();
-    }, [permissionsLoading, rawRole, roleScope, assigneeScopeNames, fetchCustomers]);
+    }, [permissionsLoading, rawRole, roleScope, department, assigneeScopeNames, fetchCustomers]);
 
     useEffect(() => {
         if (location.pathname === '/khach-hang/tao') {

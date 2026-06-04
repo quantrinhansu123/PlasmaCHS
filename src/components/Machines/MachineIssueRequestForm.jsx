@@ -8,7 +8,9 @@ import usePermissions from '../../hooks/usePermissions';
 import { notificationService } from '../../utils/notificationService';
 import {
     isAdminRole as isAdminRoleHelper,
+    isLeadSaleRole as isLeadSaleRoleHelper,
     isSalesRole as isSalesRoleHelper,
+    isThuKhoRole as isThuKhoRoleHelper,
     isWarehouseRole as isWarehouseRoleHelper,
     normalizeRole,
 } from '../../utils/accessControl';
@@ -787,6 +789,11 @@ Ghi chú: ${formData.notes}`,
 
         if (!window.confirm(confirmMsg)) return;
 
+        if (formData.status === 'CHO_CTY_DUYET' && !isAdminRole) {
+            toast.error('Chỉ Quản trị viên (Admin) được duyệt bước Công ty.');
+            return;
+        }
+
         if (formData.status === 'CHO_CTY_DUYET') {
             const warehouseCodeForOrder = sanitizeWarehouseForOrder(formData.warehouse);
             if (!warehouseCodeForOrder) {
@@ -1238,12 +1245,18 @@ Ghi chú: ${formData.notes}`,
                         const isLevel2 = formData.status === 'CHO_CTY_DUYET';
                         const isLevel3 = formData.status === 'KHO_XU_LY';
 
-                        const r = role?.toLowerCase() || '';
+                        const r = normalizeRole(role);
                         let canApprove = false;
-                        if (isAdminRole) canApprove = true;
-                        else if (isLevel1 && (r.includes('lead') || r.includes('trưởng'))) canApprove = true;
-                        else if (isLevel2 && isAdminRole) canApprove = true;
-                        else if (isLevel3 && (r.includes('kho'))) canApprove = true;
+                        if (isLevel1 && (isAdminRole || isLeadSaleRoleHelper(role) || r.includes('truong'))) {
+                            canApprove = true;
+                        } else if (isLevel2 && isAdminRole) {
+                            canApprove = true;
+                        } else if (
+                            isLevel3 &&
+                            (isAdminRole || isThuKhoRoleHelper(role) || isWarehouseRole)
+                        ) {
+                            canApprove = true;
+                        }
 
                         const canEdit = ['CHO_DUYET', 'CHO_CTY_DUYET', 'KHO_XU_LY', 'DA_DUYET'].includes(formData.status);
 

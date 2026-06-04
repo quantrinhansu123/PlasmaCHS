@@ -56,10 +56,10 @@ const hasWarehouseOrderAdminAccess = (role, department = '') =>
     (normalizeRole(department).includes('kho') &&
         (isWarehouseRole(role) || normalizeRole(role).includes('kho')));
 
-/** Map vai trò DB → ORDER_ROLES (Thủ kho / Kho = quyền thao tác như Admin). */
+/** Map vai trò DB → ORDER_ROLES (Thủ kho: bước kho/giao; Admin: mọi bước kể cả Công ty duyệt). */
 const mapUserRoleToOrderRole = (role, department = '') => {
     if (isAdminRole(role) || isAdminRole(department)) return ORDER_ROLES.ADMIN;
-    if (hasWarehouseOrderAdminAccess(role, department)) return ORDER_ROLES.ADMIN;
+    if (hasWarehouseOrderAdminAccess(role, department)) return ORDER_ROLES.THU_KHO;
 
     const r = normalizeRole(role);
     if (!r) return '';
@@ -78,7 +78,7 @@ const mapUserRoleToOrderRole = (role, department = '') => {
 
 const orderRoleCanRunTransition = (orderRole, transition) => {
     if (!orderRole || !transition) return false;
-    if (orderRole === ORDER_ROLES.ADMIN || orderRole === ORDER_ROLES.THU_KHO) return true;
+    if (orderRole === ORDER_ROLES.ADMIN) return true;
     return (transition.allowedRoles || []).includes(orderRole);
 };
 
@@ -687,6 +687,16 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     const availableActions = transitions.filter((t) => orderRoleCanRunTransition(orderRole, t));
 
     const handleUpdateStatus = async (transition) => {
+        if (
+            statusKey === 'CHO_CTY_DUYET' &&
+            transition?.nextStatus === 'KHO_XU_LY' &&
+            !isAdminRole(effectiveUserRole) &&
+            !isAdminRole(effectiveDepartment)
+        ) {
+            setErrorMsg('Chỉ Quản trị viên (Admin) được duyệt bước Công ty.');
+            return;
+        }
+
         try {
             setIsLoading(true);
             setErrorMsg('');
