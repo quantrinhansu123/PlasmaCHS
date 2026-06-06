@@ -25,6 +25,7 @@ import {
     resolveWarehouseCode,
     resolveWarehouseCodeFromCustomer,
 } from '../../utils/customerOrderMatch';
+import { fetchReadyMachinesAtWarehouse } from '../../utils/transferWarehouseMatch';
 
 const dmyToYmd = (dmy) => {
     if (!dmy || typeof dmy !== 'string') return "";
@@ -531,7 +532,7 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
     const [pendingNextStatus, setPendingNextStatus] = useState(null);
     const [pendingApproveData, setPendingApproveData] = useState(null);
 
-    // Filter machines by warehouseCode (e.g. 'HN', 'TP.HCM') — must match machines.warehouse
+    // Filter machines by warehouseCode (e.g. 'HN', 'OCP1') — khớp mã/tên/UUID cột machines.warehouse
     const loadReadyMachinesByWarehouse = async (warehouseCode) => {
         const resolvedWarehouseCode = resolveWarehouseCodeForForm(warehouseCode);
 
@@ -543,52 +544,52 @@ const MachineIssueRequestForm = ({ overrideOrderId, overrideViewOnly, onClosePop
         }
 
         const reqId = ++readyMachinesLoadReqIdRef.current;
-        const { data, error } = await supabase
-            .from('machines')
-            .select('serial_number, machine_type, warehouse, status')
-            .eq('warehouse', resolvedWarehouseCode)
-            .eq('status', 'sẵn sàng');
 
-        // Nếu request cũ chưa kịp trả về mà user đã đổi kho mới → bỏ qua
-        if (reqId !== readyMachinesLoadReqIdRef.current) return;
+        try {
+            const machines = await fetchReadyMachinesAtWarehouse(supabase, {
+                warehouseRef: resolvedWarehouseCode,
+                warehouseList,
+                warehouseId: warehouseCode,
+            });
 
-        if (error) {
+            if (reqId !== readyMachinesLoadReqIdRef.current) return;
+
+            const grouped = (machines || []).reduce((acc, machine) => {
+                const key = (machine.machine_type || 'MAY').toString().trim().toUpperCase();
+                if (!acc[key]) acc[key] = [];
+                acc[key].push((machine.serial_number || '').trim());
+                return acc;
+            }, {});
+            setAvailableMachineCodesByType(grouped);
+            const products = Object.entries(grouped).map(([productType, serials]) => ({
+                value: productType,
+                label: `${productType} (Sẵn sàng: ${serials.length})`,
+                serials: serials.filter(Boolean)
+            }));
+            setAvailableProducts(products);
+
+            const selectedProductExists = products.some((p) => p.value === formData.product);
+            if (!selectedProductExists) {
+                setFormData((prev) => ({
+                    ...prev,
+                    product: '',
+                    machineCode: '',
+                    quantity: '',
+                }));
+                setAvailableMachineCodes([]);
+                return;
+            }
+
+            setAvailableMachineCodes(
+                (products.find((p) => p.value === formData.product)?.serials || []).filter(Boolean)
+            );
+        } catch (error) {
+            if (reqId !== readyMachinesLoadReqIdRef.current) return;
             console.error('Error loading warehouse machines:', error);
             setAvailableProducts([]);
             setAvailableMachineCodes([]);
             setAvailableMachineCodesByType({});
-            return;
         }
-        const grouped = (data || []).reduce((acc, machine) => {
-            const key = (machine.machine_type || 'MAY').toString().trim().toUpperCase();
-            if (!acc[key]) acc[key] = [];
-            acc[key].push((machine.serial_number || '').trim());
-            return acc;
-        }, {});
-        setAvailableMachineCodesByType(grouped);
-        const products = Object.entries(grouped).map(([productType, serials]) => ({
-            value: productType,
-            label: `${productType} (Sẵn sàng: ${serials.length})`,
-            serials: serials.filter(Boolean)
-        }));
-        setAvailableProducts(products);
-
-        const selectedProductExists = products.some((p) => p.value === formData.product);
-        if (!selectedProductExists) {
-            // Khi đổi kho, product cũ có thể không còn sẵn sàng ở kho mới.
-            setFormData((prev) => ({
-                ...prev,
-                product: '',
-                machineCode: '',
-                quantity: '',
-            }));
-            setAvailableMachineCodes([]);
-            return;
-        }
-
-        setAvailableMachineCodes(
-            (products.find((p) => p.value === formData.product)?.serials || []).filter(Boolean)
-        );
     };
 
     const handlePrint = (type = 'DNXM') => {

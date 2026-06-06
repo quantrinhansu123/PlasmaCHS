@@ -1,8 +1,6 @@
 import {
     Activity,
     Box,
-    ChevronDown,
-    ChevronUp,
     Clock,
     Filter,
     History,
@@ -31,7 +29,6 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
     });
     const [inventory, setInventory] = useState([]);
     const [recentLogs, setRecentLogs] = useState([]);
-    const [showFullInventory, setShowFullInventory] = useState(false);
     const [isClosing, setIsClosing] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedType, setSelectedType] = useState('ALL');
@@ -437,6 +434,9 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
         });
     };
 
+    const cylinderInventory = inventory.filter((item) => item.itemType === 'BINH');
+    const machineInventory = inventory.filter((item) => item.itemType === 'MAY');
+
     const filteredInventory = inventory.filter((item) => {
         const normalizedSearch = searchTerm.trim().toLowerCase();
         const matchesSearch = !normalizedSearch
@@ -448,7 +448,17 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
         return matchesSearch && matchesType && matchesStatus;
     });
 
-    const displayedInventory = showFullInventory ? filteredInventory : filteredInventory.slice(0, 5);
+    const inventoryScopeTotal =
+        selectedType === 'BINH'
+            ? cylinderInventory.length
+            : selectedType === 'MAY'
+                ? machineInventory.length
+                : inventory.length;
+
+    const inventoryScopeLabel =
+        selectedType === 'BINH' ? 'bình' : selectedType === 'MAY' ? 'máy' : 'mục';
+
+    const displayedInventory = filteredInventory;
 
     const normalizeText = (value) => (value || '')
         .toString()
@@ -538,20 +548,8 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                             <div className="flex items-center justify-between gap-3 mb-4">
                                 <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest flex items-center gap-2 min-w-0">
                                     <Box className="w-4 h-4 text-primary" />
-                                    Tồn kho theo bộ lọc ({filteredInventory.length}/{inventory.length})
+                                    Tồn kho theo bộ lọc ({filteredInventory.length}/{inventoryScopeTotal} {inventoryScopeLabel})
                                 </h3>
-                                {filteredInventory.length > 5 && (
-                                    <button
-                                        onClick={() => setShowFullInventory(!showFullInventory)}
-                                        className="shrink-0 flex items-center gap-1.5 text-xs font-bold text-primary hover:text-white bg-primary/10 hover:bg-primary px-3 py-1.5 rounded-lg transition-all"
-                                    >
-                                        {showFullInventory ? (
-                                            <><ChevronUp className="w-3.5 h-3.5" /> Thu gọn</>
-                                        ) : (
-                                            <><ChevronDown className="w-3.5 h-3.5" /> Xem tất cả</>
-                                        )}
-                                    </button>
-                                )}
                             </div>
 
                             <div className="mb-5 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_180px_220px] gap-3">

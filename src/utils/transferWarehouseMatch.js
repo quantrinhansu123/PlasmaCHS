@@ -56,7 +56,9 @@ export function resolveWarehouseRow(warehouseId, warehouseList = []) {
 export function warehouseStorageKeys(whRow) {
     if (!whRow) return [];
     const keys = new Set(
-        [whRow.code, whRow.name, whRow.id].map((v) => String(v || '').trim()).filter(Boolean),
+        [whRow.code, whRow.name, whRow.id, whRow.branch_office]
+            .map((v) => String(v || '').trim())
+            .filter(Boolean),
     );
     String(whRow.name || '')
         .split(/[\s,;/|()-]+/)
@@ -64,6 +66,62 @@ export function warehouseStorageKeys(whRow) {
         .filter((t) => t.length >= 2)
         .forEach((t) => keys.add(t));
     return [...keys];
+}
+
+/** Alias kho giống modal Chi tiết kho (id, code, name, branch + gợi ý vùng). */
+export function buildWarehouseModalAliases(warehouseInfo = {}) {
+    const rawValues = [
+        warehouseInfo?.id,
+        warehouseInfo?.code,
+        warehouseInfo?.name,
+        warehouseInfo?.branch_office,
+    ].filter(Boolean);
+
+    const aliases = new Set();
+    rawValues.forEach((value) => {
+        const normalized = String(value).trim();
+        if (normalized) aliases.add(normalized);
+    });
+
+    const combinedText = rawValues.map((value) => String(value).toLowerCase()).join(' ');
+    if (combinedText.includes('ha noi') || combinedText.includes('hà nội')) aliases.add('HN');
+    if (combinedText.includes('thanh hoa') || combinedText.includes('thanh hóa')) aliases.add('TH');
+    if (combinedText.includes('da nang') || combinedText.includes('đà nẵng')) aliases.add('DN');
+    if (
+        combinedText.includes('hcm')
+        || combinedText.includes('hồ chí minh')
+        || combinedText.includes('ho chi minh')
+        || combinedText.includes('tp.hcm')
+    ) {
+        aliases.add('TP.HCM');
+        aliases.add('HCM');
+    }
+    if (combinedText.includes('ocp')) {
+        aliases.add('OCP1');
+        aliases.add('OCP 1');
+    }
+
+    return [...aliases];
+}
+
+export function buildWarehouseMatchKeys(whRow, warehouseRef = '', warehouseList = []) {
+    const keys = new Set([
+        ...warehouseStorageKeys(whRow),
+        ...buildWarehouseModalAliases(whRow),
+    ]);
+
+    const ref = String(warehouseRef || '').trim();
+    if (ref) keys.add(ref);
+
+    (warehouseList || []).forEach((w) => {
+        const rowKeys = warehouseStorageKeys(w);
+        const matchesRef = rowKeys.some(
+            (k) => k.toLowerCase() === ref.toLowerCase() || ref.toLowerCase().includes(k.toLowerCase()),
+        );
+        if (matchesRef) rowKeys.forEach((k) => keys.add(k));
+    });
+
+    return [...keys].filter(Boolean);
 }
 
 export function storedValueMatchesWarehouse(storedValue, fromWarehouseId, warehouseList = []) {
@@ -100,4 +158,123 @@ export function collectSerialQueryVariants(codes, itemType) {
         }
     });
     return [...set];
+}
+
+export function normalizeInventoryStatusKey(status) {
+    return String(status || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
+
+/** Khớp «Sẵn sàng» / «sẵn sàng» / biến thể không dấu trong DB. */
+export function isReadyMachineStatus(status) {
+    const s = normalizeInventoryStatusKey(status);
+    if (!s) return false;
+    if (
+        s.includes('thuoc khach')
+        || s.includes('dang su dung')
+        || s.includes('bao tri')
+        || s.includes('dang sua')
+        || s.includes('kiem tra')
+        || s.includes('da tra')
+    ) {
+        return false;
+    }
+    return s === 'san sang' || s.includes('san sang') || (s.includes('san') && s.includes('sang'));
+}
+
+const MACHINE_SELECT = 'id, machine_type, status, serial_number, warehouse';
+
+/**
+ * Lấy máy sẵn sàng tại kho — nhiều chiến lược khớp (mã/tên/UUID/ilike + quét sẵn sàng toàn hệ thống).
+ */
+export async function fetchReadyMachinesAtWarehouse(
+    supabaseClient,
+    { warehouseRef = '', warehouseList = [], whRow = null, warehouseId = null } = {},
+) {
+    const ref = String(warehouseRef || warehouseId || '').trim();
+    if (!ref) return [];
+
+    const row =
+        whRow ||
+        resolveWarehouseRow(ref, warehouseList) ||
+        resolveWarehouseRow(warehouseId, warehouseList) ||
+        { code: ref, name: ref, id: ref };
+
+    const keys = buildWarehouseMatchKeys(row, ref, warehouseList);
+    const collected = new Map();
+
+    const absorb = (rows) => {
+        (rows || []).forEach((m) => {
+            if (!m?.id || !isReadyMachineStatus(m.status)) return;
+            collected.set(m.id, m);
+        });
+    };
+
+    const absorbIfWarehouseMatch = (rows) => {
+        (rows || []).forEach((m) => {
+            if (!m?.id || !isReadyMachineStatus(m.status)) return;
+            if (
+                machineBelongsToWarehouse(m.warehouse, ref, warehouseList)
+                || machineBelongsToWarehouse(m.warehouse, warehouseId, warehouseList)
+                || keys.some((k) => String(m.warehouse || '').trim().toLowerCase() === k.toLowerCase())
+            ) {
+                collected.set(m.id, m);
+            }
+        });
+    };
+
+    if (keys.length > 0) {
+        const { data, error } = await supabaseClient
+            .from('machines')
+            .select(MACHINE_SELECT)
+            .in('warehouse', keys)
+            .limit(5000);
+        if (!error) absorb(data);
+    }
+
+    for (const key of keys) {
+        const safeKey = String(key || '').replace(/[%_]/g, '').trim();
+        if (!safeKey) continue;
+
+        const { data: exactReady } = await supabaseClient
+            .from('machines')
+            .select(MACHINE_SELECT)
+            .eq('warehouse', safeKey)
+            .eq('status', 'sẵn sàng')
+            .limit(2000);
+        absorb(exactReady);
+
+        const { data: ilikeRows } = await supabaseClient
+            .from('machines')
+            .select(MACHINE_SELECT)
+            .ilike('warehouse', `%${safeKey}%`)
+            .limit(2000);
+        absorb(ilikeRows);
+    }
+
+    const modalAliases = buildWarehouseModalAliases(row);
+    if (modalAliases.length > 0) {
+        const { data } = await supabaseClient
+            .from('machines')
+            .select(MACHINE_SELECT)
+            .in('warehouse', modalAliases)
+            .limit(5000);
+        absorb(data);
+    }
+
+    if (collected.size === 0) {
+        const { data: allReady, error } = await supabaseClient
+            .from('machines')
+            .select(MACHINE_SELECT)
+            .eq('status', 'sẵn sàng')
+            .limit(10000);
+        if (!error) absorbIfWarehouseMatch(allReady);
+    }
+
+    return [...collected.values()].sort((a, b) =>
+        String(a.serial_number || '').localeCompare(String(b.serial_number || ''), 'vi'),
+    );
 }

@@ -31,6 +31,10 @@ import {
 } from '../../utils/cloudinaryUpload';
 import Combobox from '../ui/Combobox';
 import {
+    fetchReadyMachinesAtWarehouse,
+    resolveWarehouseRow,
+} from '../../utils/transferWarehouseMatch';
+import {
     fetchCustomersByPhone,
     matchCustomerRecordForOrder,
     resolveWarehouseCode,
@@ -266,7 +270,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             (order?.status === 'KHO_XU_LY' && hasMachineItems);
         if (!needsWarehouses) return;
 
-        supabase.from('warehouses').select('id, name, code').order('name').then(({ data }) => {
+        supabase.from('warehouses').select('id, name, code, branch_office').order('name').then(({ data }) => {
             setWarehouseList(data || []);
         });
     }, [order?.status, isDNXM, hasMachineItems]);
@@ -403,25 +407,50 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
 
     useEffect(() => {
         const fetchAvailableMachineSerials = async () => {
-            if (!hasMachineItems || order?.status !== 'KHO_XU_LY' || !orderWarehouseCode) {
+            if (!hasMachineItems || order?.status !== 'KHO_XU_LY') {
+                setAvailableMachineSerials([]);
+                return;
+            }
+
+            const warehouseRef = orderWarehouseCode || getWarehouseReference(order, warehouseName);
+            if (!warehouseRef) {
                 setAvailableMachineSerials([]);
                 return;
             }
 
             try {
                 setIsFetchingMachineSerials(true);
-                const { data, error } = await supabase
-                    .from('machines')
-                    .select('serial_number, machine_type, warehouse, status')
-                    .eq('warehouse', orderWarehouseCode)
-                    .eq('status', 'sẵn sàng')
-                    .order('serial_number', { ascending: true })
-                    .limit(3000);
 
-                if (error) throw error;
-                const filtered = (data || []).filter((machine) =>
+                // Đợi danh mục kho để resolve mã OCP1 ↔ tên/UUID trên machines.warehouse
+                let warehouses = warehouseList;
+                if (!warehouses?.length) {
+                    const { data } = await supabase
+                        .from('warehouses')
+                        .select('id, name, code, branch_office')
+                        .order('name');
+                    warehouses = data || [];
+                    if (warehouses.length) setWarehouseList(warehouses);
+                }
+
+                const whRow = resolveWarehouseRow(warehouseRef, warehouses)
+                    || resolveWarehouseRow(order?.warehouse, warehouses);
+
+                const machines = await fetchReadyMachinesAtWarehouse(supabase, {
+                    warehouseRef,
+                    warehouseList: warehouses,
+                    whRow,
+                    warehouseId: order?.warehouse,
+                });
+
+                let filtered = (machines || []).filter((machine) =>
                     machineMatchesOrderTypeFilter(machine.machine_type, orderMachineTypeFilter)
                 );
+
+                // Nếu lọc loại máy quá chặt nhưng kho vẫn có máy sẵn sàng → hiện toàn bộ để thủ kho chọn.
+                if (filtered.length === 0 && machines.length > 0 && orderMachineTypeFilter.length > 0) {
+                    filtered = machines;
+                }
+
                 setAvailableMachineSerials(
                     filtered.map((item) => item.serial_number).filter(Boolean)
                 );
@@ -434,7 +463,16 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         };
 
         fetchAvailableMachineSerials();
-    }, [hasMachineItems, order?.status, orderWarehouseCode, orderMachineTypeFilter]);
+    }, [
+        hasMachineItems,
+        order?.status,
+        order?.warehouse,
+        orderWarehouseCode,
+        orderMachineTypeFilter,
+        warehouseList,
+        warehouseName,
+        order?.note,
+    ]);
 
     // Checklist giao: bình từ assigned + dòng BINH; máy từ collectMachineSerialsForOrder (order_items, department, khối note kho).
     useEffect(() => {
