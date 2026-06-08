@@ -17,6 +17,7 @@ import {
     ChevronDown,
     ChevronLeft,
     ChevronRight,
+    Download,
     Edit,
     Eye,
     FileText,
@@ -33,6 +34,7 @@ import {
     Trash2,
     TrendingUp,
     Truck,
+    Upload,
     User,
     X,
 } from 'lucide-react';
@@ -64,6 +66,11 @@ import {
     shouldScopeOrdersBySalesPerson,
 } from '../utils/salesVisibilityScope';
 import { resolveOrderStatusKey } from '../constants/orderConstants';
+import {
+    downloadDnxmImportTemplate,
+    importDnxmFromExcelRows,
+    readExcelFileToRows,
+} from '../utils/dnxmExcelImport';
 
 const getApprovedQuantityFromRequest = (request) => {
     const directApproved = parseInt(request?.quantityApproved ?? request?.quantity_approved, 10);
@@ -156,6 +163,7 @@ export default function MachineRequests() {
     const [requests, setRequests] = useState([]);
     const [warehousesList, setWarehousesList] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [isImporting, setIsImporting] = useState(false);
     const [activeView, setActiveView] = useState('list'); // 'list' or 'stats'
     const [searchTerm, setSearchTerm] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
@@ -418,6 +426,44 @@ export default function MachineRequests() {
         );
     };
 
+    const downloadDnxmTemplate = () => {
+        downloadDnxmImportTemplate(warehousesList);
+    };
+
+    const handleImportDnxmExcel = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setIsImporting(true);
+        try {
+            const rows = await readExcelFileToRows(file);
+            if (!rows.length) {
+                toast.error('File Excel không có dữ liệu!');
+                return;
+            }
+
+            const defaultRequester =
+                user?.name ||
+                localStorage.getItem('user_name') ||
+                sessionStorage.getItem('user_name') ||
+                '';
+
+            const { count } = await importDnxmFromExcelRows(supabase, rows, {
+                warehousesList,
+                defaultRequester,
+            });
+
+            toast.success(`Đã import thành công ${count} phiếu ĐNXM!`);
+            fetchData();
+        } catch (err) {
+            console.error('Import DNXM excel:', err);
+            toast.error(`Lỗi import Excel: ${err.message || err}`);
+        } finally {
+            setIsImporting(false);
+            e.target.value = null;
+        }
+    };
+
     const handleDelete = async (id, code) => {
         if (
             !window.confirm(
@@ -590,6 +636,33 @@ export default function MachineRequests() {
                                     role="group"
                                     aria-label="Chế độ hiển thị"
                                 >
+                                    <button
+                                        type="button"
+                                        onClick={downloadDnxmTemplate}
+                                        disabled={isImporting}
+                                        className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 text-[12px] font-bold text-indigo-700 shadow-sm transition hover:bg-indigo-100 disabled:opacity-50"
+                                        title="Tải mẫu Excel"
+                                    >
+                                        <Download size={16} className="shrink-0" aria-hidden />
+                                        <span className="hidden sm:inline">Tải mẫu</span>
+                                    </button>
+                                    <label
+                                        className={clsx(
+                                            'flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-[12px] font-bold text-emerald-700 shadow-sm transition hover:bg-emerald-100 select-none',
+                                            isImporting && 'pointer-events-none opacity-50',
+                                        )}
+                                        title="Import Excel"
+                                    >
+                                        <Upload size={16} className="shrink-0" aria-hidden />
+                                        <span className="hidden sm:inline">{isImporting ? 'Đang import...' : 'Import Excel'}</span>
+                                        <input
+                                            type="file"
+                                            accept=".xlsx,.xls"
+                                            onChange={handleImportDnxmExcel}
+                                            className="hidden"
+                                            disabled={isImporting}
+                                        />
+                                    </label>
                                     <div className="flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
                                         <button
                                             type="button"
@@ -686,6 +759,31 @@ export default function MachineRequests() {
                                 </button>
                                 <button
                                     type="button"
+                                    onClick={downloadDnxmTemplate}
+                                    disabled={isImporting}
+                                    className="flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-[13px] font-bold text-indigo-700 shadow-sm transition hover:bg-indigo-100 disabled:opacity-50"
+                                >
+                                    <Download size={16} aria-hidden />
+                                    Tải mẫu
+                                </button>
+                                <label
+                                    className={clsx(
+                                        'flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] font-bold text-emerald-700 shadow-sm transition hover:bg-emerald-100 select-none',
+                                        isImporting && 'pointer-events-none opacity-50',
+                                    )}
+                                >
+                                    <Upload size={16} aria-hidden />
+                                    {isImporting ? 'Đang import...' : 'Import Excel'}
+                                    <input
+                                        type="file"
+                                        accept=".xlsx,.xls"
+                                        onChange={handleImportDnxmExcel}
+                                        className="hidden"
+                                        disabled={isImporting}
+                                    />
+                                </label>
+                                <button
+                                    type="button"
                                     onClick={() => navigate('/de-nghi-xuat-may/tao')}
                                     className="flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-[13px] font-bold text-white shadow-sm transition hover:opacity-90 active:scale-[0.98]"
                                     style={{ backgroundColor: BT_PRIMARY }}
@@ -768,6 +866,25 @@ export default function MachineRequests() {
                                     <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="block w-full rounded-lg border border-gray-200 bg-gray-50 py-2 pl-9 pr-3 text-sm" placeholder="Tim kiem de nghi x" />
                                 </div>
                                 <button type="button" onClick={openMobileFilter} className="rounded-lg border border-gray-200 p-2"><ListFilter className="h-5 w-5 text-gray-600" /></button>
+                                <button
+                                    type="button"
+                                    onClick={downloadDnxmTemplate}
+                                    disabled={isImporting}
+                                    className="rounded-lg border border-indigo-200 bg-indigo-50 p-2 text-indigo-700 disabled:opacity-50"
+                                    title="Tải mẫu Excel"
+                                >
+                                    <Download className="h-5 w-5" />
+                                </button>
+                                <label className="rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-emerald-700 cursor-pointer">
+                                    <Upload className="h-5 w-5" />
+                                    <input
+                                        type="file"
+                                        accept=".xlsx,.xls"
+                                        onChange={handleImportDnxmExcel}
+                                        className="hidden"
+                                        disabled={isImporting}
+                                    />
+                                </label>
                                 <button type="button" onClick={() => navigate('/de-nghi-xuat-may/tao')} className="rounded-lg bg-blue-600 p-2 text-white"><Plus className="h-6 w-6" /></button>
                             </div>
                             <div className="mt-4 flex gap-3">

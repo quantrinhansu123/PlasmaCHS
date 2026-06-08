@@ -220,11 +220,18 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
             return;
         }
 
+        const trimmedCode = String(formData.code || '').trim();
+        if (!trimmedCode) {
+            setErrorMsg('❌ Mã khách hàng không được để trống!');
+            return;
+        }
+
         setIsLoading(true);
         setErrorMsg('');
 
         const payload = {
             ...formData,
+            code: trimmedCode,
             care_assigned_at: formData.care_assigned_at || null,
             warehouse_id: formData.warehouse_id?.trim() || null,
         };
@@ -241,6 +248,21 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
         }
 
         try {
+            let codeCheckQuery = supabase
+                .from('customers')
+                .select('id')
+                .eq('code', trimmedCode);
+            if (isEdit) {
+                codeCheckQuery = codeCheckQuery.neq('id', customer.id);
+            }
+            const { data: duplicateCodes, error: codeCheckError } = await codeCheckQuery;
+            if (codeCheckError) throw codeCheckError;
+            if (duplicateCodes?.length > 0) {
+                setErrorMsg('❌ Mã khách hàng đã tồn tại trong hệ thống!');
+                setIsLoading(false);
+                return;
+            }
+
             // Duplicate Check: Name + Phone + Category
             const checkQuery = supabase
                 .from('customers')
@@ -454,10 +476,9 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                         type="text"
                                         name="code"
                                         required
-                                        disabled={isEdit}
                                         value={formData.code}
                                         onChange={handleChange}
-                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white outline-none transition-all font-semibold text-slate-900 disabled:opacity-50"
+                                        className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white outline-none transition-all font-semibold text-slate-900"
                                     />
                                 </div>
                                 <div className="space-y-2">

@@ -20,6 +20,7 @@ import {
     ChevronDown,
     ChevronLeft,
     ClipboardCheck,
+    Download,
     Edit,
     Eye,
     FileText,
@@ -36,6 +37,7 @@ import {
     SlidersHorizontal,
     Table2,
     Trash2,
+    Upload,
     User,
     Warehouse,
     X
@@ -94,6 +96,11 @@ import {
 import { deleteOrdersWithRollback } from '../utils/deleteOrderCascade';
 import { scopeOrdersForWarehouseAccess } from '../utils/orderWarehouseScope';
 import { stripDeliveryMediaFromNote } from '../utils/orderNoteSanitize';
+import {
+    downloadOrderImportTemplate,
+    importOrdersFromExcelRows,
+    readExcelFileToRows,
+} from '../utils/orderExcelImport';
 
 // Register Chart.js components
 ChartJS.register(
@@ -409,6 +416,8 @@ const Orders = () => {
 
     const [orders, setOrders] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [isImporting, setIsImporting] = useState(false);
+    const orderImportInputRef = useRef(null);
 
     // Filter states
     const [selectedCustomerCategories, setSelectedCustomerCategories] = useState([]);
@@ -1333,6 +1342,44 @@ const Orders = () => {
         setIsFormModalOpen(true);
     };
 
+    const downloadOrderTemplate = () => {
+        downloadOrderImportTemplate(warehousesList);
+    };
+
+    const handleImportOrdersExcel = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setIsImporting(true);
+        try {
+            const rows = await readExcelFileToRows(file);
+            if (!rows.length) {
+                alert('File Excel không có dữ liệu!');
+                return;
+            }
+
+            const defaultOrderedBy =
+                user?.name ||
+                localStorage.getItem('user_name') ||
+                sessionStorage.getItem('user_name') ||
+                '';
+
+            const { count } = await importOrdersFromExcelRows(supabase, rows, {
+                warehousesList,
+                defaultOrderedBy,
+            });
+
+            alert(`Đã import thành công ${count} đơn hàng!`);
+            await fetchOrders();
+        } catch (err) {
+            console.error('Import orders excel:', err);
+            alert(`Có lỗi khi import Excel:\n${err.message || err}`);
+        } finally {
+            setIsImporting(false);
+            e.target.value = null;
+        }
+    };
+
     return (
         <div
             className={clsx(
@@ -1440,6 +1487,32 @@ const Orders = () => {
                                 )}
                                 <button
                                     type="button"
+                                    onClick={downloadOrderTemplate}
+                                    disabled={isImporting}
+                                    className="flex h-10 shrink-0 items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 text-[13px] font-bold text-indigo-700 shadow-sm transition hover:bg-indigo-100 disabled:opacity-50"
+                                    title="Tải mẫu Excel"
+                                >
+                                    <Download size={16} aria-hidden />
+                                    Tải mẫu
+                                </button>
+                                <label
+                                    className={clsx(
+                                        'flex h-10 shrink-0 cursor-pointer items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 text-[13px] font-bold text-emerald-700 shadow-sm transition hover:bg-emerald-100 select-none',
+                                        isImporting && 'pointer-events-none opacity-50',
+                                    )}
+                                >
+                                    <Upload size={16} aria-hidden />
+                                    {isImporting ? 'Đang import...' : 'Import Excel'}
+                                    <input
+                                        ref={orderImportInputRef}
+                                        type="file"
+                                        accept=".xlsx,.xls"
+                                        onChange={handleImportOrdersExcel}
+                                        className="hidden"
+                                    />
+                                </label>
+                                <button
+                                    type="button"
                                     onClick={openCreateOrderForm}
                                     className="flex h-10 shrink-0 items-center gap-2 rounded-lg px-4 text-[13px] font-bold text-white shadow-sm transition hover:opacity-90 active:scale-[0.98]"
                                     style={{ backgroundColor: BT_PRIMARY }}
@@ -1509,15 +1582,36 @@ const Orders = () => {
                             </div>
                         }
                         actions={
-                            <button
-                                onClick={() => {
-                                    setOrderToEdit(null);
-                                    setIsFormModalOpen(true);
-                                }}
-                                className="p-2 rounded-xl bg-primary text-white shadow-lg shadow-primary/30 active:scale-95 transition-all"
-                            >
-                                <Plus size={20} />
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                                <button
+                                    type="button"
+                                    onClick={downloadOrderTemplate}
+                                    disabled={isImporting}
+                                    className="p-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 active:scale-95 transition-all disabled:opacity-50"
+                                    title="Tải mẫu Excel"
+                                >
+                                    <Download size={18} />
+                                </button>
+                                <label className="p-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 active:scale-95 transition-all cursor-pointer">
+                                    <Upload size={18} />
+                                    <input
+                                        type="file"
+                                        accept=".xlsx,.xls"
+                                        onChange={handleImportOrdersExcel}
+                                        className="hidden"
+                                        disabled={isImporting}
+                                    />
+                                </label>
+                                <button
+                                    onClick={() => {
+                                        setOrderToEdit(null);
+                                        setIsFormModalOpen(true);
+                                    }}
+                                    className="p-2 rounded-xl bg-primary text-white shadow-lg shadow-primary/30 active:scale-95 transition-all"
+                                >
+                                    <Plus size={20} />
+                                </button>
+                            </div>
                         }
                         selectionBar={
                             selectedIds.length > 0 ? (
