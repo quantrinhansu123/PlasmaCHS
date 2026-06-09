@@ -104,6 +104,25 @@ const warehouseManagedByUser = (warehouse, managerCandidates = []) => {
         );
 };
 
+const compactLoginKey = (value) =>
+    normalizeText(value).replace(/[^a-z0-9]/g, '');
+
+/** Khớp mã kho với nick đăng nhập (vd. OCCP1 ↔ OCP1). */
+const warehouseMatchesLoginIdentity = (warehouse, loginCandidates = []) => {
+    const codeKey = compactLoginKey(warehouse?.code);
+    if (!codeKey || !loginCandidates.length) return false;
+
+    return loginCandidates.some((candidate) => {
+        const loginKey = compactLoginKey(candidate);
+        if (!loginKey) return false;
+        if (loginKey === codeKey) return true;
+        if (loginKey.replace(/o+/g, 'o') === codeKey.replace(/o+/g, 'o')) return true;
+        if (loginKey.length >= 3 && codeKey.includes(loginKey)) return true;
+        if (codeKey.length >= 3 && loginKey.includes(codeKey)) return true;
+        return false;
+    });
+};
+
 const buildAllowedWarehouseKeys = (warehouses = []) => {
     const allowedWarehouseValues = new Set(warehouses.flatMap((warehouse) => getWarehouseAliases(warehouse)));
     return new Set(Array.from(allowedWarehouseValues).flatMap((key) => getWarehouseKeyVariants(key)));
@@ -144,6 +163,19 @@ export function filterWarehousesForCurrentUser(warehouses = [], { role, user, de
     let scoped = (warehouses || []).filter((warehouse) =>
         warehouseManagedByUser(warehouse, managerCandidates)
     );
+
+    if (isThuKhoRole && scoped.length === 0) {
+        const loginCandidates = getManagerCandidateKeys(
+            user?.username,
+            user?.name,
+            storageUserName,
+            typeof localStorage !== 'undefined' ? localStorage.getItem('user_login') : '',
+            typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('user_login') : '',
+        );
+        scoped = (warehouses || []).filter((warehouse) =>
+            warehouseMatchesLoginIdentity(warehouse, loginCandidates),
+        );
+    }
 
     if (!isThuKhoRole && scoped.length === 0 && department) {
         const branchTokens = getManagerCandidateKeys(department, user?.chi_nhanh);

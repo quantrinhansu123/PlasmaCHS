@@ -184,7 +184,6 @@ export async function attachCustomerWarehousesToMachines(supabaseClient, machine
         return {
             ...m,
             customer_warehouse: wh,
-            warehouse: m.warehouse || wh,
         };
     });
 

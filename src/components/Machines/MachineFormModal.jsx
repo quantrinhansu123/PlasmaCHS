@@ -9,12 +9,15 @@ import {
     MACHINE_TYPES,
     VALVE_TYPES
 } from '../../constants/machineConstants';
+import usePermissions from '../../hooks/usePermissions';
+import { filterWarehousesForCurrentUser } from '../../utils/orderWarehouseScope';
 import { supabase } from '../../supabase/config';
 import BarcodeScanner from '../Common/BarcodeScanner';
 import clsx from 'clsx';
 import Combobox from '../ui/Combobox';
 
 export default function MachineFormModal({ machine, onClose, onSuccess }) {
+    const { role, user, department } = usePermissions();
     const isEdit = !!machine;
     const [isLoading, setIsLoading] = useState(false);
     const [isClosing, setIsClosing] = useState(false);
@@ -88,7 +91,11 @@ export default function MachineFormModal({ machine, onClose, onSuccess }) {
                     .select('*')
                     .eq('status', 'Đang hoạt động')
                     .order('name');
-                if (whData) setWarehousesList(whData);
+                if (whData) {
+                    setWarehousesList(
+                        filterWarehousesForCurrentUser(whData, { role, user, department }),
+                    );
+                }
 
                 // Fetch Customers
                 const { data: customerData } = await supabase
@@ -108,7 +115,7 @@ export default function MachineFormModal({ machine, onClose, onSuccess }) {
             }
         };
         fetchAllData();
-    }, [isEdit]);
+    }, [isEdit, role, user, department]);
 
     const filteredCustomers = customersList.filter(c =>
         c.name?.toLowerCase().includes(customerSearch.toLowerCase())
