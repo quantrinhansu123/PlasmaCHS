@@ -30,6 +30,7 @@ import {
     uploadDeliveryProofFile,
 } from '../../utils/cloudinaryUpload';
 import Combobox from '../ui/Combobox';
+import { resolveInventoryLineForOrder } from '../../utils/inventoryMatch';
 import {
     fetchReadyMachinesAtWarehouse,
     resolveWarehouseRow,
@@ -543,14 +544,35 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         if (availableCylsWH.length > 0 || isFetchingCylsWH || !order?.warehouse) return;
         setIsFetchingCylsWH(true);
         try {
-            const { data } = await supabase
-                .from('cylinders')
-                .select('serial_number, volume, status, warehouse_id')
-                .eq('warehouse_id', order.warehouse)
-                .eq('status', 's\u1eb5n s\u00e0ng')
-                .order('serial_number', { ascending: true })
-                .limit(5000);
-            setAvailableCylsWH(data || []);
+            let warehouses = warehouseList;
+            if (!warehouses?.length) {
+                const { data } = await supabase
+                    .from('warehouses')
+                    .select('id, name, code, branch_office')
+                    .order('name');
+                warehouses = data || [];
+                if (warehouses.length) setWarehouseList(warehouses);
+            }
+
+            const whRow =
+                resolveWarehouseRow(order.warehouse, warehouses) ||
+                resolveWarehouseRow(getWarehouseReference(order, warehouseName), warehouses);
+            const cylWarehouseIds = [...new Set([whRow?.id, order.warehouse].filter(Boolean))];
+
+            const collected = new Map();
+            for (const whId of cylWarehouseIds) {
+                const { data } = await supabase
+                    .from('cylinders')
+                    .select('serial_number, volume, status, warehouse_id')
+                    .eq('warehouse_id', whId)
+                    .eq('status', 's\u1eb5n s\u00e0ng')
+                    .order('serial_number', { ascending: true })
+                    .limit(5000);
+                (data || []).forEach((row) => {
+                    if (row?.serial_number) collected.set(row.serial_number, row);
+                });
+            }
+            setAvailableCylsWH([...collected.values()]);
         } catch (e) {
             console.error('fetch cylinders WH error', e);
         } finally {
@@ -812,6 +834,15 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 }
 
                 // Trừ tồn kho cho từng sản phẩm từ order_items
+                let warehousesForInv = warehouseList;
+                if (!warehousesForInv?.length) {
+                    const { data: whData } = await supabase
+                        .from('warehouses')
+                        .select('id, name, code, branch_office')
+                        .order('name');
+                    warehousesForInv = whData || [];
+                }
+
                 for (const item of orderItems) {
                     if (!item.quantity || item.quantity <= 0) continue;
 
@@ -819,17 +850,21 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
 
                     const productLabel = PRODUCT_TYPES.find(p => p.id === item.product_type)?.label || item.product_type;
 
-                    const { data: invData, error: invErr } = await supabase
-                        .from('inventory')
-                        .select('id, quantity, item_name')
-                        .eq('warehouse_id', order.warehouse)
-                        .ilike('item_name', productLabel.trim())
-                        .maybeSingle();
-
-                    if (invErr) throw new Error(`Lỗi kiểm tra tồn kho cho ${productLabel}: ` + invErr.message);
+                    let invData;
+                    try {
+                        invData = await resolveInventoryLineForOrder(supabase, {
+                            warehouseRef: order.warehouse,
+                            warehouseList: warehousesForInv,
+                            productType: item.product_type,
+                            allowCylinderSync: true,
+                        });
+                    } catch (invErr) {
+                        throw new Error(`Lỗi kiểm tra tồn kho cho ${productLabel}: ` + invErr.message);
+                    }
 
                     if (!invData) {
-                        throw new Error(`Kho ${order.warehouse || '—'} chưa có dòng tồn cho ${productLabel}. Vui lòng khởi tạo tồn kho trước khi xuất bán.`);
+                        const whLabel = getWarehouseLabelFromList(order.warehouse, warehousesForInv);
+                        throw new Error(`Kho ${whLabel} chưa có dòng tồn cho ${productLabel}. Vui lòng khởi tạo tồn kho trước khi xuất bán.`);
                     }
 
                     if (invData.quantity < item.quantity) {
@@ -1060,18 +1095,27 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             // 2. INVENTORY REFUND ON CANCEL - Auto-refund when cancelling a post-KHO_XU_LY order
             const POST_INVENTORY_STATUSES = ['DA_DUYET', 'CHO_GIAO_HANG', 'DANG_GIAO_HANG', 'CHO_DOI_SOAT', 'DOI_SOAT_THAT_BAI'];
             if (transition.nextStatus === 'HUY_DON' && POST_INVENTORY_STATUSES.includes(order.status)) {
+                let warehousesForRefund = warehouseList;
+                if (!warehousesForRefund?.length) {
+                    const { data: whData } = await supabase
+                        .from('warehouses')
+                        .select('id, name, code, branch_office')
+                        .order('name');
+                    warehousesForRefund = whData || [];
+                }
+
                 // Refund inventory for each product
                 for (const item of orderItems) {
                     if (!item.quantity || item.quantity <= 0) continue;
 
                     const productLabel = PRODUCT_TYPES.find(p => p.id === item.product_type)?.label || item.product_type;
 
-                    const { data: invData } = await supabase
-                        .from('inventory')
-                        .select('id, quantity')
-                        .eq('warehouse_id', order.warehouse)
-                        .ilike('item_name', productLabel.trim())
-                        .maybeSingle();
+                    const invData = await resolveInventoryLineForOrder(supabase, {
+                        warehouseRef: order.warehouse,
+                        warehouseList: warehousesForRefund,
+                        productType: item.product_type,
+                        allowCylinderSync: false,
+                    });
 
                     if (invData) {
                         await supabase
