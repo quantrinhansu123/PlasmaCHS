@@ -30,9 +30,11 @@ import {
     uploadDeliveryProofFile,
 } from '../../utils/cloudinaryUpload';
 import Combobox from '../ui/Combobox';
-import { resolveInventoryLineForOrder } from '../../utils/inventoryMatch';
+import { cylinderVolumeMatchesProduct, resolveInventoryLineForOrder } from '../../utils/inventoryMatch';
 import {
+    fetchReadyCylindersAtWarehouse,
     fetchReadyMachinesAtWarehouse,
+    isReadyCylinderStatus,
     resolveWarehouseRow,
 } from '../../utils/transferWarehouseMatch';
 import {
@@ -264,17 +266,30 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         resolveWarehouseName();
     }, [order?.warehouse, order?.note, warehouseName]);
 
-    // Fetch warehouse list for DNXM approval + machine serial suggestions at KHO_XU_LY
+    const orderCylinderProductTypes = useMemo(() => {
+        const types = new Set();
+        if (order?.product_type?.startsWith('BINH')) types.add(order.product_type);
+        if (order?.product_type_2?.startsWith('BINH')) types.add(order.product_type_2);
+        (orderItems || []).forEach((it) => {
+            if (it.product_type?.startsWith('BINH')) types.add(it.product_type);
+        });
+        return [...types];
+    }, [order?.product_type, order?.product_type_2, orderItems]);
+
+    const hasCylinderItems = orderCylinderProductTypes.length > 0;
+
+    // Fetch warehouse list for DNXM approval + gợi ý mã máy/bình tại KHO_XU_LY
     useEffect(() => {
         const needsWarehouses =
             (order?.status === 'CHO_CTY_DUYET' && isDNXM) ||
-            (order?.status === 'KHO_XU_LY' && hasMachineItems);
+            (order?.status === 'KHO_XU_LY' && (hasMachineItems || hasCylinderItems)) ||
+            (['CHO_DUYET', 'CHO_CTY_DUYET', 'KHO_XU_LY'].includes(order?.status) && hasCylinderItems);
         if (!needsWarehouses) return;
 
         supabase.from('warehouses').select('id, name, code, branch_office').order('name').then(({ data }) => {
             setWarehouseList(data || []);
         });
-    }, [order?.status, isDNXM, hasMachineItems]);
+    }, [order?.status, isDNXM, hasMachineItems, hasCylinderItems]);
 
     useEffect(() => {
         if (!isDNXM || order?.status !== 'CHO_CTY_DUYET') return undefined;
@@ -475,6 +490,73 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         order?.note,
     ]);
 
+    useEffect(() => {
+        const loadAvailableCylinders = async () => {
+            const showCylUi = ['CHO_DUYET', 'CHO_CTY_DUYET', 'KHO_XU_LY'].includes(order?.status);
+            if (!showCylUi || !hasCylinderItems) {
+                setAvailableCylsWH([]);
+                return;
+            }
+
+            const warehouseRef = orderWarehouseCode || getWarehouseReference(order, warehouseName);
+            if (!warehouseRef) {
+                setAvailableCylsWH([]);
+                return;
+            }
+
+            try {
+                setIsFetchingCylsWH(true);
+
+                let warehouses = warehouseList;
+                if (!warehouses?.length) {
+                    const { data } = await supabase
+                        .from('warehouses')
+                        .select('id, name, code, branch_office')
+                        .order('name');
+                    warehouses = data || [];
+                    if (warehouses.length) setWarehouseList(warehouses);
+                }
+
+                const whRow =
+                    resolveWarehouseRow(warehouseRef, warehouses) ||
+                    resolveWarehouseRow(order?.warehouse, warehouses);
+
+                const cylinders = await fetchReadyCylindersAtWarehouse(supabase, {
+                    warehouseRef,
+                    warehouseList: warehouses,
+                    whRow,
+                    warehouseId: order?.warehouse,
+                });
+
+                let filtered = (cylinders || []).filter((cylinder) =>
+                    orderCylinderProductTypes.some((pt) => cylinderVolumeMatchesProduct(cylinder.volume, pt)),
+                );
+
+                if (filtered.length === 0 && cylinders.length > 0) {
+                    filtered = cylinders;
+                }
+
+                setAvailableCylsWH(filtered);
+            } catch (err) {
+                console.error('Error fetching cylinder serials:', err);
+                setAvailableCylsWH([]);
+            } finally {
+                setIsFetchingCylsWH(false);
+            }
+        };
+
+        loadAvailableCylinders();
+    }, [
+        order?.status,
+        order?.warehouse,
+        orderWarehouseCode,
+        warehouseList,
+        warehouseName,
+        hasCylinderItems,
+        orderCylinderProductTypes,
+        order?.note,
+    ]);
+
     // Checklist giao: bình từ assigned + dòng BINH; máy từ collectMachineSerialsForOrder (order_items, department, khối note kho).
     useEffect(() => {
         if (order?.status === 'DANG_GIAO_HANG') {
@@ -540,46 +622,6 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         { nextStatus: 'DOI_SOAT_THAT_BAI', icon: AlertCircle },
     ];
 
-    const fetchAvailableCylindersWH = async () => {
-        if (availableCylsWH.length > 0 || isFetchingCylsWH || !order?.warehouse) return;
-        setIsFetchingCylsWH(true);
-        try {
-            let warehouses = warehouseList;
-            if (!warehouses?.length) {
-                const { data } = await supabase
-                    .from('warehouses')
-                    .select('id, name, code, branch_office')
-                    .order('name');
-                warehouses = data || [];
-                if (warehouses.length) setWarehouseList(warehouses);
-            }
-
-            const whRow =
-                resolveWarehouseRow(order.warehouse, warehouses) ||
-                resolveWarehouseRow(getWarehouseReference(order, warehouseName), warehouses);
-            const cylWarehouseIds = [...new Set([whRow?.id, order.warehouse].filter(Boolean))];
-
-            const collected = new Map();
-            for (const whId of cylWarehouseIds) {
-                const { data } = await supabase
-                    .from('cylinders')
-                    .select('serial_number, volume, status, warehouse_id')
-                    .eq('warehouse_id', whId)
-                    .eq('status', 's\u1eb5n s\u00e0ng')
-                    .order('serial_number', { ascending: true })
-                    .limit(5000);
-                (data || []).forEach((row) => {
-                    if (row?.serial_number) collected.set(row.serial_number, row);
-                });
-            }
-            setAvailableCylsWH([...collected.values()]);
-        } catch (e) {
-            console.error('fetch cylinders WH error', e);
-        } finally {
-            setIsFetchingCylsWH(false);
-        }
-    };
-
     const getCylSuggestionsWH = (idx, searchVal) => {
         if (!availableCylsWH || availableCylsWH.length === 0) return [];
 
@@ -596,6 +638,12 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 const serial = c.serial_number?.toUpperCase();
                 if (!serial) return false;
                 if (taken.has(serial)) return false;
+                if (
+                    orderCylinderProductTypes.length > 0
+                    && !orderCylinderProductTypes.some((pt) => cylinderVolumeMatchesProduct(c.volume, pt))
+                ) {
+                    return false;
+                }
                 if (!search) return true;
                 return serial.includes(search);
             })
@@ -708,7 +756,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             const match = validCylinders.find(c => c.serial_number === serial);
             if (!match) {
                 invalid.push(`${serial} (Không có trong kho hiện tại)`);
-            } else if (match.status !== 'sẵn sàng') {
+            } else if (!isReadyCylinderStatus(match.status)) {
                 invalid.push(`${serial} (T/thái: ${match.status})`);
             } else {
                 validSerialsList.push(serial);
@@ -1524,7 +1572,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                                                         className="w-full pl-4 pr-12 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[14px] font-bold text-slate-800 outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all font-mono tracking-wider placeholder:tracking-normal"
                                                                         placeholder={`Nhập hoặc quét mã số ${idx + 1}...`}
                                                                         value={currentVal}
-                                                                        onFocus={() => { fetchAvailableCylindersWH(); setActiveCylDropdownWH(dropKey); }}
+                                                                        onFocus={() => setActiveCylDropdownWH(dropKey)}
                                                                         onBlur={() => {
                                                                             setTimeout(() => {
                                                                                 // Only clear if we are still on the same dropdown (prevent flicker when focusing next)
@@ -1717,7 +1765,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                                             className="w-full pl-4 pr-12 py-2.5 bg-white border border-orange-200 rounded-xl text-[14px] font-bold text-slate-800 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-50 transition-all font-mono tracking-wider placeholder:tracking-normal"
                                                             placeholder={`Quét mã số ${idx + 1}...`}
                                                             value={serialsList[idx] || ''}
-                                                            onFocus={() => { fetchAvailableCylindersWH(); setActiveCylDropdownWH(`sp-${idx}`); }}
+                                                            onFocus={() => setActiveCylDropdownWH(`sp-${idx}`)}
                                                             onBlur={() => {
                                                                 setTimeout(() => {
                                                                     setActiveCylDropdownWH(curr => curr === `sp-${idx}` ? null : curr);

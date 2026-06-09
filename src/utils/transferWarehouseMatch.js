@@ -278,3 +278,111 @@ export async function fetchReadyMachinesAtWarehouse(
         String(a.serial_number || '').localeCompare(String(b.serial_number || ''), 'vi'),
     );
 }
+
+const CYLINDER_SELECT = 'id, serial_number, volume, status, warehouse_id';
+
+/** Khớp «Sẵn sàng» / «sẵn sàng» / biến thể không dấu. */
+export function isReadyCylinderStatus(status) {
+    const s = normalizeInventoryStatusKey(status);
+    if (!s) return false;
+    if (
+        s.includes('thuoc khach')
+        || s.includes('dang su dung')
+        || s.includes('dang van chuyen')
+        || s.includes('da tra')
+        || s.includes('bao tri')
+    ) {
+        return false;
+    }
+    return s === 'san sang' || s.includes('san sang') || (s.includes('san') && s.includes('sang'));
+}
+
+/**
+ * Lấy bình sẵn sàng tại kho — khớp warehouse_id theo mã/tên/UUID (giống fetchReadyMachinesAtWarehouse).
+ */
+export async function fetchReadyCylindersAtWarehouse(
+    supabaseClient,
+    { warehouseRef = '', warehouseList = [], whRow = null, warehouseId = null } = {},
+) {
+    const ref = String(warehouseRef || warehouseId || '').trim();
+    if (!ref) return [];
+
+    const row =
+        whRow ||
+        resolveWarehouseRow(ref, warehouseList) ||
+        resolveWarehouseRow(warehouseId, warehouseList) ||
+        { code: ref, name: ref, id: ref };
+
+    const keys = buildWarehouseMatchKeys(row, ref, warehouseList);
+    const collected = new Map();
+
+    const absorb = (rows) => {
+        (rows || []).forEach((c) => {
+            if (!c?.id || !isReadyCylinderStatus(c.status)) return;
+            collected.set(c.id, c);
+        });
+    };
+
+    const absorbIfWarehouseMatch = (rows) => {
+        (rows || []).forEach((c) => {
+            if (!c?.id || !isReadyCylinderStatus(c.status)) return;
+            if (
+                cylinderBelongsToWarehouse(c.warehouse_id, ref, warehouseList)
+                || cylinderBelongsToWarehouse(c.warehouse_id, warehouseId, warehouseList)
+                || keys.some((k) => String(c.warehouse_id || '').trim().toLowerCase() === k.toLowerCase())
+            ) {
+                collected.set(c.id, c);
+            }
+        });
+    };
+
+    if (keys.length > 0) {
+        const { data, error } = await supabaseClient
+            .from('cylinders')
+            .select(CYLINDER_SELECT)
+            .in('warehouse_id', keys)
+            .limit(5000);
+        if (!error) absorb(data);
+    }
+
+    for (const key of keys) {
+        const safeKey = String(key || '').replace(/[%_]/g, '').trim();
+        if (!safeKey) continue;
+
+        const { data: exactReady } = await supabaseClient
+            .from('cylinders')
+            .select(CYLINDER_SELECT)
+            .eq('warehouse_id', safeKey)
+            .eq('status', 'sẵn sàng')
+            .limit(2000);
+        absorb(exactReady);
+
+        const { data: ilikeRows } = await supabaseClient
+            .from('cylinders')
+            .select(CYLINDER_SELECT)
+            .ilike('warehouse_id', `%${safeKey}%`)
+            .limit(2000);
+        absorb(ilikeRows);
+    }
+
+    if (collected.size === 0) {
+        const { data: allReady, error } = await supabaseClient
+            .from('cylinders')
+            .select(CYLINDER_SELECT)
+            .eq('status', 'sẵn sàng')
+            .limit(10000);
+        if (!error) absorbIfWarehouseMatch(allReady);
+
+        if (collected.size === 0 && !error) {
+            const { data: allReadyLoose } = await supabaseClient
+                .from('cylinders')
+                .select(CYLINDER_SELECT)
+                .limit(10000);
+            absorbIfWarehouseMatch(allReadyLoose);
+        }
+    }
+
+    return [...collected.values()].sort((a, b) =>
+        String(a.serial_number || '').localeCompare(String(b.serial_number || ''), 'vi'),
+    );
+}

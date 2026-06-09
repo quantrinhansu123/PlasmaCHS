@@ -75,7 +75,7 @@ export async function findInventoryLine(supabaseClient, { warehouseRef, warehous
     return { data: null, error: lastError };
 }
 
-const cylinderVolumeMatchesProduct = (volume, productType) => {
+export const cylinderVolumeMatchesProduct = (volume, productType) => {
     const raw = String(volume ?? '').trim();
     const vol = raw.toLowerCase();
     const compact = vol.replace(/\s+/g, '');
