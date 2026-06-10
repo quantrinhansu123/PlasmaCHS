@@ -46,37 +46,11 @@ import {
     resolveOrderWarehouseForMachine,
 } from '../utils/machineCustomerFromOrders';
 import { isThuKhoRole, isWarehouseRole } from '../utils/accessControl';
-import { canViewAllWarehouses, filterWarehousesForCurrentUser } from '../utils/orderWarehouseScope';
-import {
-    buildWarehouseModalAliases,
-    storedValueMatchesWarehouse,
-} from '../utils/transferWarehouseMatch';
+import { canViewAllWarehouses, applyManagingWarehouseOrFilter, buildScopedWarehouseFilterKeys, expandWarehouseSelectionKeys, filterWarehousesForCurrentUser, getCustomerMatchLabelsForManagingWarehouses, resolveWarehouseRecordsFromSelection, rowMatchesManagingWarehouseRecord } from '../utils/orderWarehouseScope';
+import { normalizeCustomerLookupKey } from '../utils/machineCustomerFromOrders';
 import { supabase } from '../supabase/config';
 
 const NO_WAREHOUSE_ACCESS_MARKER = '__NO_WAREHOUSE_ACCESS__';
-
-/** Chỉ mã/id/tên đầy đủ — không tách token ngắn (CHS, NM…) để tránh lẫn kho. */
-function buildMachineWarehouseFilterKeys(warehouse) {
-    if (!warehouse) return [];
-    return [...new Set([
-        ...warehouseRowStorageKeys(warehouse),
-        String(warehouse.branch_office || '').trim(),
-        ...buildWarehouseModalAliases(warehouse),
-    ])].filter(Boolean);
-}
-
-function machineBelongsToAllowedWarehouses(machine, allowedWarehouses, allWarehouses) {
-    const stored = String(machine?.warehouse || '').trim();
-    if (!stored || !allowedWarehouses?.length) return false;
-
-    return allowedWarehouses.some(
-        (wh) =>
-            machineWarehouseMatchesRow(stored, wh)
-            || storedValueMatchesWarehouse(stored, wh.id, allWarehouses)
-            || storedValueMatchesWarehouse(stored, wh.code, allWarehouses)
-            || storedValueMatchesWarehouse(stored, wh.name, allWarehouses),
-    );
-}
 
 /** Escape cho chuỗi trong filter .or(... ilike.%x%) — tránh % _ , phá cú pháp PostgREST */
 function escapeIlikeOrFragment(text) {
@@ -253,7 +227,7 @@ const TABLE_COLUMNS = [
 ];
 
 const Machines = () => {
-    const { role: rawRole, department, user } = usePermissions();
+    const { role: rawRole, department, user, loading: permissionsLoading } = usePermissions();
     const isAdminOrManager = canViewAllWarehouses(rawRole);
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
@@ -283,6 +257,7 @@ const Machines = () => {
     const [selectedDepartments, setSelectedDepartments] = useState([]);
     const [selectedWarehouses, setSelectedWarehouses] = useState([]);
     const [uniqueCustomers, setUniqueCustomers] = useState([]);
+    const [customersList, setCustomersList] = useState([]);
     const [uniqueDepartments, setUniqueDepartments] = useState([]);
     const [warehousesList, setWarehousesList] = useState([]);
 
@@ -340,7 +315,7 @@ const Machines = () => {
     const visibleCount = visibleColumns.length;
     const totalCount = defaultColOrder.length;
     const shouldScopeMachinesByWarehouse = useMemo(
-        () => !canViewAllWarehouses(rawRole) && (isThuKhoRole(rawRole) || isWarehouseRole(rawRole)),
+        () => Boolean(rawRole) && !canViewAllWarehouses(rawRole) && (isThuKhoRole(rawRole) || isWarehouseRole(rawRole)),
         [rawRole],
     );
 
@@ -352,23 +327,58 @@ const Machines = () => {
     const scopedWarehouseKeys = useMemo(() => {
         if (!shouldScopeMachinesByWarehouse) return [];
         if (!allowedWarehouses.length) return [NO_WAREHOUSE_ACCESS_MARKER];
-        return [...new Set(allowedWarehouses.flatMap(buildMachineWarehouseFilterKeys))];
+        return buildScopedWarehouseFilterKeys(allowedWarehouses);
     }, [allowedWarehouses, shouldScopeMachinesByWarehouse]);
 
-    const applyWarehouseScopeToQuery = (query) => {
-        if (!shouldScopeMachinesByWarehouse) return query;
-        if (scopedWarehouseKeys.length > 0) {
-            return query.in('warehouse', scopedWarehouseKeys);
-        }
-        return query.eq('warehouse', NO_WAREHOUSE_ACCESS_MARKER);
+    const scopedCustomerNames = useMemo(() => {
+        if (!allowedWarehouses.length) return [];
+        return getCustomerMatchLabelsForManagingWarehouses(customersList, allowedWarehouses, warehousesList);
+    }, [customersList, allowedWarehouses, warehousesList]);
+
+    const getMachineCustomerWarehouse = (machine) => {
+        const label = String(machine?.customer_name || '').trim();
+        if (!label) return '';
+        const baseName = label.split(' / ')[0].trim();
+        const lookupKeys = [label, baseName]
+            .map((value) => normalizeCustomerLookupKey(value))
+            .filter(Boolean);
+        const customer = customersList.find((item) => {
+            const candidateKeys = [item.name, item.legal_rep, item.invoice_company_name]
+                .map((value) => normalizeCustomerLookupKey(value))
+                .filter(Boolean);
+            return lookupKeys.some((key) => candidateKeys.includes(key));
+        });
+        return customer?.warehouse_id || '';
     };
 
-    const filterMachinesForWarehouseScope = (rows) => {
-        if (!shouldScopeMachinesByWarehouse) return rows || [];
-        if (!allowedWarehouses.length) return [];
-        return (rows || []).filter((machine) =>
-            machineBelongsToAllowedWarehouses(machine, allowedWarehouses, warehousesList),
-        );
+    const applyWarehouseFiltersToQuery = (query) => {
+        const warehouseCatalog = shouldScopeMachinesByWarehouse ? allowedWarehouses : warehousesList;
+
+        if (selectedWarehouses.length > 0) {
+            const selectedRecords = resolveWarehouseRecordsFromSelection(selectedWarehouses, warehouseCatalog);
+            const targetWarehouses = selectedRecords.length ? selectedRecords : warehouseCatalog;
+            const whKeys = expandWarehouseSelectionKeys(selectedWarehouses, warehouseCatalog);
+            const customerNames = getCustomerMatchLabelsForManagingWarehouses(customersList, targetWarehouses, warehousesList);
+            return applyManagingWarehouseOrFilter(query, {
+                warehouseColumn: 'warehouse',
+                warehouseKeys: whKeys,
+                secondaryColumn: 'customer_name',
+                secondaryValues: customerNames,
+                noAccessValue: NO_WAREHOUSE_ACCESS_MARKER,
+            });
+        }
+
+        if (shouldScopeMachinesByWarehouse) {
+            return applyManagingWarehouseOrFilter(query, {
+                warehouseColumn: 'warehouse',
+                warehouseKeys: scopedWarehouseKeys,
+                secondaryColumn: 'customer_name',
+                secondaryValues: scopedCustomerNames,
+                noAccessValue: NO_WAREHOUSE_ACCESS_MARKER,
+            });
+        }
+
+        return query;
     };
 
     useEffect(() => {
@@ -376,10 +386,12 @@ const Machines = () => {
     }, []);
 
     useEffect(() => {
+        if (permissionsLoading) return;
+        if (shouldScopeMachinesByWarehouse && warehousesList.length === 0) return;
         fetchMachines();
         fetchGlobalStats();
         fetchMetadataForCharts();
-    }, [currentPage, searchTerm, selectedStatuses, selectedMachineTypes, selectedCustomers, selectedDepartments, selectedWarehouses, scopedWarehouseKeys, isAdminOrManager, rawRole, user, department]);
+    }, [currentPage, searchTerm, selectedStatuses, selectedMachineTypes, selectedCustomers, selectedDepartments, selectedWarehouses, scopedWarehouseKeys, scopedCustomerNames, isAdminOrManager, rawRole, user, department, warehousesList, customersList, permissionsLoading, shouldScopeMachinesByWarehouse]);
 
     const fetchMetadataForCharts = async () => {
         try {
@@ -395,12 +407,11 @@ const Machines = () => {
             if (selectedMachineTypes.length > 0) query = query.in('machine_type', selectedMachineTypes);
             if (selectedCustomers.length > 0) query = query.in('customer_name', selectedCustomers);
             if (selectedDepartments.length > 0) query = query.in('department_in_charge', selectedDepartments);
-            if (selectedWarehouses.length > 0) query = query.in('warehouse', selectedWarehouses);
 
-            query = applyWarehouseScopeToQuery(query);
+            query = applyWarehouseFiltersToQuery(query);
 
             const { data } = await query;
-            if (data) setAllMetadata(filterMachinesForWarehouseScope(data));
+            if (data) setAllMetadata(data);
         } catch (err) {
             console.error('Error fetching metadata for charts:', err);
         }
@@ -427,9 +438,7 @@ const Machines = () => {
                 if (selectedMachineTypes.length > 0) queries[key] = queries[key].in('machine_type', selectedMachineTypes);
                 if (selectedCustomers.length > 0) queries[key] = queries[key].in('customer_name', selectedCustomers);
                 if (selectedDepartments.length > 0) queries[key] = queries[key].in('department_in_charge', selectedDepartments);
-                if (selectedWarehouses.length > 0) queries[key] = queries[key].in('warehouse', selectedWarehouses);
-
-                queries[key] = applyWarehouseScopeToQuery(queries[key]);
+                queries[key] = applyWarehouseFiltersToQuery(queries[key]);
             });
 
             const [totalRes, readyRes, inUseRes, maintenanceRes] = await Promise.all([
@@ -531,11 +540,8 @@ const Machines = () => {
             if (selectedDepartments.length > 0) {
                 query = query.in('department_in_charge', selectedDepartments);
             }
-            if (selectedWarehouses.length > 0) {
-                query = query.in('warehouse', selectedWarehouses);
-            }
 
-            query = applyWarehouseScopeToQuery(query);
+            query = applyWarehouseFiltersToQuery(query);
 
             const from = (currentPage - 1) * pageSize;
             const to = from + pageSize - 1;
@@ -546,11 +552,9 @@ const Machines = () => {
 
             if (error && error.code !== '42P01') throw error;
             const rawList = data || [];
-            let list = filterMachinesForWarehouseScope(rawList);
+            let list = rawList;
             try {
-                list = filterMachinesForWarehouseScope(
-                    await enrichInUseMachineCustomersFromOrders(supabase, list),
-                );
+                list = await enrichInUseMachineCustomersFromOrders(supabase, rawList);
             } catch (enrichErr) {
                 console.warn('[Machines] enrich in-use customer display:', enrichErr);
             }
@@ -606,12 +610,22 @@ const Machines = () => {
 
     const fetchWarehouses = async () => {
         try {
-            const { data } = await supabase
-                .from('warehouses')
-                .select('id, name, branch_office, code, manager_name')
-                .order('name');
+            const [{ data }, { data: custData }] = await Promise.all([
+                supabase
+                    .from('warehouses')
+                    .select('id, name, branch_office, code, manager_name')
+                    .order('name'),
+                supabase
+                    .from('customers')
+                    .select('id, name, legal_rep, invoice_company_name, warehouse_id')
+                    .order('name'),
+            ]);
             if (data) {
                 setWarehousesList(data);
+            }
+            if (custData) {
+                setCustomersList(custData);
+                setUniqueCustomers(custData.map((c) => c.name).filter(Boolean));
             }
         } catch (error) {
             console.error('Error fetching warehouses:', error);
@@ -872,9 +886,13 @@ const Machines = () => {
         return resolveWarehouse(warehouseId)?.name || warehouseId;
     };
 
-    /** Kho quản lý hiển thị: ưu tiên kho máy/đơn, fallback kho phụ trách KH khi máy đang thuộc khách. */
-    const getMachineManagingWarehouseLabel = (machine) =>
-        getWarehouseLabel(machine?.warehouse);
+    /** Kho quản lý hiển thị: ưu tiên cột warehouse, fallback kho phụ trách KH. */
+    const getMachineManagingWarehouseLabel = (machine) => {
+        const direct = getWarehouseLabel(machine?.warehouse);
+        if (direct && direct !== '—') return direct;
+        const customerWarehouse = machine?.customer_warehouse || getMachineCustomerWarehouse(machine);
+        return getWarehouseLabel(customerWarehouse);
+    };
 
     const readyCount = stats.ready;
     const inUseCount = stats.inUse;
@@ -917,14 +935,14 @@ const Machines = () => {
         count: allMetadata.filter(m => m.department_in_charge === item).length
     }));
 
-    const warehouseOptions = allowedWarehouses.map((item) => {
-        const filterKey = (item.code || item.id || '').toString().trim();
-        return {
-            id: filterKey,
-            label: item.name || filterKey,
-            count: allMetadata.filter((m) => machineWarehouseMatchesRow(m.warehouse, item)).length,
-        };
-    });
+    const warehouseOptions = allowedWarehouses.map((item) => ({
+        id: item.id,
+        label: item.name || item.code || item.id,
+        count: allMetadata.filter((m) => rowMatchesManagingWarehouseRecord(m, item, warehousesList, {
+            warehouseValue: m.warehouse,
+            customerWarehouseValue: getMachineCustomerWarehouse(m),
+        })).length,
+    }));
 
     const clearAllFilters = () => {
         setSelectedStatuses([]);
@@ -1539,7 +1557,7 @@ const Machines = () => {
                                     )}
                                 >
                                     <Warehouse size={14} className={getFilterIconClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)} />
-                                    Kho
+                                    Kho Quản Lý
                                     {selectedWarehouses.length > 0 && (
                                         <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('warehouses'))}>
                                             {selectedWarehouses.length}
@@ -1857,13 +1875,13 @@ const Machines = () => {
                                                         <div className="flex items-center gap-2">
                                                             <Warehouse size={13} className="text-emerald-600 shrink-0" />
                                                             <p className="text-[12px] text-muted-foreground truncate">
-                                                                Kho KH: {getWarehouseLabel(machine.customer_warehouse)}
+                                                                Kho Quản Lý KH: {getWarehouseLabel(machine.customer_warehouse)}
                                                             </p>
                                                         </div>
                                                         <div className="flex items-center gap-2">
                                                             <Warehouse size={13} className="text-indigo-500 shrink-0" />
                                                             <p className="text-[12px] text-muted-foreground truncate">
-                                                                Kho QL: {getMachineManagingWarehouseLabel(machine)}
+                                                                Kho Quản Lý QL: {getMachineManagingWarehouseLabel(machine)}
                                                             </p>
                                                         </div>
                                                         <div className="flex items-center gap-2">
@@ -2056,7 +2074,7 @@ const Machines = () => {
                                         )}
                                     >
                                         <Warehouse size={14} className={getFilterIconClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)} />
-                                        Kho
+                                        Kho Quản Lý
                                         {selectedWarehouses.length > 0 && (
                                             <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('warehouses'))}>
                                                 {selectedWarehouses.length}
@@ -2281,7 +2299,7 @@ const Machines = () => {
                         },
                         {
                             id: 'warehouses',
-                            label: 'Kho',
+                            label: 'Kho Quản Lý',
                             icon: <Warehouse size={16} className="text-indigo-600" />,
                             options: warehouseOptions,
                             selectedValues: pendingWarehouses,

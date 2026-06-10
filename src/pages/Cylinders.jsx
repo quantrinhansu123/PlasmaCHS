@@ -49,7 +49,16 @@ import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import { CYLINDER_STATUSES } from '../constants/machineConstants';
 import usePermissions from '../hooks/usePermissions';
-import { isAdminRole, isWarehouseRole } from '../utils/accessControl';
+import { isAdminRole, isThuKhoRole, isWarehouseRole } from '../utils/accessControl';
+import {
+    buildCylinderWarehouseScopeKeys,
+    canViewAllWarehouses,
+    cylinderMatchesManagingWarehouseFilter,
+    expandCylinderWarehouseSelectionKeys,
+    filterWarehousesForCurrentUser,
+    getCylinderManagingWarehouseDisplayName,
+    resolveWarehouseRecordsFromSelection,
+} from '../utils/orderWarehouseScope';
 import { supabase } from '../supabase/config';
 
 ChartJS.register(
@@ -161,7 +170,7 @@ const CATEGORY_OPTIONS = [
 ];
 
 const Cylinders = () => {
-    const { role, department } = usePermissions();
+    const { role, user, department, loading: permissionsLoading } = usePermissions();
     const canManageCylinders = isAdminRole(role);
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
@@ -184,11 +193,11 @@ const Cylinders = () => {
     const [selectedWarehouses, setSelectedWarehouses] = useState([]);
     const [uniqueCustomers, setUniqueCustomers] = useState([]);
     const [uniqueVolumes, setUniqueVolumes] = useState([]);
-    const [uniqueWarehouses, setUniqueWarehouses] = useState([]);
+    const [warehousesList, setWarehousesList] = useState([]);
     /** id → name: dùng khi join suppliers trên cylinders trả null (RLS/legacy) */
     const [supplierIdToName, setSupplierIdToName] = useState({});
 
-    const EMPTY_WAREHOUSE_ID = '00000000-0000-0000-0000-000000000000';
+    const NO_MANAGING_WAREHOUSE_MATCH = '__NO_MANAGING_WAREHOUSE__';
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
@@ -212,8 +221,13 @@ const Cylinders = () => {
 
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [filterSearch, setFilterSearch] = useState('');
-    const dropdownRef = useRef(null);
+    const filterAnchorRef = useRef(null);
     const columnPickerRef = useRef(null);
+
+    const toggleFilterDropdown = (key, event) => {
+        filterAnchorRef.current = event.currentTarget;
+        setActiveDropdown((current) => (current === key ? null : key));
+    };
 
     const defaultColOrder = TABLE_COLUMNS.map(col => col.key);
     const columnDefs = TABLE_COLUMNS.reduce((acc, col) => {
@@ -249,21 +263,100 @@ const Cylinders = () => {
     const visibleCount = visibleColumns.length;
     const totalCount = defaultColOrder.length;
 
-    useEffect(() => {
-        fetchFilterOptions();
-    }, []);
+    /** NVK / Thủ kho: chỉ xem bình có Kho Quản Lý trùng tên kho mình quản lý. */
+    const shouldScopeByManagingWarehouse = useMemo(
+        () => Boolean(role) && !canViewAllWarehouses(role) && (isThuKhoRole(role) || isWarehouseRole(role)),
+        [role],
+    );
+
+    const managedWarehouses = useMemo(() => {
+        if (!shouldScopeByManagingWarehouse) return warehousesList;
+        return filterWarehousesForCurrentUser(warehousesList, { role, user, department });
+    }, [warehousesList, role, user, department, shouldScopeByManagingWarehouse]);
+
+    const managingWarehouseKeys = useMemo(() => {
+        if (!shouldScopeByManagingWarehouse) return [];
+        if (!managedWarehouses.length) return [NO_MANAGING_WAREHOUSE_MATCH];
+        return buildCylinderWarehouseScopeKeys(managedWarehouses);
+    }, [managedWarehouses, shouldScopeByManagingWarehouse]);
+
+    const activeManagingWarehouseIds = useMemo(() => {
+        const warehouseCatalog = shouldScopeByManagingWarehouse ? managedWarehouses : warehousesList;
+        if (selectedWarehouses.length > 0) {
+            return expandCylinderWarehouseSelectionKeys(selectedWarehouses, warehouseCatalog);
+        }
+        if (shouldScopeByManagingWarehouse) {
+            return managingWarehouseKeys;
+        }
+        return [];
+    }, [
+        selectedWarehouses,
+        shouldScopeByManagingWarehouse,
+        managedWarehouses,
+        warehousesList,
+        managingWarehouseKeys,
+    ]);
+
+    const activeManagingWarehouseRecords = useMemo(() => {
+        const warehouseCatalog = shouldScopeByManagingWarehouse ? managedWarehouses : warehousesList;
+        if (selectedWarehouses.length > 0) {
+            return resolveWarehouseRecordsFromSelection(selectedWarehouses, warehouseCatalog);
+        }
+        if (shouldScopeByManagingWarehouse) {
+            return managedWarehouses;
+        }
+        return [];
+    }, [
+        selectedWarehouses,
+        shouldScopeByManagingWarehouse,
+        managedWarehouses,
+        warehousesList,
+    ]);
+
+    const applyWarehouseFiltersToQuery = (query) => {
+        if (activeManagingWarehouseIds.length > 0) {
+            return query.in('warehouse_id', activeManagingWarehouseIds);
+        }
+        return query;
+    };
 
     useEffect(() => {
+        setCurrentPage(1);
+    }, [activeManagingWarehouseIds.join('|')]);
+
+    useEffect(() => {
+        fetchFilterOptions();
+    }, [role, user, department]);
+
+    useEffect(() => {
+        if (permissionsLoading) return;
+        if (shouldScopeByManagingWarehouse && warehousesList.length === 0) return;
         fetchCylinders();
         fetchGlobalStats();
         fetchMetadataForCharts();
-    }, [currentPage, searchTerm, selectedStatuses, selectedVolumes, selectedCustomers, selectedCategories, selectedWarehouses]);
+    }, [
+        currentPage,
+        searchTerm,
+        selectedStatuses,
+        selectedVolumes,
+        selectedCustomers,
+        selectedCategories,
+        selectedWarehouses,
+        activeManagingWarehouseIds,
+        managedWarehouses,
+        shouldScopeByManagingWarehouse,
+        warehousesList,
+        permissionsLoading,
+        role,
+        user,
+        department,
+    ]);
 
     const fetchMetadataForCharts = async () => {
         try {
             let query = supabase
                 .from('cylinders')
-                .select('status, volume, customer_name, category');
+                .select('status, volume, customer_name, category, warehouse_id');
 
             if (searchTerm) {
                 query = query.or(`serial_number.ilike.%${searchTerm}%,volume.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%`);
@@ -272,30 +365,8 @@ const Cylinders = () => {
             if (selectedVolumes.length > 0) query = query.in('volume', selectedVolumes);
             if (selectedCustomers.length > 0) query = query.in('customer_name', selectedCustomers);
             if (selectedCategories.length > 0) query = query.in('category', selectedCategories);
-            if (selectedWarehouses.length > 0) query = query.in('warehouse_id', selectedWarehouses);
 
-            // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-            if (isWarehouseRole(role) && department) {
-                const userBranch = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-                const { data: matchedWarehouses } = await supabase
-                    .from('warehouses')
-                    .select('id')
-                    .ilike('name', `%${userBranch}%`);
-                
-                if (matchedWarehouses && matchedWarehouses.length > 0) {
-                    const matchedWhIds = matchedWarehouses.map(w => w.id);
-                    if (selectedWarehouses.length > 0) {
-                        const scopedWhIds = selectedWarehouses.filter(id => matchedWhIds.includes(id));
-                        query = scopedWhIds.length > 0
-                            ? query.in('warehouse_id', scopedWhIds)
-                            : query.eq('warehouse_id', EMPTY_WAREHOUSE_ID);
-                    } else {
-                        query = query.in('warehouse_id', matchedWhIds);
-                    }
-                } else {
-                    query = query.eq('warehouse_id', EMPTY_WAREHOUSE_ID);
-                }
-            }
+            query = applyWarehouseFiltersToQuery(query);
 
             const { data } = await query;
             if (data) setAllMetadata(data);
@@ -312,11 +383,15 @@ const Cylinders = () => {
 
             // Fetch unique customers
             const { data: custData } = await supabase.from('customers').select('name').order('name');
-            if (custData) setUniqueCustomers(custData.map(c => c.name));
+            if (custData) {
+                setUniqueCustomers(custData.map((c) => c.name).filter(Boolean));
+            }
 
-            // Fetch unique warehouses
-            const { data: whData } = await supabase.from('warehouses').select('id, name').order('name');
-            if (whData) setUniqueWarehouses(whData);
+            const { data: whData } = await supabase
+                .from('warehouses')
+                .select('id, name, code, branch_office, manager_name')
+                .order('name');
+            if (whData) setWarehousesList(whData);
 
             const { data: supRows } = await supabase.from('suppliers').select('id, name');
             if (supRows?.length) {
@@ -340,14 +415,6 @@ const Cylinders = () => {
                 empty: supabase.from('cylinders').select('*', { count: 'exact', head: true }).in('status', ['bình rỗng', 'chờ nạp'])
             };
 
-            // Apply same filters to stat queries
-            let matchedWhIds = [];
-            if (isWarehouseRole(role) && department) {
-                const userBranch = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-                const { data: whs } = await supabase.from('warehouses').select('id').ilike('name', `%${userBranch}%`);
-                if (whs) matchedWhIds = whs.map(w => w.id);
-            }
-
             Object.keys(queries).forEach(key => {
                 if (searchTerm) {
                     queries[key] = queries[key].or(`serial_number.ilike.%${searchTerm}%,volume.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%`);
@@ -358,22 +425,7 @@ const Cylinders = () => {
                 if (selectedVolumes.length > 0) queries[key] = queries[key].in('volume', selectedVolumes);
                 if (selectedCustomers.length > 0) queries[key] = queries[key].in('customer_name', selectedCustomers);
                 if (selectedCategories.length > 0) queries[key] = queries[key].in('category', selectedCategories);
-                if (selectedWarehouses.length > 0) queries[key] = queries[key].in('warehouse_id', selectedWarehouses);
-                
-                if (isWarehouseRole(role) && department) {
-                    if (matchedWhIds.length > 0) {
-                        if (selectedWarehouses.length > 0) {
-                            const scopedWhIds = selectedWarehouses.filter(id => matchedWhIds.includes(id));
-                            queries[key] = scopedWhIds.length > 0
-                                ? queries[key].in('warehouse_id', scopedWhIds)
-                                : queries[key].eq('warehouse_id', EMPTY_WAREHOUSE_ID);
-                        } else {
-                            queries[key] = queries[key].in('warehouse_id', matchedWhIds);
-                        }
-                    } else {
-                        queries[key] = queries[key].eq('warehouse_id', EMPTY_WAREHOUSE_ID);
-                    }
-                }
+                queries[key] = applyWarehouseFiltersToQuery(queries[key]);
             });
 
             const [totalRes, readyRes, inUseRes, emptyRes] = await Promise.all([
@@ -396,9 +448,10 @@ const Cylinders = () => {
 
     useEffect(() => {
         const handleClickOutside = (event) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-                setActiveDropdown(null);
+            if (event.target.closest('[data-cylinder-filter-root]')) {
+                return;
             }
+            setActiveDropdown(null);
             if (columnPickerRef.current && !columnPickerRef.current.contains(event.target)) {
                 setShowColumnPicker(false);
             }
@@ -453,6 +506,13 @@ const Cylinders = () => {
     const fetchCylinders = async () => {
         setIsLoading(true);
         try {
+            if (shouldScopeByManagingWarehouse && warehousesList.length > 0 && managedWarehouses.length === 0) {
+                setCylinders([]);
+                setTotalRecords(0);
+                setSelectedIds([]);
+                return;
+            }
+
             let query = supabase
                 .from('cylinders')
                 .select('*, warehouses(id, name), customers(name), suppliers(id, name)', { count: 'exact' });
@@ -473,35 +533,7 @@ const Cylinders = () => {
             if (selectedCategories.length > 0) {
                 query = query.in('category', selectedCategories);
             }
-            if (selectedWarehouses.length > 0) {
-                query = query.in('warehouse_id', selectedWarehouses);
-            }
-
-            // Apply warehouse filter for warehouse managers/staff (Non-Admin)
-            if (isWarehouseRole(role) && department) {
-                const userBranch = department.includes('-') ? department.split('-')[0].trim() : department.trim();
-                
-                // Get matching warehouse IDs for this branch
-                const { data: matchedWarehouses } = await supabase
-                    .from('warehouses')
-                    .select('id')
-                    .ilike('name', `%${userBranch}%`);
-                
-                if (matchedWarehouses && matchedWarehouses.length > 0) {
-                    const matchedWhIds = matchedWarehouses.map(w => w.id);
-                    if (selectedWarehouses.length > 0) {
-                        const scopedWhIds = selectedWarehouses.filter(id => matchedWhIds.includes(id));
-                        query = scopedWhIds.length > 0
-                            ? query.in('warehouse_id', scopedWhIds)
-                            : query.eq('warehouse_id', EMPTY_WAREHOUSE_ID);
-                    } else {
-                        query = query.in('warehouse_id', matchedWhIds);
-                    }
-                } else {
-                    // Fallback to strict match if ilike fails or no results
-                    query = query.eq('warehouse_id', EMPTY_WAREHOUSE_ID); // No results
-                }
-            }
+            query = applyWarehouseFiltersToQuery(query);
 
             const from = (currentPage - 1) * pageSize;
             const to = from + pageSize - 1;
@@ -512,7 +544,7 @@ const Cylinders = () => {
 
             if (error && error.code !== '42P01') throw error;
             setCylinders(data || []);
-            setTotalRecords(count || 0);
+            setTotalRecords(count ?? data?.length ?? 0);
             setSelectedIds([]); // Clear selection on refresh
         } catch (error) {
             console.error('Error fetching cylinders:', error);
@@ -635,7 +667,7 @@ const Cylinders = () => {
                 'Loại quai': 'Có quai',
                 'Phân loại (BV/TM)': 'BV',
                 'Khối lượng tịnh (kg)': '8',
-                'Kho quản lý': uniqueWarehouses[0]?.name || 'Kho tổng',
+                'Kho quản lý': managedWarehouses[0]?.name || warehousesList[0]?.name || 'Kho tổng',
                 'Trạng thái': 'sẵn sàng',
                 'Hạn kiểm định': '2026-12-31',
                 'Khách hàng': 'Phòng khám đa khoa VH',
@@ -668,10 +700,10 @@ const Cylinders = () => {
 
                 setIsLoading(true);
 
-                // Fetch all warehouses to map names to IDs
+                // Fetch all warehouses to map names for Kho Quản Lý
                 const { data: warehouses } = await supabase.from('warehouses').select('id, name');
                 const warehouseMap = (warehouses || []).reduce((acc, w) => {
-                    acc[w.name.toLowerCase()] = w.id;
+                    if (w?.name) acc[w.name.toLowerCase()] = w.name;
                     return acc;
                 }, {});
 
@@ -785,7 +817,12 @@ const Cylinders = () => {
         return '—';
     };
 
-    const filteredCylinders = cylinders;
+    const filteredCylinders = useMemo(() => {
+        if (!activeManagingWarehouseRecords.length) return cylinders;
+        return cylinders.filter((cylinder) =>
+            cylinderMatchesManagingWarehouseFilter(cylinder, activeManagingWarehouseRecords),
+        );
+    }, [cylinders, activeManagingWarehouseRecords]);
 
     const filteredCylindersCount = totalRecords;
     const readyCount = stats.ready;
@@ -803,6 +840,9 @@ const Cylinders = () => {
         + selectedCustomers.length
         + selectedCategories.length
         + selectedWarehouses.length;
+
+    const getCylinderManagingWarehouseLabel = (cylinder) =>
+        getCylinderManagingWarehouseDisplayName(cylinder, warehousesList);
 
     const statusOptions = CYLINDER_STATUSES.map(item => ({
         id: item.id,
@@ -822,11 +862,19 @@ const Cylinders = () => {
         count: cylinders.filter(c => c.customer_name === item).length
     }));
 
-    const warehouseOptions = uniqueWarehouses.map(item => ({
-        id: item.id,
-        label: item.name,
-        count: cylinders.filter(c => c.warehouse_id === item.id).length
-    }));
+    const warehouseFilterCatalog = (shouldScopeByManagingWarehouse && managedWarehouses.length > 0)
+        ? managedWarehouses
+        : warehousesList;
+
+    const warehouseOptions = warehouseFilterCatalog
+        .filter((item) => String(item?.name || '').trim())
+        .map((item) => ({
+            id: item.id,
+            label: item.name,
+            count: allMetadata.filter((c) =>
+                cylinderMatchesManagingWarehouseFilter(c, [item]),
+            ).length,
+        }));
 
     const categoryOptions = CATEGORY_OPTIONS.map(item => ({
         id: item.id,
@@ -1038,7 +1086,7 @@ const Cylinders = () => {
     const cylinderKanbanColumns = useMemo(() => {
         if (kanbanGroupBy === 'status') {
             const byStatus = new Map();
-            cylinders.forEach((c) => {
+            filteredCylinders.forEach((c) => {
                 const sid = c.status || '__unknown__';
                 if (!byStatus.has(sid)) byStatus.set(sid, []);
                 byStatus.get(sid).push(c);
@@ -1064,7 +1112,7 @@ const Cylinders = () => {
         }
 
         const byLabel = new Map();
-        cylinders.forEach((c) => {
+        filteredCylinders.forEach((c) => {
             const label = getLocationDisplay(c);
             if (!byLabel.has(label)) byLabel.set(label, []);
             byLabel.get(label).push(c);
@@ -1079,14 +1127,14 @@ const Cylinders = () => {
             })
             .map(([label, items]) => ({ id: label, label, items, groupBy: 'location' }));
         return cols;
-    }, [cylinders, supplierIdToName, kanbanGroupBy]);
+    }, [filteredCylinders, supplierIdToName, kanbanGroupBy]);
 
     const renderCylinderBoardFilters = () => (
         <>
-            <div className="relative">
+            <div className="relative" data-cylinder-filter-root>
                 <button
                     type="button"
-                    onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
+                    onClick={(event) => toggleFilterDropdown('status', event)}
                     className={clsx(
                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
                         getFilterButtonClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)
@@ -1103,6 +1151,8 @@ const Cylinders = () => {
                 </button>
                 {activeDropdown === 'status' && (
                     <FilterDropdown
+                        usePortal
+                        anchorRef={filterAnchorRef}
                         options={statusOptions}
                         selected={selectedStatuses}
                         setSelected={setSelectedStatuses}
@@ -1112,10 +1162,10 @@ const Cylinders = () => {
                 )}
             </div>
 
-            <div className="relative">
+            <div className="relative" data-cylinder-filter-root>
                 <button
                     type="button"
-                    onClick={() => setActiveDropdown(activeDropdown === 'volume' ? null : 'volume')}
+                    onClick={(event) => toggleFilterDropdown('volume', event)}
                     className={clsx(
                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
                         getFilterButtonClass('volume', activeDropdown === 'volume' || selectedVolumes.length > 0)
@@ -1132,6 +1182,8 @@ const Cylinders = () => {
                 </button>
                 {activeDropdown === 'volume' && (
                     <FilterDropdown
+                        usePortal
+                        anchorRef={filterAnchorRef}
                         options={volumeOptions}
                         selected={selectedVolumes}
                         setSelected={setSelectedVolumes}
@@ -1141,10 +1193,10 @@ const Cylinders = () => {
                 )}
             </div>
 
-            <div className="relative">
+            <div className="relative" data-cylinder-filter-root>
                 <button
                     type="button"
-                    onClick={() => setActiveDropdown(activeDropdown === 'customers' ? null : 'customers')}
+                    onClick={(event) => toggleFilterDropdown('customers', event)}
                     className={clsx(
                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
                         getFilterButtonClass('customers', activeDropdown === 'customers' || selectedCustomers.length > 0)
@@ -1161,6 +1213,8 @@ const Cylinders = () => {
                 </button>
                 {activeDropdown === 'customers' && (
                     <FilterDropdown
+                        usePortal
+                        anchorRef={filterAnchorRef}
                         options={customerOptions}
                         selected={selectedCustomers}
                         setSelected={setSelectedCustomers}
@@ -1170,17 +1224,17 @@ const Cylinders = () => {
                 )}
             </div>
 
-            <div className="relative">
+            <div className="relative" data-cylinder-filter-root>
                 <button
                     type="button"
-                    onClick={() => setActiveDropdown(activeDropdown === 'warehouses' ? null : 'warehouses')}
+                    onClick={(event) => toggleFilterDropdown('warehouses', event)}
                     className={clsx(
                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
                         getFilterButtonClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)
                     )}
                 >
                     <Warehouse size={14} className={getFilterIconClass('warehouses', activeDropdown === 'warehouses' || selectedWarehouses.length > 0)} />
-                    Kho
+                    Kho Quản Lý
                     {selectedWarehouses.length > 0 && (
                         <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('warehouses'))}>
                             {selectedWarehouses.length}
@@ -1190,6 +1244,8 @@ const Cylinders = () => {
                 </button>
                 {activeDropdown === 'warehouses' && (
                     <FilterDropdown
+                        usePortal
+                        anchorRef={filterAnchorRef}
                         options={warehouseOptions}
                         selected={selectedWarehouses}
                         setSelected={setSelectedWarehouses}
@@ -1199,10 +1255,10 @@ const Cylinders = () => {
                 )}
             </div>
 
-            <div className="relative">
+            <div className="relative" data-cylinder-filter-root>
                 <button
                     type="button"
-                    onClick={() => setActiveDropdown(activeDropdown === 'categories' ? null : 'categories')}
+                    onClick={(event) => toggleFilterDropdown('categories', event)}
                     className={clsx(
                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
                         getFilterButtonClass('categories', activeDropdown === 'categories' || selectedCategories.length > 0)
@@ -1219,6 +1275,8 @@ const Cylinders = () => {
                 </button>
                 {activeDropdown === 'categories' && (
                     <FilterDropdown
+                        usePortal
+                        anchorRef={filterAnchorRef}
                         options={categoryOptions}
                         selected={selectedCategories}
                         setSelected={setSelectedCategories}
@@ -1402,7 +1460,7 @@ const Cylinders = () => {
                                                     <div className="min-w-0 flex-1">
                                                         <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Kho quản lý</p>
                                                         <p className="text-[12px] text-foreground font-bold truncate">
-                                                            {cylinder.warehouses?.name || '—'}
+                                                            {getCylinderManagingWarehouseLabel(cylinder)}
                                                         </p>
                                                     </div>
                                                 </div>
@@ -1437,7 +1495,7 @@ const Cylinders = () => {
                                     <div className="flex items-center justify-between pt-2 border-t border-border/70">
                                         <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                                             <Warehouse size={12} />
-                                            <span>{cylinder.warehouses?.name || '—'}</span>
+                                            <span>{getCylinderManagingWarehouseLabel(cylinder)}</span>
                                         </div>
                                         <div className="flex items-center gap-3">
                                             <button onClick={() => handleViewWarehouse(cylinder)} className="px-2 py-1 text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg text-[10px] font-bold">Xem kho</button>
@@ -1567,7 +1625,7 @@ const Cylinders = () => {
                             </div>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-2" ref={dropdownRef}>
+                        <div className="flex flex-wrap items-center gap-2">
                             {renderCylinderBoardFilters()}
                         </div>
                     </div>
@@ -1651,7 +1709,7 @@ const Cylinders = () => {
                                             if (col.key === 'warehouse') {
                                                 return (
                                                     <td key={col.key} className="px-4 py-4 text-sm text-muted-foreground font-bold">
-                                                        {cylinder.warehouses?.name || '—'}
+                                                        {getCylinderManagingWarehouseLabel(cylinder)}
                                                     </td>
                                                 );
                                             }
@@ -1816,7 +1874,7 @@ const Cylinders = () => {
                         </select>
                     </div>
 
-                    <div className="hidden md:flex flex-col p-4 border-b border-border gap-3 shrink-0" ref={dropdownRef}>
+                    <div className="hidden md:flex flex-col p-4 border-b border-border gap-3 shrink-0">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                             <div className="flex flex-wrap items-center gap-3 flex-1 min-w-0">
                                 <button
@@ -1884,7 +1942,7 @@ const Cylinders = () => {
                                 <div className="w-10 h-10 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
                                 <p className="text-[13px] font-medium text-muted-foreground">Đang tải bình…</p>
                             </div>
-                        ) : cylinders.length === 0 ? (
+                        ) : filteredCylinders.length === 0 ? (
                             <div className="flex flex-col items-center justify-center py-16 text-center px-6 text-muted-foreground">
                                 <ActivitySquare size={48} className="opacity-35 mb-3" />
                                 <p className="text-[14px] font-bold">Không có bình trên trang này</p>
@@ -1938,8 +1996,8 @@ const Cylinders = () => {
                                                                 Vị trí: {getLocationDisplay(cylinder)}
                                                             </p>
                                                         ) : (
-                                                            <p className="text-[11px] font-semibold text-foreground truncate" title={cylinder.warehouses?.name || ''}>
-                                                                Kho: {cylinder.warehouses?.name || '—'}
+                                                            <p className="text-[11px] font-semibold text-foreground truncate" title={getCylinderManagingWarehouseLabel(cylinder)}>
+                                                                Kho Quản Lý: {getCylinderManagingWarehouseLabel(cylinder)}
                                                             </p>
                                                         )}
                                                         <div className="flex items-center justify-end gap-1 pt-1 border-t border-border/50">
@@ -2071,7 +2129,7 @@ const Cylinders = () => {
                             </button>
                         </div>
 
-                        <div className="hidden md:block p-4 border-b border-border" ref={dropdownRef}>
+                        <div className="hidden md:block p-4 border-b border-border">
                             <div className="flex flex-wrap items-center gap-2">
                                 <button
                                     type="button"
@@ -2268,7 +2326,7 @@ const Cylinders = () => {
                         },
                         {
                             id: 'warehouses',
-                            label: 'Kho',
+                            label: 'Kho Quản Lý',
                             icon: <Warehouse size={16} className="text-indigo-600" />,
                             options: warehouseOptions,
                             selectedValues: pendingWarehouses,

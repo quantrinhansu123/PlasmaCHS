@@ -16,12 +16,16 @@ import {
   Settings,
   LogOut,
   ChevronDown,
+  Warehouse,
 } from 'lucide-react';
 import { useLocation, Link, useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 
 import { sidebarMenu, extraMenuItems } from '../../constants/sidebarMenu';
 import { actionModuleGroups } from '../../constants/actionModuleData';
+import usePermissions from '../../hooks/usePermissions';
+import { isThuKhoRole, isWarehouseRole } from '../../utils/accessControl';
+import { canViewAllWarehouses, filterWarehousesForCurrentUser } from '../../utils/orderWarehouseScope';
 
 import { supabase } from '../../supabase/config';
 
@@ -39,12 +43,49 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
 
   const location = useLocation();
   const navigate = useNavigate();
+  const { role, user, department, loading: permissionsLoading } = usePermissions();
+  const [managedWarehouseNames, setManagedWarehouseNames] = useState([]);
 
   const username = localStorage.getItem('user_name') || sessionStorage.getItem('user_name') || "Nhân viên";
   const userRole = localStorage.getItem('user_role') || sessionStorage.getItem('user_role') || "Chưa xác định";
   const userAvatar = localStorage.getItem('user_avatar') || sessionStorage.getItem('user_avatar') || null;
   const displayName = username.split(' ').map(n => n.charAt(0)).join('+');
   const defaultAvatar = `https://ui-avatars.com/api/?name=${displayName}&background=random&color=random`;
+  const managedWarehouseLabel = managedWarehouseNames.join(', ');
+  const showManagedWarehouse = Boolean(managedWarehouseLabel)
+    && !canViewAllWarehouses(role)
+    && (isThuKhoRole(role) || isWarehouseRole(role));
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadManagedWarehouses = async () => {
+      if (permissionsLoading) return;
+
+      if (!role || canViewAllWarehouses(role) || (!isThuKhoRole(role) && !isWarehouseRole(role))) {
+        if (!cancelled) setManagedWarehouseNames([]);
+        return;
+      }
+
+      const { data } = await supabase
+        .from('warehouses')
+        .select('id, name, code, branch_office, manager_name')
+        .order('name');
+
+      if (cancelled) return;
+
+      const scoped = filterWarehousesForCurrentUser(data || [], { role, user, department });
+      setManagedWarehouseNames(
+        scoped.map((warehouse) => String(warehouse?.name || '').trim()).filter(Boolean),
+      );
+    };
+
+    loadManagedWarehouses();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [role, user, department, permissionsLoading]);
 
   // Real-time Fetching Notifications
   const fetchNotifications = async () => {
@@ -501,22 +542,41 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
               </div>
               <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-card shadow-sm shadow-emerald-500/50" />
             </div>
-            <div className="hidden sm:flex flex-col">
-              <div className="flex items-center gap-1">
-                <span className="text-[13px] font-bold leading-tight text-foreground group-hover:text-primary transition-colors">
+            <div className="hidden sm:flex flex-col min-w-0 max-w-[160px]">
+              <div className="flex items-center gap-1 min-w-0">
+                <span className="text-[13px] font-bold leading-tight text-foreground group-hover:text-primary transition-colors truncate">
                   {username}
                 </span>
                 <ChevronDown
                   size={12}
-                  className={clsx('text-muted-foreground transition-transform duration-200', showUserDropdown && 'rotate-180')}
+                  className={clsx('text-muted-foreground transition-transform duration-200 shrink-0', showUserDropdown && 'rotate-180')}
                 />
               </div>
-              <span className="text-[10px] text-muted-foreground leading-tight font-medium">{userRole}</span>
+              <span className="text-[10px] text-muted-foreground leading-tight font-medium truncate">{userRole}</span>
+              {showManagedWarehouse && (
+                <span
+                  className="text-[10px] text-primary font-semibold leading-tight truncate flex items-center gap-1"
+                  title={`Kho quản lý: ${managedWarehouseLabel}`}
+                >
+                  <Warehouse size={10} className="shrink-0" />
+                  {managedWarehouseLabel}
+                </span>
+              )}
             </div>
           </div>
 
           {showUserDropdown && (
             <div className="absolute right-0 mt-3 w-56 bg-white rounded-xl shadow-2xl border border-border overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-right">
+              <div className="px-3 py-2.5 border-b border-border/50 bg-muted/20">
+                <p className="text-[13px] font-bold text-foreground truncate">{username}</p>
+                <p className="text-[11px] text-muted-foreground">{userRole}</p>
+                {showManagedWarehouse && (
+                  <p className="text-[11px] text-primary font-semibold mt-1 flex items-center gap-1.5">
+                    <Warehouse size={12} className="shrink-0" />
+                    <span className="truncate" title={managedWarehouseLabel}>Kho: {managedWarehouseLabel}</span>
+                  </p>
+                )}
+              </div>
               <div className="p-1.5 space-y-0.5">
                 <button
                   onClick={() => {

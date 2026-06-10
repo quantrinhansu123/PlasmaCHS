@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useLayoutEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Search } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -9,7 +10,32 @@ const FilterDropdown = ({
   filterSearch,
   setFilterSearch,
   singleSelect = false,
+  anchorRef = null,
+  usePortal = false,
 }) => {
+  const [portalStyle, setPortalStyle] = useState({ top: 0, left: 0, width: 256 });
+
+  useLayoutEffect(() => {
+    if (!usePortal || !anchorRef?.current) return;
+
+    const updatePosition = () => {
+      const rect = anchorRef.current.getBoundingClientRect();
+      setPortalStyle({
+        top: rect.bottom + 8,
+        left: rect.left,
+        width: Math.max(rect.width, 256),
+      });
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [usePortal, anchorRef, options.length]);
+
   const normalizeText = (text) => {
     if (!text) return '';
     return text
@@ -24,7 +50,7 @@ const FilterDropdown = ({
     const label = opt.label || '';
     const normalizedLabel = normalizeText(label);
     const normalizedSearch = normalizeText(search);
-    return label.toLowerCase().includes(search.toLowerCase()) || 
+    return label.toLowerCase().includes(search.toLowerCase()) ||
            normalizedLabel.includes(normalizedSearch);
   });
 
@@ -48,8 +74,21 @@ const FilterDropdown = ({
     }
   };
 
-  return (
-    <div className="absolute top-full left-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-border z-[99999] overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top">
+  const dropdownContent = (
+    <div
+      data-cylinder-filter-root
+      className={clsx(
+        'w-64 bg-white rounded-2xl shadow-xl border border-border z-[100010] overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top',
+        !usePortal && 'absolute top-full left-0 mt-2',
+      )}
+      style={usePortal ? {
+        position: 'fixed',
+        top: portalStyle.top,
+        left: portalStyle.left,
+        width: portalStyle.width,
+      } : undefined}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
       <div className="p-3 border-b border-border">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/50" size={14} />
@@ -78,6 +117,7 @@ const FilterDropdown = ({
             </label>
             {selected.length > 0 && (
               <button
+                type="button"
                 onClick={() => setSelected([])}
                 className="text-[12px] font-bold text-primary hover:text-primary/80 transition-colors"
               >
@@ -97,10 +137,10 @@ const FilterDropdown = ({
             >
               <div className="flex items-center gap-3">
                 <input
-                  type={singleSelect ? "radio" : "checkbox"}
+                  type={singleSelect ? 'radio' : 'checkbox'}
                   className={clsx(
-                    "border-border text-primary focus:ring-primary/20 w-4 h-4",
-                    singleSelect ? "rounded-full" : "rounded"
+                    'border-border text-primary focus:ring-primary/20 w-4 h-4',
+                    singleSelect ? 'rounded-full' : 'rounded',
                   )}
                   checked={selected.includes(opt.id)}
                   onChange={() => toggleOption(opt.id)}
@@ -118,6 +158,12 @@ const FilterDropdown = ({
       </div>
     </div>
   );
+
+  if (usePortal && typeof document !== 'undefined') {
+    return createPortal(dropdownContent, document.body);
+  }
+
+  return dropdownContent;
 };
 
 export default FilterDropdown;

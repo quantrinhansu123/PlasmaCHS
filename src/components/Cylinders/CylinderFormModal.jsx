@@ -1,5 +1,5 @@
 import { Activity, ActivitySquare, Building2, Calendar, Camera, Gauge, Hash, Save, Scale, ScanLine, Settings2, Tag, User, Warehouse, Wind, Wrench, X } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import {
@@ -10,8 +10,11 @@ import {
     VALVE_TYPES
 } from '../../constants/machineConstants';
 import { toast } from 'react-toastify';
+import usePermissions from '../../hooks/usePermissions';
+import { filterWarehousesForCurrentUser } from '../../utils/orderWarehouseScope';
 import { supabase } from '../../supabase/config';
 import BarcodeScanner from '../Common/BarcodeScanner';
+import { SearchableSelect } from '../ui/SearchableSelect';
 
 const findMatchingId = (list, value, defaultValue) => {
     if (!value) return defaultValue;
@@ -23,6 +26,7 @@ const findMatchingId = (list, value, defaultValue) => {
 };
 
 export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
+    const { role, user, department } = usePermissions();
     const isEdit = !!cylinder;
     const [isLoading, setIsLoading] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
@@ -51,6 +55,35 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
     const [warehousesList, setWarehousesList] = useState([]);
     const [suppliersList, setSuppliersList] = useState([]);
     const [suppliersLoading, setSuppliersLoading] = useState(false);
+    const initializedCylinderIdRef = useRef(null);
+
+    const resolveWarehouseSelectValue = useCallback((storedValue, warehouses = []) => {
+        const stored = String(storedValue || '').trim();
+        if (!stored) return '';
+        const matched = (warehouses || []).find(
+            (w) => String(w.id) === stored
+                || String(w.name || '').trim().toLowerCase() === stored.toLowerCase(),
+        );
+        if (matched?.id) return String(matched.id);
+        if (/^[0-9a-f-]{36}$/i.test(stored)) return stored;
+        return '';
+    }, []);
+
+    const warehouseSelectOptions = useMemo(() => {
+        const options = warehousesList.map((w) => ({
+            value: String(w.id),
+            label: w.name,
+        }));
+        const current = String(formData.warehouse_id || '').trim();
+        if (current && !options.some((opt) => opt.value === current)) {
+            const legacy = warehousesList.find((w) => String(w.id) === current);
+            options.unshift({
+                value: current,
+                label: legacy?.name || current,
+            });
+        }
+        return options;
+    }, [warehousesList, formData.warehouse_id]);
 
     useEffect(() => {
         const fetchCustomers = async () => {
@@ -71,17 +104,14 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             try {
                 const { data, error } = await supabase
                     .from('warehouses')
-                    .select('id, name')
-                    .eq('status', 'Đang hoạt động')
+                    .select('id, name, code, branch_office, manager_name')
                     .order('name');
                 if (!error && data) {
-                    setWarehousesList(data);
-                    // Default to first warehouse if not editing
-                    if (!isEdit && data.length > 0) {
-                        setFormData(prev => (!prev.warehouse_id && prev.status !== 'đã trả ncc')
-                            ? { ...prev, warehouse_id: data[0].id }
-                            : prev);
-                    }
+                    const rows = (data || []).filter((w) => String(w?.name || '').trim());
+                    setWarehousesList(rows);
+                } else if (error) {
+                    console.error('Error fetching warehouses:', error);
+                    toast.error('Không tải được danh sách kho.');
                 }
             } catch (err) {
                 console.error('Error fetching warehouses:', err);
@@ -114,30 +144,50 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
         fetchCustomers();
         fetchWarehouses();
         fetchSuppliers();
-    }, [isEdit]);
+    }, [isEdit, role, user, department]);
 
     useEffect(() => {
-        if (isEdit) {
-            const [, cDept] = cylinder.customer_name?.split(' / ') || ['', ''];
+        if (isEdit || warehousesList.length === 0) return;
+        const effectiveRole = role || localStorage.getItem('user_role') || sessionStorage.getItem('user_role');
+        const managed = filterWarehousesForCurrentUser(warehousesList, {
+            role: effectiveRole,
+            user,
+            department,
+        });
+        const defaultWarehouseId = managed[0]?.id ? String(managed[0].id) : '';
+        if (!defaultWarehouseId) return;
+        setFormData((prev) => (!prev.warehouse_id && prev.status !== 'đã trả ncc')
+            ? { ...prev, warehouse_id: defaultWarehouseId }
+            : prev);
+    }, [isEdit, warehousesList, role, user, department]);
 
-            setFormData({
-                serial_number: cylinder.serial_number || '',
-                status: findMatchingId(CYLINDER_STATUSES, cylinder.status, 'sẵn sàng'),
-                net_weight: cylinder.net_weight || '',
-                category: ['BV', 'TM'].includes(cylinder.category?.toUpperCase()) ? cylinder.category.toUpperCase() : 'BV',
-                volume: findMatchingId(CYLINDER_VOLUMES, cylinder.volume, 'bình 4L/ CGA870'),
-                gas_type: findMatchingId(GAS_TYPES, cylinder.gas_type, 'AirMAC'),
-                valve_type: findMatchingId(VALVE_TYPES, cylinder.valve_type, 'Van Messer/Phi 6/ CB Trắng'),
-                handle_type: findMatchingId(HANDLE_TYPES, cylinder.handle_type, 'Có quai'),
-                customer_id: cylinder.customer_id || '',
-                department: cDept || '',
-                warehouse_id: cylinder.warehouse_id || '',
-                supplier_id: cylinder.supplier_id || '',
-                cylinder_code: cylinder.cylinder_code || '',
-                expiry_date: cylinder.expiry_date || ''
-            });
+    useEffect(() => {
+        if (!isEdit || !cylinder?.id) {
+            initializedCylinderIdRef.current = null;
+            return;
         }
-    }, [cylinder, isEdit]);
+        if (initializedCylinderIdRef.current === cylinder.id) return;
+
+        initializedCylinderIdRef.current = cylinder.id;
+        const [, cDept] = cylinder.customer_name?.split(' / ') || ['', ''];
+
+        setFormData({
+            serial_number: cylinder.serial_number || '',
+            status: findMatchingId(CYLINDER_STATUSES, cylinder.status, 'sẵn sàng'),
+            net_weight: cylinder.net_weight || '',
+            category: ['BV', 'TM'].includes(cylinder.category?.toUpperCase()) ? cylinder.category.toUpperCase() : 'BV',
+            volume: findMatchingId(CYLINDER_VOLUMES, cylinder.volume, 'bình 4L/ CGA870'),
+            gas_type: findMatchingId(GAS_TYPES, cylinder.gas_type, 'AirMAC'),
+            valve_type: findMatchingId(VALVE_TYPES, cylinder.valve_type, 'Van Messer/Phi 6/ CB Trắng'),
+            handle_type: findMatchingId(HANDLE_TYPES, cylinder.handle_type, 'Có quai'),
+            customer_id: cylinder.customer_id || '',
+            department: cDept || '',
+            warehouse_id: resolveWarehouseSelectValue(cylinder.warehouse_id, warehousesList),
+            supplier_id: cylinder.supplier_id || '',
+            cylinder_code: cylinder.cylinder_code || '',
+            expiry_date: cylinder.expiry_date || ''
+        });
+    }, [cylinder, isEdit, resolveWarehouseSelectValue, warehousesList]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -456,19 +506,16 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                                     <Warehouse className="w-4 h-4 text-primary/60" />
                                     Kho quản lý {formData.status !== 'đã trả ncc' && <span className="text-red-500">*</span>}
                                 </label>
-                                <select
-                                    name="warehouse_id"
+                                <SearchableSelect
+                                    options={warehouseSelectOptions}
                                     value={formData.warehouse_id || ''}
-                                    onChange={handleChange}
+                                    onValueChange={(value) => setFormData((prev) => ({ ...prev, warehouse_id: value }))}
+                                    placeholder="-- Chọn kho --"
+                                    searchPlaceholder="Tìm kho..."
+                                    emptyMessage={warehousesList.length === 0 ? 'Đang tải hoặc chưa có kho.' : 'Không tìm thấy kho.'}
                                     disabled={formData.status === 'đã trả ncc'}
-                                    className={clsx(
-                                        'w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-[14px] font-bold text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white transition-all shadow-sm',
-                                        formData.status === 'đã trả ncc' && 'opacity-60 cursor-not-allowed text-slate-500'
-                                    )}
-                                >
-                                    <option value="">-- Chọn kho --</option>
-                                    {warehousesList.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                                </select>
+                                    className="h-11 rounded-xl text-[14px] font-bold"
+                                />
                             </div>
 
                             <div className="space-y-1.5">
@@ -631,7 +678,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             {/* Panel */}
             <div
                 className={clsx(
-                    "relative bg-slate-50 shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col h-full border-l border-slate-200 animate-in slide-in-from-right duration-500",
+                    "relative bg-slate-50 shadow-2xl w-full max-w-4xl flex flex-col h-full min-h-0 border-l border-slate-200 animate-in slide-in-from-right duration-500",
                     isClosing && "animate-out slide-out-to-right duration-300"
                 )}
                 onClick={(e) => e.stopPropagation()}

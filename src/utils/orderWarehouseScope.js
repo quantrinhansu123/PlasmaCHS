@@ -5,6 +5,7 @@ import {
     isWarehouseRole as isWarehouseRoleHelper,
     normalizeRole,
 } from './accessControl';
+import { buildWarehouseModalAliases, storedValueMatchesWarehouse } from './transferWarehouseMatch';
 
 const normalizeText = (value) =>
     String(value || '')
@@ -107,21 +108,367 @@ const warehouseManagedByUser = (warehouse, managerCandidates = []) => {
 const compactLoginKey = (value) =>
     normalizeText(value).replace(/[^a-z0-9]/g, '');
 
-/** Khớp mã kho với nick đăng nhập (vd. OCCP1 ↔ OCP1). */
+/** Chuẩn hóa biến thể nick/mã OCP (OCCP1, OCP1, ocp-1…). */
+const normalizeOcpWarehouseKey = (value) =>
+    compactLoginKey(value).replace(/^occ+(?=p)/, 'oc');
+
+/** Khớp mã/tên kho với nick đăng nhập (vd. NVK-OCP1 ↔ OCP1, OCCP1 ↔ OCP1). */
 const warehouseMatchesLoginIdentity = (warehouse, loginCandidates = []) => {
-    const codeKey = compactLoginKey(warehouse?.code);
-    if (!codeKey || !loginCandidates.length) return false;
+    const warehouseKeys = [warehouse?.code, warehouse?.name]
+        .map((value) => normalizeOcpWarehouseKey(value))
+        .filter(Boolean);
+    if (!warehouseKeys.length || !loginCandidates.length) return false;
 
     return loginCandidates.some((candidate) => {
-        const loginKey = compactLoginKey(candidate);
+        const loginKey = normalizeOcpWarehouseKey(candidate);
         if (!loginKey) return false;
-        if (loginKey === codeKey) return true;
-        if (loginKey.replace(/o+/g, 'o') === codeKey.replace(/o+/g, 'o')) return true;
-        if (loginKey.length >= 3 && codeKey.includes(loginKey)) return true;
-        if (codeKey.length >= 3 && loginKey.includes(codeKey)) return true;
-        return false;
+        return warehouseKeys.some((warehouseKey) => {
+            if (loginKey === warehouseKey) return true;
+            if (loginKey.length >= 3 && warehouseKey.includes(loginKey)) return true;
+            if (warehouseKey.length >= 3 && loginKey.includes(warehouseKey)) return true;
+            return false;
+        });
     });
 };
+
+/** Các giá trị có thể lưu ở machines.warehouse / cylinders.warehouse_id. */
+export function getWarehouseStorageFilterKeys(warehouse) {
+    if (!warehouse) return [];
+    const raw = [
+        warehouse.id,
+        warehouse.code,
+        warehouse.name,
+        warehouse.branch_office,
+    ].map((v) => String(v || '').trim()).filter(Boolean);
+    return [...new Set([
+        ...raw,
+        ...raw.flatMap((key) => getWarehouseKeyVariants(key)),
+    ])];
+}
+
+/** Mọi khóa dùng lọc DB: UUID, mã, tên, alias vùng (OCP1, HN…). */
+export function getFullWarehouseFilterKeys(warehouse) {
+    if (!warehouse) return [];
+    return [...new Set([
+        ...getWarehouseStorageFilterKeys(warehouse),
+        ...buildWarehouseModalAliases(warehouse),
+    ])].filter(Boolean);
+}
+
+export function buildScopedWarehouseFilterKeys(warehouses = []) {
+    return [...new Set((warehouses || []).flatMap(getFullWarehouseFilterKeys))];
+}
+
+/** Chỉ tên kho — khớp cột Kho Quản Lý trên /binh (NVK). */
+export function getManagingWarehouseNameKey(warehouse) {
+    return String(warehouse?.name || '').trim();
+}
+
+export function buildManagingWarehouseNameKeys(warehouses = []) {
+    return [...new Set(
+        (warehouses || []).map(getManagingWarehouseNameKey).filter(Boolean),
+    )];
+}
+
+export function rowMatchesManagingWarehouseName(storedValue, warehouse) {
+    const stored = String(storedValue || '').trim();
+    const name = getManagingWarehouseNameKey(warehouse);
+    if (!stored || !name) return false;
+    return stored.toLowerCase() === name.toLowerCase();
+}
+
+/** Dropdown chọn kho → danh sách tên kho để lọc warehouse_id. */
+export function resolveManagingWarehouseNamesFromSelection(selectedIds = [], warehouses = []) {
+    const names = new Set();
+    (selectedIds || []).forEach((sel) => {
+        const selStr = String(sel || '').trim();
+        if (!selStr) return;
+        const wh = (warehouses || []).find(
+            (w) =>
+                String(w.id) === selStr
+                || String(w.code || '').trim() === selStr
+                || String(w.name || '').trim() === selStr,
+        );
+        const name = getManagingWarehouseNameKey(wh);
+        if (name) names.add(name);
+    });
+    return [...names];
+}
+
+/** Khóa lọc theo tên/mã kho (Kho phụ trách KH lưu «OCP1», không phải UUID). */
+export function getWarehouseNameFilterKeys(warehouse) {
+    if (!warehouse) return [];
+    const keys = new Set();
+    [warehouse?.code, warehouse?.name, warehouse?.branch_office].forEach((value) => {
+        const raw = String(value || '').trim();
+        if (raw) keys.add(raw);
+    });
+    buildWarehouseModalAliases(warehouse).forEach((alias) => {
+        const raw = String(alias || '').trim();
+        if (raw) keys.add(raw);
+    });
+    return [...keys];
+}
+
+export function buildCylinderWarehouseNameScopeKeys(warehouses = []) {
+    const keys = new Set();
+    (warehouses || []).forEach((warehouse) => {
+        getWarehouseNameFilterKeys(warehouse).forEach((key) => keys.add(key));
+    });
+    return [...keys];
+}
+
+/** Khớp giá trị cột kho (tên/mã) — không so UUID id. Dùng cho customers.warehouse_id (Kho phụ trách). */
+export function rowMatchesWarehouseNameStorage(storedValue, warehouse, warehouseList = []) {
+    const stored = String(storedValue || '').trim();
+    if (!stored || !warehouse) return false;
+
+    const storedLower = stored.toLowerCase();
+    if (getWarehouseNameFilterKeys(warehouse).some(
+        (key) => String(key).trim().toLowerCase() === storedLower,
+    )) {
+        return true;
+    }
+
+    return (
+        storedValueMatchesWarehouse(stored, warehouse.code, warehouseList)
+        || storedValueMatchesWarehouse(stored, warehouse.name, warehouseList)
+    );
+}
+
+/** Khóa lọc cylinders.warehouse_id — UUID kho (cột DB là uuid). */
+export function getCylinderWarehouseFilterKeys(warehouse) {
+    if (!warehouse) return [];
+    const id = String(warehouse?.id || '').trim();
+    return id ? [id] : [];
+}
+
+export function rowMatchesCylinderWarehouseStorage(storedValue, warehouse) {
+    const stored = String(storedValue || '').trim();
+    if (!stored || !warehouse) return false;
+    const id = String(warehouse?.id || '').trim();
+    const name = String(warehouse?.name || '').trim();
+    if (id && stored === id) return true;
+    if (name && stored.toLowerCase() === name.toLowerCase()) return true;
+    return false;
+}
+
+/** Khớp bình với danh sách kho đã chọn (UUID; hỗ trợ dữ liệu cũ lưu tên). */
+export function cylinderMatchesManagingWarehouseFilter(cylinder, targetWarehouses = []) {
+    if (!targetWarehouses?.length) return true;
+    const stored = String(cylinder?.warehouse_id ?? '').trim();
+    if (!stored) return false;
+    return targetWarehouses.some((wh) => rowMatchesCylinderWarehouseStorage(stored, wh));
+}
+
+/** @deprecated dùng cylinderMatchesManagingWarehouseFilter */
+export function cylinderMatchesManagingWarehouseNames(cylinder, targetNames = [], warehouses = []) {
+    if (!targetNames?.length) return true;
+    const records = (warehouses || []).filter((wh) =>
+        targetNames.some((name) => String(wh?.name || '').trim().toLowerCase() === String(name || '').trim().toLowerCase()),
+    );
+    if (!records.length) {
+        return cylinderMatchesManagingWarehouseFilter(
+            cylinder,
+            targetNames.map((name) => ({ id: '', name })),
+        );
+    }
+    return cylinderMatchesManagingWarehouseFilter(cylinder, records);
+}
+
+/** Hiển thị Kho Quản Lý từ UUID (hoặc tên legacy). */
+export function getCylinderManagingWarehouseDisplayName(cylinder, warehouses = []) {
+    if (cylinder?.warehouses?.name) return cylinder.warehouses.name;
+    const stored = String(cylinder?.warehouse_id ?? '').trim();
+    if (!stored) return '—';
+    const matched = (warehouses || []).find((wh) => rowMatchesCylinderWarehouseStorage(stored, wh));
+    return matched?.name || '—';
+}
+
+/** Khóa lọc cylinders.warehouse_id — giữ nguyên hoa/thường, tránh chỉ còn biến thể lowercase. */
+export function buildCylinderWarehouseScopeKeys(warehouses = []) {
+    return [...new Set((warehouses || []).flatMap(getCylinderWarehouseFilterKeys))];
+}
+
+/** Dropdown chọn kho trên /binh → UUID để lọc warehouse_id. */
+export function expandCylinderWarehouseSelectionKeys(selectedIds = [], warehouses = []) {
+    if (!selectedIds?.length) return [];
+    const keys = new Set();
+    (selectedIds || []).forEach((sel) => {
+        const selStr = String(sel || '').trim();
+        if (!selStr) return;
+        const wh = (warehouses || []).find(
+            (w) =>
+                String(w.id) === selStr
+                || String(w.code || '').trim() === selStr
+                || String(w.name || '').trim() === selStr,
+        );
+        if (wh?.id) {
+            keys.add(String(wh.id).trim());
+        } else if (/^[0-9a-f-]{36}$/i.test(selStr)) {
+            keys.add(selStr);
+        }
+    });
+    return [...keys].filter(Boolean);
+}
+
+/** Kiểm tra giá trị cột kho trên bản ghi có thuộc một kho trong danh mục. */
+export function rowMatchesWarehouseStorage(storedValue, warehouse, warehouseList = []) {
+    const stored = String(storedValue || '').trim();
+    if (!stored || !warehouse) return false;
+
+    const storedLower = stored.toLowerCase();
+    if (getFullWarehouseFilterKeys(warehouse).some(
+        (key) => String(key).trim().toLowerCase() === storedLower,
+    )) {
+        return true;
+    }
+
+    return (
+        storedValueMatchesWarehouse(stored, warehouse.id, warehouseList)
+        || storedValueMatchesWarehouse(stored, warehouse.code, warehouseList)
+        || storedValueMatchesWarehouse(stored, warehouse.name, warehouseList)
+    );
+}
+
+/** Khách hàng có Kho phụ trách khớp tên/mã kho (customers.warehouse_id thường là «OCP1», không phải UUID). */
+export function getCustomerIdsForManagingWarehouses(customers = [], targetWarehouses = [], warehouseList = []) {
+    const ids = new Set();
+    (customers || []).forEach((customer) => {
+        if (!customer?.id) return;
+        const matches = (targetWarehouses || []).some((warehouse) =>
+            rowMatchesWarehouseNameStorage(customer.warehouse_id, warehouse, warehouseList),
+        );
+        if (matches) ids.add(String(customer.id));
+    });
+    return [...ids];
+}
+
+/** Nhãn customer_name trên bình — KH có Kho phụ trách khớp tên kho. */
+export function getCustomerMatchLabelsForManagingWarehouses(customers = [], targetWarehouses = [], warehouseList = []) {
+    const labels = new Set();
+    (customers || []).forEach((customer) => {
+        const matches = (targetWarehouses || []).some((warehouse) =>
+            rowMatchesWarehouseNameStorage(customer.warehouse_id, warehouse, warehouseList),
+        );
+        if (!matches) return;
+        [customer.name, customer.legal_rep, customer.invoice_company_name].forEach((field) => {
+            const label = String(field || '').trim();
+            if (label) labels.add(label);
+        });
+    });
+    return [...labels];
+}
+
+export function resolveWarehouseRecordsFromSelection(selectedIds = [], warehouses = []) {
+    return (selectedIds || [])
+        .map((selected) => {
+            const selStr = String(selected || '').trim();
+            if (!selStr) return null;
+            return (warehouses || []).find(
+                (warehouse) =>
+                    String(warehouse.id) === selStr
+                    || String(warehouse.code || '').trim() === selStr
+                    || String(warehouse.name || '').trim() === selStr,
+            ) || null;
+        })
+        .filter(Boolean);
+}
+
+const quotePostgrestFilterValue = (value) => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    if (/[,()"\\\s]/.test(raw)) {
+        return `"${raw.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+    }
+    return raw;
+};
+
+const buildPostgrestInClause = (values = []) => {
+    const quoted = (values || []).map(quotePostgrestFilterValue).filter(Boolean);
+    if (!quoted.length) return '';
+    return `(${quoted.join(',')})`;
+};
+
+/**
+ * Lọc theo kho quản lý trực tiếp HOẶC kho phụ trách (customer_id / customer_name).
+ * Bình/máy đang ở khách vẫn hiện nếu KH thuộc kho phụ trách của Thủ kho.
+ */
+export function applyManagingWarehouseOrFilter(
+    query,
+    {
+        warehouseColumn,
+        warehouseKeys = [],
+        secondaryColumn,
+        secondaryValues = [],
+        tertiaryColumn,
+        tertiaryValues = [],
+        noAccessValue,
+    } = {},
+) {
+    const keys = [...new Set((warehouseKeys || []).map((value) => String(value).trim()).filter(Boolean))];
+    const secondary = [...new Set((secondaryValues || []).map((value) => String(value).trim()).filter(Boolean))];
+    const tertiary = [...new Set((tertiaryValues || []).map((value) => String(value).trim()).filter(Boolean))];
+
+    if (!keys.length && !secondary.length && !tertiary.length) {
+        return query.eq(warehouseColumn, noAccessValue);
+    }
+
+    if (keys.length && !secondary.length && !tertiary.length) {
+        return query.in(warehouseColumn, keys);
+    }
+    if (!keys.length && secondary.length && !tertiary.length) {
+        return query.in(secondaryColumn, secondary);
+    }
+    if (!keys.length && !secondary.length && tertiary.length) {
+        return query.in(tertiaryColumn, tertiary);
+    }
+
+    const parts = [];
+    if (keys.length) parts.push(`${warehouseColumn}.in.${buildPostgrestInClause(keys)}`);
+    if (secondary.length) parts.push(`${secondaryColumn}.in.${buildPostgrestInClause(secondary)}`);
+    if (tertiary.length) parts.push(`${tertiaryColumn}.in.${buildPostgrestInClause(tertiary)}`);
+
+    return query.or(parts.join(','));
+}
+
+/** Khớp kho quản lý: cột kho trên bản ghi hoặc kho phụ trách KH. */
+export function rowMatchesManagingWarehouseRecord(record, warehouse, warehouseList, options = {}) {
+    const warehouseValue = options.warehouseValue ?? record?.warehouse_id ?? record?.warehouse;
+    if (rowMatchesWarehouseStorage(warehouseValue, warehouse, warehouseList)) {
+        return true;
+    }
+    const customerWarehouseValue = options.customerWarehouseValue;
+    if (customerWarehouseValue !== undefined && customerWarehouseValue !== null && customerWarehouseValue !== '') {
+        if (options.matchCustomerWarehouseByName) {
+            return rowMatchesWarehouseNameStorage(customerWarehouseValue, warehouse, warehouseList);
+        }
+        return rowMatchesWarehouseStorage(customerWarehouseValue, warehouse, warehouseList);
+    }
+    return false;
+}
+
+/** Mở rộng lựa chọn dropdown (id kho) → mọi biến thể lưu DB (UUID, OCP1, tên…). */
+export function expandWarehouseSelectionKeys(selectedIds = [], warehouses = []) {
+    if (!selectedIds?.length) return [];
+    const keys = new Set();
+    selectedIds.forEach((sel) => {
+        const selStr = String(sel || '').trim();
+        if (!selStr) return;
+        const wh = (warehouses || []).find(
+            (w) =>
+                String(w.id) === selStr
+                || String(w.code || '').trim() === selStr
+                || String(w.name || '').trim() === selStr,
+        );
+        if (wh) {
+            getFullWarehouseFilterKeys(wh).forEach((k) => keys.add(String(k).trim()));
+        } else {
+            keys.add(selStr);
+        }
+    });
+    return [...keys].filter(Boolean);
+}
 
 const buildAllowedWarehouseKeys = (warehouses = []) => {
     const allowedWarehouseValues = new Set(warehouses.flatMap((warehouse) => getWarehouseAliases(warehouse)));
@@ -158,7 +505,16 @@ export function filterWarehousesForCurrentUser(warehouses = [], { role, user, de
 
     const storageUserName =
         localStorage.getItem('user_name') || sessionStorage.getItem('user_name') || '';
-    const managerCandidates = getManagerCandidateKeys(user?.name, user?.username, storageUserName);
+    const storageLogin =
+        localStorage.getItem('user_login')
+        || sessionStorage.getItem('user_login')
+        || storageUserName;
+    const managerCandidates = getManagerCandidateKeys(
+        user?.name,
+        user?.username,
+        storageUserName,
+        storageLogin,
+    );
 
     let scoped = (warehouses || []).filter((warehouse) =>
         warehouseManagedByUser(warehouse, managerCandidates)
@@ -169,12 +525,27 @@ export function filterWarehousesForCurrentUser(warehouses = [], { role, user, de
             user?.username,
             user?.name,
             storageUserName,
-            typeof localStorage !== 'undefined' ? localStorage.getItem('user_login') : '',
-            typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('user_login') : '',
+            storageLogin,
         );
         scoped = (warehouses || []).filter((warehouse) =>
             warehouseMatchesLoginIdentity(warehouse, loginCandidates),
         );
+    }
+
+    if (isThuKhoRole && scoped.length === 0 && department) {
+        const deptTokens = getManagerCandidateKeys(department, user?.chi_nhanh);
+        if (deptTokens.length > 0) {
+            scoped = (warehouses || []).filter((warehouse) => {
+                const keys = getWarehouseAliases(warehouse);
+                return deptTokens.some((token) =>
+                    keys.some((key) => key === token || (token.length >= 3 && key.includes(token))),
+                );
+            });
+            const exactCode = scoped.filter((warehouse) =>
+                deptTokens.some((token) => normalizeOcpWarehouseKey(warehouse?.code) === normalizeOcpWarehouseKey(token)),
+            );
+            if (exactCode.length > 0) scoped = exactCode;
+        }
     }
 
     if (!isThuKhoRole && scoped.length === 0 && department) {

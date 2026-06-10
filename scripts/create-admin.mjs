@@ -89,7 +89,7 @@ async function main() {
     console.log(`  Password : ${ADMIN_CONFIG.password}   ← (đây là mật khẩu gốc, lưu lại!)`);
     console.log(`  Role     : ${inserted.role}`);
     console.log('────────────────────────────────────────\n');
-    console.log('🌐 Đăng nhập tại: http://localhost:6060');
+    console.log('🌐 Đăng nhập tại: http://localhost:5173');
 }
 
 main();
