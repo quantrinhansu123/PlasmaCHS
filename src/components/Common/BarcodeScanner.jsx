@@ -1,7 +1,7 @@
-import React, { useEffect, useId, useMemo } from 'react';
+import React, { useEffect, useId, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import useBarcodeScanner from '../../hooks/useBarcodeScanner';
-import { CameraOff, ScanLine } from 'lucide-react';
+import { Camera, CameraOff, ImagePlus, ScanLine } from 'lucide-react';
 
 const BarcodeScanner = ({
     onScanSuccess,
@@ -17,17 +17,23 @@ const BarcodeScanner = ({
     const [pendingScan, setPendingScan] = React.useState(null);
     const [scanTime, setScanTime] = React.useState(null);
     const [manualInput, setManualInput] = React.useState('');
+    const [fileScanError, setFileScanError] = React.useState('');
+    const [isFileScanning, setIsFileScanning] = React.useState(false);
+    const fileInputRef = useRef(null);
+    const pauseRef = useRef(() => {});
     const reactId = useId();
     const scannerElementId = useMemo(
         () => `${elementId}-${reactId.replace(/:/g, '')}`,
         [elementId, reactId]
     );
 
-    const { isScanning, scanError, hasPermission, start, stop, pause, resume, resetLastScanned } = useBarcodeScanner({
+    const { isScanning, scanError, hasPermission, start, stop, pause, resume, scanFromFile, resetLastScanned } = useBarcodeScanner({
         elementId: scannerElementId,
         debounceMs,
         allowDuplicateScans
     });
+
+    pauseRef.current = pause;
 
     const getCurrentTimeVN = () => {
         return new Date().toLocaleTimeString('vi-VN', { 
@@ -49,10 +55,31 @@ const BarcodeScanner = ({
         }
     };
 
+    const handlePhotoPick = async (event) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file) return;
+
+        setFileScanError('');
+        setIsFileScanning(true);
+        try {
+            const decodedText = await scanFromFile(file);
+            if (decodedText) {
+                pauseRef.current(true);
+                setPendingScan(decodedText);
+                setScanTime(getCurrentTimeVN());
+            }
+        } catch (error) {
+            setFileScanError(error.message || 'Không đọc được mã từ ảnh.');
+        } finally {
+            setIsFileScanning(false);
+        }
+    };
+
     const handleManualSubmit = (e) => {
         e.preventDefault();
         if (manualInput.trim()) {
-            pause(true);
+            pauseRef.current(true);
             setPendingScan(manualInput.trim());
             setScanTime(getCurrentTimeVN());
             setManualInput('');
@@ -74,7 +101,7 @@ const BarcodeScanner = ({
         }
 
         const wrapScanSuccess = (decodedText) => {
-            pause(true);
+            pauseRef.current(true);
             setPendingScan(decodedText);
             setScanTime(getCurrentTimeVN());
         };
@@ -94,7 +121,7 @@ const BarcodeScanner = ({
             cancelAnimationFrame(rafId);
             stop();
         };
-    }, [isOpen, start, stop, pause]);
+    }, [isOpen, start, stop]);
 
     if (!isOpen) return null;
 
@@ -139,19 +166,6 @@ const BarcodeScanner = ({
                             className="barcode-scanner-container w-full h-full min-h-[240px]"
                         />
                         
-                        {/* Lightweight scan frame overlay (no huge box-shadow) */}
-                        <div className="absolute inset-0 pointer-events-none z-30">
-                            <div className="absolute top-0 left-0 right-0 h-[32%] bg-black/70" />
-                            <div className="absolute bottom-0 left-0 right-0 h-[32%] bg-black/70" />
-                            <div className="absolute top-[32%] bottom-[32%] left-0 w-[6%] bg-black/70" />
-                            <div className="absolute top-[32%] bottom-[32%] right-0 w-[6%] bg-black/70" />
-                            <div className="absolute top-[32%] bottom-[32%] left-[6%] right-[6%] border-2 border-blue-500 rounded-xl">
-                                <div className="absolute -top-0.5 -left-0.5 w-8 h-8 border-t-[3px] border-l-[3px] border-blue-400 rounded-tl-lg" />
-                                <div className="absolute -top-0.5 -right-0.5 w-8 h-8 border-t-[3px] border-r-[3px] border-blue-400 rounded-tr-lg" />
-                                <div className="absolute -bottom-0.5 -left-0.5 w-8 h-8 border-b-[3px] border-l-[3px] border-blue-400 rounded-bl-lg" />
-                                <div className="absolute -bottom-0.5 -right-0.5 w-8 h-8 border-b-[3px] border-r-[3px] border-blue-400 rounded-br-lg" />
-                            </div>
-                        </div>
                     </div>
                 )}
             </div>
@@ -193,6 +207,32 @@ const BarcodeScanner = ({
 
             {/* Manual Input Form */}
             <div className="flex-none bg-black/95 p-4 border-t border-white/10 z-[100] shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
+                <div className="flex items-center justify-center gap-2 mb-3">
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={handlePhotoPick}
+                    />
+                    <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isFileScanning}
+                        className="flex items-center gap-2 px-4 py-2.5 bg-white/10 border border-white/20 rounded-xl text-white text-xs font-bold hover:bg-white/15 disabled:opacity-50"
+                    >
+                        {isFileScanning ? (
+                            <Camera className="w-4 h-4 animate-pulse" />
+                        ) : (
+                            <ImagePlus className="w-4 h-4" />
+                        )}
+                        Chụp / chọn ảnh mã
+                    </button>
+                </div>
+                {fileScanError && (
+                    <p className="text-center text-rose-300 text-xs mb-2">{fileScanError}</p>
+                )}
                 <form onSubmit={handleManualSubmit} className="flex items-center gap-2 w-full max-w-sm mx-auto">
                     <input
                         type="text"
@@ -244,11 +284,7 @@ const BarcodeScanner = ({
 
                 /* Hide any default elements injected by html5-qrcode */
                 #${scannerElementId} select,
-                #${scannerElementId} button,
                 #${scannerElementId} a {
-                    display: none !important;
-                }
-                #qr-canvas-visible {
                     display: none !important;
                 }
             `}</style>

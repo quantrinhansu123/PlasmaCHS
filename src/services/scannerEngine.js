@@ -1,4 +1,4 @@
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+import { Html5Qrcode } from 'html5-qrcode';
 
 export const isIOS = () => {
     return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
@@ -16,50 +16,52 @@ export const shouldUseNativeBarcodeDetector = () => {
     return isAndroid() && hasNativeBarcodeDetector();
 };
 
-/** Fewer formats = faster decode (cylinder labels use Code 128 / Code 39). */
-const SCAN_FORMATS = [
-    Html5QrcodeSupportedFormats.CODE_128,
-    Html5QrcodeSupportedFormats.CODE_39,
-    Html5QrcodeSupportedFormats.QR_CODE,
-];
-
-/** Compact ROI — wide but shallow for 1D barcodes, fewer pixels to process. */
-const buildQrBox = (viewfinderWidth, viewfinderHeight) => {
-    const width = Math.floor(Math.min(viewfinderWidth * 0.88, 420));
-    const height = Math.floor(Math.min(viewfinderHeight * 0.28, 120));
-    return {
-        width: Math.max(width, 220),
-        height: Math.max(height, 64),
-    };
-};
-
-const getCameraConfig = () => {
-    if (isIOS()) {
-        return {
-            facingMode: 'environment',
-            width: { ideal: 960, max: 1280 },
-            height: { ideal: 540, max: 720 },
-        };
-    }
-
-    if (isAndroid()) {
-        return {
-            facingMode: 'environment',
-            width: { ideal: 1280, max: 1280 },
-            height: { ideal: 720, max: 720 },
-        };
-    }
-
-    return {
-        width: { ideal: 1280, max: 1280 },
-        height: { ideal: 720, max: 720 },
-    };
-};
-
 /**
- * Scanner engine backed by html5-qrcode.
- * Tuned for smooth preview + fast Code 128 reads on mobile/desktop.
+ * html5-qrcode cameraIdOrConfig must be a deviceId string OR an object with
+ * exactly one key (facingMode | deviceId). Resolution goes in videoConstraints.
  */
+const resolveCameraSelection = async () => {
+    if (isMobile()) {
+        return { facingMode: 'environment' };
+    }
+
+    try {
+        const cameras = await Html5Qrcode.getCameras();
+        if (cameras.length > 0) {
+            return cameras[cameras.length - 1].id;
+        }
+    } catch (error) {
+        console.warn('Could not list cameras:', error);
+    }
+
+    return { facingMode: 'user' };
+};
+
+const getVideoConstraints = () => {
+    const resolution = isIOS()
+        ? { width: { ideal: 1280 }, height: { ideal: 720 } }
+        : { width: { ideal: 1280 }, height: { ideal: 720 } };
+
+    if (isMobile()) {
+        return {
+            facingMode: { ideal: 'environment' },
+            ...resolution,
+        };
+    }
+
+    return resolution;
+};
+
+/** Wide scan band for Code 128 labels (TN13469). */
+const buildQrBox = (viewfinderWidth, viewfinderHeight) => {
+    const width = Math.floor(Math.min(viewfinderWidth * 0.92, 560));
+    const height = Math.floor(Math.min(viewfinderHeight * 0.42, 200));
+    return {
+        width: Math.max(width, 260),
+        height: Math.max(height, 100),
+    };
+};
+
 class ScannerEngine {
     constructor(elementId) {
         this.elementId = elementId;
@@ -82,17 +84,19 @@ class ScannerEngine {
         }
 
         this.html5Qrcode = new Html5Qrcode(this.elementId, {
-            formatsToSupport: SCAN_FORMATS,
             useBarCodeDetectorIfSupported: shouldUseNativeBarcodeDetector(),
             verbose: false,
         });
 
+        const cameraSelection = await resolveCameraSelection();
+
         await this.html5Qrcode.start(
-            getCameraConfig(),
+            cameraSelection,
             {
-                fps: shouldUseNativeBarcodeDetector() ? 12 : 8,
+                fps: 10,
                 qrbox: buildQrBox,
-                disableFlip: true,
+                disableFlip: false,
+                videoConstraints: getVideoConstraints(),
             },
             (decodedText, result) => {
                 if (this.isScanning && !this.isPaused) {
@@ -101,6 +105,18 @@ class ScannerEngine {
             },
             () => {}
         );
+    }
+
+    async scanFromFile(file) {
+        if (!this.html5Qrcode) {
+            this.html5Qrcode = new Html5Qrcode(this.elementId, {
+                useBarCodeDetectorIfSupported: shouldUseNativeBarcodeDetector(),
+                verbose: false,
+            });
+        }
+
+        const result = await this.html5Qrcode.scanFileV2(file, false);
+        return result.decodedText;
     }
 
     pause(pauseVideo = true) {
@@ -170,4 +186,11 @@ export const resumeScanner = (scannerInstance) => {
     if (scannerInstance) {
         scannerInstance.resume();
     }
+};
+
+export const scanFileWithEngine = async (scannerInstance, file) => {
+    if (!scannerInstance) {
+        throw new Error('Scanner is not ready');
+    }
+    return scannerInstance.scanFromFile(file);
 };

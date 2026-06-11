@@ -3,6 +3,7 @@ import {
     createScannerEngine,
     pauseScanner,
     resumeScanner,
+    scanFileWithEngine,
     startScanner,
     stopScanner,
 } from '../services/scannerEngine';
@@ -129,6 +130,22 @@ const useBarcodeScanner = ({
         resumeScanner(scannerRef.current);
     }, []);
 
+    const scanFromFile = useCallback(async (file) => {
+        if (!file) return null;
+
+        if (!scannerRef.current) {
+            scannerRef.current = createScannerEngine(elementId);
+        }
+
+        try {
+            const decodedText = await scanFileWithEngine(scannerRef.current, file);
+            return decodedText || null;
+        } catch (error) {
+            console.error('File scan error:', error);
+            throw new Error('Không đọc được mã từ ảnh. Hãy chụp rõ mã vạch Code 128.');
+        }
+    }, [elementId]);
+
     return {
         isScanning,
         scanError,
@@ -137,6 +154,7 @@ const useBarcodeScanner = ({
         stop,
         pause,
         resume,
+        scanFromFile,
         resetLastScanned
     };
 };
