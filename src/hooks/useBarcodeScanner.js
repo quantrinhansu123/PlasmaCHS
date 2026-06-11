@@ -1,18 +1,24 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { createScannerEngine, startScanner, stopScanner } from '../services/scannerEngine';
+import {
+    createScannerEngine,
+    pauseScanner,
+    resumeScanner,
+    startScanner,
+    stopScanner,
+} from '../services/scannerEngine';
 
 /**
  * Custom hook for managing the barcode scanner state and logic.
  * 
  * @param {Object} options Options for the scanner
  * @param {string} options.elementId The ID of the HTML element to render the scanner in
- * @param {number} [options.debounceMs=1500] Minimum time in ms between consecutive successful scans
+ * @param {number} [options.debounceMs=600] Minimum time in ms between consecutive successful scans
  * @param {boolean} [options.allowDuplicateScans=false] Whether to allow scanning the exact same barcode multiple times in a row
  * @returns {Object} Scanner state and control functions
  */
 const useBarcodeScanner = ({ 
     elementId = 'barcode-reader', 
-    debounceMs = 1500,
+    debounceMs = 600,
     allowDuplicateScans = false
 } = {}) => {
     const [isScanning, setIsScanning] = useState(false);
@@ -21,6 +27,7 @@ const useBarcodeScanner = ({
     
     // Refs for mutable state that shouldn't trigger re-renders
     const scannerRef = useRef(null);
+    const isScanningRef = useRef(false);
     const lastScannedTimeRef = useRef(0);
     const lastScannedTextRef = useRef('');
     // Store the callback in a ref to always access the latest version without dependency loops
@@ -41,7 +48,7 @@ const useBarcodeScanner = ({
         onSuccessCallbackRef.current = onSuccess;
         
         // If already scanning, just update the callback and return
-        if (isScanning && scannerRef.current) {
+        if (isScanningRef.current && scannerRef.current) {
             return;
         }
 
@@ -85,11 +92,13 @@ const useBarcodeScanner = ({
 
             await startScanner(scanner, elementId, handleScanSuccess, handleScanFailure);
             
+            isScanningRef.current = true;
             setIsScanning(true);
             setHasPermission(true);
             
         } catch (err) {
             console.error('Hook start error:', err);
+            isScanningRef.current = false;
             setIsScanning(false);
             setHasPermission(false);
             setScanError(err.message || 'Không thể truy cập camera. Vui lòng kiểm tra quyền.');
@@ -102,6 +111,7 @@ const useBarcodeScanner = ({
             await stopScanner(scannerRef.current);
             scannerRef.current = null;
         }
+        isScanningRef.current = false;
         setIsScanning(false);
     }, []);
 
@@ -111,12 +121,22 @@ const useBarcodeScanner = ({
         lastScannedTimeRef.current = 0;
     }, []);
 
+    const pause = useCallback((pauseVideo = true) => {
+        pauseScanner(scannerRef.current, pauseVideo);
+    }, []);
+
+    const resume = useCallback(() => {
+        resumeScanner(scannerRef.current);
+    }, []);
+
     return {
         isScanning,
         scanError,
         hasPermission,
         start,
         stop,
+        pause,
+        resume,
         resetLastScanned
     };
 };

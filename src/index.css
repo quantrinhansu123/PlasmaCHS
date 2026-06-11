@@ -589,9 +589,19 @@ h6:not([class*="text-"]) {
 #barcode-reader video,
 #order-barcode-reader video,
 #recovery-barcode-reader video,
-#modal-barcode-reader video {
+#modal-barcode-reader video,
+.barcode-scanner-container video {
   border: none !important;
   border-radius: 0 !important;
+  object-fit: contain !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.barcode-scanner-container button,
+.barcode-scanner-container img[alt="Info icon"],
+.barcode-scanner-container img[alt="Camera based scan"] {
+  display: none !important;
 }
 
 /* Hide library's placeholder images */

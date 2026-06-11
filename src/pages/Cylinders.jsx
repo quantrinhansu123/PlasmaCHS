@@ -47,7 +47,7 @@ import CylinderQCDialog from '../components/Cylinders/CylinderQCDialog';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
-import { CYLINDER_STATUSES } from '../constants/machineConstants';
+import { CYLINDER_STATUSES, CYLINDER_VOLUMES } from '../constants/machineConstants';
 import usePermissions from '../hooks/usePermissions';
 import { isAdminRole, isThuKhoRole, isWarehouseRole } from '../utils/accessControl';
 import {
@@ -185,6 +185,8 @@ const Cylinders = () => {
     const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
     const [selectedCylinder, setSelectedCylinder] = useState(null);
     const [showMoreActions, setShowMoreActions] = useState(false);
+    const [bulkAssignWarehouseId, setBulkAssignWarehouseId] = useState('');
+    const [bulkAssignVolume, setBulkAssignVolume] = useState('');
 
     const [selectedStatuses, setSelectedStatuses] = useState([]);
     const [selectedVolumes, setSelectedVolumes] = useState([]);
@@ -274,6 +276,24 @@ const Cylinders = () => {
         return filterWarehousesForCurrentUser(warehousesList, { role, user, department });
     }, [warehousesList, role, user, department, shouldScopeByManagingWarehouse]);
 
+    const warehouseAssignOptions = useMemo(() => {
+        const catalog = (shouldScopeByManagingWarehouse && managedWarehouses.length > 0)
+            ? managedWarehouses
+            : warehousesList;
+        return (catalog || [])
+            .filter((warehouse) => String(warehouse?.name || '').trim())
+            .map((warehouse) => ({ id: warehouse.id, name: warehouse.name }));
+    }, [shouldScopeByManagingWarehouse, managedWarehouses, warehousesList]);
+
+    const volumeAssignOptions = useMemo(() => {
+        const fromCatalog = CYLINDER_VOLUMES.map((item) => ({ id: item.id, label: item.label }));
+        const knownIds = new Set(fromCatalog.map((item) => item.id));
+        const extras = (uniqueVolumes || [])
+            .filter((value) => value && !knownIds.has(value))
+            .map((value) => ({ id: value, label: value }));
+        return [...fromCatalog, ...extras];
+    }, [uniqueVolumes]);
+
     const managingWarehouseKeys = useMemo(() => {
         if (!shouldScopeByManagingWarehouse) return [];
         if (!managedWarehouses.length) return [NO_MANAGING_WAREHOUSE_MATCH];
@@ -318,6 +338,25 @@ const Cylinders = () => {
             return query.in('warehouse_id', activeManagingWarehouseIds);
         }
         return query;
+    };
+
+    const applyCylinderListFiltersToQuery = (query) => {
+        if (searchTerm) {
+            query = query.or(`serial_number.ilike.%${searchTerm}%,volume.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%`);
+        }
+        if (selectedStatuses.length > 0) {
+            query = query.in('status', selectedStatuses);
+        }
+        if (selectedVolumes.length > 0) {
+            query = query.in('volume', selectedVolumes);
+        }
+        if (selectedCustomers.length > 0) {
+            query = query.in('customer_name', selectedCustomers);
+        }
+        if (selectedCategories.length > 0) {
+            query = query.in('category', selectedCategories);
+        }
+        return applyWarehouseFiltersToQuery(query);
     };
 
     useEffect(() => {
@@ -517,23 +556,7 @@ const Cylinders = () => {
                 .from('cylinders')
                 .select('*, warehouses(id, name), customers(name), suppliers(id, name)', { count: 'exact' });
 
-            // Apply Filters (Server-side)
-            if (searchTerm) {
-                query = query.or(`serial_number.ilike.%${searchTerm}%,volume.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%`);
-            }
-            if (selectedStatuses.length > 0) {
-                query = query.in('status', selectedStatuses);
-            }
-            if (selectedVolumes.length > 0) {
-                query = query.in('volume', selectedVolumes);
-            }
-            if (selectedCustomers.length > 0) {
-                query = query.in('customer_name', selectedCustomers);
-            }
-            if (selectedCategories.length > 0) {
-                query = query.in('category', selectedCategories);
-            }
-            query = applyWarehouseFiltersToQuery(query);
+            query = applyCylinderListFiltersToQuery(query);
 
             const from = (currentPage - 1) * pageSize;
             const to = from + pageSize - 1;
@@ -585,9 +608,185 @@ const Cylinders = () => {
             alert(`🎉 Đã xóa thành công ${selectedIds.length} bình khí!`);
             setSelectedIds([]);
             fetchCylinders();
+            fetchGlobalStats();
+            fetchMetadataForCharts();
         } catch (error) {
             console.error('Error deleting cylinders:', error);
             alert('❌ Có lỗi xảy ra khi xóa: ' + error.message);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleDeleteAllFilteredCylinders = async () => {
+        if (!canManageCylinders) return;
+        if (totalRecords === 0) {
+            alert('Không có bình nào để xóa.');
+            return;
+        }
+
+        const scopeLabel = hasActiveFilters ? 'theo bộ lọc hiện tại' : 'trong danh sách';
+        if (!window.confirm(
+            `Bạn có chắc muốn XÓA HẾT ${totalRecords} bình ${scopeLabel}?\n\nThao tác này không thể hoàn tác.`,
+        )) {
+            return;
+        }
+        if (!window.confirm('Xác nhận lần cuối: Xóa toàn bộ danh sách bình này?')) {
+            return;
+        }
+
+        try {
+            setIsLoading(true);
+
+            let selectQuery = supabase.from('cylinders').select('id');
+            selectQuery = applyCylinderListFiltersToQuery(selectQuery);
+            const { data: rows, error: fetchError } = await selectQuery;
+            if (fetchError) throw fetchError;
+
+            const ids = (rows || []).map((row) => row.id).filter(Boolean);
+            if (!ids.length) {
+                alert('Không có bình nào để xóa.');
+                return;
+            }
+
+            const BATCH_SIZE = 200;
+            for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+                const batch = ids.slice(i, i + BATCH_SIZE);
+                const { error } = await supabase.from('cylinders').delete().in('id', batch);
+                if (error) throw error;
+            }
+
+            alert(`Đã xóa ${ids.length} bình khí.`);
+            setSelectedIds([]);
+            setCurrentPage(1);
+            fetchCylinders();
+            fetchGlobalStats();
+            fetchMetadataForCharts();
+        } catch (error) {
+            console.error('Error deleting all cylinders:', error);
+            alert('❌ Có lỗi xảy ra khi xóa: ' + error.message);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleBulkAssignWarehouse = async () => {
+        if (!canManageCylinders) return;
+        if (!bulkAssignWarehouseId) {
+            alert('Vui lòng chọn kho trong danh sách.');
+            return;
+        }
+        if (totalRecords === 0) {
+            alert('Không có bình nào để gán kho.');
+            return;
+        }
+
+        const warehouse = warehousesList.find((item) => String(item.id) === String(bulkAssignWarehouseId));
+        const warehouseName = warehouse?.name || 'kho đã chọn';
+        const scopeLabel = hasActiveFilters ? 'theo bộ lọc hiện tại' : 'trong danh sách';
+
+        if (!window.confirm(
+            `Gán kho "${warehouseName}" cho tất cả bình ${scopeLabel}?\n\n(Bỏ qua bình đã trả NCC)`,
+        )) {
+            return;
+        }
+
+        try {
+            setIsLoading(true);
+
+            let selectQuery = supabase
+                .from('cylinders')
+                .select('id')
+                .neq('status', 'đã trả ncc');
+            selectQuery = applyCylinderListFiltersToQuery(selectQuery);
+            const { data: rows, error: fetchError } = await selectQuery;
+            if (fetchError) throw fetchError;
+
+            const ids = (rows || []).map((row) => row.id).filter(Boolean);
+            if (!ids.length) {
+                alert('Không có bình phù hợp để gán kho.');
+                return;
+            }
+
+            const updatedAt = new Date().toISOString();
+            const BATCH_SIZE = 200;
+            for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+                const batch = ids.slice(i, i + BATCH_SIZE);
+                const { error } = await supabase
+                    .from('cylinders')
+                    .update({ warehouse_id: bulkAssignWarehouseId, updated_at: updatedAt })
+                    .in('id', batch);
+                if (error) throw error;
+            }
+
+            alert(`Đã gán kho "${warehouseName}" cho ${ids.length} bình.`);
+            fetchCylinders();
+            fetchGlobalStats();
+            fetchMetadataForCharts();
+        } catch (error) {
+            console.error('Error bulk assigning warehouse:', error);
+            alert('❌ Có lỗi xảy ra khi gán kho: ' + error.message);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleBulkAssignVolume = async () => {
+        if (!canManageCylinders) return;
+        if (!bulkAssignVolume) {
+            alert('Vui lòng chọn loại bình.');
+            return;
+        }
+        if (totalRecords === 0) {
+            alert('Không có bình nào để điền loại bình.');
+            return;
+        }
+
+        const volumeLabel = volumeAssignOptions.find((item) => item.id === bulkAssignVolume)?.label
+            || bulkAssignVolume;
+        const scopeLabel = hasActiveFilters ? 'theo bộ lọc hiện tại' : 'trong danh sách';
+
+        if (!window.confirm(
+            `Điền loại bình "${volumeLabel}" cho tất cả bình ${scopeLabel}?\n\n(Bỏ qua bình đã trả NCC)`,
+        )) {
+            return;
+        }
+
+        try {
+            setIsLoading(true);
+
+            let selectQuery = supabase
+                .from('cylinders')
+                .select('id')
+                .neq('status', 'đã trả ncc');
+            selectQuery = applyCylinderListFiltersToQuery(selectQuery);
+            const { data: rows, error: fetchError } = await selectQuery;
+            if (fetchError) throw fetchError;
+
+            const ids = (rows || []).map((row) => row.id).filter(Boolean);
+            if (!ids.length) {
+                alert('Không có bình phù hợp để điền loại bình.');
+                return;
+            }
+
+            const updatedAt = new Date().toISOString();
+            const BATCH_SIZE = 200;
+            for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+                const batch = ids.slice(i, i + BATCH_SIZE);
+                const { error } = await supabase
+                    .from('cylinders')
+                    .update({ volume: bulkAssignVolume, updated_at: updatedAt })
+                    .in('id', batch);
+                if (error) throw error;
+            }
+
+            alert(`Đã điền loại bình "${volumeLabel}" cho ${ids.length} bình.`);
+            fetchCylinders();
+            fetchGlobalStats();
+            fetchMetadataForCharts();
+        } catch (error) {
+            console.error('Error bulk assigning volume:', error);
+            alert('❌ Có lỗi xảy ra khi điền loại bình: ' + error.message);
         } finally {
             setIsLoading(false);
         }
@@ -1357,6 +1556,70 @@ const Cylinders = () => {
                                                     className="hidden"
                                                 />
                                             </label>
+                                            {canManageCylinders && totalRecords > 0 && warehouseAssignOptions.length > 0 && (
+                                                <div className="px-4 py-3 border-t border-slate-100 space-y-2">
+                                                    <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Gán kho hết</p>
+                                                    <select
+                                                        value={bulkAssignWarehouseId}
+                                                        onChange={(e) => setBulkAssignWarehouseId(e.target.value)}
+                                                        className="w-full h-9 px-3 rounded-lg border border-border bg-white text-[13px] font-semibold text-foreground"
+                                                    >
+                                                        <option value="">-- Chọn kho --</option>
+                                                        {warehouseAssignOptions.map((warehouse) => (
+                                                            <option key={warehouse.id} value={warehouse.id}>
+                                                                {warehouse.name}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { handleBulkAssignWarehouse(); setShowMoreActions(false); }}
+                                                        disabled={!bulkAssignWarehouseId || isLoading}
+                                                        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-teal-50 text-teal-800 text-[13px] font-bold border border-teal-100 disabled:opacity-50"
+                                                    >
+                                                        <Warehouse size={16} />
+                                                        Gán kho ({totalRecords})
+                                                    </button>
+                                                </div>
+                                            )}
+                                            {canManageCylinders && totalRecords > 0 && volumeAssignOptions.length > 0 && (
+                                                <div className="px-4 py-3 border-t border-slate-100 space-y-2">
+                                                    <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Điền loại bình</p>
+                                                    <select
+                                                        value={bulkAssignVolume}
+                                                        onChange={(e) => setBulkAssignVolume(e.target.value)}
+                                                        className="w-full h-9 px-3 rounded-lg border border-border bg-white text-[13px] font-semibold text-foreground"
+                                                    >
+                                                        <option value="">-- Loại bình --</option>
+                                                        {volumeAssignOptions.map((item) => (
+                                                            <option key={item.id} value={item.id}>
+                                                                {item.label}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { handleBulkAssignVolume(); setShowMoreActions(false); }}
+                                                        disabled={!bulkAssignVolume || isLoading}
+                                                        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-violet-50 text-violet-800 text-[13px] font-bold border border-violet-100 disabled:opacity-50"
+                                                    >
+                                                        <ActivitySquare size={16} />
+                                                        Điền loại bình ({totalRecords})
+                                                    </button>
+                                                </div>
+                                            )}
+                                            {canManageCylinders && totalRecords > 0 && (
+                                                <div
+                                                    role="button"
+                                                    onClick={() => { handleDeleteAllFilteredCylinders(); setShowMoreActions(false); }}
+                                                    className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-rose-600 hover:bg-rose-50 transition-colors text-left cursor-pointer border-t border-slate-100 mt-1"
+                                                >
+                                                    <div className="w-5 flex justify-center flex-shrink-0">
+                                                        <Trash2 size={18} />
+                                                    </div>
+                                                    Xóa hết ({totalRecords})
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -1385,7 +1648,7 @@ const Cylinders = () => {
                                             onClick={handleBulkDelete}
                                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-50 text-rose-600 text-[12px] font-bold border border-rose-100"
                                         >
-                                            <Trash2 size={14} /> Xóa tất cả
+                                            <Trash2 size={14} /> Xóa đã chọn
                                         </button>
                                     </div>
                                 </div>
@@ -1622,6 +1885,74 @@ const Cylinders = () => {
                                         Import Excel
                                     </label>
                                 </div>
+
+                                {canManageCylinders && totalRecords > 0 && warehouseAssignOptions.length > 0 && (
+                                    <div className="flex items-center gap-2">
+                                        <select
+                                            value={bulkAssignWarehouseId}
+                                            onChange={(e) => setBulkAssignWarehouseId(e.target.value)}
+                                            className="h-10 min-w-[150px] max-w-[220px] px-3 rounded-lg border border-border bg-white text-[13px] font-bold text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                                            title="Chọn kho quản lý"
+                                        >
+                                            <option value="">-- Chọn kho --</option>
+                                            {warehouseAssignOptions.map((warehouse) => (
+                                                <option key={warehouse.id} value={warehouse.id}>
+                                                    {warehouse.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            type="button"
+                                            onClick={handleBulkAssignWarehouse}
+                                            disabled={!bulkAssignWarehouseId || isLoading}
+                                            className="flex items-center gap-2 px-4 h-10 rounded-lg border border-teal-200 bg-teal-50 text-teal-800 text-[13px] font-bold hover:bg-teal-100 shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            title="Gán kho quản lý cho toàn bộ bình trong danh sách hiện tại"
+                                        >
+                                            <Warehouse size={16} />
+                                            Gán kho hết
+                                        </button>
+                                    </div>
+                                )}
+
+                                {canManageCylinders && totalRecords > 0 && volumeAssignOptions.length > 0 && (
+                                    <div className="flex items-center gap-2">
+                                        <select
+                                            value={bulkAssignVolume}
+                                            onChange={(e) => setBulkAssignVolume(e.target.value)}
+                                            className="h-10 min-w-[150px] max-w-[240px] px-3 rounded-lg border border-border bg-white text-[13px] font-bold text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                                            title="Chọn loại bình / thể tích"
+                                        >
+                                            <option value="">-- Loại bình --</option>
+                                            {volumeAssignOptions.map((item) => (
+                                                <option key={item.id} value={item.id}>
+                                                    {item.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            type="button"
+                                            onClick={handleBulkAssignVolume}
+                                            disabled={!bulkAssignVolume || isLoading}
+                                            className="flex items-center gap-2 px-4 h-10 rounded-lg border border-violet-200 bg-violet-50 text-violet-800 text-[13px] font-bold hover:bg-violet-100 shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            title="Điền loại bình cho toàn bộ bình trong danh sách hiện tại"
+                                        >
+                                            <ActivitySquare size={16} />
+                                            Điền loại bình
+                                        </button>
+                                    </div>
+                                )}
+
+                                {canManageCylinders && totalRecords > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={handleDeleteAllFilteredCylinders}
+                                        className="flex items-center gap-2 px-4 h-10 rounded-lg border border-rose-300 bg-rose-50 text-rose-700 text-[13px] font-bold hover:bg-rose-100 shadow-sm transition-all active:scale-95"
+                                        title="Xóa toàn bộ bình trong danh sách hiện tại"
+                                    >
+                                        <Trash2 size={16} />
+                                        Xóa hết ({totalRecords})
+                                    </button>
+                                )}
                             </div>
                         </div>
 

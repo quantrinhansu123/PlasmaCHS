@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useId, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import useBarcodeScanner from '../../hooks/useBarcodeScanner';
 import { CameraOff, ScanLine } from 'lucide-react';
 
@@ -8,7 +9,7 @@ const BarcodeScanner = ({
     onClose,
     title = 'Quét mã vạch',
     elementId = 'barcode-reader',
-    debounceMs = 1500,
+    debounceMs = 600,
     allowDuplicateScans = false,
     currentCount = 0,
     totalCount = null
@@ -16,9 +17,14 @@ const BarcodeScanner = ({
     const [pendingScan, setPendingScan] = React.useState(null);
     const [scanTime, setScanTime] = React.useState(null);
     const [manualInput, setManualInput] = React.useState('');
+    const reactId = useId();
+    const scannerElementId = useMemo(
+        () => `${elementId}-${reactId.replace(/:/g, '')}`,
+        [elementId, reactId]
+    );
 
-    const { isScanning, scanError, hasPermission, start, stop, resetLastScanned } = useBarcodeScanner({
-        elementId,
+    const { isScanning, scanError, hasPermission, start, stop, pause, resume, resetLastScanned } = useBarcodeScanner({
+        elementId: scannerElementId,
         debounceMs,
         allowDuplicateScans
     });
@@ -38,16 +44,15 @@ const BarcodeScanner = ({
             
             setPendingScan(null);
             setScanTime('');
-            // Resume scanning after a short delay to prevent immediate re-scan
-            setTimeout(() => {
-                resetLastScanned();
-            }, 500);
+            resetLastScanned();
+            resume();
         }
     };
 
     const handleManualSubmit = (e) => {
         e.preventDefault();
         if (manualInput.trim()) {
+            pause(true);
             setPendingScan(manualInput.trim());
             setScanTime(getCurrentTimeVN());
             setManualInput('');
@@ -57,43 +62,53 @@ const BarcodeScanner = ({
     const handleCancel = () => {
         setPendingScan(null);
         setScanTime(null);
-        setTimeout(() => {
-            resetLastScanned();
-        }, 500);
+        resetLastScanned();
+        resume();
     };
 
     useEffect(() => {
+        if (!isOpen) {
+            stop();
+            setPendingScan(null);
+            return undefined;
+        }
+
         const wrapScanSuccess = (decodedText) => {
-            // Pause further scans while confirming
+            pause(true);
             setPendingScan(decodedText);
             setScanTime(getCurrentTimeVN());
         };
 
-        if (isOpen) {
-            start(wrapScanSuccess);
-        } else {
-            stop();
-            setPendingScan(null);
-        }
-        
+        let cancelled = false;
+        let rafId = 0;
+        rafId = requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                if (!cancelled) {
+                    start(wrapScanSuccess);
+                }
+            });
+        });
+
         return () => {
+            cancelled = true;
+            cancelAnimationFrame(rafId);
             stop();
         };
-    }, [isOpen, start, stop]);
+    }, [isOpen, start, stop, pause]);
 
     if (!isOpen) return null;
 
-    return (
+    return createPortal(
         <div className="fixed inset-0 z-[100010] bg-black flex flex-col w-screen h-[100dvh] overflow-hidden">
             {/* Header: Fixed at top using Flex */}
-            <div className="flex-none bg-black/80 backdrop-blur-md p-4 flex items-center justify-between text-white border-b border-white/10 z-50 shadow-md">
+            <div className="flex-none bg-black/90 p-4 flex items-center justify-between text-white border-b border-white/10 z-50">
                 <div className="flex items-center gap-3">
                     <ScanLine className="w-6 h-6 text-blue-400" />
                     <h3 className="text-lg font-medium tracking-wide leading-none">{title}</h3>
                 </div>
                 <button
                     onClick={onClose}
-                    className="p-2.5 bg-white/20 rounded-full hover:bg-red-500/80 hover:text-white transition-colors flex items-center justify-center backdrop-blur-md"
+                    className="p-2.5 bg-white/20 rounded-full hover:bg-red-500/80 hover:text-white transition-colors flex items-center justify-center"
                 >
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
@@ -119,23 +134,22 @@ const BarcodeScanner = ({
                     </div>
                 ) : (
                     <div className="absolute inset-0 w-full h-full">
-                        <div id={elementId} className="w-full h-full [&_video]:object-cover" />
+                        <div
+                            id={scannerElementId}
+                            className="barcode-scanner-container w-full h-full min-h-[240px]"
+                        />
                         
-                        {/* Rectangular Scanner Overlay with Cutout */}
-                        <div className="absolute inset-0 pointer-events-none flex items-center justify-center overflow-hidden z-30">
-                            {/* The clear box in the middle with thick box-shadow to darken surroundings */}
-                            <div 
-                                className="w-[85%] max-w-sm h-[35%] relative" 
-                                style={{ boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.75)' }}
-                            >
-                                {/* Corner borders (Reticle) */}
-                                <div className="absolute -top-1 -left-1 w-10 h-10 border-t-[4px] border-l-[4px] border-blue-500 rounded-tl-xl shadow-blue-500/50"></div>
-                                <div className="absolute -top-1 -right-1 w-10 h-10 border-t-[4px] border-r-[4px] border-blue-500 rounded-tr-xl shadow-blue-500/50"></div>
-                                <div className="absolute -bottom-1 -left-1 w-10 h-10 border-b-[4px] border-l-[4px] border-blue-500 rounded-bl-xl shadow-blue-500/50"></div>
-                                <div className="absolute -bottom-1 -right-1 w-10 h-10 border-b-[4px] border-r-[4px] border-blue-500 rounded-br-xl shadow-blue-500/50"></div>
-                                
-                                {/* Animated Scan Line */}
-                                <div className="absolute top-0 left-0 w-full h-[3px] bg-blue-400 animate-scan-line shadow-[0_0_12px_3px_rgba(59,130,246,0.8)]"></div>
+                        {/* Lightweight scan frame overlay (no huge box-shadow) */}
+                        <div className="absolute inset-0 pointer-events-none z-30">
+                            <div className="absolute top-0 left-0 right-0 h-[32%] bg-black/70" />
+                            <div className="absolute bottom-0 left-0 right-0 h-[32%] bg-black/70" />
+                            <div className="absolute top-[32%] bottom-[32%] left-0 w-[6%] bg-black/70" />
+                            <div className="absolute top-[32%] bottom-[32%] right-0 w-[6%] bg-black/70" />
+                            <div className="absolute top-[32%] bottom-[32%] left-[6%] right-[6%] border-2 border-blue-500 rounded-xl">
+                                <div className="absolute -top-0.5 -left-0.5 w-8 h-8 border-t-[3px] border-l-[3px] border-blue-400 rounded-tl-lg" />
+                                <div className="absolute -top-0.5 -right-0.5 w-8 h-8 border-t-[3px] border-r-[3px] border-blue-400 rounded-tr-lg" />
+                                <div className="absolute -bottom-0.5 -left-0.5 w-8 h-8 border-b-[3px] border-l-[3px] border-blue-400 rounded-bl-lg" />
+                                <div className="absolute -bottom-0.5 -right-0.5 w-8 h-8 border-b-[3px] border-r-[3px] border-blue-400 rounded-br-lg" />
                             </div>
                         </div>
                     </div>
@@ -198,20 +212,15 @@ const BarcodeScanner = ({
             </div>
 
             {/* Footer / Instructions */}
-            <div className="flex-none bg-black/80 backdrop-blur-md p-3 text-center z-50">
+            <div className="flex-none bg-black/90 p-3 text-center z-50">
                 <p className="text-gray-200 text-xs font-medium truncate">
-                    {isScanning 
-                        ? 'Đưa mã vạch vào khung hiển thị' 
+                    {isScanning
+                        ? 'Đưa mã vạch 1D (Code 128) nằm ngang vào khung quét'
                         : 'Không tìm thấy hoặc hỏng Camera'}
                 </p>
                 {/* Visual indicator for scanning status */}
                 <div className="mt-1.5 flex justify-center gap-2 items-center">
-                    <span className="relative flex h-2.5 w-2.5">
-                        {isScanning && (
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                        )}
-                        <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isScanning ? 'bg-green-500' : 'bg-gray-500'}`}></span>
-                    </span>
+                    <span className={`inline-flex rounded-full h-2.5 w-2.5 ${isScanning ? 'bg-green-500' : 'bg-gray-500'}`} />
                     <span className="text-[11px] font-bold text-gray-300">
                         {isScanning ? 'Đang tự động quét' : 'Tạm dừng'}
                     </span>
@@ -219,16 +228,6 @@ const BarcodeScanner = ({
             </div>
             
             <style jsx="true">{`
-                @keyframes scanLine {
-                    0% { top: 0%; opacity: 0; }
-                    10% { opacity: 1; }
-                    90% { opacity: 1; }
-                    100% { top: 100%; opacity: 0; }
-                }
-                .animate-scan-line {
-                    animation: scanLine 2s infinite linear;
-                }
-                
                 /* Force White Text Hack - Very Aggressive */
                 .confirmation-overlay-white-force,
                 .confirmation-overlay-white-force *,
@@ -244,16 +243,17 @@ const BarcodeScanner = ({
                 }
 
                 /* Hide any default elements injected by html5-qrcode */
-                #${elementId} select,
-                #${elementId} button,
-                #${elementId} a {
+                #${scannerElementId} select,
+                #${scannerElementId} button,
+                #${scannerElementId} a {
                     display: none !important;
                 }
                 #qr-canvas-visible {
                     display: none !important;
                 }
             `}</style>
-        </div>
+        </div>,
+        document.body
     );
 };
 
