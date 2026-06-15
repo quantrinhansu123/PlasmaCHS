@@ -528,13 +528,9 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     warehouseId: order?.warehouse,
                 });
 
-                let filtered = (cylinders || []).filter((cylinder) =>
+                const filtered = (cylinders || []).filter((cylinder) =>
                     orderCylinderProductTypes.some((pt) => cylinderVolumeMatchesProduct(cylinder.volume, pt)),
                 );
-
-                if (filtered.length === 0 && cylinders.length > 0) {
-                    filtered = cylinders;
-                }
 
                 setAvailableCylsWH(filtered);
             } catch (err) {
@@ -743,7 +739,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
 
         const { data, error } = await supabase
             .from('cylinders')
-            .select('serial_number, status, warehouse_id')
+            .select('serial_number, status, warehouse_id, volume')
             .eq('warehouse_id', order?.warehouse)
             .in('serial_number', uniqueSerials);
         if (error) return;
@@ -758,6 +754,11 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 invalid.push(`${serial} (Không có trong kho hiện tại)`);
             } else if (!isReadyCylinderStatus(match.status)) {
                 invalid.push(`${serial} (T/thái: ${match.status})`);
+            } else if (
+                orderCylinderProductTypes.length > 0
+                && !orderCylinderProductTypes.some((pt) => cylinderVolumeMatchesProduct(match.volume, pt))
+            ) {
+                invalid.push(`${serial} (Không khớp loại bình đơn: ${match.volume || '—'})`);
             } else {
                 validSerialsList.push(serial);
             }
@@ -857,6 +858,43 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     const serials = scannedSerials.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
                     if (serials.length !== totalCylQty) {
                         throw new Error(`Kho xuất: Bạn cần quét đúng ${totalCylQty} mã bình. Hiện tại đã quét: ${serials.length}`);
+                    }
+
+                    const requiredByType = {};
+                    cylItems.forEach((it) => {
+                        requiredByType[it.product_type] = (requiredByType[it.product_type] || 0) + (it.quantity || 0);
+                    });
+
+                    const { data: scannedCylinders, error: scanCheckErr } = await supabase
+                        .from('cylinders')
+                        .select('serial_number, volume')
+                        .in('serial_number', serials);
+                    if (scanCheckErr) throw scanCheckErr;
+
+                    if (!scannedCylinders || scannedCylinders.length !== serials.length) {
+                        throw new Error('Phát hiện mã bình không tồn tại! Vui lòng kiểm tra lại.');
+                    }
+
+                    const matchedByType = {};
+                    for (const cyl of scannedCylinders) {
+                        const matchedType = Object.keys(requiredByType).find((pt) =>
+                            cylinderVolumeMatchesProduct(cyl.volume, pt),
+                        );
+                        if (!matchedType) {
+                            throw new Error(
+                                `Mã ${cyl.serial_number} không khớp loại bình trong đơn (volume: ${cyl.volume || '—'}).`,
+                            );
+                        }
+                        matchedByType[matchedType] = (matchedByType[matchedType] || 0) + 1;
+                    }
+                    for (const [pt, required] of Object.entries(requiredByType)) {
+                        const got = matchedByType[pt] || 0;
+                        if (got !== required) {
+                            const label = PRODUCT_TYPES.find((p) => p.id === pt)?.label || pt;
+                            throw new Error(
+                                `${label}: cần ${required} mã đúng loại, hiện có ${got} mã khớp.`,
+                            );
+                        }
                     }
 
                     // Cập nhật trạng thái vỏ bình sang đang vận chuyển

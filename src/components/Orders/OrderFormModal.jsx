@@ -760,17 +760,26 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
             const newItems = [...prev.items];
             const updatedItem = { ...newItems[index], [field]: value };
             
-            // Sync RFID list if quantity or type changes for cylinders
-            if (field === 'quantity' || field === 'productType') {
+            // Đổi loại sản phẩm → xóa mã bình cũ (tránh giữ mã sai loại, vd. 8L trên dòng 4L)
+            if (field === 'productType') {
+                const isCyl = updatedItem.productType?.startsWith('BINH');
+                if (isCyl) {
+                    const targetQty = Math.max(1, parseInt(updatedItem.quantity, 10) || 1);
+                    updatedItem.assignedCylinders = Array.from({ length: targetQty }, () => ({
+                        serial: '',
+                        scan_time: null,
+                    }));
+                } else {
+                    updatedItem.assignedCylinders = [];
+                }
+            } else if (field === 'quantity') {
                 const isCyl = updatedItem.productType?.startsWith('BINH');
                 const targetQty = parseInt(updatedItem.quantity, 10);
-                
+
                 if (isCyl) {
                     const currentCyls = [...(updatedItem.assignedCylinders || [])];
-                    
-                    // ON CHANGE: We only allow GROWING the list. 
-                    // This ensures that while a user is typing (and might temporarily have a small or empty number),
-                    // the already filled boxes don't disappear.
+
+                    // ON CHANGE: We only allow GROWING the list.
                     if (!isNaN(targetQty) && targetQty > currentCyls.length) {
                         for (let i = currentCyls.length; i < targetQty; i++) {
                             currentCyls.push({ serial: '', scan_time: null });
@@ -778,7 +787,6 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                         updatedItem.assignedCylinders = currentCyls;
                     }
                 } else {
-                    // Changing to non-cylinder clears instantly
                     updatedItem.assignedCylinders = [];
                 }
             }
@@ -984,6 +992,20 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
             return;
         }
 
+        for (const item of validItems) {
+            if (!item.productType?.startsWith('BINH')) continue;
+            const serials = (item.assignedCylinders || [])
+                .map((c) => (typeof c === 'string' ? c : c?.serial)?.trim().toUpperCase())
+                .filter(Boolean);
+            const label = PRODUCT_TYPES.find((p) => p.id === item.productType)?.label || item.productType;
+            if (serials.length !== item.quantity) {
+                failSubmit(
+                    `${label}: Phải gán đủ ${item.quantity} mã bình RFID đúng loại (hiện tại ${serials.length}).`,
+                );
+                return;
+            }
+        }
+
         // Allow unit price = 0; only block invalid negative values
         const invalidNegativePrice = validItems.filter((it) => Number(it.unitPrice) < 0);
         if (invalidNegativePrice.length > 0) {
@@ -1024,9 +1046,12 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                 const isCyl = item.productType?.startsWith('BINH');
                 const serials = (item.assignedCylinders || []).map(c => (typeof c === 'string' ? c : c?.serial)?.trim().toUpperCase()).filter(Boolean);
 
-                if (isCyl && serials.length > 0) {
+                if (isCyl) {
+                    const label = PRODUCT_TYPES.find((p) => p.id === item.productType)?.label || item.productType;
                     if (serials.length !== item.quantity) {
-                        throw new Error(`Sản phẩm ${item.productType}: Bạn đã quét ${serials.length}/${item.quantity} bình. Vui lòng quét đủ hoặc xóa bớt.`);
+                        throw new Error(
+                            `${label}: Phải gán đủ ${item.quantity} mã bình RFID đúng loại (hiện tại ${serials.length}).`,
+                        );
                     }
 
                     const uniqueSerials = [...new Set(serials)];
