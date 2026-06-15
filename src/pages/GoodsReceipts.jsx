@@ -58,7 +58,11 @@ import { supabase } from '../supabase/config';
 import { notificationService } from '../utils/notificationService';
 import usePermissions from '../hooks/usePermissions';
 import { isAccountantRole, isAdminRole, isWarehouseRole } from '../utils/accessControl';
-import { filterWarehousesForCurrentUser } from '../utils/orderWarehouseScope';
+import {
+    buildScopedWarehouseFilterKeys,
+    expandWarehouseSelectionKeys,
+    filterWarehousesForCurrentUser,
+} from '../utils/orderWarehouseScope';
 
 // Register Chart.js components
 ChartJS.register(
@@ -257,13 +261,14 @@ const GoodsReceipts = () => {
                     user,
                     department,
                 });
-                const allowedCodes = [...new Set((allowedWarehouses || []).map((w) => String(w.code || '').trim()).filter(Boolean))];
-                if (allowedCodes.length === 0) {
+                // warehouse_id có thể là UUID, mã (HN/DN…) hoặc tên kho — khớp mọi biến thể
+                const allowedKeys = buildScopedWarehouseFilterKeys(allowedWarehouses || []);
+                if (allowedKeys.length === 0) {
                     setReceipts([]);
                     setSelectedIds([]);
                     return;
                 }
-                query = query.in('warehouse_id', allowedCodes);
+                query = query.in('warehouse_id', allowedKeys);
             }
 
             const { data, error } = await query.order('created_at', { ascending: false });
@@ -839,8 +844,25 @@ const GoodsReceipts = () => {
         );
     };
 
-    const getWarehouseLabel = (id) => {
-        return warehousesList.find(w => w.id === id)?.name || id;
+    const resolveWarehouseRecord = (warehouseRef) => {
+        const key = String(warehouseRef || '').trim().toLowerCase();
+        if (!key) return null;
+        return (warehousesList || []).find((w) =>
+            [w.id, w.code, w.name].some(
+                (v) => String(v || '').trim().toLowerCase() === key,
+            ),
+        ) || null;
+    };
+
+    const getWarehouseLabel = (id) => resolveWarehouseRecord(id)?.name || id;
+
+    const receiptMatchesWarehouseRef = (receiptWarehouseId, warehouseRef) => {
+        const wh = resolveWarehouseRecord(warehouseRef);
+        if (!wh) return String(receiptWarehouseId || '').trim() === String(warehouseRef || '').trim();
+        const keys = new Set(
+            buildScopedWarehouseFilterKeys([wh]).map((k) => String(k).trim().toLowerCase()),
+        );
+        return keys.has(String(receiptWarehouseId || '').trim().toLowerCase());
     };
 
     const renderCell = (key, receipt) => {
@@ -886,7 +908,12 @@ const GoodsReceipts = () => {
             r.deliverer_name?.toLowerCase().includes(search) ||
             r.deliverer_address?.toLowerCase().includes(search);
         const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(r.status);
-        const matchesWarehouse = selectedWarehouses.length === 0 || selectedWarehouses.includes(r.warehouse_id);
+        const expandedWarehouseFilter = expandWarehouseSelectionKeys(selectedWarehouses, warehousesList);
+        const matchesWarehouse =
+            selectedWarehouses.length === 0
+            || expandedWarehouseFilter.some(
+                (key) => String(key).trim().toLowerCase() === String(r.warehouse_id || '').trim().toLowerCase(),
+            );
 
         const receiptType = r.items?.[0]?.item_type || 'MAY';
         const matchesType = selectedTypes.length === 0 || selectedTypes.includes(receiptType);
@@ -922,7 +949,7 @@ const GoodsReceipts = () => {
     const warehouseOptions = warehousesList.map(w => ({
         id: w.id,
         label: w.name,
-        count: receipts.filter(r => r.warehouse_id === w.id).length
+        count: receipts.filter((r) => receiptMatchesWarehouseRef(r.warehouse_id, w.id)).length,
     }));
 
     const typeOptions = [
