@@ -60,16 +60,18 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
     const resolveWarehouseSelectValue = useCallback((storedValue, warehouses = []) => {
         const stored = String(storedValue || '').trim();
         if (!stored) return '';
-        const matched = (warehouses || []).find(
-            (w) => String(w.id) === stored
-                || String(w.name || '').trim().toLowerCase() === stored.toLowerCase(),
+        const byName = (warehouses || []).find(
+            (w) => String(w.name || '').trim().toLowerCase() === stored.toLowerCase(),
         );
-        return matched?.id ? String(matched.id).trim() : ( /^[0-9a-f-]{36}$/i.test(stored) ? stored : '');
+        if (byName?.name) return String(byName.name).trim();
+        const byId = (warehouses || []).find((w) => String(w.id) === stored);
+        if (byId?.name) return String(byId.name).trim();
+        return stored;
     }, []);
 
     const warehouseSelectOptions = useMemo(() => {
         const options = warehousesList.map((w) => ({
-            value: String(w.id),
+            value: String(w.name || '').trim(),
             label: w.name,
         }));
         const current = String(formData.warehouse_id || '').trim();
@@ -154,10 +156,10 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             user,
             department,
         });
-        const defaultWarehouseId = managed[0]?.id ? String(managed[0].id) : '';
-        if (!defaultWarehouseId) return;
+        const defaultWarehouseName = managed[0]?.name ? String(managed[0].name).trim() : '';
+        if (!defaultWarehouseName) return;
         setFormData((prev) => (!prev.warehouse_id && prev.status !== 'đã trả ncc')
-            ? { ...prev, warehouse_id: defaultWarehouseId }
+            ? { ...prev, warehouse_id: defaultWarehouseName }
             : prev);
     }, [isEdit, warehousesList, role, user, department]);
 
@@ -297,9 +299,15 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                 payload.customer_name = '';
             } else {
                 payload.supplier_id = null;
-                payload.warehouse_id = payload.warehouse_id && String(payload.warehouse_id).trim()
-                    ? String(payload.warehouse_id).trim()
-                    : null;
+                const selectedWarehouse = warehousesList.find(
+                    (w) => String(w.id) === String(payload.warehouse_id)
+                        || String(w.name || '').trim().toLowerCase() === String(payload.warehouse_id || '').trim().toLowerCase(),
+                );
+                payload.warehouse_id = selectedWarehouse?.name
+                    ? String(selectedWarehouse.name).trim()
+                    : (payload.warehouse_id && String(payload.warehouse_id).trim()
+                        ? String(payload.warehouse_id).trim()
+                        : null);
             }
             // Remove local only field
             delete payload.department;

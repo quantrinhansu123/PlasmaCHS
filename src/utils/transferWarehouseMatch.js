@@ -1,4 +1,7 @@
 import { normalizeMachineSerialKey } from './machineCustomerFromOrders';
+import {
+    buildCylinderWarehouseQueryKeys,
+} from './orderWarehouseScope';
 
 /** Biến thể serial máy để .in() khớp DB (phân biệt hoa thường / khoảng trắng). */
 export function machineSerialLookupVariants(raw) {
@@ -122,6 +125,32 @@ export function buildWarehouseMatchKeys(whRow, warehouseRef = '', warehouseList 
     });
 
     return [...keys].filter(Boolean);
+}
+
+/** Tên kho để query cylinders.warehouse_id. */
+function resolveCylinderWarehouseNameKeys(row, matchKeys, warehouseList) {
+    let nameKeys = buildCylinderWarehouseQueryKeys([row]);
+
+    (matchKeys || []).forEach((key) => {
+        const trimmed = String(key || '').trim();
+        if (!trimmed) return;
+        const matched = (warehouseList || []).find(
+            (w) => String(w?.name || '').trim().toLowerCase() === trimmed.toLowerCase()
+                || String(w?.code || '').trim().toLowerCase() === trimmed.toLowerCase(),
+        );
+        if (matched?.name) nameKeys.push(String(matched.name).trim());
+        else nameKeys.push(trimmed);
+    });
+
+    const matchedWarehouses = (warehouseList || []).filter((warehouse) => {
+        const warehouseKeys = warehouseStorageKeys(warehouse);
+        return (matchKeys || []).some((key) =>
+            warehouseKeys.some((wk) => wk.toLowerCase() === String(key || '').trim().toLowerCase()),
+        );
+    });
+    nameKeys = [...new Set([...nameKeys, ...buildCylinderWarehouseQueryKeys(matchedWarehouses)])];
+
+    return nameKeys;
 }
 
 export function storedValueMatchesWarehouse(storedValue, fromWarehouseId, warehouseList = []) {
@@ -314,6 +343,7 @@ export async function fetchReadyCylindersAtWarehouse(
         { code: ref, name: ref, id: ref };
 
     const keys = buildWarehouseMatchKeys(row, ref, warehouseList);
+    const nameKeys = resolveCylinderWarehouseNameKeys(row, keys, warehouseList);
     const collected = new Map();
 
     const absorb = (rows) => {
@@ -336,33 +366,13 @@ export async function fetchReadyCylindersAtWarehouse(
         });
     };
 
-    if (keys.length > 0) {
+    if (nameKeys.length > 0) {
         const { data, error } = await supabaseClient
             .from('cylinders')
             .select(CYLINDER_SELECT)
-            .in('warehouse_id', keys)
+            .in('warehouse_id', nameKeys)
             .limit(5000);
         if (!error) absorb(data);
-    }
-
-    for (const key of keys) {
-        const safeKey = String(key || '').replace(/[%_]/g, '').trim();
-        if (!safeKey) continue;
-
-        const { data: exactReady } = await supabaseClient
-            .from('cylinders')
-            .select(CYLINDER_SELECT)
-            .eq('warehouse_id', safeKey)
-            .eq('status', 'sẵn sàng')
-            .limit(2000);
-        absorb(exactReady);
-
-        const { data: ilikeRows } = await supabaseClient
-            .from('cylinders')
-            .select(CYLINDER_SELECT)
-            .ilike('warehouse_id', `%${safeKey}%`)
-            .limit(2000);
-        absorb(ilikeRows);
     }
 
     if (collected.size === 0) {

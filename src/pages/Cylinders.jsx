@@ -334,14 +334,14 @@ const Cylinders = () => {
     ]);
 
     const applyWarehouseFiltersToQuery = (query) => {
-        const uuidKeys = activeManagingWarehouseIds.filter((id) =>
-            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id || '').trim()),
-        );
-        if (uuidKeys.length > 0) {
-            return query.in('warehouse_id', uuidKeys);
+        const nameKeys = activeManagingWarehouseIds
+            .map((key) => String(key || '').trim())
+            .filter(Boolean);
+        if (nameKeys.length > 0) {
+            return query.in('warehouse_id', nameKeys);
         }
         if (activeManagingWarehouseIds.length > 0) {
-            return query.eq('warehouse_id', '00000000-0000-0000-0000-000000000000');
+            return query.eq('warehouse_id', '__no_warehouse_match__');
         }
         return query;
     };
@@ -688,9 +688,10 @@ const Cylinders = () => {
         }
 
         const warehouse = warehousesList.find(
-            (item) => String(item.id) === String(bulkAssignWarehouseId),
+            (item) => String(item.id) === String(bulkAssignWarehouseId)
+                || String(item.name) === String(bulkAssignWarehouseId),
         );
-        const warehouseName = warehouse?.name || 'kho đã chọn';
+        const warehouseName = warehouse?.name || bulkAssignWarehouseId || 'kho đã chọn';
         const scopeLabel = hasActiveFilters ? 'theo bộ lọc hiện tại' : 'trong danh sách';
 
         if (!window.confirm(
@@ -722,7 +723,7 @@ const Cylinders = () => {
                 const batch = ids.slice(i, i + BATCH_SIZE);
                 const { error } = await supabase
                     .from('cylinders')
-                    .update({ warehouse_id: bulkAssignWarehouseId, updated_at: updatedAt })
+                    .update({ warehouse_id: warehouseName, updated_at: updatedAt })
                     .in('id', batch);
                 if (error) throw error;
             }
@@ -830,12 +831,16 @@ const Cylinders = () => {
     };
 
     const handleViewWarehouse = (cylinder) => {
-        const warehouseId = cylinder?.warehouse_id || cylinder?.warehouses?.id;
-        if (!warehouseId) {
+        const warehouseRef = cylinder?.warehouses?.name || cylinder?.warehouse_id;
+        if (!warehouseRef) {
             alert('Bình này chưa có kho quản lý để xem chi tiết.');
             return;
         }
-        navigate(`/kho/danh-sach?warehouseId=${warehouseId}`);
+        const matched = warehousesList.find(
+            (w) => String(w.name || '').trim() === String(warehouseRef).trim()
+                || String(w.id) === String(warehouseRef).trim(),
+        );
+        navigate(`/kho/danh-sach?warehouseId=${matched?.id || warehouseRef}`);
     };
 
     const handleFormSubmitSuccess = () => {
@@ -1574,7 +1579,7 @@ const Cylinders = () => {
                                                     >
                                                         <option value="">-- Chọn kho --</option>
                                                         {warehouseAssignOptions.map((warehouse) => (
-                                                            <option key={warehouse.id} value={warehouse.id}>
+                                                            <option key={warehouse.id} value={warehouse.name}>
                                                                 {warehouse.name}
                                                             </option>
                                                         ))}
@@ -1904,7 +1909,7 @@ const Cylinders = () => {
                                         >
                                             <option value="">-- Chọn kho --</option>
                                             {warehouseAssignOptions.map((warehouse) => (
-                                                <option key={warehouse.id} value={warehouse.id}>
+                                                <option key={warehouse.id} value={warehouse.name}>
                                                     {warehouse.name}
                                                 </option>
                                             ))}

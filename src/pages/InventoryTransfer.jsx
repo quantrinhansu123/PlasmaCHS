@@ -189,23 +189,34 @@ async function fetchReadyMachinesAtWarehouse(supabaseClient, whRow, warehouseId)
 }
 
 async function fetchReadyCylindersAtWarehouse(supabaseClient, cylinderWhId, whRow) {
-    const { data, error } = await supabaseClient
-        .from('cylinders')
-        .select('id, volume, status, serial_number, warehouse_id')
-        .eq('warehouse_id', cylinderWhId)
-        .limit(5000);
-    if (error) throw error;
+    const warehouseName = String(whRow?.name || '').trim();
+
+    if (warehouseName) {
+        const { data, error } = await supabaseClient
+            .from('cylinders')
+            .select('id, volume, status, serial_number, warehouse_id')
+            .eq('warehouse_id', warehouseName)
+            .limit(5000);
+        if (!error) {
+            const rows = (data || []).filter((c) => isReadyCylinderStatus(c.status));
+            if (rows.length > 0) return rows;
+        }
+    }
+
     const keys = machineWarehouseCandidates(whRow);
-    const rows = (data || []).filter((c) => isReadyCylinderStatus(c.status));
-
-    if (rows.length > 0 || !whRow?.code) return rows;
-
-    const { data: byCode } = await supabaseClient
+    const { data: allReady, error } = await supabaseClient
         .from('cylinders')
         .select('id, volume, status, serial_number, warehouse_id')
-        .ilike('warehouse_id', whRow.code)
-        .limit(500);
-    return (byCode || []).filter((c) => isReadyCylinderStatus(c.status));
+        .eq('status', 'sẵn sàng')
+        .limit(10000);
+    if (error) return [];
+
+    return (allReady || []).filter((c) => {
+        if (!isReadyCylinderStatus(c.status)) return false;
+        const stored = String(c.warehouse_id || '').trim().toLowerCase();
+        if (warehouseName && stored === warehouseName.toLowerCase()) return true;
+        return keys.some((k) => stored === String(k || '').trim().toLowerCase());
+    });
 }
 
 function machineBelongsToWarehouse(storedWarehouse, fromWarehouseId, warehouseList) {

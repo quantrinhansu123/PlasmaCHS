@@ -19,9 +19,8 @@ import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import { supabase } from '../../supabase/config';
 import {
-    buildCylinderWarehouseUuidQueryKeys,
+    buildCylinderWarehouseQueryKeys,
     getWarehouseNameFilterKeys,
-    resolveWarehouseUuidKeysForQuery,
 } from '../../utils/orderWarehouseScope';
 
 export default function WarehouseDetailsModal({ warehouse, onClose }) {
@@ -46,7 +45,7 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
         fetchWarehouseData();
     }, [warehouse?.id, warehouse?.name]);
 
-    const fetchAllCylindersByWarehouse = async (uuidKeys) => {
+    const fetchAllCylindersByWarehouse = async (warehouseKeys) => {
         const pageSize = 1000;
         let allRows = [];
         let from = 0;
@@ -55,7 +54,7 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
             const { data, error } = await supabase
                 .from('cylinders')
                 .select('*')
-                .in('warehouse_id', uuidKeys)
+                .in('warehouse_id', warehouseKeys)
                 .order('serial_number', { ascending: true })
                 .range(from, from + pageSize - 1);
 
@@ -301,18 +300,18 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
     const fetchWarehouseData = async () => {
         setLoading(true);
         try {
-            const cylinderUuidKeys = await resolveWarehouseUuidKeysForQuery(warehouse, supabase);
-            const goodsUuidKeys = cylinderUuidKeys;
+            const cylinderNameKeys = buildCylinderWarehouseQueryKeys(warehouse ? [warehouse] : []);
+            const goodsNameKeys = cylinderNameKeys;
 
             let invData = [];
-            if (cylinderUuidKeys.length > 0) {
-                invData = await fetchAllCylindersByWarehouse(cylinderUuidKeys);
+            if (cylinderNameKeys.length > 0) {
+                invData = await fetchAllCylindersByWarehouse(cylinderNameKeys);
             }
 
             let machinesData = [];
-            if (goodsUuidKeys.length > 0) {
+            if (goodsNameKeys.length > 0) {
                 const nameKeys = getWarehouseNameFilterKeys(warehouse);
-                const machineKeys = [...new Set([...goodsUuidKeys, ...nameKeys])];
+                const machineKeys = [...new Set([...goodsNameKeys, ...nameKeys])];
                 const { data } = await supabase
                     .from('machines')
                     .select('id, serial_number, machine_type, status, warehouse')
@@ -320,7 +319,7 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
                 machinesData = data || [];
             }
 
-            const goodsWhKeys = goodsUuidKeys.length > 0 ? goodsUuidKeys : [];
+            const goodsWhKeys = goodsNameKeys.length > 0 ? goodsNameKeys : [];
 
             const [receiptsRes, issuesRes, inventoryRes] = await Promise.all([
                 goodsWhKeys.length > 0 ? supabase

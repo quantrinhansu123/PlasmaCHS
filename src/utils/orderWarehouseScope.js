@@ -210,41 +210,19 @@ export function getWarehouseNameFilterKeys(warehouse) {
     return [...keys];
 }
 
-/** UUID kho — dùng cho truy vấn DB (cylinders.warehouse_id là cột uuid). */
-export function buildCylinderWarehouseUuidQueryKeys(warehouses = []) {
-    return [...new Set(
-        (warehouses || [])
-            .map((w) => String(w?.id || '').trim())
-            .filter((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)),
-    )];
+/** Tên kho — giá trị lưu và lọc cylinders.warehouse_id. */
+export function buildCylinderWarehouseQueryKeys(warehouses = []) {
+    return buildManagingWarehouseNameKeys(warehouses);
 }
 
-/** Lấy UUID kho để query — fallback theo tên/mã nếu object thiếu id. */
-export async function resolveWarehouseUuidKeysForQuery(warehouse, supabaseClient) {
-    const direct = buildCylinderWarehouseUuidQueryKeys(warehouse ? [warehouse] : []);
-    if (direct.length > 0) return direct;
+/** @deprecated dùng buildCylinderWarehouseQueryKeys */
+export function buildCylinderWarehouseUuidQueryKeys(warehouses = []) {
+    return buildCylinderWarehouseQueryKeys(warehouses);
+}
 
-    const label = String(warehouse?.name || warehouse?.code || '').trim();
-    if (!label || !supabaseClient) return [];
-
-    const { data, error } = await supabaseClient
-        .from('warehouses')
-        .select('id, code, name')
-        .or(`name.eq.${label},code.eq.${label}`)
-        .limit(5);
-
-    if (error) {
-        console.error('resolveWarehouseUuidKeysForQuery:', error);
-        return [];
-    }
-
-    const matched = (data || []).find(
-        (row) =>
-            String(row?.name || '').trim().toLowerCase() === label.toLowerCase()
-            || String(row?.code || '').trim().toLowerCase() === label.toLowerCase(),
-    ) || data?.[0];
-
-    return buildCylinderWarehouseUuidQueryKeys(matched ? [matched] : []);
+/** Lấy tên kho để query DB (đồng bộ, không cần UUID). */
+export function resolveWarehouseUuidKeysForQuery(warehouse, _supabaseClient) {
+    return Promise.resolve(buildCylinderWarehouseQueryKeys(warehouse ? [warehouse] : []));
 }
 
 export function buildCylinderWarehouseNameScopeKeys(warehouses = []) {
@@ -256,11 +234,10 @@ export function buildCylinderWarehouseNameScopeKeys(warehouses = []) {
 }
 
 /**
- * Khóa tra cứu DB cylinders.warehouse_id — chỉ UUID (cột postgres là uuid).
- * Không trộn tên/mã vào .in() — sẽ lỗi «invalid input syntax for type uuid».
+ * Khóa tra cứu DB cylinders.warehouse_id — tên kho.
  */
 export function buildCylinderWarehouseReadKeys(warehouses = []) {
-    return buildCylinderWarehouseUuidQueryKeys(warehouses);
+    return buildCylinderWarehouseQueryKeys(warehouses);
 }
 
 /** Khớp giá trị cột kho (tên/mã) — không so UUID id. Dùng cho customers.warehouse_id (Kho phụ trách). */
@@ -281,9 +258,9 @@ export function rowMatchesWarehouseNameStorage(storedValue, warehouse, warehouse
     );
 }
 
-/** Giá trị lưu cylinders.warehouse_id — UUID FK (hiển thị UI dùng tên kho). */
+/** Giá trị lưu cylinders.warehouse_id — tên kho. */
 export function resolveWarehouseStorageName(warehouse) {
-    return String(warehouse?.id || '').trim();
+    return getManagingWarehouseNameKey(warehouse);
 }
 
 /** Chuẩn hoá giá trị đã lưu (tên hoặc UUID cũ) → tên kho. */
@@ -362,20 +339,15 @@ export function buildCylinderWarehouseScopeKeys(warehouses = []) {
     return buildCylinderWarehouseReadKeys(warehouses);
 }
 
-/** Dropdown chọn kho trên /binh → UUID để lọc cylinders.warehouse_id. */
+/** Dropdown chọn kho trên /binh → tên kho để lọc cylinders.warehouse_id. */
 export function expandCylinderWarehouseSelectionKeys(selectedIds = [], warehouses = []) {
     const records = resolveWarehouseRecordsFromSelection(selectedIds, warehouses);
-    if (records.length) return buildCylinderWarehouseUuidQueryKeys(records);
+    if (records.length) return buildCylinderWarehouseQueryKeys(records);
 
     const names = resolveManagingWarehouseNamesFromSelection(selectedIds, warehouses);
-    if (names.length) {
-        const matched = (warehouses || []).filter((w) =>
-            names.some((n) => rowMatchesManagingWarehouseName(n, w)),
-        );
-        if (matched.length) return buildCylinderWarehouseUuidQueryKeys(matched);
-    }
+    if (names.length) return names;
 
-    return buildCylinderWarehouseUuidQueryKeys(
+    return buildCylinderWarehouseQueryKeys(
         (selectedIds || [])
             .map((sel) => (warehouses || []).find((w) => String(w.id) === String(sel).trim()))
             .filter(Boolean),
