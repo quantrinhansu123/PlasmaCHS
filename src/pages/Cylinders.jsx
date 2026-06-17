@@ -334,8 +334,14 @@ const Cylinders = () => {
     ]);
 
     const applyWarehouseFiltersToQuery = (query) => {
+        const uuidKeys = activeManagingWarehouseIds.filter((id) =>
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id || '').trim()),
+        );
+        if (uuidKeys.length > 0) {
+            return query.in('warehouse_id', uuidKeys);
+        }
         if (activeManagingWarehouseIds.length > 0) {
-            return query.in('warehouse_id', activeManagingWarehouseIds);
+            return query.eq('warehouse_id', '00000000-0000-0000-0000-000000000000');
         }
         return query;
     };
@@ -681,7 +687,9 @@ const Cylinders = () => {
             return;
         }
 
-        const warehouse = warehousesList.find((item) => String(item.id) === String(bulkAssignWarehouseId));
+        const warehouse = warehousesList.find(
+            (item) => String(item.id) === String(bulkAssignWarehouseId),
+        );
         const warehouseName = warehouse?.name || 'kho đã chọn';
         const scopeLabel = hasActiveFilters ? 'theo bộ lọc hiện tại' : 'trong danh sách';
 
@@ -1019,9 +1027,9 @@ const Cylinders = () => {
     const filteredCylinders = useMemo(() => {
         if (!activeManagingWarehouseRecords.length) return cylinders;
         return cylinders.filter((cylinder) =>
-            cylinderMatchesManagingWarehouseFilter(cylinder, activeManagingWarehouseRecords),
+            cylinderMatchesManagingWarehouseFilter(cylinder, activeManagingWarehouseRecords, warehousesList),
         );
-    }, [cylinders, activeManagingWarehouseRecords]);
+    }, [cylinders, activeManagingWarehouseRecords, warehousesList]);
 
     const filteredCylindersCount = totalRecords;
     const readyCount = stats.ready;
@@ -1071,7 +1079,7 @@ const Cylinders = () => {
             id: item.id,
             label: item.name,
             count: allMetadata.filter((c) =>
-                cylinderMatchesManagingWarehouseFilter(c, [item]),
+                cylinderMatchesManagingWarehouseFilter(c, [item], warehousesList),
             ).length,
         }));
 

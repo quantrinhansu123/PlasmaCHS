@@ -18,6 +18,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import { supabase } from '../../supabase/config';
+import {
+    buildCylinderWarehouseUuidQueryKeys,
+    getWarehouseNameFilterKeys,
+    resolveWarehouseUuidKeysForQuery,
+} from '../../utils/orderWarehouseScope';
 
 export default function WarehouseDetailsModal({ warehouse, onClose }) {
     const [loading, setLoading] = useState(true);
@@ -39,7 +44,30 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
     useEffect(() => {
         if (!warehouse) return;
         fetchWarehouseData();
-    }, [warehouse]);
+    }, [warehouse?.id, warehouse?.name]);
+
+    const fetchAllCylindersByWarehouse = async (uuidKeys) => {
+        const pageSize = 1000;
+        let allRows = [];
+        let from = 0;
+
+        while (true) {
+            const { data, error } = await supabase
+                .from('cylinders')
+                .select('*')
+                .in('warehouse_id', uuidKeys)
+                .order('serial_number', { ascending: true })
+                .range(from, from + pageSize - 1);
+
+            if (error) throw error;
+            const batch = data || [];
+            allRows = allRows.concat(batch);
+            if (batch.length < pageSize) break;
+            from += pageSize;
+        }
+
+        return allRows;
+    };
 
     const handleClose = useCallback(() => {
         setIsClosing(true);
@@ -273,34 +301,44 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
     const fetchWarehouseData = async () => {
         setLoading(true);
         try {
-            const { data: invData } = await supabase
-                .from('cylinders')
-                .select('*')
-                .eq('warehouse_id', warehouse.id)
-                .order('serial_number', { ascending: true });
+            const cylinderUuidKeys = await resolveWarehouseUuidKeysForQuery(warehouse, supabase);
+            const goodsUuidKeys = cylinderUuidKeys;
 
-            const { data: machinesData } = await supabase
-                .from('machines')
-                .select('id, serial_number, machine_type, status, warehouse')
-                .in('warehouse', buildWarehouseAliases(warehouse));
+            let invData = [];
+            if (cylinderUuidKeys.length > 0) {
+                invData = await fetchAllCylindersByWarehouse(cylinderUuidKeys);
+            }
+
+            let machinesData = [];
+            if (goodsUuidKeys.length > 0) {
+                const nameKeys = getWarehouseNameFilterKeys(warehouse);
+                const machineKeys = [...new Set([...goodsUuidKeys, ...nameKeys])];
+                const { data } = await supabase
+                    .from('machines')
+                    .select('id, serial_number, machine_type, status, warehouse')
+                    .in('warehouse', machineKeys);
+                machinesData = data || [];
+            }
+
+            const goodsWhKeys = goodsUuidKeys.length > 0 ? goodsUuidKeys : [];
 
             const [receiptsRes, issuesRes, inventoryRes] = await Promise.all([
-                supabase
+                goodsWhKeys.length > 0 ? supabase
                     .from('goods_receipts')
                     .select('id, receipt_code, supplier_name, total_items, status, receipt_date, created_at')
-                    .eq('warehouse_id', warehouse.id)
+                    .in('warehouse_id', goodsWhKeys)
                     .order('created_at', { ascending: false })
-                    .limit(10),
-                supabase
+                    .limit(10) : Promise.resolve({ data: [] }),
+                goodsWhKeys.length > 0 ? supabase
                     .from('goods_issues')
                     .select('id, issue_code, issue_type, total_items, status, issue_date, created_at')
-                    .eq('warehouse_id', warehouse.id)
+                    .in('warehouse_id', goodsWhKeys)
                     .order('created_at', { ascending: false })
-                    .limit(10),
-                supabase
+                    .limit(10) : Promise.resolve({ data: [] }),
+                goodsWhKeys.length > 0 ? supabase
                     .from('inventory')
                     .select('id')
-                    .eq('warehouse_id', warehouse.id)
+                    .in('warehouse_id', goodsWhKeys) : Promise.resolve({ data: [] }),
             ]);
 
             const unifiedCylinders = (invData || []).map(cyl => ({

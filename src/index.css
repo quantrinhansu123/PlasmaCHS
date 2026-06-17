@@ -604,6 +604,21 @@ h6:not([class*="text-"]) {
   display: none !important;
 }
 
+.barcode-scanner-flash {
+  animation: barcode-scan-flash 0.2s ease-out;
+}
+
+@keyframes barcode-scan-flash {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Hide library's placeholder images */
 #barcode-reader img,
 #order-barcode-reader img,

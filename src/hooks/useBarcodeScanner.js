@@ -13,13 +13,13 @@ import {
  * 
  * @param {Object} options Options for the scanner
  * @param {string} options.elementId The ID of the HTML element to render the scanner in
- * @param {number} [options.debounceMs=600] Minimum time in ms between consecutive successful scans
+ * @param {number} [options.debounceMs=200] Minimum time in ms between consecutive successful scans
  * @param {boolean} [options.allowDuplicateScans=false] Whether to allow scanning the exact same barcode multiple times in a row
  * @returns {Object} Scanner state and control functions
  */
 const useBarcodeScanner = ({ 
     elementId = 'barcode-reader', 
-    debounceMs = 600,
+    debounceMs = 200,
     allowDuplicateScans = false
 } = {}) => {
     const [isScanning, setIsScanning] = useState(false);

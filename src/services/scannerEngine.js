@@ -1,68 +1,135 @@
-import { Html5Qrcode } from 'html5-qrcode';
+import { SCANNER_CONFIG } from '../utils/barcodeFormats';
 
-export const isIOS = () => {
-    return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-};
+export const isIOS = () =>
+    /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 export const isAndroid = () => /Android/i.test(navigator.userAgent);
 
 export const isMobile = () => isIOS() || isAndroid();
 
-export const hasNativeBarcodeDetector = () => 'BarcodeDetector' in window;
+export const hasNativeBarcodeDetector = () => typeof window !== 'undefined' && 'BarcodeDetector' in window;
 
-/** Native BarcodeDetector is reliable on Android Chrome only. */
-export const shouldUseNativeBarcodeDetector = () => {
-    return isAndroid() && hasNativeBarcodeDetector();
-};
-
-/**
- * html5-qrcode cameraIdOrConfig must be a deviceId string OR an object with
- * exactly one key (facingMode | deviceId). Resolution goes in videoConstraints.
- */
-const resolveCameraSelection = async () => {
-    if (isMobile()) {
-        return { facingMode: 'environment' };
-    }
-
-    try {
-        const cameras = await Html5Qrcode.getCameras();
-        if (cameras.length > 0) {
-            return cameras[cameras.length - 1].id;
-        }
-    } catch (error) {
-        console.warn('Could not list cameras:', error);
-    }
-
-    return { facingMode: 'user' };
-};
+const NATIVE_FORMATS = ['code_128'];
+const SCAN_INTERVAL_MS = 80;
 
 const getVideoConstraints = () => {
-    const resolution = isIOS()
-        ? { width: { ideal: 1280 }, height: { ideal: 720 } }
-        : { width: { ideal: 1280 }, height: { ideal: 720 } };
-
     if (isMobile()) {
         return {
             facingMode: { ideal: 'environment' },
-            ...resolution,
+            width: { ideal: 640, max: 800 },
+            height: { ideal: 360, max: 480 },
         };
     }
-
-    return resolution;
-};
-
-/** Wide scan band for Code 128 labels (TN13469). */
-const buildQrBox = (viewfinderWidth, viewfinderHeight) => {
-    const width = Math.floor(Math.min(viewfinderWidth * 0.92, 560));
-    const height = Math.floor(Math.min(viewfinderHeight * 0.42, 200));
     return {
-        width: Math.max(width, 260),
-        height: Math.max(height, 100),
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 800, max: 960 },
+        height: { ideal: 450, max: 540 },
     };
 };
 
-class ScannerEngine {
+const mountVideo = (container) => {
+    const video = document.createElement('video');
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+    video.playsInline = true;
+    video.muted = true;
+    video.autoplay = true;
+    video.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;background:#000';
+    container.innerHTML = '';
+    container.appendChild(video);
+    return video;
+};
+
+/** Native BarcodeDetector — nhẹ nhất, chỉ Code 128. */
+class NativeBarcodeEngine {
+    constructor(elementId) {
+        this.elementId = elementId;
+        this.video = null;
+        this.stream = null;
+        this.detector = null;
+        this.rafId = 0;
+        this.isScanning = false;
+        this.isPaused = false;
+    }
+
+    async start(onSuccess) {
+        const container = document.getElementById(this.elementId);
+        if (!container) throw new Error(`Container #${this.elementId} not found`);
+
+        await this.stop();
+
+        this.detector = new BarcodeDetector({ formats: NATIVE_FORMATS });
+        this.video = mountVideo(container);
+        this.stream = await navigator.mediaDevices.getUserMedia({
+            video: getVideoConstraints(),
+            audio: false,
+        });
+        this.video.srcObject = this.stream;
+        await this.video.play();
+
+        this.isScanning = true;
+        this.isPaused = false;
+        let lastScanAt = 0;
+
+        const tick = async (now) => {
+            if (!this.isScanning) return;
+            this.rafId = requestAnimationFrame(tick);
+
+            if (this.isPaused || !this.video || this.video.readyState < 2) return;
+            if (now - lastScanAt < SCAN_INTERVAL_MS) return;
+            lastScanAt = now;
+
+            try {
+                const codes = await this.detector.detect(this.video);
+                const value = codes[0]?.rawValue;
+                if (value) onSuccess(value);
+            } catch {
+                /* frame noise */
+            }
+        };
+
+        this.rafId = requestAnimationFrame(tick);
+    }
+
+    async scanFromFile(file) {
+        const detector = new BarcodeDetector({ formats: NATIVE_FORMATS });
+        const bitmap = await createImageBitmap(file);
+        try {
+            const codes = await detector.detect(bitmap);
+            return codes[0]?.rawValue || null;
+        } finally {
+            bitmap.close();
+        }
+    }
+
+    pause(pauseVideo = true) {
+        this.isPaused = true;
+        if (pauseVideo && this.video) this.video.pause();
+    }
+
+    resume() {
+        this.isPaused = false;
+        if (this.video) this.video.play().catch(() => {});
+    }
+
+    async stop() {
+        this.isScanning = false;
+        if (this.rafId) cancelAnimationFrame(this.rafId);
+        this.rafId = 0;
+        if (this.stream) {
+            this.stream.getTracks().forEach((t) => t.stop());
+        }
+        this.stream = null;
+        this.video = null;
+        this.detector = null;
+        const container = document.getElementById(this.elementId);
+        if (container) container.innerHTML = '';
+    }
+}
+
+/** Fallback iOS — html5-qrcode chỉ Code 128, load lazy. */
+class Html5FallbackEngine {
     constructor(elementId) {
         this.elementId = elementId;
         this.html5Qrcode = null;
@@ -70,52 +137,50 @@ class ScannerEngine {
         this.isPaused = false;
     }
 
+    async getEngine() {
+        if (!this.html5Qrcode) {
+            const { Html5Qrcode } = await import('html5-qrcode');
+            this.html5Qrcode = new Html5Qrcode(this.elementId, {
+                ...SCANNER_CONFIG,
+                useBarCodeDetectorIfSupported: false,
+            });
+        }
+        return this.html5Qrcode;
+    }
+
+    buildQrBox(viewfinderWidth, viewfinderHeight) {
+        const width = Math.floor(viewfinderWidth * 0.88);
+        const height = Math.floor(Math.min(viewfinderHeight * 0.22, 88));
+        return { width: Math.max(width, 180), height: Math.max(height, 48) };
+    }
+
     async start(onSuccess) {
         const container = document.getElementById(this.elementId);
-        if (!container) {
-            throw new Error(`Container #${this.elementId} not found`);
-        }
+        if (!container) throw new Error(`Container #${this.elementId} not found`);
 
+        await this.stop();
+        const engine = await this.getEngine();
         this.isScanning = true;
         this.isPaused = false;
 
-        if (this.html5Qrcode) {
-            await this.stop();
-        }
-
-        this.html5Qrcode = new Html5Qrcode(this.elementId, {
-            useBarCodeDetectorIfSupported: shouldUseNativeBarcodeDetector(),
-            verbose: false,
-        });
-
-        const cameraSelection = await resolveCameraSelection();
-
-        await this.html5Qrcode.start(
-            cameraSelection,
+        await engine.start(
+            { facingMode: 'environment' },
             {
                 fps: 10,
-                qrbox: buildQrBox,
-                disableFlip: false,
+                qrbox: (w, h) => this.buildQrBox(w, h),
+                disableFlip: true,
                 videoConstraints: getVideoConstraints(),
             },
-            (decodedText, result) => {
-                if (this.isScanning && !this.isPaused) {
-                    onSuccess(decodedText, result);
-                }
+            (text) => {
+                if (this.isScanning && !this.isPaused) onSuccess(text);
             },
-            () => {}
+            () => {},
         );
     }
 
     async scanFromFile(file) {
-        if (!this.html5Qrcode) {
-            this.html5Qrcode = new Html5Qrcode(this.elementId, {
-                useBarCodeDetectorIfSupported: shouldUseNativeBarcodeDetector(),
-                verbose: false,
-            });
-        }
-
-        const result = await this.html5Qrcode.scanFileV2(file, false);
+        const engine = await this.getEngine();
+        const result = await engine.scanFileV2(file, false);
         return result.decodedText;
     }
 
@@ -124,9 +189,7 @@ class ScannerEngine {
         try {
             this.html5Qrcode.pause(pauseVideo);
             this.isPaused = true;
-        } catch (error) {
-            console.warn('Scanner pause warning:', error);
-        }
+        } catch { /* */ }
     }
 
     resume() {
@@ -134,33 +197,53 @@ class ScannerEngine {
         try {
             this.html5Qrcode.resume();
             this.isPaused = false;
-        } catch (error) {
-            console.warn('Scanner resume warning:', error);
-        }
+        } catch { /* */ }
     }
 
     async stop() {
         this.isScanning = false;
         this.isPaused = false;
-
         if (!this.html5Qrcode) return;
-
         try {
-            if (this.html5Qrcode.isScanning) {
-                await this.html5Qrcode.stop();
-            }
+            if (this.html5Qrcode.isScanning) await this.html5Qrcode.stop();
             this.html5Qrcode.clear();
-        } catch (error) {
-            console.warn('Scanner stop warning:', error);
-        } finally {
-            this.html5Qrcode = null;
-        }
+        } catch { /* */ }
+        this.html5Qrcode = null;
+    }
+}
+
+class ScannerEngine {
+    constructor(elementId) {
+        this.elementId = elementId;
+        this.inner = hasNativeBarcodeDetector() && !isIOS()
+            ? new NativeBarcodeEngine(elementId)
+            : new Html5FallbackEngine(elementId);
+    }
+
+    start(onSuccess) {
+        return this.inner.start(onSuccess);
+    }
+
+    scanFromFile(file) {
+        return this.inner.scanFromFile(file);
+    }
+
+    pause(pauseVideo = true) {
+        this.inner.pause(pauseVideo);
+    }
+
+    resume() {
+        this.inner.resume();
+    }
+
+    stop() {
+        return this.inner.stop();
     }
 }
 
 export const createScannerEngine = (htmlElementId) => new ScannerEngine(htmlElementId);
 
-export const startScanner = async (scannerInstance, htmlElementId, onScanSuccess, onScanError) => {
+export const startScanner = async (scannerInstance, _htmlElementId, onScanSuccess, onScanError) => {
     try {
         await scannerInstance.start(onScanSuccess);
         return true;
@@ -171,26 +254,21 @@ export const startScanner = async (scannerInstance, htmlElementId, onScanSuccess
 };
 
 export const stopScanner = async (scannerInstance) => {
-    if (scannerInstance) {
-        await scannerInstance.stop();
-    }
+    if (scannerInstance) await scannerInstance.stop();
 };
 
 export const pauseScanner = (scannerInstance, pauseVideo = true) => {
-    if (scannerInstance) {
-        scannerInstance.pause(pauseVideo);
-    }
+    if (scannerInstance) scannerInstance.pause(pauseVideo);
 };
 
 export const resumeScanner = (scannerInstance) => {
-    if (scannerInstance) {
-        scannerInstance.resume();
-    }
+    if (scannerInstance) scannerInstance.resume();
 };
 
 export const scanFileWithEngine = async (scannerInstance, file) => {
-    if (!scannerInstance) {
-        throw new Error('Scanner is not ready');
-    }
+    if (!scannerInstance) throw new Error('Scanner is not ready');
     return scannerInstance.scanFromFile(file);
 };
+
+/** @deprecated giữ tương thích import cũ */
+export const shouldUseNativeBarcodeDetector = () => hasNativeBarcodeDetector() && !isIOS();

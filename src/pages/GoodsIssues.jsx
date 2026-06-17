@@ -55,7 +55,7 @@ import { supabase } from '../supabase/config';
 import { ISSUE_STATUSES, ISSUE_TABLE_COLUMNS, ISSUE_TYPES } from '../constants/goodsIssueConstants';
 import usePermissions from '../hooks/usePermissions';
 import { isAccountantRole, isAdminRole, isWarehouseRole } from '../utils/accessControl';
-import { filterWarehousesForCurrentUser } from '../utils/orderWarehouseScope';
+import { buildCylinderWarehouseUuidQueryKeys, filterWarehousesForCurrentUser } from '../utils/orderWarehouseScope';
 
 // Register ChartJS components
 ChartJS.register(
@@ -251,14 +251,7 @@ const GoodsIssues = () => {
                     user,
                     department,
                 });
-                const allowedKeys = [
-                    ...new Set(
-                        (allowedWarehouses || [])
-                            .flatMap((w) => [w.id, w.code, w.name])
-                            .map((v) => String(v || '').trim())
-                            .filter(Boolean)
-                    ),
-                ];
+                const allowedKeys = buildCylinderWarehouseUuidQueryKeys(allowedWarehouses || []);
                 if (allowedKeys.length === 0) {
                     setIssues([]);
                     return;

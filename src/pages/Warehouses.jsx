@@ -48,7 +48,10 @@ import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import { WAREHOUSE_STATUSES } from '../constants/warehouseConstants';
 import usePermissions from '../hooks/usePermissions';
 import { isAdminRole } from '../utils/accessControl';
-import { filterWarehousesForCurrentUser } from '../utils/orderWarehouseScope';
+import {
+    filterWarehousesForCurrentUser,
+    rowMatchesCylinderWarehouseStorage,
+} from '../utils/orderWarehouseScope';
 import { supabase } from '../supabase/config';
 
 ChartJS.register(
@@ -218,40 +221,6 @@ const Warehouses = () => {
     const fetchWarehouses = async () => {
         setIsLoading(true);
         try {
-            const buildWarehouseAliases = (warehouseInfo) => {
-                const rawValues = [
-                    warehouseInfo?.id,
-                    warehouseInfo?.name,
-                    warehouseInfo?.branch_office
-                ].filter(Boolean);
-
-                const aliases = new Set();
-                rawValues.forEach((value) => {
-                    const normalized = String(value).trim();
-                    if (!normalized) return;
-                    aliases.add(normalized);
-                });
-
-                const combinedText = rawValues
-                    .map((value) => String(value).toLowerCase())
-                    .join(' ');
-
-                if (combinedText.includes('ha noi') || combinedText.includes('hà nội')) aliases.add('HN');
-                if (combinedText.includes('thanh hoa') || combinedText.includes('thanh hóa')) aliases.add('TH');
-                if (combinedText.includes('da nang') || combinedText.includes('đà nẵng')) aliases.add('DN');
-                if (
-                    combinedText.includes('hcm')
-                    || combinedText.includes('hồ chí minh')
-                    || combinedText.includes('ho chi minh')
-                    || combinedText.includes('tp.hcm')
-                ) {
-                    aliases.add('TP.HCM');
-                    aliases.add('HCM');
-                }
-
-                return Array.from(aliases);
-            };
-
             const { data, error } = await supabase
                 .from('warehouses')
                 .select('*')
@@ -276,28 +245,17 @@ const Warehouses = () => {
                 supabase.from('cylinders').select('warehouse_id')
             ]);
 
-            const machineCountMap = new Map();
-            (machinesData || []).forEach(m => {
-                const key = (m.warehouse || '').toString().trim();
-                if (!key) return;
-                machineCountMap.set(key, (machineCountMap.get(key) || 0) + 1);
-            });
-
-            const cylinderCountMap = new Map();
-            (cylindersData || []).forEach(c => {
-                const key = (c.warehouse_id || '').toString().trim();
-                if (!key) return;
-                cylinderCountMap.set(key, (cylinderCountMap.get(key) || 0) + 1);
-            });
-
-            const warehousesWithCounts = baseWarehouses.map(w => {
-                const aliases = buildWarehouseAliases(w);
-                const machineCount = aliases.reduce((sum, key) => sum + (machineCountMap.get(key) || 0), 0);
-                const cylinderCount = aliases.reduce((sum, key) => sum + (cylinderCountMap.get(key) || 0), 0);
+            const warehousesWithCounts = baseWarehouses.map((w) => {
+                const machineCount = (machinesData || []).filter((m) =>
+                    rowMatchesCylinderWarehouseStorage(m.warehouse, w, baseWarehouses),
+                ).length;
+                const cylinderCount = (cylindersData || []).filter((c) =>
+                    rowMatchesCylinderWarehouseStorage(c.warehouse_id, w, baseWarehouses),
+                ).length;
                 return {
                     ...w,
                     machine_count: machineCount,
-                    cylinder_count: cylinderCount
+                    cylinder_count: cylinderCount,
                 };
             });
 

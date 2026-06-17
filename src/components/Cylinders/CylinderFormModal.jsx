@@ -64,9 +64,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             (w) => String(w.id) === stored
                 || String(w.name || '').trim().toLowerCase() === stored.toLowerCase(),
         );
-        if (matched?.id) return String(matched.id);
-        if (/^[0-9a-f-]{36}$/i.test(stored)) return stored;
-        return '';
+        return matched?.id ? String(matched.id).trim() : ( /^[0-9a-f-]{36}$/i.test(stored) ? stored : '');
     }, []);
 
     const warehouseSelectOptions = useMemo(() => {
@@ -76,7 +74,9 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
         }));
         const current = String(formData.warehouse_id || '').trim();
         if (current && !options.some((opt) => opt.value === current)) {
-            const legacy = warehousesList.find((w) => String(w.id) === current);
+            const legacy = warehousesList.find(
+                (w) => String(w.id) === current || String(w.name || '').trim().toLowerCase() === current.toLowerCase(),
+            );
             options.unshift({
                 value: current,
                 label: legacy?.name || current,

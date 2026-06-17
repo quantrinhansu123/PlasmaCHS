@@ -210,12 +210,57 @@ export function getWarehouseNameFilterKeys(warehouse) {
     return [...keys];
 }
 
+/** UUID kho — dùng cho truy vấn DB (cylinders.warehouse_id là cột uuid). */
+export function buildCylinderWarehouseUuidQueryKeys(warehouses = []) {
+    return [...new Set(
+        (warehouses || [])
+            .map((w) => String(w?.id || '').trim())
+            .filter((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)),
+    )];
+}
+
+/** Lấy UUID kho để query — fallback theo tên/mã nếu object thiếu id. */
+export async function resolveWarehouseUuidKeysForQuery(warehouse, supabaseClient) {
+    const direct = buildCylinderWarehouseUuidQueryKeys(warehouse ? [warehouse] : []);
+    if (direct.length > 0) return direct;
+
+    const label = String(warehouse?.name || warehouse?.code || '').trim();
+    if (!label || !supabaseClient) return [];
+
+    const { data, error } = await supabaseClient
+        .from('warehouses')
+        .select('id, code, name')
+        .or(`name.eq.${label},code.eq.${label}`)
+        .limit(5);
+
+    if (error) {
+        console.error('resolveWarehouseUuidKeysForQuery:', error);
+        return [];
+    }
+
+    const matched = (data || []).find(
+        (row) =>
+            String(row?.name || '').trim().toLowerCase() === label.toLowerCase()
+            || String(row?.code || '').trim().toLowerCase() === label.toLowerCase(),
+    ) || data?.[0];
+
+    return buildCylinderWarehouseUuidQueryKeys(matched ? [matched] : []);
+}
+
 export function buildCylinderWarehouseNameScopeKeys(warehouses = []) {
     const keys = new Set();
     (warehouses || []).forEach((warehouse) => {
         getWarehouseNameFilterKeys(warehouse).forEach((key) => keys.add(key));
     });
     return [...keys];
+}
+
+/**
+ * Khóa tra cứu DB cylinders.warehouse_id — chỉ UUID (cột postgres là uuid).
+ * Không trộn tên/mã vào .in() — sẽ lỗi «invalid input syntax for type uuid».
+ */
+export function buildCylinderWarehouseReadKeys(warehouses = []) {
+    return buildCylinderWarehouseUuidQueryKeys(warehouses);
 }
 
 /** Khớp giá trị cột kho (tên/mã) — không so UUID id. Dùng cho customers.warehouse_id (Kho phụ trách). */
@@ -236,29 +281,54 @@ export function rowMatchesWarehouseNameStorage(storedValue, warehouse, warehouse
     );
 }
 
-/** Khóa lọc cylinders.warehouse_id — UUID kho (cột DB là uuid). */
+/** Giá trị lưu cylinders.warehouse_id — UUID FK (hiển thị UI dùng tên kho). */
+export function resolveWarehouseStorageName(warehouse) {
+    return String(warehouse?.id || '').trim();
+}
+
+/** Chuẩn hoá giá trị đã lưu (tên hoặc UUID cũ) → tên kho. */
+export function resolveStoredWarehouseName(storedValue, warehouses = []) {
+    const stored = String(storedValue || '').trim();
+    if (!stored) return '';
+    const byId = (warehouses || []).find((w) => String(w.id || '').trim() === stored);
+    if (byId?.name) return String(byId.name).trim();
+    return stored;
+}
+
+/** Khóa lọc cylinders.warehouse_id — chỉ tên/mã kho (không UUID). */
 export function getCylinderWarehouseFilterKeys(warehouse) {
     if (!warehouse) return [];
-    const id = String(warehouse?.id || '').trim();
-    return id ? [id] : [];
+    const keys = new Set();
+    const name = getManagingWarehouseNameKey(warehouse);
+    if (name) keys.add(name);
+    getWarehouseNameFilterKeys(warehouse).forEach((key) => keys.add(key));
+    return [...keys].filter(Boolean);
 }
 
-export function rowMatchesCylinderWarehouseStorage(storedValue, warehouse) {
+export function rowMatchesCylinderWarehouseStorage(storedValue, warehouse, warehouses = []) {
     const stored = String(storedValue || '').trim();
     if (!stored || !warehouse) return false;
-    const id = String(warehouse?.id || '').trim();
-    const name = String(warehouse?.name || '').trim();
-    if (id && stored === id) return true;
-    if (name && stored.toLowerCase() === name.toLowerCase()) return true;
-    return false;
+
+    const whId = String(warehouse?.id || '').trim();
+    if (whId && stored.toLowerCase() === whId.toLowerCase()) return true;
+
+    const resolved = resolveStoredWarehouseName(stored, warehouses);
+    if (!resolved) return false;
+    const storedLower = resolved.toLowerCase();
+    if (rowMatchesManagingWarehouseName(resolved, warehouse)) return true;
+    return getWarehouseNameFilterKeys(warehouse).some(
+        (key) => String(key).trim().toLowerCase() === storedLower,
+    );
 }
 
-/** Khớp bình với danh sách kho đã chọn (UUID; hỗ trợ dữ liệu cũ lưu tên). */
-export function cylinderMatchesManagingWarehouseFilter(cylinder, targetWarehouses = []) {
+/** Khớp bình với danh sách kho đã chọn (theo tên kho). */
+export function cylinderMatchesManagingWarehouseFilter(cylinder, targetWarehouses = [], warehouses = []) {
     if (!targetWarehouses?.length) return true;
     const stored = String(cylinder?.warehouse_id ?? '').trim();
     if (!stored) return false;
-    return targetWarehouses.some((wh) => rowMatchesCylinderWarehouseStorage(stored, wh));
+    return targetWarehouses.some((wh) =>
+        rowMatchesCylinderWarehouseStorage(stored, wh, warehouses),
+    );
 }
 
 /** @deprecated dùng cylinderMatchesManagingWarehouseFilter */
@@ -276,40 +346,40 @@ export function cylinderMatchesManagingWarehouseNames(cylinder, targetNames = []
     return cylinderMatchesManagingWarehouseFilter(cylinder, records);
 }
 
-/** Hiển thị Kho Quản Lý từ UUID (hoặc tên legacy). */
+/** Hiển thị Kho Quản Lý — chuẩn theo tên kho. */
 export function getCylinderManagingWarehouseDisplayName(cylinder, warehouses = []) {
     if (cylinder?.warehouses?.name) return cylinder.warehouses.name;
-    const stored = String(cylinder?.warehouse_id ?? '').trim();
+    const stored = resolveStoredWarehouseName(cylinder?.warehouse_id, warehouses);
     if (!stored) return '—';
-    const matched = (warehouses || []).find((wh) => rowMatchesCylinderWarehouseStorage(stored, wh));
-    return matched?.name || '—';
+    const matched = (warehouses || []).find((wh) =>
+        rowMatchesCylinderWarehouseStorage(stored, wh, warehouses),
+    );
+    return matched?.name || stored;
 }
 
-/** Khóa lọc cylinders.warehouse_id — giữ nguyên hoa/thường, tránh chỉ còn biến thể lowercase. */
+/** Khóa lọc cylinders.warehouse_id — chỉ tên/mã kho. */
 export function buildCylinderWarehouseScopeKeys(warehouses = []) {
-    return [...new Set((warehouses || []).flatMap(getCylinderWarehouseFilterKeys))];
+    return buildCylinderWarehouseReadKeys(warehouses);
 }
 
-/** Dropdown chọn kho trên /binh → UUID để lọc warehouse_id. */
+/** Dropdown chọn kho trên /binh → UUID để lọc cylinders.warehouse_id. */
 export function expandCylinderWarehouseSelectionKeys(selectedIds = [], warehouses = []) {
-    if (!selectedIds?.length) return [];
-    const keys = new Set();
-    (selectedIds || []).forEach((sel) => {
-        const selStr = String(sel || '').trim();
-        if (!selStr) return;
-        const wh = (warehouses || []).find(
-            (w) =>
-                String(w.id) === selStr
-                || String(w.code || '').trim() === selStr
-                || String(w.name || '').trim() === selStr,
+    const records = resolveWarehouseRecordsFromSelection(selectedIds, warehouses);
+    if (records.length) return buildCylinderWarehouseUuidQueryKeys(records);
+
+    const names = resolveManagingWarehouseNamesFromSelection(selectedIds, warehouses);
+    if (names.length) {
+        const matched = (warehouses || []).filter((w) =>
+            names.some((n) => rowMatchesManagingWarehouseName(n, w)),
         );
-        if (wh?.id) {
-            keys.add(String(wh.id).trim());
-        } else if (/^[0-9a-f-]{36}$/i.test(selStr)) {
-            keys.add(selStr);
-        }
-    });
-    return [...keys].filter(Boolean);
+        if (matched.length) return buildCylinderWarehouseUuidQueryKeys(matched);
+    }
+
+    return buildCylinderWarehouseUuidQueryKeys(
+        (selectedIds || [])
+            .map((sel) => (warehouses || []).find((w) => String(w.id) === String(sel).trim()))
+            .filter(Boolean),
+    );
 }
 
 /** Kiểm tra giá trị cột kho trên bản ghi có thuộc một kho trong danh mục. */

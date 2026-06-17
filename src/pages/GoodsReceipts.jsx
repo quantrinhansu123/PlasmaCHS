@@ -59,6 +59,7 @@ import { notificationService } from '../utils/notificationService';
 import usePermissions from '../hooks/usePermissions';
 import { isAccountantRole, isAdminRole, isWarehouseRole } from '../utils/accessControl';
 import {
+    buildCylinderWarehouseUuidQueryKeys,
     buildScopedWarehouseFilterKeys,
     expandWarehouseSelectionKeys,
     filterWarehousesForCurrentUser,
@@ -262,7 +263,7 @@ const GoodsReceipts = () => {
                     department,
                 });
                 // warehouse_id có thể là UUID, mã (HN/DN…) hoặc tên kho — khớp mọi biến thể
-                const allowedKeys = buildScopedWarehouseFilterKeys(allowedWarehouses || []);
+                const allowedKeys = buildCylinderWarehouseUuidQueryKeys(allowedWarehouses || []);
                 if (allowedKeys.length === 0) {
                     setReceipts([]);
                     setSelectedIds([]);
