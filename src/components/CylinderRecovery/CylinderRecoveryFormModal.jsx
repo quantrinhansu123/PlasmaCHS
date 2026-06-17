@@ -27,6 +27,7 @@ import { applyRecoveryCompletionInventory } from '../../utils/cylinderRecoveryCo
 import BarcodeScanner from '../Common/BarcodeScanner';
 import { SearchableSelect } from '../ui/SearchableSelect';
 import usePermissions from '../../hooks/usePermissions';
+import { customerOwnsAssetName, fetchCustomerOwnedCylinders } from '../../utils/customerOwnedDevices';
 import { filterWarehousesForCurrentUser } from '../../utils/orderWarehouseScope';
 
 /** prefillComplete: mở form ở trạng thái Hoàn thành; recovery vẫn là bản ghi DB (để xử lý kho đúng). */
@@ -197,7 +198,7 @@ export default function CylinderRecoveryFormModal({
     const loadCustomers = async () => {
         const { data } = await supabase
             .from('customers')
-            .select('id, name, legal_rep, phone')
+            .select('id, name, legal_rep, phone, invoice_company_name, agency_name')
             .order('name');
         if (data) setCustomers(data);
     };
@@ -274,25 +275,9 @@ export default function CylinderRecoveryFormModal({
             return;
         }
 
-        if (isFetchingCyls) return;
-
         setIsFetchingCyls(true);
         try {
-            const { data, error } = await supabase
-                .from('cylinders')
-                .select('serial_number, volume, customer_name, status')
-                .eq('status', 'thuộc khách hàng')
-                .eq('customer_name', selectedCustomer.name.trim())
-                .order('serial_number', { ascending: true })
-                .limit(5000);
-
-            if (error) throw error;
-
-            const filtered = (data || []).filter((cylinder) => {
-                const matchedCustomer = resolveCustomerByName(cylinder.customer_name);
-                return matchedCustomer?.id === customerId;
-            });
-
+            const filtered = await fetchCustomerOwnedCylinders(supabase, selectedCustomer);
             setAvailableCyls(filtered);
         } catch (e) {
             console.error('fetchAvailableCyls error', e);
@@ -300,7 +285,7 @@ export default function CylinderRecoveryFormModal({
         } finally {
             setIsFetchingCyls(false);
         }
-    }, [resolveCustomerByName]);
+    }, []);
 
     useEffect(() => {
         if (isReadOnly) return;
@@ -419,18 +404,25 @@ export default function CylinderRecoveryFormModal({
                 return;
             }
 
+            const selectedCustomer = currentFormData.customer_id
+                ? currentCustomers.find((c) => c.id === currentFormData.customer_id)
+                : null;
             const matchedCustomer = resolveCustomerByName(cylData.customer_name);
-            if (!matchedCustomer) {
+            const ownsForSelected =
+                selectedCustomer && customerOwnsAssetName(cylData.customer_name, selectedCustomer);
+
+            if (!matchedCustomer && !ownsForSelected) {
                 setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: `Của: ${cylData.customer_name}` } : i));
                 return;
             }
 
-            // Successfully validated
-            setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: true, error: null } : i));
-
-            // Auto-detect customer if not set
             if (!currentFormData.customer_id) {
-                setFormData(prev => ({ ...prev, customer_id: matchedCustomer.id }));
+                setFormData(prev => ({ ...prev, customer_id: (matchedCustomer || selectedCustomer).id }));
+                setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: true, error: null } : i));
+            } else if (ownsForSelected || matchedCustomer?.id === currentFormData.customer_id) {
+                setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: true, error: null } : i));
+            } else {
+                setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: `Của: ${cylData.customer_name}` } : i));
             }
         } catch (err) {
             console.error('Validation failed:', err);
@@ -641,19 +633,25 @@ export default function CylinderRecoveryFormModal({
                 return;
             }
 
+            const selectedCustomer = currentFormData.customer_id
+                ? currentCustomers.find((c) => c.id === currentFormData.customer_id)
+                : null;
             const matchedCustomer = resolveCustomerByName(cylData.customer_name);
-            if (!matchedCustomer) {
+            const ownsForSelected =
+                selectedCustomer && customerOwnsAssetName(cylData.customer_name, selectedCustomer);
+
+            if (!matchedCustomer && !ownsForSelected) {
                 setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: false, isValid: false, error: `Của: ${cylData.customer_name}` } : i));
                 return;
             }
 
             if (!currentFormData.customer_id) {
-                setFormData(prev => ({ ...prev, customer_id: matchedCustomer.id }));
+                setFormData(prev => ({ ...prev, customer_id: (matchedCustomer || selectedCustomer).id }));
                 setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: false, isValid: true, error: null } : i));
-            } else if (currentFormData.customer_id === matchedCustomer.id) {
+            } else if (ownsForSelected || matchedCustomer?.id === currentFormData.customer_id) {
                 setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: false, isValid: true, error: null } : i));
             } else {
-                setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: false, isValid: false, error: `Của: ${matchedCustomer.name}` } : i));
+                setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: false, isValid: false, error: `Của: ${cylData.customer_name}` } : i));
             }
         } catch (err) {
             setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: false, isValid: false, error: 'Lỗi' } : i));
@@ -1084,7 +1082,11 @@ export default function CylinderRecoveryFormModal({
                                                                                     const suggs = getCylSuggestions(item._id, item.serial_number);
                                                                                     if (suggs.length === 0) return (
                                                                                         <div className="px-4 py-3 text-xs text-slate-400 italic">
-                                                                                            {item.serial_number ? 'Không tìm thấy vỏ thuộc khách hàng này' : 'Nhập để tìm kiếm...'}
+                                                                                            {item.serial_number
+                                                                                                ? 'Không tìm thấy vỏ thuộc khách hàng này'
+                                                                                                : availableCyls.length === 0
+                                                                                                    ? 'Khách hàng chưa có vỏ trong hệ thống'
+                                                                                                    : 'Chọn mã từ danh sách bên dưới'}
                                                                                         </div>
                                                                                     );
                                                                                     return suggs.map(c => (

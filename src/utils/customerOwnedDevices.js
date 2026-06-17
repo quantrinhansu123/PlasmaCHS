@@ -326,3 +326,123 @@ export async function fetchCustomerOwnedDevices(supabaseClient, customer) {
         a.serial_number.localeCompare(b.serial_number, 'vi', { sensitivity: 'base' }),
     );
 }
+
+/** Vỏ bình khách đang giữ — dùng dropdown phiếu thu hồi vỏ. */
+export async function fetchCustomerOwnedCylinders(supabaseClient, customer) {
+    const custId = customer?.id;
+    const lookupNames = getCustomerLookupNames(customer);
+    if (!custId && lookupNames.length === 0) return [];
+
+    const cylindersById = new Map();
+    const nameMatchedCylinderIds = new Set();
+    const cylinderSerialRawFromOrders = new Set();
+
+    const markCylinder = (row) => {
+        if (!row?.id) return;
+        cylindersById.set(row.id, row);
+    };
+    const markCylinderByName = (row) => {
+        markCylinder(row);
+        if (row?.id) nameMatchedCylinderIds.add(row.id);
+    };
+
+    const cylinderCols = 'id, serial_number, volume, category, status, customer_name';
+
+    if (custId) {
+        const { data: cylById } = await supabaseClient.from('cylinders').select(cylinderCols).eq('customer_id', custId);
+        (cylById || []).forEach(markCylinderByName);
+    }
+
+    for (const name of lookupNames) {
+        const { data: cExact } = await supabaseClient.from('cylinders').select(cylinderCols).eq('customer_name', name);
+        (cExact || []).forEach(markCylinderByName);
+
+        if (name.length >= 3) {
+            const esc = escapeIlikeOrFragment(name);
+            const { data: cLike } = await supabaseClient
+                .from('cylinders')
+                .select(cylinderCols)
+                .ilike('customer_name', `%${esc}%`);
+            (cLike || []).forEach(markCylinderByName);
+        }
+    }
+
+    const orderMap = new Map();
+    const mergeOrder = (o) => {
+        if (o?.id && !orderMap.has(o.id)) orderMap.set(o.id, o);
+    };
+    const orderSelect = 'id, status';
+    if (custId) {
+        const { data: o1 } = await supabaseClient.from('orders').select(orderSelect).eq('customer_id', custId);
+        (o1 || []).forEach(mergeOrder);
+    }
+    for (const name of lookupNames) {
+        const { data: o2 } = await supabaseClient.from('orders').select(orderSelect).eq('customer_name', name);
+        (o2 || []).forEach(mergeOrder);
+    }
+
+    const orderIds = [...orderMap.keys()];
+    const itemsByOrderId = new Map();
+    for (const part of chunkArray(orderIds, 100)) {
+        if (!part.length) continue;
+        const { data: items } = await supabaseClient
+            .from('order_items')
+            .select('order_id, serial_number, product_type')
+            .in('order_id', part);
+        for (const it of items || []) {
+            if (!it.order_id) continue;
+            if (!itemsByOrderId.has(it.order_id)) itemsByOrderId.set(it.order_id, []);
+            itemsByOrderId.get(it.order_id).push(it);
+        }
+    }
+
+    for (const oid of [...orderMap.values()].filter((o) => isOrderDeliveredCompleted(o.status)).map((o) => o.id)) {
+        const items = itemsByOrderId.get(oid) || [];
+        for (const it of items) {
+            const sn = String(it.serial_number || '').trim();
+            if (!sn || !isCylinderProductType(it.product_type)) continue;
+            cylinderSerialRawFromOrders.add(sn);
+            cylinderSerialRawFromOrders.add(sn.replace(/\s+/g, ''));
+        }
+    }
+
+    for (const part of chunkArray([...cylinderSerialRawFromOrders], 80)) {
+        if (!part.length) continue;
+        const { data: cBySerial } = await supabaseClient.from('cylinders').select(cylinderCols).in('serial_number', part);
+        (cBySerial || []).forEach(markCylinder);
+    }
+
+    const cylinderSerMatch = (c) => {
+        const rs = String(c.serial_number || '').trim();
+        return (
+            cylinderSerialRawFromOrders.has(rs) ||
+            cylinderSerialRawFromOrders.has(rs.replace(/\s+/g, ''))
+        );
+    };
+
+    const owned = [...cylindersById.values()].filter((c) => {
+        const st = String(c.status || '').trim();
+        return (
+            nameMatchedCylinderIds.has(c.id) ||
+            CYLINDER_STATUSES_AT_CUSTOMER.has(st) ||
+            cylinderSerMatch(c) ||
+            customerOwnsAssetName(c.customer_name, customer)
+        );
+    });
+
+    const serialMap = new Map();
+    owned.forEach((c) => {
+        const serial = String(c.serial_number || '').trim();
+        if (!serial) return;
+        serialMap.set(serial.toUpperCase(), {
+            serial_number: serial,
+            volume: c.volume || '',
+            customer_name: c.customer_name || '',
+            status: c.status || '',
+        });
+    });
+
+    return Array.from(serialMap.values()).sort((a, b) =>
+        a.serial_number.localeCompare(b.serial_number, 'vi', { sensitivity: 'base' }),
+    );
+}
