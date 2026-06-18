@@ -227,6 +227,13 @@ const orderMatchesWarehouseScope = (order, customerWarehouseById, allowedKeys, {
     return candidates.some((candidateKey) => allowedKeys.has(candidateKey));
 };
 
+/** Đề nghị xuất máy — chỉ hiển thị ở /de-nghi-xuat-may. */
+const isDnxmOrder = (order) => {
+    const orderType = String(order?.order_type || '').trim().toUpperCase();
+    const orderCode = String(order?.order_code || '').trim().toUpperCase();
+    return orderType === 'DNXM' || orderCode.includes('DNXM');
+};
+
 const HIDDEN_ORDER_COLUMNS = new Set(['department']);
 
 /** BottleTrack ERP — không dùng `primary` app (#3b82f6) để không lệch mock */
@@ -584,10 +591,8 @@ const Orders = () => {
                 .from('orders')
                 .select('*, order_items(*)');
 
-            // Admin/Kế toán/Thủ kho: giữ DNXM; các vai trò khác xem DNXM ở trang riêng.
-            if (!isThuKhoRole && !fullOrderAccess) {
-                query = query.neq('order_type', 'DNXM');
-            }
+            // DNXM xem ở /de-nghi-xuat-may, không hiển thị trên /don-hang.
+            query = query.neq('order_type', 'DNXM').not('order_code', 'ilike', '%DNXM%');
 
             // Thủ kho: hiển thị đầy đủ đơn, không giới hạn cứng theo 1 trạng thái.
 
@@ -606,7 +611,7 @@ const Orders = () => {
 
             if (error) throw error;
 
-            let scopedOrders = data || [];
+            let scopedOrders = (data || []).filter((order) => !isDnxmOrder(order));
 
             // Nhân viên KD = ordered_by; quản lý thấy đơn của NV có Người quản lý trùng mình
             if (shouldScopeOrdersBySalesPerson(role, roleScope, department) && visibleSalesNames?.length) {
@@ -941,7 +946,9 @@ const Orders = () => {
         count: orders.filter(o => o.customer_category === c.id).length
     }));
 
-    const orderTypeOptions = ORDER_TYPES.map(t => ({
+    const orderTypeOptions = ORDER_TYPES
+        .filter((t) => t.id !== 'DNXM')
+        .map(t => ({
         id: t.id,
         label: t.label,
         count: orders.filter(o => o.order_type === t.id).length
