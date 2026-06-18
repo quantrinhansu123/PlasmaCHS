@@ -230,6 +230,7 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
     localStorage.removeItem('user_id');
     localStorage.removeItem('user_name');
     localStorage.removeItem('user_role');
+    localStorage.removeItem('user_login');
     clearPermissionsCache();
     sessionStorage.clear();
     navigate('/login', { replace: true });

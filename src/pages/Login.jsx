@@ -112,6 +112,7 @@ const Login = () => {
             localStorage.removeItem('is_authenticated');
             localStorage.removeItem('user_id');
             localStorage.removeItem('user_name');
+            localStorage.removeItem('user_login');
             localStorage.removeItem('user_role');
             localStorage.removeItem('user_department');
             clearPermissionsCache();
@@ -120,6 +121,7 @@ const Login = () => {
             storage.setItem('is_authenticated', 'true');
             storage.setItem('user_id', user.id);
             storage.setItem('user_name', user.name);
+            storage.setItem('user_login', user.username || user.name || '');
             storage.setItem('user_role', user.role);
             storage.setItem('user_department', user.department || '');
             storage.setItem('user_avatar', user.avatar_url || '');

@@ -27,6 +27,7 @@ const readAuthStorage = () => {
         storage,
         userId: storage.getItem('user_id') || localStorage.getItem('user_id'),
         userName: storage.getItem('user_name') || localStorage.getItem('user_name'),
+        userLogin: storage.getItem('user_login') || localStorage.getItem('user_login') || '',
         role: storage.getItem('user_role') || localStorage.getItem('user_role'),
         department: storage.getItem('user_department') || localStorage.getItem('user_department') || '',
         chi_nhanh: storage.getItem('user_chi_nhanh') || localStorage.getItem('user_chi_nhanh') || '',
@@ -72,6 +73,7 @@ export const clearPermissionsCache = () => {
 const buildGuestUser = (auth) => ({
     id: auth.userId || '00000000-0000-0000-0000-000000000000',
     name: auth.userName || 'Guest',
+    username: auth.userLogin || auth.userName || '',
     role: auth.role,
     department: auth.department,
     chi_nhanh: auth.chi_nhanh,
@@ -136,7 +138,10 @@ export function PermissionsProvider({ children }) {
             let nextUser = buildGuestUser(auth);
 
             if (!userError && userData) {
-                nextUser = userData;
+                nextUser = {
+                    ...userData,
+                    username: userData.username || auth.userLogin || userData.name || auth.userName,
+                };
                 nextRole = userData.role;
                 nextDept = userData.department || '';
             } else if (isAdminRole(fallbackRole) && !userData) {

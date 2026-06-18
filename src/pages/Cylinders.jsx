@@ -49,9 +49,11 @@ import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import { CYLINDER_STATUSES, CYLINDER_VOLUMES } from '../constants/machineConstants';
 import usePermissions from '../hooks/usePermissions';
-import { isAdminRole } from '../utils/accessControl';
+import { isAdminRole, isThuKhoRole, isWarehouseRole } from '../utils/accessControl';
 import {
+    canViewAllWarehouses,
     expandCylinderWarehouseSelectionKeys,
+    filterWarehousesForCurrentUser,
     getCylinderManagingWarehouseDisplayName,
 } from '../utils/orderWarehouseScope';
 import { applyCylinderKhoFilterToQuery, CYLINDER_KHO_COLUMN, cylinderKhoMatchesWarehouseRecord, isMissingKhoColumnError } from '../utils/cylinderKho';
@@ -166,7 +168,7 @@ const CATEGORY_OPTIONS = [
 ];
 
 const Cylinders = () => {
-    const { role } = usePermissions();
+    const { role, user, department, loading: permissionsLoading } = usePermissions();
     const canManageCylinders = isAdminRole(role);
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
@@ -260,17 +262,41 @@ const Cylinders = () => {
     const visibleCount = visibleColumns.length;
     const totalCount = defaultColOrder.length;
 
-    /** /binh: hiển thị tất cả bình — chỉ lọc kho khi user chọn bộ lọc thủ công. */
+    const shouldScopeByManagingWarehouse = useMemo(
+        () => Boolean(role) && !canViewAllWarehouses(role) && (isThuKhoRole(role) || isWarehouseRole(role)),
+        [role],
+    );
+
+    const managedWarehouses = useMemo(() => {
+        if (!shouldScopeByManagingWarehouse) return warehousesList;
+        return filterWarehousesForCurrentUser(warehousesList, { role, user, department });
+    }, [warehousesList, role, user, department, shouldScopeByManagingWarehouse]);
+
+    /** /binh: Admin thấy hết, NVK mặc định chỉ thấy kho mình phụ trách. */
     const activeManagingWarehouseIds = useMemo(() => {
-        if (selectedWarehouses.length === 0) return [];
-        return expandCylinderWarehouseSelectionKeys(selectedWarehouses, warehousesList);
-    }, [selectedWarehouses, warehousesList]);
+        const warehouseCatalog = shouldScopeByManagingWarehouse ? managedWarehouses : warehousesList;
+        if (selectedWarehouses.length > 0) {
+            return expandCylinderWarehouseSelectionKeys(selectedWarehouses, warehouseCatalog);
+        }
+        if (shouldScopeByManagingWarehouse) {
+            return expandCylinderWarehouseSelectionKeys(
+                managedWarehouses.map((warehouse) => warehouse.id),
+                managedWarehouses,
+            );
+        }
+        return [];
+    }, [
+        selectedWarehouses,
+        shouldScopeByManagingWarehouse,
+        managedWarehouses,
+        warehousesList,
+    ]);
 
     const warehouseAssignOptions = useMemo(() => (
-        (warehousesList || [])
+        (shouldScopeByManagingWarehouse && managedWarehouses.length > 0 ? managedWarehouses : warehousesList || [])
             .filter((warehouse) => String(warehouse?.name || '').trim())
             .map((warehouse) => ({ id: warehouse.id, name: warehouse.name }))
-    ), [warehousesList]);
+    ), [shouldScopeByManagingWarehouse, managedWarehouses, warehousesList]);
 
     const volumeAssignOptions = useMemo(() => {
         const fromCatalog = CYLINDER_VOLUMES.map((item) => ({ id: item.id, label: item.label }));
@@ -319,6 +345,7 @@ const Cylinders = () => {
     }, []);
 
     useEffect(() => {
+        if (permissionsLoading) return;
         fetchCylinders();
         fetchGlobalStats();
         fetchMetadataForCharts();
@@ -331,6 +358,7 @@ const Cylinders = () => {
         selectedCategories,
         selectedWarehouses,
         activeManagingWarehouseIds,
+        permissionsLoading,
     ]);
 
     const fetchMetadataForCharts = async () => {
@@ -486,6 +514,14 @@ const Cylinders = () => {
         setIsLoading(true);
         setFetchError('');
         try {
+            if (shouldScopeByManagingWarehouse && warehousesList.length > 0 && managedWarehouses.length === 0) {
+                setCylinders([]);
+                setTotalRecords(0);
+                setSelectedIds([]);
+                setFetchError('Tài khoản chưa được gán kho phụ trách.');
+                return;
+            }
+
             const from = (currentPage - 1) * pageSize;
             const to = from + pageSize - 1;
 
@@ -1053,7 +1089,9 @@ const Cylinders = () => {
         count: cylinders.filter(c => c.customer_name === item).length
     }));
 
-    const warehouseFilterCatalog = warehousesList;
+    const warehouseFilterCatalog = shouldScopeByManagingWarehouse && managedWarehouses.length > 0
+        ? managedWarehouses
+        : warehousesList;
 
     const warehouseOptions = warehouseFilterCatalog
         .filter((item) => String(item?.name || '').trim())

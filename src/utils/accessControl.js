@@ -1,4 +1,4 @@
-const PUBLIC_PATHS = new Set(['/ho-so', '/trang-chu', '/binh', '/binh/tao']);
+const PUBLIC_PATHS = new Set(['/ho-so', '/trang-chu']);
 
 const ROUTE_RULES = [
     { prefix: '/trang-chu', module: 'dashboard' },
@@ -123,7 +123,7 @@ export const THU_KHO_OPERATION_MODULES = [
 
 export const isWarehouseRole = (role) => {
     const r = normalizeRole(role);
-    return isThuKhoRole(role) || r.includes('warehouse') || r === 'kho';
+    return isThuKhoRole(role) || r.includes('warehouse') || r === 'kho' || r.includes('nvk');
 };
 
 export const isAccountantRole = (role) => {

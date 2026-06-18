@@ -120,6 +120,62 @@ const compactLoginKey = (value) =>
 const normalizeOcpWarehouseKey = (value) =>
     compactLoginKey(value).replace(/^occ+(?=p)/, 'oc');
 
+const ROLE_LOGIN_PREFIXES = new Set(['nvk', 'thukho', 'warehouse', 'kho', 'thu']);
+
+/** Suy mã kho từ nick đăng nhập khi bảng warehouses trống / chưa đồng bộ (vd. NVK-OCP1 → OCP1). */
+export function deriveManagingWarehouseCodesFromUser({ user, department } = {}) {
+    const storageUserName =
+        localStorage.getItem('user_name') || sessionStorage.getItem('user_name') || '';
+    const storageLogin =
+        localStorage.getItem('user_login')
+        || sessionStorage.getItem('user_login')
+        || storageUserName;
+
+    const loginCandidates = getManagerCandidateKeys(
+        user?.username,
+        user?.name,
+        storageUserName,
+        storageLogin,
+    );
+
+    const codes = new Set();
+
+    for (const candidate of loginCandidates) {
+        const nvkMatch = candidate.match(/^nvk[-_](.+)$/);
+        if (nvkMatch?.[1]) {
+            const code = normalizeOcpWarehouseKey(nvkMatch[1]);
+            if (code) codes.add(code);
+        }
+
+        candidate.split(/[-_]+/).filter(Boolean).forEach((part) => {
+            if (ROLE_LOGIN_PREFIXES.has(part)) return;
+            const code = normalizeOcpWarehouseKey(part);
+            if (code && code.length >= 2) codes.add(code);
+        });
+    }
+
+    if (codes.size === 0 && department) {
+        getManagerCandidateKeys(department, user?.chi_nhanh).forEach((token) => {
+            const code = normalizeOcpWarehouseKey(token);
+            if (code) codes.add(code);
+            if (token.includes('-')) {
+                const head = normalizeOcpWarehouseKey(token.split('-')[0]);
+                if (head) codes.add(head);
+            }
+        });
+    }
+
+    return [...codes];
+};
+
+const buildSyntheticWarehousesFromCodes = (codes = []) =>
+    codes.map((code) => ({
+        id: String(code),
+        code: String(code).toUpperCase(),
+        name: String(code).toUpperCase(),
+        manager_name: '',
+    }));
+
 /** Khớp mã/tên kho với nick đăng nhập (vd. NVK-OCP1 ↔ OCP1, OCCP1 ↔ OCP1). */
 const warehouseMatchesLoginIdentity = (warehouse, loginCandidates = []) => {
     const warehouseKeys = [warehouse?.code, warehouse?.name]
@@ -624,6 +680,13 @@ export function filterWarehousesForCurrentUser(warehouses = [], { role, user, de
         }
     }
 
+    if ((isThuKhoRole || isWarehouseRole) && scoped.length === 0) {
+        const derivedCodes = deriveManagingWarehouseCodesFromUser({ user, department });
+        if (derivedCodes.length > 0) {
+            return buildSyntheticWarehousesFromCodes(derivedCodes);
+        }
+    }
+
     return scoped;
 }
 
@@ -657,14 +720,22 @@ export function filterTransfersForCurrentUser(transferRows = [], warehouses = []
 
 export async function loadCustomerWarehouseMap(orders = []) {
     const customerIds = [...new Set(orders.map((order) => order.customer_id).filter(Boolean))];
-    if (customerIds.length === 0) return {};
+    const customerNames = [...new Set(
+        orders
+            .filter((order) => !order.customer_id && order.customer_name)
+            .map((order) => String(order.customer_name).trim())
+            .filter(Boolean),
+    )];
+
+    if (customerIds.length === 0 && customerNames.length === 0) return {};
 
     const customerWarehouseById = {};
+
     for (let i = 0; i < customerIds.length; i += 200) {
         const ids = customerIds.slice(i, i + 200);
         const { data, error } = await supabase
             .from('customers')
-            .select('id, warehouse_id')
+            .select('id, warehouse_id, name')
             .in('id', ids);
         if (error) {
             console.error('Error loading customer warehouses:', error);
@@ -672,28 +743,52 @@ export async function loadCustomerWarehouseMap(orders = []) {
         }
         (data || []).forEach((row) => {
             customerWarehouseById[row.id] = row.warehouse_id;
+            if (row.name) customerWarehouseById[row.name] = row.warehouse_id;
         });
     }
+
+    for (let i = 0; i < customerNames.length; i += 100) {
+        const names = customerNames.slice(i, i + 100);
+        const { data, error } = await supabase
+            .from('customers')
+            .select('name, warehouse_id')
+            .in('name', names);
+        if (error) {
+            console.error('Error loading customer warehouses by name:', error);
+            continue;
+        }
+        (data || []).forEach((row) => {
+            if (row.name) customerWarehouseById[row.name] = row.warehouse_id;
+        });
+    }
+
     return customerWarehouseById;
 }
 
 const orderMatchesWarehouseScope = (
     order,
     customerWarehouseById,
-    allowedKeys,
-    { customerWarehouseOnly = false, orderWarehouseOnly = false } = {},
+    scopedWarehouses,
+    warehouseList = scopedWarehouses,
+    { customerWarehouseOnly = false } = {},
 ) => {
-    const customerWarehouse = customerWarehouseById[order.customer_id];
-    let sources;
-    if (orderWarehouseOnly) {
-        sources = [order.warehouse, extractWarehouseFromNote(order.note)];
-    } else if (customerWarehouseOnly) {
-        sources = [customerWarehouse];
-    } else {
-        sources = [customerWarehouse, order.warehouse, extractWarehouseFromNote(order.note)];
+    const customerWarehouse =
+        customerWarehouseById[order.customer_id]
+        ?? customerWarehouseById[order.customer_name];
+
+    if (customerWarehouseOnly) {
+        return (scopedWarehouses || []).some((warehouse) =>
+            rowMatchesWarehouseNameStorage(customerWarehouse, warehouse, warehouseList),
+        );
     }
-    const candidates = sources.flatMap((candidate) => getWarehouseKeyVariants(candidate));
-    return candidates.some((candidateKey) => allowedKeys.has(candidateKey));
+
+    return (scopedWarehouses || []).some((warehouse) =>
+        rowMatchesManagingWarehouseRecord(order, warehouse, warehouseList, {
+            warehouseValue: order?.warehouse || extractWarehouseFromNote(order?.note),
+            customerWarehouseValue: customerWarehouse,
+            matchCustomerWarehouseByName: true,
+        }),
+    );
 };
 
 /**
@@ -709,62 +804,31 @@ export async function scopeOrdersForWarehouseAccess(
         return { orders: orders || [], customerWarehouseById };
     }
 
-    const normalizedRole = normalizeRole(role);
     const isThuKhoRole = isThuKhoRoleHelper(role);
     const isWarehouseRole = isWarehouseRoleHelper(role);
-    const storageUserName =
-        localStorage.getItem('user_name')
-        || sessionStorage.getItem('user_name')
-        || '';
 
     let scopedOrders = orders || [];
     const customerWarehouseById = await loadCustomerWarehouseMap(scopedOrders);
 
     if (isThuKhoRole || isWarehouseRole) {
-        const managerCandidates = getManagerCandidateKeys(user?.name, user?.username, storageUserName);
-
         const { data: warehousesData } = await supabase
             .from('warehouses')
-            .select('id, name, code, manager_name');
+            .select('id, name, code, manager_name, branch_office');
 
-        let scopedWarehouses = (warehousesData || []).filter((warehouse) =>
-            warehouseManagedByUser(warehouse, managerCandidates)
-        );
-
-        if (!isThuKhoRole && scopedWarehouses.length === 0) {
-            const branchTokens = getManagerCandidateKeys(department, user?.chi_nhanh);
-            if (branchTokens.length > 0) {
-                scopedWarehouses = (warehousesData || []).filter((warehouse) => {
-                    const keys = getWarehouseAliases(warehouse);
-                    return branchTokens.some((token) =>
-                        keys.some((key) => key.includes(token) || token.includes(key))
-                    );
-                });
-            }
-        }
+        const scopedWarehouses = filterWarehousesForCurrentUser(warehousesData || [], {
+            role,
+            user,
+            department,
+        });
 
         if (scopedWarehouses.length > 0) {
-            const allowedKeys = buildAllowedWarehouseKeys(scopedWarehouses);
-            // TK kho / thủ kho: khớp cột Kho trên phiếu (warehouse + note), không chỉ kho KH
-            const matchWarehouseColumn =
-                matchOrderWarehouseFields || isThuKhoRole || isWarehouseRole;
-            const scopeMatchOptions = matchWarehouseColumn
-                ? { orderWarehouseOnly: true }
-                : { customerWarehouseOnly: isThuKhoRole };
-
             scopedOrders = scopedOrders.filter((order) =>
-                orderMatchesWarehouseScope(order, customerWarehouseById, allowedKeys, scopeMatchOptions),
-            );
-        } else if (!isThuKhoRole && department) {
-            const fallbackWarehouseCode = department.includes('-')
-                ? department.split('-')[0].trim()
-                : department.trim();
-            const fallbackKeys = new Set(getWarehouseKeyVariants(fallbackWarehouseCode));
-            scopedOrders = scopedOrders.filter((order) =>
-                orderMatchesWarehouseScope(order, customerWarehouseById, fallbackKeys, {
-                    orderWarehouseOnly: isWarehouseRole,
-                    customerWarehouseOnly: false,
-                })
+                orderMatchesWarehouseScope(
+                    order,
+                    customerWarehouseById,
+                    scopedWarehouses,
+                    warehousesData || scopedWarehouses,
+                ),
             );
         } else {
             scopedOrders = [];
