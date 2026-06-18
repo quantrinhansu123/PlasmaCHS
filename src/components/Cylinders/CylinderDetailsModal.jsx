@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import { ORDER_TYPES } from '../../constants/orderConstants';
+import { getCylinderKhoValue } from '../../utils/orderWarehouseScope';
 import { supabase } from '../../supabase/config';
 
 /** Loại đơn xuất / giao khách (theo mã orderConstants + legacy THUONG + tên có dấu). Không gồm DNXM. */
@@ -103,10 +104,15 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
         if (!cylinder) return;
         setWarehouseName(cylinder.warehouses?.name || null);
         fetchAllHistory();
-        // Resolve warehouse name if not available from join
-        if (!cylinder.warehouses?.name && cylinder.warehouse_id) {
-            supabase.from('warehouses').select('name').eq('id', cylinder.warehouse_id).maybeSingle()
-                .then(({ data }) => { if (data) setWarehouseName(data.name); });
+        const storedWh = getCylinderKhoValue(cylinder);
+        if (!cylinder.warehouses?.name && storedWh) {
+            supabase.from('warehouses').select('name, code')
+                .or(`code.eq.${storedWh},name.eq.${storedWh},id.eq.${storedWh}`)
+                .maybeSingle()
+                .then(({ data }) => {
+                    if (data?.name) setWarehouseName(data.name);
+                    else setWarehouseName(storedWh);
+                });
         }
     }, [cylinder]);
 

@@ -37,6 +37,7 @@ import MobilePageHeader from '../components/layout/MobilePageHeader';
 import MobilePagination from '../components/layout/MobilePagination';
 import PageViewSwitcher from '../components/layout/PageViewSwitcher';
 import { supabase } from '../supabase/config';
+import { CYLINDER_KHO_COLUMN, getCylinderKhoValue } from '../utils/orderWarehouseScope';
 import usePermissions from '../hooks/usePermissions';
 import ColumnPicker from '../components/ui/ColumnPicker';
 import FilterDropdown from '../components/ui/FilterDropdown';
@@ -183,14 +184,14 @@ const InventoryReport = () => {
             // 3. Fetch Cylinders counts grouped by warehouse and volume
             let cylQuery = supabase
                 .from('cylinders')
-                .select('warehouse_id, volume, status')
+                .select(`${CYLINDER_KHO_COLUMN}, volume, status`)
                 .eq('status', 'sẵn sàng');
             
             if (userBranch) {
-                const { data: whs } = await supabase.from('warehouses').select('id').ilike('name', `%${userBranch}%`);
-                const whIds = whs?.map(w => w.id) || [];
-                if (whIds.length > 0) {
-                    cylQuery = cylQuery.in('warehouse_id', whIds);
+                const { data: whs } = await supabase.from('warehouses').select('id, code, name').ilike('name', `%${userBranch}%`);
+                const whKeys = (whs || []).flatMap((w) => [w.code, w.name, w.id].map((v) => String(v || '').trim()).filter(Boolean));
+                if (whKeys.length > 0) {
+                    cylQuery = cylQuery.in(CYLINDER_KHO_COLUMN, whKeys);
                 }
             }
             const { data: cylData, error: cylError } = await cylQuery;
@@ -219,8 +220,8 @@ const InventoryReport = () => {
             // Process Cylinder real-time records
             const cylRows = [];
             const cylGroups = (cylData || []).reduce((acc, c) => {
-                const key = `${c.warehouse_id}-${c.volume}`;
-                if (!acc[key]) acc[key] = { warehouse_id: c.warehouse_id, name: `Bình ${c.volume || 'khác'}`, qty: 0 };
+                const key = `${getCylinderKhoValue(c)}-${c.volume}`;
+                if (!acc[key]) acc[key] = { warehouse_id: getCylinderKhoValue(c), name: `Bình ${c.volume || 'khác'}`, qty: 0 };
                 acc[key].qty++;
                 return acc;
             }, {});

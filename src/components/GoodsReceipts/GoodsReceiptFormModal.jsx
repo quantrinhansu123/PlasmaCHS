@@ -35,7 +35,7 @@ import { PRODUCT_TYPES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
 import { notificationService } from '../../utils/notificationService';
 import usePermissions from '../../hooks/usePermissions';
-import { filterWarehousesForCurrentUser } from '../../utils/orderWarehouseScope';
+import { filterWarehousesForCurrentUser, getCylinderKhoValue } from '../../utils/orderWarehouseScope';
 
 export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, viewOnly = false, prefill = null }) {
     const { role, user, department } = usePermissions();
@@ -455,7 +455,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                     supabase.from('warehouses').select('id, code, name, manager_name, address').eq('status', 'Đang hoạt động').order('name'),
                     supabase
                         .from('cylinders')
-                        .select('serial_number, status, warehouse_id, customer_name, supplier_id, volume, suppliers(id, name)')
+                        .select('serial_number, status, kho, warehouse, customer_name, supplier_id, volume, suppliers(id, name)')
                         .order('serial_number'),
                     supabase.from('machines').select('serial_number, status, warehouse, customer_name').order('serial_number')
                 ]);
@@ -491,7 +491,7 @@ export default function GoodsReceiptFormModal({ receipt, onClose, onSuccess, vie
                     console.warn('cylinders join suppliers failed, retry without join:', cylindersRes.error);
                     const { data: cylFallback } = await supabase
                         .from('cylinders')
-                        .select('serial_number, status, warehouse_id, customer_name, supplier_id, volume')
+                        .select('serial_number, status, kho, warehouse, customer_name, supplier_id, volume')
                         .order('serial_number');
                     if (cylFallback) {
                         setCylinderOptions(cylFallback);

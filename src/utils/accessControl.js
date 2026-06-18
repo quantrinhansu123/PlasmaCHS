@@ -1,4 +1,4 @@
-const PUBLIC_PATHS = new Set(['/ho-so', '/trang-chu']);
+const PUBLIC_PATHS = new Set(['/ho-so', '/trang-chu', '/binh', '/binh/tao']);
 
 const ROUTE_RULES = [
     { prefix: '/trang-chu', module: 'dashboard' },

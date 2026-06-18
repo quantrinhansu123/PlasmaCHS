@@ -16,6 +16,7 @@ import {
     fetchCustomersByPhone,
     resolveWarehouseCodeFromCustomer,
 } from '../../utils/customerOrderMatch';
+import { buildCylinderWarehouseQueryKeys, CYLINDER_KHO_COLUMN, getCylinderKhoValue } from '../../utils/orderWarehouseScope';
 import BarcodeScanner from '../Common/BarcodeScanner';
 import OrderFormReadOnlyView from './OrderFormReadOnlyView';
 import clsx from 'clsx';
@@ -23,7 +24,7 @@ import clsx from 'clsx';
 const READY_CYLINDER_STATUS = 'sẵn sàng';
 const isReadyCylinderStatus = (status) => String(status || '').trim().toLowerCase() === READY_CYLINDER_STATUS;
 
-/** Chuẩn hoá warehouses theo giá trị orders.warehouse (thường là code VD: VP, DN). cylinders.warehouse_id là UUID FK. */
+/** Chuẩn hoá warehouses theo giá trị orders.warehouse (thường là code VD: VP, DN). cylinders.warehouse là mã kho (OCP1…). */
 function resolveWarehouseRecord(warehouseOrderValue, warehouseList = []) {
     const raw = String(warehouseOrderValue || '').trim();
     if (!raw || !warehouseList?.length) return null;
@@ -264,13 +265,14 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
             
             if (mErr) throw mErr;
 
-            // 2. Fetch Cylinder counts (warehouse_id trong DB là UUID của bảng warehouses)
+            // 2. Fetch Cylinder counts (cylinders.warehouse = mã kho)
             let cylinders = [];
-            if (whRow?.id) {
+            const cylWhKeys = buildCylinderWarehouseQueryKeys(whRow ? [whRow] : []);
+            if (cylWhKeys.length > 0) {
                 const { data: cylData, error: cErr } = await supabase
                     .from('cylinders')
                     .select('volume')
-                    .eq('warehouse_id', whRow.id)
+                    .in(CYLINDER_KHO_COLUMN, cylWhKeys)
                     .eq('status', 'sẵn sàng');
                 if (cErr) throw cErr;
                 cylinders = cylData || [];
@@ -388,12 +390,13 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
             try {
                 const whRow = resolveWarehouseRecord(formData.warehouse, warehousesList);
                 let loadedCylinders = [];
+                const cylWhKeys = buildCylinderWarehouseQueryKeys(whRow ? [whRow] : []);
 
-                if (whRow?.id) {
+                if (cylWhKeys.length > 0) {
                     const { data, error } = await supabase
                         .from('cylinders')
-                        .select('serial_number, volume, status, warehouse_id')
-                        .eq('warehouse_id', whRow.id)
+                        .select(`serial_number, volume, status, ${CYLINDER_KHO_COLUMN}`)
+                        .in(CYLINDER_KHO_COLUMN, cylWhKeys)
                         .eq('status', 's\u1eb5n s\u00e0ng')
                         .order('serial_number', { ascending: true })
                         .limit(5000);
@@ -407,8 +410,8 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                     for (const warehouseKey of warehouseCandidates) {
                         const { data, error } = await supabase
                             .from('cylinders')
-                            .select('serial_number, volume, status, warehouse_id')
-                            .eq('warehouse_id', warehouseKey)
+                            .select(`serial_number, volume, status, ${CYLINDER_KHO_COLUMN}`)
+                            .eq(CYLINDER_KHO_COLUMN, warehouseKey)
                             .eq('status', 's\u1eb5n s\u00e0ng')
                             .order('serial_number', { ascending: true })
                             .limit(5000);
@@ -1061,7 +1064,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
 
                     const { data: validCyls, error: checkErr } = await supabase
                         .from('cylinders')
-                        .select('serial_number, warehouse_id, status, volume')
+                        .select(`serial_number, ${CYLINDER_KHO_COLUMN}, status, volume`)
                         .in('serial_number', uniqueSerials);
                     
                     if (checkErr) throw checkErr;
@@ -1071,7 +1074,7 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                         throw new Error(`Sản phẩm ${item.productType}: Mã bình không tồn tại: ${missing.join(', ')}`);
                     }
                     for (const c of validCyls) {
-                        const cylWarehouseValue = String(c.warehouse_id || '').trim().toUpperCase();
+                        const cylWarehouseValue = getCylinderKhoValue(c).toUpperCase();
                         if (!selectedWarehouseCandidates.has(cylWarehouseValue)) {
                             throw new Error(`Sản phẩm ${item.productType}: Mã ${c.serial_number} không thuộc kho xuất đã chọn.`);
                         }

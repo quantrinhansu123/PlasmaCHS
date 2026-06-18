@@ -12,7 +12,7 @@ AND customer_assigned_at IS NULL;
 -- 3. Create or replace the view for cylinder aging stats
 CREATE OR REPLACE VIEW view_cylinder_aging_stats AS
 SELECT 
-    warehouse_id AS kho,
+    warehouse AS kho,
     COUNT(*) AS tong_so_binh_khach_giu,
     -- Quá hạn từ 31 đến 60 ngày
     COUNT(CASE WHEN CURRENT_DATE - customer_assigned_at::DATE > 30 AND CURRENT_DATE - customer_assigned_at::DATE <= 60 THEN 1 END) AS qua_han_30_60,
@@ -25,7 +25,7 @@ SELECT
 FROM cylinders
 WHERE status IN ('thuộc khách hàng', 'đang sử dụng')
 AND customer_assigned_at IS NOT NULL
-GROUP BY warehouse_id;
+GROUP BY warehouse;
 
 COMMENT ON VIEW view_cylinder_aging_stats IS 'Thống kê ngày tồn bình của khách: Phân nhóm quá hạn >30, >60, >90 ngày';
 
@@ -35,7 +35,7 @@ SELECT
     id,
     serial_number AS ma_binh,
     customer_name AS khach_hang,
-    warehouse_id AS kho,
+    warehouse AS kho,
     customer_assigned_at::DATE AS ngay_giao,
     CURRENT_DATE - customer_assigned_at::DATE AS so_ngay_ton
 FROM cylinders

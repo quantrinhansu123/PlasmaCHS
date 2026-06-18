@@ -340,7 +340,7 @@ const CylinderExpiryReport = () => {
                     })(),
                     net_weight: row['Khối lượng tịnh (kg)']?.toString() || '8',
                     status: cylinderStatus,
-                    warehouse_id: warehouseMap[row['Kho quản lý']?.toString()?.toLowerCase()] || null,
+                    kho: warehouseMap[row['Kho quản lý']?.toString()?.toLowerCase()] || 'OCP1',
                     customer_id: custId,
                     customer_name: custName || null,
                     expiry_date: parseExcelDate(row['Hạn kiểm định'])

@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS public.cylinders (
     error_reason TEXT,
     error_fixed_date DATE,
     error_reported_by VARCHAR(255),
-    warehouse_id TEXT,
+    warehouse TEXT,
+    kho TEXT,
     supplier_id UUID,
     customer_assigned_at TIMESTAMPTZ,
     last_log_image TEXT,
@@ -56,8 +57,20 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'cylinders' AND column_name = 'customer_id') THEN
         ALTER TABLE public.cylinders ADD COLUMN customer_id UUID;
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'cylinders' AND column_name = 'warehouse_id') THEN
-        ALTER TABLE public.cylinders ADD COLUMN warehouse_id TEXT;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'cylinders' AND column_name = 'warehouse') THEN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'cylinders' AND column_name = 'warehouse_id') THEN
+            ALTER TABLE public.cylinders RENAME COLUMN warehouse_id TO warehouse;
+        ELSE
+            ALTER TABLE public.cylinders ADD COLUMN warehouse TEXT;
+        END IF;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'cylinders' AND column_name = 'kho') THEN
+        ALTER TABLE public.cylinders ADD COLUMN kho TEXT;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'cylinders' AND column_name = 'warehouse') THEN
+        UPDATE public.cylinders
+        SET kho = COALESCE(NULLIF(trim(kho), ''), NULLIF(trim(warehouse), ''))
+        WHERE (kho IS NULL OR trim(kho) = '') AND warehouse IS NOT NULL AND trim(warehouse) <> '';
     END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'cylinders' AND column_name = 'supplier_id') THEN
         ALTER TABLE public.cylinders ADD COLUMN supplier_id UUID;
@@ -103,10 +116,26 @@ CREATE INDEX IF NOT EXISTS idx_cylinders_nha_may
     ON public.cylinders (nha_may) WHERE nha_may = TRUE;
 
 CREATE INDEX IF NOT EXISTS idx_cylinders_status ON public.cylinders (status);
-CREATE INDEX IF NOT EXISTS idx_cylinders_warehouse_id ON public.cylinders (warehouse_id);
+CREATE INDEX IF NOT EXISTS idx_cylinders_warehouse ON public.cylinders (warehouse);
+CREATE INDEX IF NOT EXISTS idx_cylinders_kho ON public.cylinders (kho);
 
--- Bật RLS (tuỳ chọn — nếu project đã có policy thì giữ nguyên)
+COMMENT ON COLUMN public.cylinders.kho IS 'Mã kho quản lý bình (VD: OCP1) — dùng trên /binh';
+
+-- Bật RLS + policy (anon key; xem add_cylinders_rls.sql)
 ALTER TABLE public.cylinders ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'cylinders' AND policyname = 'cylinders_select_all'
+    ) THEN
+        CREATE POLICY "cylinders_select_all" ON public.cylinders FOR SELECT USING (true);
+        CREATE POLICY "cylinders_insert_all" ON public.cylinders FOR INSERT WITH CHECK (true);
+        CREATE POLICY "cylinders_update_all" ON public.cylinders FOR UPDATE USING (true) WITH CHECK (true);
+        CREATE POLICY "cylinders_delete_all" ON public.cylinders FOR DELETE USING (true);
+    END IF;
+END $$;
 
 -- Kiểm tra sau khi chạy:
 SELECT

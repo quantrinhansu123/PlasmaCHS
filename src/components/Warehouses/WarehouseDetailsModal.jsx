@@ -18,6 +18,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import { supabase } from '../../supabase/config';
+import { CYLINDER_KHO_COLUMN } from '../../utils/orderWarehouseScope';
 import {
     buildCylinderWarehouseQueryKeys,
     getWarehouseNameFilterKeys,
@@ -54,7 +55,7 @@ export default function WarehouseDetailsModal({ warehouse, onClose }) {
             const { data, error } = await supabase
                 .from('cylinders')
                 .select('*')
-                .in('warehouse_id', warehouseKeys)
+                .in(CYLINDER_KHO_COLUMN, warehouseKeys)
                 .order('serial_number', { ascending: true })
                 .range(from, from + pageSize - 1);
 

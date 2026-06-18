@@ -43,19 +43,25 @@ export const fetchRolePermissions = async (roleName, departmentName = '') => {
         if (!candidates.includes(name)) candidates.push(name);
     });
 
-    for (const name of candidates) {
-        const { data, error } = await supabase
-            .from('app_roles')
-            .select('permissions, name')
-            .eq('name', name)
-            .maybeSingle();
+    if (!candidates.length) {
+        return getDefaultViewPermissions(departmentName, roleName);
+    }
 
-        if (error) {
-            console.warn('fetchRolePermissions:', name, error.message);
-            continue;
-        }
-        if (data?.permissions) {
-            return mergeWithDefaultViewPermissions(data.permissions, departmentName, roleName);
+    const { data, error } = await supabase
+        .from('app_roles')
+        .select('permissions, name')
+        .in('name', candidates);
+
+    if (error) {
+        console.warn('fetchRolePermissions:', error.message);
+        return getDefaultViewPermissions(departmentName, roleName);
+    }
+
+    const rows = data || [];
+    for (const name of candidates) {
+        const row = rows.find((item) => item.name === name);
+        if (row?.permissions) {
+            return mergeWithDefaultViewPermissions(row.permissions, departmentName, roleName);
         }
     }
 

@@ -24,36 +24,8 @@ CREATE TABLE IF NOT EXISTS cylinder_logs (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 3. Create Trigger for Automated Logging
-CREATE OR REPLACE FUNCTION func_log_cylinder_activity()
-RETURNS TRIGGER AS $$
-BEGIN
-    IF (TG_OP = 'INSERT') THEN
-        INSERT INTO cylinder_logs (cylinder_id, serial_number, warehouse_id, action, description)
-        VALUES (NEW.id, NEW.serial_number, NEW.warehouse_id, 'KHOI_TAO', 'Khởi tạo vỏ bình mới trên hệ thống');
-    ELSIF (TG_OP = 'UPDATE') THEN
-        -- Log if status OR warehouse changed
-        IF (OLD.status <> NEW.status OR OLD.warehouse_id IS DISTINCT FROM NEW.warehouse_id OR NEW.last_log_image IS NOT NULL) THEN
-            INSERT INTO cylinder_logs (cylinder_id, serial_number, warehouse_id, action, description, image_url)
-            VALUES (
-                NEW.id, 
-                NEW.serial_number, 
-                NEW.warehouse_id, 
-                'CAP_NHAT_TRANG_THAI', 
-                'Cập nhật trạng thái từ ' || OLD.status || ' sang ' || NEW.status || 
-                CASE WHEN OLD.warehouse_id IS DISTINCT FROM NEW.warehouse_id THEN ' (Chuyển kho)' ELSE '' END,
-                NEW.last_log_image
-            );
-        END IF;
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS trig_log_cylinder_changes ON cylinders;
-CREATE TRIGGER trig_log_cylinder_changes
-AFTER INSERT OR UPDATE ON cylinders
-FOR EACH ROW EXECUTE FUNCTION func_log_cylinder_activity();
+-- 3. Create Trigger for Automated Logging (dùng cột kho — xem fix_cylinder_log_trigger_kho.sql)
+-- Chạy fix_cylinder_log_trigger_kho.sql thay vì block dưới nếu đã migrate sang kho/OCP1.
 
 -- Optional: Initial log for existing cylinders
 -- INSERT INTO cylinder_logs (cylinder_id, serial_number, warehouse_id, action, description)

@@ -37,6 +37,7 @@ import {
     isReadyCylinderStatus,
     resolveWarehouseRow,
 } from '../../utils/transferWarehouseMatch';
+import { CYLINDER_KHO_COLUMN } from '../../utils/orderWarehouseScope';
 import {
     fetchCustomersByPhone,
     matchCustomerRecordForOrder,
@@ -739,8 +740,8 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
 
         const { data, error } = await supabase
             .from('cylinders')
-            .select('serial_number, status, warehouse_id, volume')
-            .eq('warehouse_id', order?.warehouse)
+            .select(`serial_number, status, ${CYLINDER_KHO_COLUMN}, volume`)
+            .eq(CYLINDER_KHO_COLUMN, order?.warehouse)
             .in('serial_number', uniqueSerials);
         if (error) return;
 

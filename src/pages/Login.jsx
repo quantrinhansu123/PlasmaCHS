@@ -17,6 +17,9 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { toast } from 'react-toastify';
+import { fetchRolePermissions } from '../utils/fetchRolePermissions';
+import { applyThuKhoOperationPermissions } from '../constants/departmentViewPermissions';
+import { clearPermissionsCache, writePermissionsCache } from '../hooks/usePermissions';
 
 /** Hình bình oxy y tế (vector) — nền chìm, màu theo currentColor */
 function OxygenCylinderWatermark({ className }) {
@@ -111,6 +114,7 @@ const Login = () => {
             localStorage.removeItem('user_name');
             localStorage.removeItem('user_role');
             localStorage.removeItem('user_department');
+            clearPermissionsCache();
             sessionStorage.clear();
 
             storage.setItem('is_authenticated', 'true');
@@ -119,6 +123,12 @@ const Login = () => {
             storage.setItem('user_role', user.role);
             storage.setItem('user_department', user.department || '');
             storage.setItem('user_avatar', user.avatar_url || '');
+
+            const rolePermissions = applyThuKhoOperationPermissions(
+                await fetchRolePermissions(user.role, user.department || ''),
+                user.role,
+            );
+            writePermissionsCache(user.role, user.department || '', rolePermissions, storage);
 
             toast.success(`Chào mừng trở lại, ${user.name}!`);
 

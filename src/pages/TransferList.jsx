@@ -35,7 +35,7 @@ import PrintOptionsModal from '../components/Orders/PrintOptionsModal';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 import { isAdminRole, isWarehouseRole } from '../utils/accessControl';
-import { filterTransfersForCurrentUser } from '../utils/orderWarehouseScope';
+import { CYLINDER_KHO_COLUMN, filterTransfersForCurrentUser, getCylinderKhoValue, resolveCylinderWarehouseValue } from '../utils/orderWarehouseScope';
 import { persistTransferHandover } from '../utils/persistTransferHandover';
 import {
     collectSerialQueryVariants,
@@ -586,8 +586,8 @@ export default function TransferList() {
                 const qty = Number(item.quantity) || 0;
                 if (!qty) continue;
 
-                const sourceWarehouseColumn = itemType.startsWith('BINH') ? 'warehouse_id' : 'warehouse';
                 const sourceTable = itemType.startsWith('BINH') ? 'cylinders' : 'machines';
+                const sourceWarehouseColumn = sourceTable === 'cylinders' ? CYLINDER_KHO_COLUMN : 'warehouse';
                 const serializedCodes = (item.codes || []).filter(Boolean);
 
                 // For cylinders/machines, trust serialized stock by codes and warehouse before inventory aggregate.
@@ -699,11 +699,12 @@ export default function TransferList() {
                     const codes = serializedCodes;
                     if (codes.length > 0) {
                         const tableName = itemType.startsWith('BINH') ? 'cylinders' : 'machines';
-                        const warehouseColumn = itemType.startsWith('BINH') ? 'warehouse_id' : 'warehouse';
+                        const warehouseColumn = tableName === 'cylinders' ? CYLINDER_KHO_COLUMN : 'warehouse';
+                        const toWhCode = resolveCylinderWarehouseValue(record.toWarehouseId, whList);
 
                         const { error: serialUpdateErr } = await supabase
                             .from(tableName)
-                            .update({ [warehouseColumn]: record.toWarehouseId })
+                            .update({ [warehouseColumn]: toWhCode })
                             .in('serial_number', codes);
                         if (serialUpdateErr) throw serialUpdateErr;
                     }

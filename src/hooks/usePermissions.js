@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react';
-import { supabase } from '../supabase/config';
+import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { fetchAppUserProfile } from '../utils/appUserQuery';
 import {
     getDataVisibilityScope,
@@ -14,99 +13,165 @@ import {
     normalizeRole,
 } from '../utils/accessControl';
 import { fetchRolePermissions } from '../utils/fetchRolePermissions';
-import { applyThuKhoOperationPermissions } from '../constants/departmentViewPermissions';
+import {
+    applyThuKhoOperationPermissions,
+    getDefaultViewPermissions,
+} from '../constants/departmentViewPermissions';
 
-export const usePermissions = () => {
-    const [permissions, setPermissions] = useState({});
-    const [role, setRole] = useState(null);
-    const [department, setDepartment] = useState(null);
-    const [user, setUser] = useState(null);
-    const [loading, setLoading] = useState(true);
+const PERMISSIONS_CACHE_KEY = 'user_permissions_cache';
 
-    useEffect(() => {
-        const fetchPermissionsAndUser = async () => {
-            try {
-                const userId = localStorage.getItem('user_id') || sessionStorage.getItem('user_id');
-                const userName = localStorage.getItem('user_name') || sessionStorage.getItem('user_name');
-                const userRoleFromStorage = localStorage.getItem('user_role') || sessionStorage.getItem('user_role');
-                const userDeptFromStorage = localStorage.getItem('user_department') || sessionStorage.getItem('user_department') || '';
+const readAuthStorage = () => {
+    const useLocal = localStorage.getItem('is_authenticated') === 'true';
+    const storage = useLocal ? localStorage : sessionStorage;
+    return {
+        storage,
+        userId: storage.getItem('user_id') || localStorage.getItem('user_id'),
+        userName: storage.getItem('user_name') || localStorage.getItem('user_name'),
+        role: storage.getItem('user_role') || localStorage.getItem('user_role'),
+        department: storage.getItem('user_department') || localStorage.getItem('user_department') || '',
+        chi_nhanh: storage.getItem('user_chi_nhanh') || localStorage.getItem('user_chi_nhanh') || '',
+    };
+};
 
-                if (!userId && !userName) {
-                    setLoading(false);
-                    return;
-                }
+const readCachedPermissions = (role, department) => {
+    try {
+        const raw = localStorage.getItem(PERMISSIONS_CACHE_KEY)
+            || sessionStorage.getItem(PERMISSIONS_CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (parsed?.role === role && parsed?.department === (department || '') && parsed?.permissions) {
+            return parsed.permissions;
+        }
+    } catch {
+        // ignore corrupt cache
+    }
+    return null;
+};
 
-                const { data: userData, error: userError } = await fetchAppUserProfile({
-                    userId: userId || undefined,
-                    userName: !userId ? userName : undefined,
-                });
+export const writePermissionsCache = (role, department, permissions, storage = localStorage) => {
+    try {
+        const payload = JSON.stringify({
+            role,
+            department: department || '',
+            permissions,
+        });
+        storage.setItem(PERMISSIONS_CACHE_KEY, payload);
+        if (storage === localStorage) {
+            sessionStorage.setItem(PERMISSIONS_CACHE_KEY, payload);
+        }
+    } catch {
+        // ignore quota errors
+    }
+};
 
-                if (!userError && userData) {
-                    setUser(userData);
-                    setRole(userData.role);
-                    setDepartment(userData.department || '');
-                    const rolePermissions = applyThuKhoOperationPermissions(
-                        await fetchRolePermissions(userData.role, userData.department || ''),
-                        userData.role,
-                    );
-                    setPermissions(rolePermissions);
-                } else {
-                    const safeRole = userRoleFromStorage || null;
+export const clearPermissionsCache = () => {
+    localStorage.removeItem(PERMISSIONS_CACHE_KEY);
+    sessionStorage.removeItem(PERMISSIONS_CACHE_KEY);
+};
 
-                    setUser({
-                        id: userId || '00000000-0000-0000-0000-000000000000',
-                        name: userName || 'Guest',
-                        role: safeRole,
-                        department: userDeptFromStorage,
-                        chi_nhanh: localStorage.getItem('user_chi_nhanh') || sessionStorage.getItem('user_chi_nhanh') || '',
-                        nguoi_quan_ly: userName,
-                    });
-                    setRole(safeRole);
-                    setDepartment(userDeptFromStorage);
-                    const rolePermissions = applyThuKhoOperationPermissions(
-                        await fetchRolePermissions(safeRole, userDeptFromStorage),
-                        safeRole,
-                    );
-                    setPermissions(rolePermissions);
+const buildGuestUser = (auth) => ({
+    id: auth.userId || '00000000-0000-0000-0000-000000000000',
+    name: auth.userName || 'Guest',
+    role: auth.role,
+    department: auth.department,
+    chi_nhanh: auth.chi_nhanh,
+    nguoi_quan_ly: auth.userName,
+});
 
-                    if (isAdminRole(safeRole) && !userData) {
-                        console.warn(
-                            'User profile could not be loaded from DB; using cached role for UI. Re-login after migrations if data looks wrong.'
-                        );
-                    }
-                }
-            } catch (err) {
-                console.error('Error fetching permissions hook:', err);
-            } finally {
-                setLoading(false);
+const resolveInitialPermissions = (role, department) => {
+    if (!role) return {};
+    const cached = readCachedPermissions(role, department);
+    if (cached) return cached;
+    return applyThuKhoOperationPermissions(
+        getDefaultViewPermissions(department, role),
+        role,
+    );
+};
+
+const PermissionsContext = createContext(null);
+
+export function PermissionsProvider({ children }) {
+    const initialAuth = useMemo(() => readAuthStorage(), []);
+    const [permissions, setPermissions] = useState(() => resolveInitialPermissions(
+        initialAuth.role,
+        initialAuth.department,
+    ));
+    const [role, setRole] = useState(initialAuth.role || null);
+    const [department, setDepartment] = useState(initialAuth.department || null);
+    const [user, setUser] = useState(() => (
+        initialAuth.role || initialAuth.userName
+            ? buildGuestUser(initialAuth)
+            : null
+    ));
+    const [loading, setLoading] = useState(() => !(initialAuth.userId || initialAuth.userName));
+
+    const refreshPermissions = useCallback(async () => {
+        const auth = readAuthStorage();
+        if (!auth.userId && !auth.userName) {
+            setUser(null);
+            setRole(null);
+            setDepartment(null);
+            setPermissions({});
+            setLoading(false);
+            return;
+        }
+
+        try {
+            const fallbackRole = auth.role;
+            const fallbackDept = auth.department;
+
+            const profilePromise = fetchAppUserProfile({
+                userId: auth.userId || undefined,
+                userName: !auth.userId ? auth.userName : undefined,
+            });
+            const permissionsPromise = fetchRolePermissions(fallbackRole, fallbackDept);
+
+            const [{ data: userData, error: userError }, rolePermissionsRaw] = await Promise.all([
+                profilePromise,
+                permissionsPromise,
+            ]);
+
+            let nextRole = fallbackRole;
+            let nextDept = fallbackDept;
+            let nextUser = buildGuestUser(auth);
+
+            if (!userError && userData) {
+                nextUser = userData;
+                nextRole = userData.role;
+                nextDept = userData.department || '';
+            } else if (isAdminRole(fallbackRole) && !userData) {
+                console.warn(
+                    'User profile could not be loaded from DB; using cached role for UI. Re-login after migrations if data looks wrong.',
+                );
             }
-        };
 
-        fetchPermissionsAndUser();
+            let rolePermissions = rolePermissionsRaw;
+            if (nextRole !== fallbackRole || nextDept !== fallbackDept) {
+                rolePermissions = await fetchRolePermissions(nextRole, nextDept);
+            }
+
+            const mergedPermissions = applyThuKhoOperationPermissions(rolePermissions, nextRole);
+
+            setUser(nextUser);
+            setRole(nextRole);
+            setDepartment(nextDept);
+            setPermissions(mergedPermissions);
+            writePermissionsCache(nextRole, nextDept, mergedPermissions, auth.storage);
+        } catch (err) {
+            console.error('Error fetching permissions:', err);
+        } finally {
+            setLoading(false);
+        }
     }, []);
 
+    useEffect(() => {
+        refreshPermissions();
+    }, [refreshPermissions]);
+
     const isCompanyRole = isAdminRole(role);
-
-    const canView = (module) =>
-        isCompanyRole || permissions[module]?.view || false;
-    const canCreate = (module) =>
-        isCompanyRole || permissions[module]?.create || false;
-    const canEdit = (module) =>
-        isCompanyRole || permissions[module]?.edit || false;
-    const canDelete = (module) =>
-        isCompanyRole || permissions[module]?.delete || false;
-
-    const canViewAllReports = () => isCompanyRole || permissions.reports?.view_all || false;
-    const canViewOwnReports = () => isCompanyRole || permissions.reports?.view_own || false;
-    const canViewWarehouseReports = () => isCompanyRole || permissions.reports?.view_warehouse || false;
-    const canViewErrorReports = () => isCompanyRole || permissions.reports?.view_errors || false;
-    const canExportReports = () => isCompanyRole || permissions.reports?.export || false;
-    const canScheduleReports = () => isCompanyRole || permissions.reports?.schedule || false;
-    const canUpdateReports = () => isCompanyRole || permissions.reports?.update || false;
-
     const roleNormalization = normalizeRole(role);
 
-    return {
+    const value = useMemo(() => ({
         permissions,
         role,
         department,
@@ -122,18 +187,29 @@ export const usePermissions = () => {
         roleScope: hasFullDataVisibility(role, department) ? 'all' : getDataVisibilityScope(role, department),
         hasFullDataVisibility: hasFullDataVisibility(role, department),
         normalizedRole: roleNormalization,
-        canView,
-        canCreate,
-        canEdit,
-        canDelete,
-        canViewAllReports,
-        canViewOwnReports,
-        canViewWarehouseReports,
-        canViewErrorReports,
-        canExportReports,
-        canScheduleReports,
-        canUpdateReports,
-    };
+        canView: (module) => isCompanyRole || permissions[module]?.view || false,
+        canCreate: (module) => isCompanyRole || permissions[module]?.create || false,
+        canEdit: (module) => isCompanyRole || permissions[module]?.edit || false,
+        canDelete: (module) => isCompanyRole || permissions[module]?.delete || false,
+        canViewAllReports: () => isCompanyRole || permissions.reports?.view_all || false,
+        canViewOwnReports: () => isCompanyRole || permissions.reports?.view_own || false,
+        canViewWarehouseReports: () => isCompanyRole || permissions.reports?.view_warehouse || false,
+        canViewErrorReports: () => isCompanyRole || permissions.reports?.view_errors || false,
+        canExportReports: () => isCompanyRole || permissions.reports?.export || false,
+        canScheduleReports: () => isCompanyRole || permissions.reports?.schedule || false,
+        canUpdateReports: () => isCompanyRole || permissions.reports?.update || false,
+        refreshPermissions,
+    }), [permissions, role, department, user, loading, isCompanyRole, roleNormalization, refreshPermissions]);
+
+    return createElement(PermissionsContext.Provider, { value }, children);
+}
+
+export const usePermissions = () => {
+    const context = useContext(PermissionsContext);
+    if (!context) {
+        throw new Error('usePermissions must be used within PermissionsProvider');
+    }
+    return context;
 };
 
 export default usePermissions;

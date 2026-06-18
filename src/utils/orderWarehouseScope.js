@@ -6,6 +6,14 @@ import {
     normalizeRole,
 } from './accessControl';
 import { buildWarehouseModalAliases, storedValueMatchesWarehouse } from './transferWarehouseMatch';
+import { getCylinderKhoValue, buildCylinderKhoScopeKeys } from './cylinderKho';
+export {
+    CYLINDER_KHO_COLUMN,
+    buildCylinderKhoScopeKeys,
+    cylinderKhoMatchesWarehouseRecord,
+    getCylinderKhoValue,
+    isMissingKhoColumnError,
+} from './cylinderKho';
 
 const normalizeText = (value) =>
     String(value || '')
@@ -131,7 +139,7 @@ const warehouseMatchesLoginIdentity = (warehouse, loginCandidates = []) => {
     });
 };
 
-/** Các giá trị có thể lưu ở machines.warehouse / cylinders.warehouse_id. */
+/** Các giá trị có thể lưu ở machines.warehouse / cylinders.warehouse. */
 export function getWarehouseStorageFilterKeys(warehouse) {
     if (!warehouse) return [];
     const raw = [
@@ -177,6 +185,14 @@ export function rowMatchesManagingWarehouseName(storedValue, warehouse) {
     return stored.toLowerCase() === name.toLowerCase();
 }
 
+export function resolveCylinderWarehouseValue(warehouseRef, warehouses = []) {
+    const ref = String(warehouseRef || '').trim();
+    if (!ref) return '';
+    const records = resolveWarehouseRecordsFromSelection([ref], warehouses);
+    if (records.length) return resolveWarehouseStorageName(records[0]);
+    return ref;
+}
+
 /** Dropdown chọn kho → danh sách tên kho để lọc warehouse_id. */
 export function resolveManagingWarehouseNamesFromSelection(selectedIds = [], warehouses = []) {
     const names = new Set();
@@ -210,9 +226,15 @@ export function getWarehouseNameFilterKeys(warehouse) {
     return [...keys];
 }
 
-/** Tên kho — giá trị lưu và lọc cylinders.warehouse_id. */
+/** Mã/tên/alias — mọi giá trị có thể còn trong cylinders.warehouse. */
 export function buildCylinderWarehouseQueryKeys(warehouses = []) {
-    return buildManagingWarehouseNameKeys(warehouses);
+    const keys = new Set();
+    (warehouses || []).forEach((warehouse) => {
+        getCylinderWarehouseFilterKeys(warehouse).forEach((key) => keys.add(key));
+        const legacyId = String(warehouse?.id || '').trim();
+        if (legacyId) keys.add(legacyId);
+    });
+    return [...keys];
 }
 
 /** @deprecated dùng buildCylinderWarehouseQueryKeys */
@@ -234,7 +256,7 @@ export function buildCylinderWarehouseNameScopeKeys(warehouses = []) {
 }
 
 /**
- * Khóa tra cứu DB cylinders.warehouse_id — tên kho.
+ * Khóa tra cứu DB cylinders.warehouse — mã/tên kho.
  */
 export function buildCylinderWarehouseReadKeys(warehouses = []) {
     return buildCylinderWarehouseQueryKeys(warehouses);
@@ -258,9 +280,9 @@ export function rowMatchesWarehouseNameStorage(storedValue, warehouse, warehouse
     );
 }
 
-/** Giá trị lưu cylinders.warehouse_id — tên kho. */
+/** Giá trị lưu cylinders.kho — mã kho (OCP1…). */
 export function resolveWarehouseStorageName(warehouse) {
-    return getManagingWarehouseNameKey(warehouse);
+    return String(warehouse?.code || warehouse?.name || '').trim();
 }
 
 /** Chuẩn hoá giá trị đã lưu (tên hoặc UUID cũ) → tên kho. */
@@ -272,13 +294,15 @@ export function resolveStoredWarehouseName(storedValue, warehouses = []) {
     return stored;
 }
 
-/** Khóa lọc cylinders.warehouse_id — chỉ tên/mã kho (không UUID). */
+/** Khóa lọc cylinders.warehouse — mã/tên kho. */
 export function getCylinderWarehouseFilterKeys(warehouse) {
     if (!warehouse) return [];
     const keys = new Set();
-    const name = getManagingWarehouseNameKey(warehouse);
-    if (name) keys.add(name);
+    const storage = resolveWarehouseStorageName(warehouse);
+    if (storage) keys.add(storage);
     getWarehouseNameFilterKeys(warehouse).forEach((key) => keys.add(key));
+    const legacyId = String(warehouse?.id || '').trim();
+    if (legacyId) keys.add(legacyId);
     return [...keys].filter(Boolean);
 }
 
@@ -286,22 +310,25 @@ export function rowMatchesCylinderWarehouseStorage(storedValue, warehouse, wareh
     const stored = String(storedValue || '').trim();
     if (!stored || !warehouse) return false;
 
-    const whId = String(warehouse?.id || '').trim();
-    if (whId && stored.toLowerCase() === whId.toLowerCase()) return true;
+    const storedLower = stored.toLowerCase();
+    if (buildCylinderKhoScopeKeys([warehouse]).some(
+        (key) => key.toLowerCase() === storedLower,
+    )) {
+        return true;
+    }
 
     const resolved = resolveStoredWarehouseName(stored, warehouses);
     if (!resolved) return false;
-    const storedLower = resolved.toLowerCase();
-    if (rowMatchesManagingWarehouseName(resolved, warehouse)) return true;
-    return getWarehouseNameFilterKeys(warehouse).some(
-        (key) => String(key).trim().toLowerCase() === storedLower,
+    const resolvedLower = resolved.toLowerCase();
+    return buildCylinderKhoScopeKeys([warehouse]).some(
+        (key) => key.toLowerCase() === resolvedLower,
     );
 }
 
 /** Khớp bình với danh sách kho đã chọn (theo tên kho). */
 export function cylinderMatchesManagingWarehouseFilter(cylinder, targetWarehouses = [], warehouses = []) {
     if (!targetWarehouses?.length) return true;
-    const stored = String(cylinder?.warehouse_id ?? '').trim();
+    const stored = getCylinderKhoValue(cylinder);
     if (!stored) return false;
     return targetWarehouses.some((wh) =>
         rowMatchesCylinderWarehouseStorage(stored, wh, warehouses),
@@ -326,7 +353,7 @@ export function cylinderMatchesManagingWarehouseNames(cylinder, targetNames = []
 /** Hiển thị Kho Quản Lý — chuẩn theo tên kho. */
 export function getCylinderManagingWarehouseDisplayName(cylinder, warehouses = []) {
     if (cylinder?.warehouses?.name) return cylinder.warehouses.name;
-    const stored = resolveStoredWarehouseName(cylinder?.warehouse_id, warehouses);
+    const stored = resolveStoredWarehouseName(getCylinderKhoValue(cylinder), warehouses);
     if (!stored) return '—';
     const matched = (warehouses || []).find((wh) =>
         rowMatchesCylinderWarehouseStorage(stored, wh, warehouses),
@@ -334,24 +361,19 @@ export function getCylinderManagingWarehouseDisplayName(cylinder, warehouses = [
     return matched?.name || stored;
 }
 
-/** Khóa lọc cylinders.warehouse_id — chỉ tên/mã kho. */
+/** Khóa lọc cylinders.kho — mã/tên kho từ danh mục Kho (manager_name trên warehouses). */
 export function buildCylinderWarehouseScopeKeys(warehouses = []) {
-    return buildCylinderWarehouseReadKeys(warehouses);
+    return buildCylinderKhoScopeKeys(warehouses);
 }
 
-/** Dropdown chọn kho trên /binh → tên kho để lọc cylinders.warehouse_id. */
+/** Dropdown chọn kho trên /binh → mã/tên cho cột cylinders.kho. */
 export function expandCylinderWarehouseSelectionKeys(selectedIds = [], warehouses = []) {
     const records = resolveWarehouseRecordsFromSelection(selectedIds, warehouses);
-    if (records.length) return buildCylinderWarehouseQueryKeys(records);
+    if (records.length) return buildCylinderKhoScopeKeys(records);
 
-    const names = resolveManagingWarehouseNamesFromSelection(selectedIds, warehouses);
-    if (names.length) return names;
-
-    return buildCylinderWarehouseQueryKeys(
-        (selectedIds || [])
-            .map((sel) => (warehouses || []).find((w) => String(w.id) === String(sel).trim()))
-            .filter(Boolean),
-    );
+    return (selectedIds || [])
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
 }
 
 /** Kiểm tra giá trị cột kho trên bản ghi có thuộc một kho trong danh mục. */
@@ -476,7 +498,7 @@ export function applyManagingWarehouseOrFilter(
 
 /** Khớp kho quản lý: cột kho trên bản ghi hoặc kho phụ trách KH. */
 export function rowMatchesManagingWarehouseRecord(record, warehouse, warehouseList, options = {}) {
-    const warehouseValue = options.warehouseValue ?? record?.warehouse_id ?? record?.warehouse;
+    const warehouseValue = options.warehouseValue ?? getCylinderKhoValue(record);
     if (rowMatchesWarehouseStorage(warehouseValue, warehouse, warehouseList)) {
         return true;
     }

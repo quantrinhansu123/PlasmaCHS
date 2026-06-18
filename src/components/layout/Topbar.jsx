@@ -23,7 +23,7 @@ import { clsx } from 'clsx';
 
 import { sidebarMenu, extraMenuItems } from '../../constants/sidebarMenu';
 import { actionModuleGroups } from '../../constants/actionModuleData';
-import usePermissions from '../../hooks/usePermissions';
+import usePermissions, { clearPermissionsCache } from '../../hooks/usePermissions';
 import { isThuKhoRole, isWarehouseRole } from '../../utils/accessControl';
 import { canViewAllWarehouses, filterWarehousesForCurrentUser } from '../../utils/orderWarehouseScope';
 
@@ -230,6 +230,7 @@ function Topbar({ sidebarOpen, setSidebarOpen }) {
     localStorage.removeItem('user_id');
     localStorage.removeItem('user_name');
     localStorage.removeItem('user_role');
+    clearPermissionsCache();
     sessionStorage.clear();
     navigate('/login', { replace: true });
   };

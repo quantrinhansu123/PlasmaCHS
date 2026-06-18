@@ -1,4 +1,5 @@
 import { PRODUCT_TYPES } from '../constants/orderConstants';
+import { CYLINDER_KHO_COLUMN } from './orderWarehouseScope';
 import { resolveWarehouseRow, warehouseStorageKeys } from './transferWarehouseMatch';
 
 /** Các khóa warehouse_id có thể lưu trong bảng inventory (mã, UUID, tên). */
@@ -108,14 +109,17 @@ export async function ensureInventoryLineFromCylinders(
     { warehouseRef, warehouseList = [], productType },
 ) {
     const whRow = resolveWarehouseRow(warehouseRef, warehouseList);
-    const cylWarehouseIds = [...new Set([whRow?.id, warehouseRef].filter(Boolean))];
+    const cylWarehouseKeys = [...new Set([
+        ...(whRow ? [whRow.code, whRow.name, whRow.id].map((v) => String(v || '').trim()).filter(Boolean) : []),
+        String(warehouseRef || '').trim(),
+    ].filter(Boolean))];
 
     let readyCount = 0;
-    for (const whId of cylWarehouseIds) {
+    if (cylWarehouseKeys.length > 0) {
         const { data: cylinders, error } = await supabaseClient
             .from('cylinders')
-            .select('id, volume, status, warehouse_id')
-            .eq('warehouse_id', whId);
+            .select(`id, volume, status, ${CYLINDER_KHO_COLUMN}`)
+            .in(CYLINDER_KHO_COLUMN, cylWarehouseKeys);
 
         if (error) throw error;
 

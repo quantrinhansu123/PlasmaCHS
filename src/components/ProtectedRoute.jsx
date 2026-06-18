@@ -13,7 +13,7 @@ function ProtectedRoute({ children }) {
         return <Navigate to="/login" state={{ from: location }} replace />;
     }
 
-    if (loading) {
+    if (loading && !role) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground">
                 <div className="flex flex-col items-center gap-3">

@@ -49,16 +49,12 @@ import FilterDropdown from '../components/ui/FilterDropdown';
 import MobileFilterSheet from '../components/ui/MobileFilterSheet';
 import { CYLINDER_STATUSES, CYLINDER_VOLUMES } from '../constants/machineConstants';
 import usePermissions from '../hooks/usePermissions';
-import { isAdminRole, isThuKhoRole, isWarehouseRole } from '../utils/accessControl';
+import { isAdminRole } from '../utils/accessControl';
 import {
-    buildCylinderWarehouseScopeKeys,
-    canViewAllWarehouses,
-    cylinderMatchesManagingWarehouseFilter,
     expandCylinderWarehouseSelectionKeys,
-    filterWarehousesForCurrentUser,
     getCylinderManagingWarehouseDisplayName,
-    resolveWarehouseRecordsFromSelection,
 } from '../utils/orderWarehouseScope';
+import { applyCylinderKhoFilterToQuery, CYLINDER_KHO_COLUMN, cylinderKhoMatchesWarehouseRecord, isMissingKhoColumnError } from '../utils/cylinderKho';
 import { supabase } from '../supabase/config';
 
 ChartJS.register(
@@ -170,7 +166,7 @@ const CATEGORY_OPTIONS = [
 ];
 
 const Cylinders = () => {
-    const { role, user, department, loading: permissionsLoading } = usePermissions();
+    const { role } = usePermissions();
     const canManageCylinders = isAdminRole(role);
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
@@ -179,7 +175,7 @@ const Cylinders = () => {
     const [selectedIds, setSelectedIds] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [cylinders, setCylinders] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
+    const [isLoading, setIsLoading] = useState(false);
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [isQCModalOpen, setIsQCModalOpen] = useState(false);
     const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
@@ -199,8 +195,6 @@ const Cylinders = () => {
     /** id → name: dùng khi join suppliers trên cylinders trả null (RLS/legacy) */
     const [supplierIdToName, setSupplierIdToName] = useState({});
 
-    const NO_MANAGING_WAREHOUSE_MATCH = '__NO_MANAGING_WAREHOUSE__';
-
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(50);
@@ -212,6 +206,7 @@ const Cylinders = () => {
         total: 0
     });
     const [allMetadata, setAllMetadata] = useState([]); // For stats and charts
+    const [fetchError, setFetchError] = useState('');
 
     const [showMobileFilter, setShowMobileFilter] = useState(false);
     const [mobileFilterClosing, setMobileFilterClosing] = useState(false);
@@ -265,25 +260,17 @@ const Cylinders = () => {
     const visibleCount = visibleColumns.length;
     const totalCount = defaultColOrder.length;
 
-    /** NVK / Thủ kho: chỉ xem bình có Kho Quản Lý trùng tên kho mình quản lý. */
-    const shouldScopeByManagingWarehouse = useMemo(
-        () => Boolean(role) && !canViewAllWarehouses(role) && (isThuKhoRole(role) || isWarehouseRole(role)),
-        [role],
-    );
+    /** /binh: hiển thị tất cả bình — chỉ lọc kho khi user chọn bộ lọc thủ công. */
+    const activeManagingWarehouseIds = useMemo(() => {
+        if (selectedWarehouses.length === 0) return [];
+        return expandCylinderWarehouseSelectionKeys(selectedWarehouses, warehousesList);
+    }, [selectedWarehouses, warehousesList]);
 
-    const managedWarehouses = useMemo(() => {
-        if (!shouldScopeByManagingWarehouse) return warehousesList;
-        return filterWarehousesForCurrentUser(warehousesList, { role, user, department });
-    }, [warehousesList, role, user, department, shouldScopeByManagingWarehouse]);
-
-    const warehouseAssignOptions = useMemo(() => {
-        const catalog = (shouldScopeByManagingWarehouse && managedWarehouses.length > 0)
-            ? managedWarehouses
-            : warehousesList;
-        return (catalog || [])
+    const warehouseAssignOptions = useMemo(() => (
+        (warehousesList || [])
             .filter((warehouse) => String(warehouse?.name || '').trim())
-            .map((warehouse) => ({ id: warehouse.id, name: warehouse.name }));
-    }, [shouldScopeByManagingWarehouse, managedWarehouses, warehousesList]);
+            .map((warehouse) => ({ id: warehouse.id, name: warehouse.name }))
+    ), [warehousesList]);
 
     const volumeAssignOptions = useMemo(() => {
         const fromCatalog = CYLINDER_VOLUMES.map((item) => ({ id: item.id, label: item.label }));
@@ -294,54 +281,12 @@ const Cylinders = () => {
         return [...fromCatalog, ...extras];
     }, [uniqueVolumes]);
 
-    const managingWarehouseKeys = useMemo(() => {
-        if (!shouldScopeByManagingWarehouse) return [];
-        if (!managedWarehouses.length) return [NO_MANAGING_WAREHOUSE_MATCH];
-        return buildCylinderWarehouseScopeKeys(managedWarehouses);
-    }, [managedWarehouses, shouldScopeByManagingWarehouse]);
-
-    const activeManagingWarehouseIds = useMemo(() => {
-        const warehouseCatalog = shouldScopeByManagingWarehouse ? managedWarehouses : warehousesList;
-        if (selectedWarehouses.length > 0) {
-            return expandCylinderWarehouseSelectionKeys(selectedWarehouses, warehouseCatalog);
-        }
-        if (shouldScopeByManagingWarehouse) {
-            return managingWarehouseKeys;
-        }
-        return [];
-    }, [
-        selectedWarehouses,
-        shouldScopeByManagingWarehouse,
-        managedWarehouses,
-        warehousesList,
-        managingWarehouseKeys,
-    ]);
-
-    const activeManagingWarehouseRecords = useMemo(() => {
-        const warehouseCatalog = shouldScopeByManagingWarehouse ? managedWarehouses : warehousesList;
-        if (selectedWarehouses.length > 0) {
-            return resolveWarehouseRecordsFromSelection(selectedWarehouses, warehouseCatalog);
-        }
-        if (shouldScopeByManagingWarehouse) {
-            return managedWarehouses;
-        }
-        return [];
-    }, [
-        selectedWarehouses,
-        shouldScopeByManagingWarehouse,
-        managedWarehouses,
-        warehousesList,
-    ]);
-
     const applyWarehouseFiltersToQuery = (query) => {
         const nameKeys = activeManagingWarehouseIds
             .map((key) => String(key || '').trim())
             .filter(Boolean);
         if (nameKeys.length > 0) {
-            return query.in('warehouse_id', nameKeys);
-        }
-        if (activeManagingWarehouseIds.length > 0) {
-            return query.eq('warehouse_id', '__no_warehouse_match__');
+            return applyCylinderKhoFilterToQuery(query, nameKeys);
         }
         return query;
     };
@@ -371,11 +316,9 @@ const Cylinders = () => {
 
     useEffect(() => {
         fetchFilterOptions();
-    }, [role, user, department]);
+    }, []);
 
     useEffect(() => {
-        if (permissionsLoading) return;
-        if (shouldScopeByManagingWarehouse && warehousesList.length === 0) return;
         fetchCylinders();
         fetchGlobalStats();
         fetchMetadataForCharts();
@@ -388,20 +331,13 @@ const Cylinders = () => {
         selectedCategories,
         selectedWarehouses,
         activeManagingWarehouseIds,
-        managedWarehouses,
-        shouldScopeByManagingWarehouse,
-        warehousesList,
-        permissionsLoading,
-        role,
-        user,
-        department,
     ]);
 
     const fetchMetadataForCharts = async () => {
         try {
             let query = supabase
                 .from('cylinders')
-                .select('status, volume, customer_name, category, warehouse_id');
+                .select(`status, volume, customer_name, category, ${CYLINDER_KHO_COLUMN}`);
 
             if (searchTerm) {
                 query = query.or(`serial_number.ilike.%${searchTerm}%,volume.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%`);
@@ -422,11 +358,9 @@ const Cylinders = () => {
 
     const fetchFilterOptions = async () => {
         try {
-            // Lấy danh sách volume (thể tích) trực tiếp không qua RPC để tránh báo lỗi đỏ trong console
             const { data: volData } = await supabase.from('cylinders').select('volume').not('volume', 'is', null);
             if (volData) setUniqueVolumes([...new Set(volData.map(d => d.volume))]);
 
-            // Fetch unique customers
             const { data: custData } = await supabase.from('customers').select('name').order('name');
             if (custData) {
                 setUniqueCustomers(custData.map((c) => c.name).filter(Boolean));
@@ -550,33 +484,82 @@ const Cylinders = () => {
 
     const fetchCylinders = async () => {
         setIsLoading(true);
+        setFetchError('');
         try {
-            if (shouldScopeByManagingWarehouse && warehousesList.length > 0 && managedWarehouses.length === 0) {
-                setCylinders([]);
-                setTotalRecords(0);
-                setSelectedIds([]);
-                return;
-            }
-
-            let query = supabase
-                .from('cylinders')
-                .select('*, warehouses(id, name), customers(name), suppliers(id, name)', { count: 'exact' });
-
-            query = applyCylinderListFiltersToQuery(query);
-
             const from = (currentPage - 1) * pageSize;
             const to = from + pageSize - 1;
 
-            const { data, count, error } = await query
-                .order('created_at', { ascending: false })
-                .range(from, to);
+            const buildQuery = (warehouseFilterMode = 'default') => {
+                let query = supabase
+                    .from('cylinders')
+                    .select('*', { count: 'exact' });
 
-            if (error && error.code !== '42P01') throw error;
+                if (searchTerm) {
+                    query = query.or(`serial_number.ilike.%${searchTerm}%,volume.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%`);
+                }
+                if (selectedStatuses.length > 0) query = query.in('status', selectedStatuses);
+                if (selectedVolumes.length > 0) query = query.in('volume', selectedVolumes);
+                if (selectedCustomers.length > 0) query = query.in('customer_name', selectedCustomers);
+                if (selectedCategories.length > 0) query = query.in('category', selectedCategories);
+
+                const nameKeys = activeManagingWarehouseIds
+                    .map((key) => String(key || '').trim())
+                    .filter(Boolean);
+                if (nameKeys.length > 0) {
+                    const filterOptions = warehouseFilterMode === 'warehouse'
+                        ? { column: 'warehouse' }
+                        : warehouseFilterMode === 'kho'
+                            ? { column: 'kho', legacyWarehouse: false }
+                            : {};
+                    query = applyCylinderKhoFilterToQuery(query, nameKeys, filterOptions);
+                }
+
+                return query
+                    .order('created_at', { ascending: false })
+                    .range(from, to);
+            };
+
+            let { data, count, error } = await buildQuery('default');
+
+            if (error && isMissingKhoColumnError(error)) {
+                ({ data, count, error } = await buildQuery('warehouse'));
+                if (!error) {
+                    setFetchError('Cột kho chưa có trên Supabase. Đang dùng cột warehouse tạm — chạy fix_cylinder_log_trigger_kho.sql.');
+                }
+            }
+
+            if (!error && (count ?? 0) === 0 && activeManagingWarehouseIds.length > 0) {
+                const retry = await buildQuery('warehouse');
+                if (!retry.error && (retry.count ?? 0) > 0) {
+                    data = retry.data;
+                    count = retry.count;
+                    error = retry.error;
+                    setFetchError('Dữ liệu kho chưa đồng bộ sang cột kho. Chạy fix_cylinder_log_trigger_kho.sql trên Supabase.');
+                }
+            }
+
+            if (error) throw error;
+
             setCylinders(data || []);
             setTotalRecords(count ?? data?.length ?? 0);
-            setSelectedIds([]); // Clear selection on refresh
+            setSelectedIds([]);
+
+            if (!error && (count ?? 0) === 0
+                && selectedStatuses.length === 0
+                && selectedVolumes.length === 0
+                && selectedCustomers.length === 0
+                && selectedCategories.length === 0
+                && selectedWarehouses.length === 0) {
+                setFetchError((prev) => prev || 'Không có bình trong DB hoặc RLS đang chặn. Chạy add_cylinders_rls.sql và fix_cylinder_log_trigger_kho.sql.');
+            }
         } catch (error) {
             console.error('Error fetching cylinders:', error);
+            setCylinders([]);
+            setTotalRecords(0);
+            setFetchError(
+                error?.message
+                || 'Không tải được danh sách bình. Kiểm tra bảng cylinders và cột kho trên Supabase.',
+            );
         } finally {
             setIsLoading(false);
         }
@@ -691,11 +674,11 @@ const Cylinders = () => {
             (item) => String(item.id) === String(bulkAssignWarehouseId)
                 || String(item.name) === String(bulkAssignWarehouseId),
         );
-        const warehouseName = warehouse?.name || bulkAssignWarehouseId || 'kho đã chọn';
+        const warehouseCode = warehouse?.code || warehouse?.name || bulkAssignWarehouseId || 'OCP1';
         const scopeLabel = hasActiveFilters ? 'theo bộ lọc hiện tại' : 'trong danh sách';
 
         if (!window.confirm(
-            `Gán kho "${warehouseName}" cho tất cả bình ${scopeLabel}?\n\n(Bỏ qua bình đã trả NCC)`,
+            `Gán kho "${warehouseCode}" cho tất cả bình ${scopeLabel}?\n\n(Bỏ qua bình đã trả NCC)`,
         )) {
             return;
         }
@@ -723,12 +706,12 @@ const Cylinders = () => {
                 const batch = ids.slice(i, i + BATCH_SIZE);
                 const { error } = await supabase
                     .from('cylinders')
-                    .update({ warehouse_id: warehouseName, updated_at: updatedAt })
+                    .update({ [CYLINDER_KHO_COLUMN]: warehouseCode, updated_at: updatedAt })
                     .in('id', batch);
                 if (error) throw error;
             }
 
-            alert(`Đã gán kho "${warehouseName}" cho ${ids.length} bình.`);
+            alert(`Đã gán kho "${warehouseCode}" cho ${ids.length} bình.`);
             fetchCylinders();
             fetchGlobalStats();
             fetchMetadataForCharts();
@@ -831,8 +814,8 @@ const Cylinders = () => {
     };
 
     const handleViewWarehouse = (cylinder) => {
-        const warehouseRef = cylinder?.warehouses?.name || cylinder?.warehouse_id;
-        if (!warehouseRef) {
+        const warehouseRef = getCylinderManagingWarehouseDisplayName(cylinder, warehousesList);
+        if (!warehouseRef || warehouseRef === '—') {
             alert('Bình này chưa có kho quản lý để xem chi tiết.');
             return;
         }
@@ -879,7 +862,7 @@ const Cylinders = () => {
                 'Loại quai': 'Có quai',
                 'Phân loại (BV/TM)': 'BV',
                 'Khối lượng tịnh (kg)': '8',
-                'Kho quản lý': managedWarehouses[0]?.name || warehousesList[0]?.name || 'Kho tổng',
+                'Kho quản lý': warehousesList[0]?.name || 'Kho tổng',
                 'Trạng thái': 'sẵn sàng',
                 'Hạn kiểm định': '2026-12-31',
                 'Khách hàng': 'Phòng khám đa khoa VH',
@@ -954,7 +937,7 @@ const Cylinders = () => {
                         category: row['Phân loại (BV/TM)']?.toString() || 'BV',
                         net_weight: row['Khối lượng tịnh (kg)']?.toString() || '8',
                         status: cylinderStatus,
-                        warehouse_id: warehouseMap[row['Kho quản lý']?.toString()?.toLowerCase()] || null,
+                        kho: warehouseMap[row['Kho quản lý']?.toString()?.toLowerCase()] || 'OCP1',
                         customer_id: custId,
                         customer_name: custName || null,
                         expiry_date: row['Hạn kiểm định']?.toString() || null
@@ -1006,7 +989,8 @@ const Cylinders = () => {
     };
 
     const getCurrentLocation = (cylinder) => {
-        const warehouseName = cylinder?.warehouses?.name;
+        const resolvedWarehouse = getCylinderManagingWarehouseDisplayName(cylinder, warehousesList);
+        const warehouseName = resolvedWarehouse && resolvedWarehouse !== '—' ? resolvedWarehouse : '';
         const customerName = cylinder?.customers?.name || cylinder?.customer_name?.split(' / ')[0];
         const customerDepartment = cylinder?.customer_name?.split(' / ')[1];
 
@@ -1029,12 +1013,7 @@ const Cylinders = () => {
         return '—';
     };
 
-    const filteredCylinders = useMemo(() => {
-        if (!activeManagingWarehouseRecords.length) return cylinders;
-        return cylinders.filter((cylinder) =>
-            cylinderMatchesManagingWarehouseFilter(cylinder, activeManagingWarehouseRecords, warehousesList),
-        );
-    }, [cylinders, activeManagingWarehouseRecords, warehousesList]);
+    const filteredCylinders = cylinders;
 
     const filteredCylindersCount = totalRecords;
     const readyCount = stats.ready;
@@ -1074,9 +1053,7 @@ const Cylinders = () => {
         count: cylinders.filter(c => c.customer_name === item).length
     }));
 
-    const warehouseFilterCatalog = (shouldScopeByManagingWarehouse && managedWarehouses.length > 0)
-        ? managedWarehouses
-        : warehousesList;
+    const warehouseFilterCatalog = warehousesList;
 
     const warehouseOptions = warehouseFilterCatalog
         .filter((item) => String(item?.name || '').trim())
@@ -1084,7 +1061,7 @@ const Cylinders = () => {
             id: item.id,
             label: item.name,
             count: allMetadata.filter((c) =>
-                cylinderMatchesManagingWarehouseFilter(c, [item], warehousesList),
+                cylinderKhoMatchesWarehouseRecord(c, item),
             ).length,
         }));
 
@@ -1284,7 +1261,7 @@ const Cylinders = () => {
         
         // 3. Warehouse / Ready / Empty / Repair Logic: Show Warehouse Name
         if (['sẵn sàng', 'bình rỗng', 'chờ nạp', 'hỏng'].includes(status) || !status) {
-            return cylinder.warehouses?.name || '—';
+            return getCylinderManagingWarehouseDisplayName(cylinder, warehousesList);
         }
 
         if (status === 'đã trả ncc') {
@@ -1292,7 +1269,8 @@ const Cylinders = () => {
         }
 
         // Fallback
-        return cylinder.customer_name?.split(' / ')[1] || cylinder.warehouses?.name || '—';
+        return cylinder.customer_name?.split(' / ')[1]
+            || getCylinderManagingWarehouseDisplayName(cylinder, warehousesList);
     };
 
     const cylinderKanbanColumns = useMemo(() => {
@@ -1579,7 +1557,7 @@ const Cylinders = () => {
                                                     >
                                                         <option value="">-- Chọn kho --</option>
                                                         {warehouseAssignOptions.map((warehouse) => (
-                                                            <option key={warehouse.id} value={warehouse.name}>
+                                                            <option key={warehouse.id} value={warehouse.code || warehouse.name}>
                                                                 {warehouse.name}
                                                             </option>
                                                         ))}
@@ -1909,7 +1887,7 @@ const Cylinders = () => {
                                         >
                                             <option value="">-- Chọn kho --</option>
                                             {warehouseAssignOptions.map((warehouse) => (
-                                                <option key={warehouse.id} value={warehouse.name}>
+                                                <option key={warehouse.id} value={warehouse.code || warehouse.name}>
                                                     {warehouse.name}
                                                 </option>
                                             ))}
@@ -2010,7 +1988,20 @@ const Cylinders = () => {
                                 ) : filteredCylinders.length === 0 ? (
                                     <tr>
                                         <td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center text-muted-foreground">
-                                            Không tìm thấy bình nào
+                                            {fetchError ? (
+                                                <span className="text-rose-600">{fetchError}</span>
+                                            ) : hasActiveFilters ? (
+                                                'Không tìm thấy kết quả phù hợp'
+                                            ) : (
+                                                <>
+                                                    Không có bình trong cơ sở dữ liệu.
+                                                    <br />
+                                                    <span className="text-[12px]">
+                                                        Chạy <code className="text-foreground">add_cylinders_rls.sql</code> và{' '}
+                                                        <code className="text-foreground">fix_cylinder_log_trigger_kho.sql</code> trên Supabase.
+                                                    </span>
+                                                </>
+                                            )}
                                         </td>
                                     </tr>
                                 ) : filteredCylinders.map((cylinder) => (

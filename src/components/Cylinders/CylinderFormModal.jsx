@@ -11,7 +11,7 @@ import {
 } from '../../constants/machineConstants';
 import { toast } from 'react-toastify';
 import usePermissions from '../../hooks/usePermissions';
-import { filterWarehousesForCurrentUser } from '../../utils/orderWarehouseScope';
+import { CYLINDER_KHO_COLUMN, filterWarehousesForCurrentUser, getCylinderKhoValue } from '../../utils/orderWarehouseScope';
 import { supabase } from '../../supabase/config';
 import BarcodeScanner from '../Common/BarcodeScanner';
 import { SearchableSelect } from '../ui/SearchableSelect';
@@ -44,7 +44,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
         handle_type: 'Có quai',
         customer_id: '',
         department: '',
-        warehouse_id: '',
+        warehouse: '',
         supplier_id: '',
         cylinder_code: '',
         expiry_date: ''
@@ -60,24 +60,31 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
     const resolveWarehouseSelectValue = useCallback((storedValue, warehouses = []) => {
         const stored = String(storedValue || '').trim();
         if (!stored) return '';
+        const byCode = (warehouses || []).find(
+            (w) => String(w.code || '').trim().toLowerCase() === stored.toLowerCase(),
+        );
+        if (byCode?.code) return String(byCode.code).trim();
         const byName = (warehouses || []).find(
             (w) => String(w.name || '').trim().toLowerCase() === stored.toLowerCase(),
         );
+        if (byName?.code) return String(byName.code).trim();
         if (byName?.name) return String(byName.name).trim();
         const byId = (warehouses || []).find((w) => String(w.id) === stored);
-        if (byId?.name) return String(byId.name).trim();
+        if (byId?.code) return String(byId.code).trim();
         return stored;
     }, []);
 
     const warehouseSelectOptions = useMemo(() => {
         const options = warehousesList.map((w) => ({
-            value: String(w.name || '').trim(),
+            value: String(w.code || w.name || '').trim(),
             label: w.name,
         }));
-        const current = String(formData.warehouse_id || '').trim();
+        const current = String(formData.warehouse || '').trim();
         if (current && !options.some((opt) => opt.value === current)) {
             const legacy = warehousesList.find(
-                (w) => String(w.id) === current || String(w.name || '').trim().toLowerCase() === current.toLowerCase(),
+                (w) => String(w.id) === current
+                    || String(w.code || '').trim().toLowerCase() === current.toLowerCase()
+                    || String(w.name || '').trim().toLowerCase() === current.toLowerCase(),
             );
             options.unshift({
                 value: current,
@@ -85,7 +92,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             });
         }
         return options;
-    }, [warehousesList, formData.warehouse_id]);
+    }, [warehousesList, formData.warehouse]);
 
     useEffect(() => {
         const fetchCustomers = async () => {
@@ -156,10 +163,12 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             user,
             department,
         });
-        const defaultWarehouseName = managed[0]?.name ? String(managed[0].name).trim() : '';
-        if (!defaultWarehouseName) return;
-        setFormData((prev) => (!prev.warehouse_id && prev.status !== 'đã trả ncc')
-            ? { ...prev, warehouse_id: defaultWarehouseName }
+        const defaultWarehouseCode = managed[0]?.code
+            ? String(managed[0].code).trim()
+            : (managed[0]?.name ? String(managed[0].name).trim() : 'OCP1');
+        if (!defaultWarehouseCode) return;
+        setFormData((prev) => (!prev.warehouse && prev.status !== 'đã trả ncc')
+            ? { ...prev, warehouse: defaultWarehouseCode }
             : prev);
     }, [isEdit, warehousesList, role, user, department]);
 
@@ -184,7 +193,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             handle_type: findMatchingId(HANDLE_TYPES, cylinder.handle_type, 'Có quai'),
             customer_id: cylinder.customer_id || '',
             department: cDept || '',
-            warehouse_id: resolveWarehouseSelectValue(cylinder.warehouse_id, warehousesList),
+            warehouse: resolveWarehouseSelectValue(getCylinderKhoValue(cylinder), warehousesList),
             supplier_id: cylinder.supplier_id || '',
             cylinder_code: cylinder.cylinder_code || '',
             expiry_date: cylinder.expiry_date || ''
@@ -197,7 +206,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             const next = { ...prev, [name]: value };
             if (name === 'status') {
                 if (value === 'đã trả ncc') {
-                    next.warehouse_id = '';
+                    next.warehouse = '';
                     next.customer_id = '';
                     next.department = '';
                 } else if (prev.status === 'đã trả ncc') {
@@ -206,7 +215,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             }
             if (name === 'supplier_id' && value) {
                 next.status = 'đã trả ncc';
-                next.warehouse_id = '';
+                next.warehouse = '';
                 next.customer_id = '';
                 next.department = '';
             }
@@ -264,7 +273,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                 setErrorMsg('Vui lòng chọn NCC nhận vỏ (danh sách từ mục NCC).');
                 return;
             }
-        } else if (!formData.warehouse_id) {
+        } else if (!formData.warehouse) {
             setErrorMsg('Vui lòng chọn Kho quản lý.');
             return;
         }
@@ -294,21 +303,23 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             payload.cylinder_code = payload.cylinder_code || null;
             if (payload.status === 'đã trả ncc') {
                 payload.supplier_id = String(payload.supplier_id).trim();
-                payload.warehouse_id = null;
+                payload[CYLINDER_KHO_COLUMN] = null;
                 payload.customer_id = null;
                 payload.customer_name = '';
             } else {
                 payload.supplier_id = null;
                 const selectedWarehouse = warehousesList.find(
-                    (w) => String(w.id) === String(payload.warehouse_id)
-                        || String(w.name || '').trim().toLowerCase() === String(payload.warehouse_id || '').trim().toLowerCase(),
+                    (w) => String(w.id) === String(payload.warehouse)
+                        || String(w.code || '').trim().toLowerCase() === String(payload.warehouse || '').trim().toLowerCase()
+                        || String(w.name || '').trim().toLowerCase() === String(payload.warehouse || '').trim().toLowerCase(),
                 );
-                payload.warehouse_id = selectedWarehouse?.name
-                    ? String(selectedWarehouse.name).trim()
-                    : (payload.warehouse_id && String(payload.warehouse_id).trim()
-                        ? String(payload.warehouse_id).trim()
-                        : null);
+                payload[CYLINDER_KHO_COLUMN] = selectedWarehouse?.code
+                    ? String(selectedWarehouse.code).trim()
+                    : (payload.warehouse && String(payload.warehouse).trim()
+                        ? String(payload.warehouse).trim()
+                        : 'OCP1');
             }
+            delete payload.warehouse;
             // Remove local only field
             delete payload.department;
 
@@ -509,8 +520,8 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
                                 </label>
                                 <SearchableSelect
                                     options={warehouseSelectOptions}
-                                    value={formData.warehouse_id || ''}
-                                    onValueChange={(value) => setFormData((prev) => ({ ...prev, warehouse_id: value }))}
+                                    value={formData.warehouse || ''}
+                                    onValueChange={(value) => setFormData((prev) => ({ ...prev, warehouse: value }))}
                                     placeholder="-- Chọn kho --"
                                     searchPlaceholder="Tìm kho..."
                                     emptyMessage={warehousesList.length === 0 ? 'Đang tải hoặc chưa có kho.' : 'Không tìm thấy kho.'}

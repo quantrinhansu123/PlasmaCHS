@@ -7,6 +7,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import ScrollToTop from './components/ScrollToTop';
 import GlobalNotifications from './components/layout/GlobalNotifications';
 import MainLayout from './components/layout/MainLayout';
+import { PermissionsProvider } from './hooks/usePermissions';
 
 
 import Customers from './pages/Customers';
@@ -93,11 +94,12 @@ function App() {
   console.log('📱 Simple App baseline rendering...');
   return (
     <Router>
-      <ScrollToTop />
-      <GlobalNotifications />
-      <div className="min-h-screen bg-background">
-        <ErrorBoundary>
-          <Routes>
+      <PermissionsProvider>
+        <ScrollToTop />
+        <GlobalNotifications />
+        <div className="min-h-screen bg-background">
+          <ErrorBoundary>
+            <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<Navigate to="/trang-chu" replace />} />
 
@@ -172,10 +174,11 @@ function App() {
             </Route>
 
             <Route path="*" element={<Navigate to="/trang-chu" replace />} />
-          </Routes>
-        </ErrorBoundary>
-        <ToastContainer position="top-right" autoClose={3000} />
-      </div>
+            </Routes>
+          </ErrorBoundary>
+          <ToastContainer position="top-right" autoClose={3000} />
+        </div>
+      </PermissionsProvider>
     </Router>
   );
 }

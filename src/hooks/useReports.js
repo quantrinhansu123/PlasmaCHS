@@ -532,15 +532,32 @@ export const useReports = () => {
     setLoading(true);
     try {
       const { data, error } = await supabase
-        .from('view_customer_cylinder_debt')
-        .select('*')
-        .eq('customer_id', customerId);
-      
+        .from('cylinders')
+        .select('customer_id, category, customer_name, status')
+        .eq('customer_id', customerId)
+        .not('status', 'eq', 'hỏng')
+        .not('status', 'eq', 'đã trả ncc');
+
       if (error) throw error;
-      return data;
+
+      const groups = {};
+      (data || []).forEach((row) => {
+        const type = row.category || 'BV';
+        if (!groups[type]) {
+          groups[type] = {
+            customer_id: customerId,
+            customer_name: row.customer_name || '',
+            cylinder_type: type,
+            debt_count: 0,
+            balance: 0,
+          };
+        }
+        groups[type].debt_count += 1;
+        groups[type].balance += 1;
+      });
+      return Object.values(groups);
     } catch (err) {
       console.error('Error fetching cylinder debt:', err);
-      // toast.error('Lỗi tải thông tin nợ vỏ'); -- Don't show toast for every fetch
       return [];
     } finally {
       setLoading(false);

@@ -657,7 +657,7 @@ const GoodsReceipts = () => {
                                 .from('cylinders')
                                 .update({
                                     status: 'sẵn sàng',
-                                    warehouse_id: receipt.warehouse_id,
+                                    kho: receipt.warehouse_id,
                                     customer_id: null,
                                     customer_name: null,
                                     supplier_id: null,
@@ -671,7 +671,7 @@ const GoodsReceipts = () => {
                                 .insert({
                                     serial_number: normalizedSerial,
                                     status: 'sẵn sàng',
-                                    warehouse_id: receipt.warehouse_id,
+                                    kho: receipt.warehouse_id,
                                     category: 'BV',
                                     volume: item.item_name, // e.g. "Bình 4L", "Bình oxi"
                                     customer_id: null,
@@ -694,7 +694,7 @@ const GoodsReceipts = () => {
                                 .from('machines')
                                 .update({
                                     status: 'sẵn sàng',
-                                    warehouse: receipt.warehouse_id,
+                                    kho: receipt.warehouse_id,
                                     customer_name: null,
                                 })
                                 .eq('id', existingMach.id);
@@ -707,7 +707,7 @@ const GoodsReceipts = () => {
                                 .insert({
                                     serial_number: normalizedSerial,
                                     status: 'sẵn sàng',
-                                    warehouse: receipt.warehouse_id,
+                                    kho: receipt.warehouse_id,
                                     machine_type: safeMachineType,
                                     customer_name: null,
                                 });

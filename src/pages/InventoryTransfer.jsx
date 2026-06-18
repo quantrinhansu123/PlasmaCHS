@@ -33,12 +33,15 @@ import usePermissions from '../hooks/usePermissions';
 import { isThuKhoRole } from '../utils/accessControl';
 import {
     canViewAllWarehouses,
+    CYLINDER_KHO_COLUMN,
     filterWarehousesForCurrentUser,
+    getCylinderKhoValue,
 } from '../utils/orderWarehouseScope';
 import { supabase } from '../supabase/config';
 import { notificationService } from '../utils/notificationService';
 import { uploadFileToCloudinary } from '../utils/cloudinaryUpload';
 import { normalizeMachineSerialKey } from '../utils/machineCustomerFromOrders';
+import { storedValueMatchesWarehouse } from '../utils/transferWarehouseMatch';
 
 /** Biến thể serial máy để .in() khớp DB (phân biệt hoa thường / khoảng trắng). */
 function machineSerialLookupVariants(raw) {
@@ -189,13 +192,13 @@ async function fetchReadyMachinesAtWarehouse(supabaseClient, whRow, warehouseId)
 }
 
 async function fetchReadyCylindersAtWarehouse(supabaseClient, cylinderWhId, whRow) {
-    const warehouseName = String(whRow?.name || '').trim();
+    const warehouseCode = String(whRow?.code || whRow?.name || cylinderWhId || '').trim();
 
-    if (warehouseName) {
+    if (warehouseCode) {
         const { data, error } = await supabaseClient
             .from('cylinders')
-            .select('id, volume, status, serial_number, warehouse_id')
-            .eq('warehouse_id', warehouseName)
+            .select(`id, volume, status, serial_number, ${CYLINDER_KHO_COLUMN}`)
+            .eq(CYLINDER_KHO_COLUMN, warehouseCode)
             .limit(5000);
         if (!error) {
             const rows = (data || []).filter((c) => isReadyCylinderStatus(c.status));
@@ -206,15 +209,15 @@ async function fetchReadyCylindersAtWarehouse(supabaseClient, cylinderWhId, whRo
     const keys = machineWarehouseCandidates(whRow);
     const { data: allReady, error } = await supabaseClient
         .from('cylinders')
-        .select('id, volume, status, serial_number, warehouse_id')
+        .select(`id, volume, status, serial_number, ${CYLINDER_KHO_COLUMN}`)
         .eq('status', 'sẵn sàng')
         .limit(10000);
     if (error) return [];
 
     return (allReady || []).filter((c) => {
         if (!isReadyCylinderStatus(c.status)) return false;
-        const stored = String(c.warehouse_id || '').trim().toLowerCase();
-        if (warehouseName && stored === warehouseName.toLowerCase()) return true;
+        const stored = getCylinderKhoValue(c).toLowerCase();
+        if (warehouseCode && stored === warehouseCode.toLowerCase()) return true;
         return keys.some((k) => stored === String(k || '').trim().toLowerCase());
     });
 }
@@ -232,10 +235,8 @@ function machineBelongsToWarehouse(storedWarehouse, fromWarehouseId, warehouseLi
     });
 }
 
-function cylinderBelongsToWarehouse(storedWarehouseId, fromWarehouseId, warehouseList) {
-    const whRow = resolveWarehouseRow(fromWarehouseId, warehouseList);
-    const expected = String(whRow?.id || fromWarehouseId || '').trim();
-    return String(storedWarehouseId || '').trim() === expected;
+function cylinderBelongsToWarehouse(storedWarehouse, fromWarehouseId, warehouseList) {
+    return storedValueMatchesWarehouse(storedWarehouse, fromWarehouseId, warehouseList);
 }
 
 // Helper functions for smart categorization
@@ -726,7 +727,7 @@ const InventoryTransfer = () => {
                 ];
                 const { data: cyls } = await supabase
                     .from('cylinders')
-                    .select('id, serial_number, status, warehouse_id')
+                    .select(`id, serial_number, status, ${CYLINDER_KHO_COLUMN}`)
                     .in('serial_number', cylQuerySerials);
                 const remoteMap = indexSerialRecords(cyls, 'BINH');
                 dbMap.cylinders = { ...dbMap.cylinders, ...remoteMap };
@@ -738,7 +739,7 @@ const InventoryTransfer = () => {
                 ];
                 const { data: macs } = await supabase
                     .from('machines')
-                    .select('id, serial_number, status, warehouse')
+                    .select(`id, serial_number, status, ${CYLINDER_KHO_COLUMN}`)
                     .in('serial_number', macQuerySerials);
                 const remoteMap = indexSerialRecords(macs, 'MAY');
                 dbMap.machines = { ...dbMap.machines, ...remoteMap };
@@ -761,7 +762,7 @@ const InventoryTransfer = () => {
                     const atSourceWarehouse =
                         item.item_type === 'BINH'
                             ? cylinderBelongsToWarehouse(
-                                  dbItem.warehouse_id,
+                                  getCylinderKhoValue(dbItem),
                                   formData.from_warehouse_id,
                                   warehouses,
                               )

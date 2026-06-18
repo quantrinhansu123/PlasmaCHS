@@ -1,4 +1,4 @@
-﻿import clsx from 'clsx';
+import clsx from 'clsx';
 import {
     Camera,
     ChevronDown,
@@ -28,9 +28,9 @@ import { PRODUCT_TYPES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
 import usePermissions from '../../hooks/usePermissions';
 import { notificationService } from '../../utils/notificationService';
-import { filterWarehousesForCurrentUser } from '../../utils/orderWarehouseScope';
+import { CYLINDER_KHO_COLUMN, filterWarehousesForCurrentUser, getCylinderKhoValue, resolveCylinderWarehouseValue } from '../../utils/orderWarehouseScope';
 
-/** goods_issues có thể lưu warehouses.id hoặc code/tên cũ — luôn map về dòng warehouses (UUID cylinders.warehouse_id). */
+/** goods_issues có thể lưu warehouses.id hoặc code/tên cũ — cylinders.warehouse lưu mã kho (OCP1…). */
 function resolveWarehouseRowForForm(storedWarehouseId, warehousesList = []) {
     const raw = String(storedWarehouseId || '').trim();
     if (!raw || !warehousesList.length) return null;
@@ -286,12 +286,12 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                 if (error) throw error;
                 setInventoryItems(data || []);
             } else {
-                const cylinderWhId = whRow?.id || formData.warehouse_id;
+                const cylinderWhId = resolveCylinderWarehouseValue(whRow || formData.warehouse_id, warehousesList);
 
                 let query = supabase
                     .from('cylinders')
                     .select('*')
-                    .eq('warehouse_id', cylinderWhId);
+                    .eq(CYLINDER_KHO_COLUMN, cylinderWhId);
 
                 // Return-empty cylinders should allow selecting all cylinders in the warehouse.
                 if (formData.issue_type !== 'TRA_VO') {
@@ -698,7 +698,7 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                                 .from('cylinders')
                                 .update({
                                     status: 'đã trả ncc',
-                                    warehouse_id: null,
+                                    [CYLINDER_KHO_COLUMN]: null,
                                     customer_id: null,
                                     customer_name: null,
                                     supplier_id: issuePayload.supplier_id

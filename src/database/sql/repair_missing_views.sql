@@ -4,6 +4,38 @@
 -- This script contains the COMPLETE set of views for all application reports.
 -- ==============================================================================
 
+-- 0a. Đảm bảo bảng warehouses tồn tại (view JOIN warehouses — tránh lỗi 42P01)
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+CREATE TABLE IF NOT EXISTS public.warehouses (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) UNIQUE NOT NULL,
+    manager_name VARCHAR(255) NOT NULL DEFAULT '—',
+    address TEXT NOT NULL DEFAULT '—',
+    capacity INTEGER NOT NULL DEFAULT 9999,
+    status VARCHAR(100) NOT NULL DEFAULT 'Đang hoạt động',
+    branch_office VARCHAR(255),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'warehouses' AND column_name = 'code'
+    ) THEN
+        ALTER TABLE public.warehouses ADD COLUMN code VARCHAR(50);
+    END IF;
+END $$;
+
+INSERT INTO public.warehouses (name, code, manager_name, address, capacity, status)
+SELECT 'OCP1', 'OCP1', '—', '—', 9999, 'Đang hoạt động'
+WHERE NOT EXISTS (
+    SELECT 1 FROM public.warehouses
+    WHERE code = 'OCP1' OR lower(name) LIKE '%ocp1%' OR lower(name) LIKE '%ocp 1%'
+);
+
 -- 0. Drop existing views to avoid type mismatch errors
 DROP VIEW IF EXISTS view_customer_cylinder_monthly_balance CASCADE;
 DROP VIEW IF EXISTS view_customer_cylinder_movements CASCADE;
@@ -50,7 +82,7 @@ SELECT
     c.machines_in_use AS danh_sach_may,
     (SELECT STRING_AGG(serial_number, ', ') FROM cylinders cy WHERE cy.customer_name = c.name) AS danh_sach_binh
 FROM customers c
-LEFT JOIN warehouses w ON (w.id::text = c.warehouse_id OR w.name = c.warehouse_id);
+LEFT JOIN warehouses w ON (w.id::text = c.warehouse_id OR w.name = c.warehouse_id OR w.code = c.warehouse_id);
 
 -- 2. view_salesperson_stats
 CREATE OR REPLACE VIEW view_salesperson_stats AS
@@ -104,7 +136,7 @@ SELECT
     END AS kho
 FROM cylinders cy
 LEFT JOIN customers c ON c.name = cy.customer_name
-LEFT JOIN warehouses w ON (w.id::text = c.warehouse_id OR w.name = c.warehouse_id)
+LEFT JOIN warehouses w ON (w.id::text = c.warehouse_id OR w.name = c.warehouse_id OR w.code = c.warehouse_id)
 WHERE cy.expiry_date IS NOT NULL AND cy.expiry_date < CURRENT_DATE;
 
 -- 4. view_customer_expiry
@@ -154,7 +186,7 @@ SELECT
     END AS kho
 FROM cylinders cy
 LEFT JOIN customers c ON c.name = cy.customer_name
-LEFT JOIN warehouses w ON (w.id::text = c.warehouse_id OR w.name = c.warehouse_id)
+LEFT JOIN warehouses w ON (w.id::text = c.warehouse_id OR w.name = c.warehouse_id OR w.code = c.warehouse_id)
 WHERE cy.status = 'hỏng';
 
 -- 6. view_machine_summary
@@ -176,7 +208,7 @@ SELECT
     COUNT(CASE WHEN m.status = 'đang sửa' THEN 1 END) AS may_sua_chua,
     COUNT(CASE WHEN m.status = 'đang sử dụng' THEN 1 END) AS may_dang_su_dung
 FROM machines m
-LEFT JOIN warehouses w ON (w.id::text = m.warehouse OR w.name = m.warehouse)
+LEFT JOIN warehouses w ON (w.id::text = m.warehouse OR w.name = m.warehouse OR w.code = m.warehouse)
 GROUP BY m.machine_type, 
     CASE 
         WHEN w.name IS NOT NULL THEN w.name
@@ -211,7 +243,7 @@ LEFT JOIN orders o ON o.customer_name = m.customer_name
     AND o.product_type LIKE '%' || m.machine_type || '%'
     AND o.status IN ('DA_DUYET', 'CHO_GIAO_HANG', 'DANG_GIAO_HANG', 'HOAN_THANH')
 LEFT JOIN customers c ON c.name = m.customer_name
-LEFT JOIN warehouses w ON (w.id::text = m.warehouse OR w.name = m.warehouse)
+LEFT JOIN warehouses w ON (w.id::text = m.warehouse OR w.name = m.warehouse OR w.code = m.warehouse)
 GROUP BY m.machine_type, m.serial_number, m.customer_name, m.department_in_charge, 
     CASE 
         WHEN w.name IS NOT NULL THEN w.name
@@ -247,7 +279,7 @@ SELECT
     EXTRACT(YEAR FROM o.created_at)::INT AS nam,
     EXTRACT(MONTH FROM o.created_at)::INT AS thang
 FROM orders o
-LEFT JOIN warehouses w ON (w.id::text = o.warehouse OR w.name = o.warehouse)
+LEFT JOIN warehouses w ON (w.id::text = o.warehouse OR w.name = o.warehouse OR w.code = o.warehouse)
 WHERE o.status IN ('DA_DUYET', 'CHO_GIAO_HANG', 'DANG_GIAO_HANG', 'HOAN_THANH');
 
 -- 9. view_dashboard_summary
@@ -309,7 +341,7 @@ SELECT
     SUM(m.thu_hoi) as thu_hoi,
     SUM(m.xuat - m.thu_hoi) as chenh_lech
 FROM monthly_movements m
-LEFT JOIN warehouses w ON (w.id::text = m.kho_src OR w.name = m.kho_src)
+LEFT JOIN warehouses w ON (w.id::text = m.kho_src OR w.name = m.kho_src OR w.code = m.kho_src)
 GROUP BY m.customer_id, m.customer_name, 
     CASE 
         WHEN w.name IS NOT NULL THEN w.name
@@ -375,7 +407,7 @@ SELECT
     SUM(m.thu_hoi) as thu_hoi,
     SUM(m.xuat - m.thu_hoi) as chenh_lech
 FROM movements m
-LEFT JOIN warehouses w ON (w.id::text = m.warehouse_id OR w.name = m.warehouse_id)
+LEFT JOIN warehouses w ON (w.id::text = m.warehouse_id OR w.name = m.warehouse_id OR w.code = m.warehouse_id)
 GROUP BY m.customer_id, m.customer_name, 
     CASE 
         WHEN w.name IS NOT NULL THEN w.name
@@ -426,7 +458,7 @@ SELECT
 FROM repair_tickets rt
 LEFT JOIN repair_error_types ret ON ret.id = rt.error_type_id
 LEFT JOIN customers c ON c.id = rt.customer_id
-LEFT JOIN warehouses w ON (w.id::text = c.warehouse_id OR w.name = c.warehouse_id)
+LEFT JOIN warehouses w ON (w.id::text = c.warehouse_id OR w.name = c.warehouse_id OR w.code = c.warehouse_id)
 LEFT JOIN app_users u_created ON u_created.id = rt.created_by
 LEFT JOIN app_users u_tech ON u_tech.id = rt.technician_id;
 
@@ -459,7 +491,7 @@ SELECT
     CASE WHEN m.status = 'đang sửa' THEN 1 ELSE 0 END AS is_sua_chua
 FROM machines m
 LEFT JOIN customers c ON c.name = m.customer_name
-LEFT JOIN warehouses w ON (w.id::text = m.warehouse OR w.name = m.warehouse);
+LEFT JOIN warehouses w ON (w.id::text = m.warehouse OR w.name = m.warehouse OR w.code = m.warehouse);
 
 -- 16. view_sales_summary_monthly
 CREATE OR REPLACE VIEW view_sales_summary_monthly AS
@@ -481,7 +513,7 @@ SELECT
     COUNT(o.id) as so_don_hang
 FROM orders o
 JOIN customers c ON c.name = o.customer_name
-LEFT JOIN warehouses w ON (w.id::text = c.warehouse_id OR w.name = c.warehouse_id)
+LEFT JOIN warehouses w ON (w.id::text = c.warehouse_id OR w.name = c.warehouse_id OR w.code = c.warehouse_id)
 WHERE o.status IN ('DA_DUYET', 'CHO_GIAO_HANG', 'DANG_GIAO_HANG', 'HOAN_THANH')
 GROUP BY c.name, c.care_by, c.category, 
     CASE 

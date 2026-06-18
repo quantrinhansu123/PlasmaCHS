@@ -1,4 +1,5 @@
 import { toast } from 'react-toastify';
+import { CYLINDER_KHO_COLUMN } from './orderWarehouseScope';
 import { notificationService } from './notificationService';
 
 /**
@@ -26,7 +27,7 @@ export async function applyRecoveryCompletionInventory(supabase, {
             .from('cylinders')
             .update({
                 status: 'bình rỗng',
-                warehouse_id: warehouseId,
+                [CYLINDER_KHO_COLUMN]: warehouseId,
                 customer_id: null,
                 customer_name: null,
                 updated_at: new Date().toISOString(),

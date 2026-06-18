@@ -1,4 +1,5 @@
 import { normalizeMachineSerialKey } from './machineCustomerFromOrders';
+import { CYLINDER_KHO_COLUMN, applyCylinderKhoFilterToQuery, getCylinderKhoValue } from './cylinderKho';
 import {
     buildCylinderWarehouseQueryKeys,
 } from './orderWarehouseScope';
@@ -127,7 +128,7 @@ export function buildWarehouseMatchKeys(whRow, warehouseRef = '', warehouseList 
     return [...keys].filter(Boolean);
 }
 
-/** Tên kho để query cylinders.warehouse_id. */
+/** Mã kho để query cylinders.warehouse. */
 function resolveCylinderWarehouseNameKeys(row, matchKeys, warehouseList) {
     let nameKeys = buildCylinderWarehouseQueryKeys([row]);
 
@@ -308,7 +309,7 @@ export async function fetchReadyMachinesAtWarehouse(
     );
 }
 
-const CYLINDER_SELECT = 'id, serial_number, volume, status, warehouse_id';
+const CYLINDER_SELECT = `id, serial_number, volume, status, ${CYLINDER_KHO_COLUMN}`;
 
 /** Khớp «Sẵn sàng» / «sẵn sàng» / biến thể không dấu. */
 export function isReadyCylinderStatus(status) {
@@ -357,9 +358,9 @@ export async function fetchReadyCylindersAtWarehouse(
         (rows || []).forEach((c) => {
             if (!c?.id || !isReadyCylinderStatus(c.status)) return;
             if (
-                cylinderBelongsToWarehouse(c.warehouse_id, ref, warehouseList)
-                || cylinderBelongsToWarehouse(c.warehouse_id, warehouseId, warehouseList)
-                || keys.some((k) => String(c.warehouse_id || '').trim().toLowerCase() === k.toLowerCase())
+                cylinderBelongsToWarehouse(getCylinderKhoValue(c), ref, warehouseList)
+                || cylinderBelongsToWarehouse(getCylinderKhoValue(c), warehouseId, warehouseList)
+                || keys.some((k) => getCylinderKhoValue(c).toLowerCase() === k.toLowerCase())
             ) {
                 collected.set(c.id, c);
             }
@@ -367,11 +368,10 @@ export async function fetchReadyCylindersAtWarehouse(
     };
 
     if (nameKeys.length > 0) {
-        const { data, error } = await supabaseClient
-            .from('cylinders')
-            .select(CYLINDER_SELECT)
-            .in('warehouse_id', nameKeys)
-            .limit(5000);
+        const { data, error } = await applyCylinderKhoFilterToQuery(
+            supabaseClient.from('cylinders').select(CYLINDER_SELECT),
+            nameKeys,
+        ).limit(5000);
         if (!error) absorb(data);
     }
 

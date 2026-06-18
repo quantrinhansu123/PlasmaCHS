@@ -50,6 +50,7 @@ import usePermissions from '../hooks/usePermissions';
 import { isAdminRole } from '../utils/accessControl';
 import {
     filterWarehousesForCurrentUser,
+    getCylinderKhoValue,
     rowMatchesCylinderWarehouseStorage,
 } from '../utils/orderWarehouseScope';
 import { supabase } from '../supabase/config';
@@ -242,7 +243,7 @@ const Warehouses = () => {
             // Rebuild machine/cylinder counts from source tables to avoid stale values in UI cards
             const [{ data: machinesData }, { data: cylindersData }] = await Promise.all([
                 supabase.from('machines').select('warehouse'),
-                supabase.from('cylinders').select('warehouse_id')
+                supabase.from('cylinders').select('kho')
             ]);
 
             const warehousesWithCounts = baseWarehouses.map((w) => {
@@ -250,7 +251,7 @@ const Warehouses = () => {
                     rowMatchesCylinderWarehouseStorage(m.warehouse, w, baseWarehouses),
                 ).length;
                 const cylinderCount = (cylindersData || []).filter((c) =>
-                    rowMatchesCylinderWarehouseStorage(c.warehouse_id, w, baseWarehouses),
+                    rowMatchesCylinderWarehouseStorage(getCylinderKhoValue(c), w, baseWarehouses),
                 ).length;
                 return {
                     ...w,
