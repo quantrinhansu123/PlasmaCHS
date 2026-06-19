@@ -105,11 +105,16 @@ const warehouseManagedByUser = (warehouse, managerCandidates = []) => {
         .map((part) => normalizeText(part))
         .filter(Boolean)
         .some((managerPart) =>
-            managerCandidates.some((candidate) =>
-                managerPart === candidate
-                || managerPart.includes(candidate)
-                || candidate.includes(managerPart)
-            )
+            managerCandidates.some((candidate) => {
+                const compactManager = compactLoginKey(managerPart);
+                const compactCandidate = compactLoginKey(candidate);
+                return (
+                    managerPart === candidate
+                    || compactManager === compactCandidate
+                    || managerPart.includes(candidate)
+                    || candidate.includes(managerPart)
+                );
+            }),
         );
 };
 
@@ -119,8 +124,6 @@ const compactLoginKey = (value) =>
 /** Chuẩn hóa biến thể nick/mã OCP (OCCP1, OCP1, ocp-1…). */
 const normalizeOcpWarehouseKey = (value) =>
     compactLoginKey(value).replace(/^occ+(?=p)/, 'oc');
-
-const ROLE_LOGIN_PREFIXES = new Set(['nvk', 'thukho', 'warehouse', 'kho', 'thu']);
 
 /** Suy mã kho từ nick đăng nhập khi bảng warehouses trống / chưa đồng bộ (vd. NVK-OCP1 → OCP1). */
 export function deriveManagingWarehouseCodesFromUser({ user, department } = {}) {
@@ -141,26 +144,21 @@ export function deriveManagingWarehouseCodesFromUser({ user, department } = {}) 
     const codes = new Set();
 
     for (const candidate of loginCandidates) {
-        const nvkMatch = candidate.match(/^nvk[-_](.+)$/);
+        const nvkMatch = candidate.match(/^nvk[-_](.+)$/i);
         if (nvkMatch?.[1]) {
             const code = normalizeOcpWarehouseKey(nvkMatch[1]);
             if (code) codes.add(code);
         }
-
-        candidate.split(/[-_]+/).filter(Boolean).forEach((part) => {
-            if (ROLE_LOGIN_PREFIXES.has(part)) return;
-            const code = normalizeOcpWarehouseKey(part);
-            if (code && code.length >= 2) codes.add(code);
-        });
     }
 
     if (codes.size === 0 && department) {
         getManagerCandidateKeys(department, user?.chi_nhanh).forEach((token) => {
             const code = normalizeOcpWarehouseKey(token);
-            if (code) codes.add(code);
+            if (code && /^ocp\d*$/i.test(code)) codes.add(code);
+            if (/^(hn|dn|ct|th|nm|nmk|vq|vpmn)$/i.test(code)) codes.add(code);
             if (token.includes('-')) {
-                const head = normalizeOcpWarehouseKey(token.split('-')[0]);
-                if (head) codes.add(head);
+                const tail = normalizeOcpWarehouseKey(token.split('-').pop());
+                if (tail && /^ocp\d*$/i.test(tail)) codes.add(tail);
             }
         });
     }
@@ -339,6 +337,17 @@ export function rowMatchesWarehouseNameStorage(storedValue, warehouse, warehouse
 /** Giá trị lưu cylinders.kho — mã kho (OCP1…). */
 export function resolveWarehouseStorageName(warehouse) {
     return String(warehouse?.code || warehouse?.name || '').trim();
+}
+
+/** Tên hiển thị danh sách kho — ưu tiên name, fallback code/chi nhánh. */
+export function getWarehouseDisplayName(warehouse) {
+    const name = String(warehouse?.name || '').trim();
+    if (name) return name;
+    const code = String(warehouse?.code || '').trim();
+    if (code) return code;
+    const branch = String(warehouse?.branch_office || '').trim();
+    if (branch) return branch;
+    return '—';
 }
 
 /** Chuẩn hoá giá trị đã lưu (tên hoặc UUID cũ) → tên kho. */

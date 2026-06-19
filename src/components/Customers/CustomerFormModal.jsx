@@ -4,21 +4,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../../supabase/config';
 import { notificationService } from '../../utils/notificationService';
+import {
+    CUSTOMER_WAREHOUSE_DEFAULT_CODE,
+    getCustomerWarehouseOptionLabel,
+    getCustomerWarehouseOptionValue,
+    resolveCustomerWarehouseForDatabase,
+    resolveCustomerWarehouseSelectValue,
+    resolvePreferredWarehouseId,
+} from '../../utils/customerWarehouse';
 import { formatPhoneNumber, validateMST, validatePhone } from '../../utils/taxUtils';
-
-const resolveWarehouseSelectValue = (warehouseId, warehouseList = []) => {
-    const raw = String(warehouseId || '').trim();
-    if (!raw) return '';
-    const list = warehouseList || [];
-    if (list.some((w) => String(w.id) === raw)) return raw;
-    const lowered = raw.toLowerCase();
-    const matched = list.find(
-        (w) =>
-            String(w.code || '').trim().toLowerCase() === lowered ||
-            String(w.name || '').trim().toLowerCase() === lowered,
-    );
-    return matched ? String(matched.id) : '';
-};
 
 export default function CustomerFormModal({ customer, onClose, onSuccess, categories, warehouses, isLeadMode = false }) {
     const isEdit = !!customer;
@@ -62,7 +56,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
         invoice_email: '',
         care_expiry_date: '',
         care_assigned_at: '',
-        warehouse_id: '',
+        warehouse_id: resolvePreferredWarehouseId(warehouses) || CUSTOMER_WAREHOUSE_DEFAULT_CODE,
         status: isLeadMode ? 'Chưa thành công' : 'Thành công',
     });
 
@@ -86,7 +80,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                 invoice_email: customer.invoice_email || '',
                 care_expiry_date: customer.care_expiry_date || '',
                 care_assigned_at: customer.care_assigned_at || '',
-                warehouse_id: resolveWarehouseSelectValue(customer.warehouse_id, warehouses),
+                warehouse_id: resolveCustomerWarehouseSelectValue(customer.warehouse_id, warehouses),
                 status: customer.status || (isLeadMode ? 'Chưa thành công' : 'Thành công'),
             });
         } else {
@@ -233,7 +227,10 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
             ...formData,
             code: trimmedCode,
             care_assigned_at: formData.care_assigned_at || null,
-            warehouse_id: formData.warehouse_id?.trim() || null,
+            warehouse_id: resolveCustomerWarehouseForDatabase(
+                formData.warehouse_id,
+                warehouses,
+            ),
         };
 
         const prevStatus = isEdit ? customer.status : null;
@@ -559,16 +556,24 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                         className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white outline-none transition-all font-semibold text-slate-900 cursor-pointer"
                                     >
                                         <option value="">-- Chọn kho --</option>
-                                        {(warehouses || []).map((warehouse) => (
-                                            <option key={warehouse.id} value={warehouse.id}>
-                                                {warehouse.name}
-                                                {warehouse.code ? ` (${warehouse.code})` : ''}
+                                        {(warehouses || []).length > 0 ? (
+                                            (warehouses || []).map((warehouse) => (
+                                                <option
+                                                    key={warehouse.id}
+                                                    value={getCustomerWarehouseOptionValue(warehouse)}
+                                                >
+                                                    {getCustomerWarehouseOptionLabel()}
+                                                </option>
+                                            ))
+                                        ) : (
+                                            <option value={CUSTOMER_WAREHOUSE_DEFAULT_CODE}>
+                                                {CUSTOMER_WAREHOUSE_DEFAULT_CODE}
                                             </option>
-                                        ))}
+                                        )}
                                     </select>
                                     {(warehouses || []).length === 0 && (
-                                        <p className="text-[11px] font-semibold text-amber-700 ml-1">
-                                            Chưa có kho hoạt động — thêm tại mục Danh sách kho.
+                                        <p className="text-[11px] font-semibold text-slate-500 ml-1">
+                                            Mặc định kho {CUSTOMER_WAREHOUSE_DEFAULT_CODE}.
                                         </p>
                                     )}
                                 </div>

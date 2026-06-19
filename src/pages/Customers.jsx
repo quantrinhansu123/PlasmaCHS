@@ -58,6 +58,13 @@ import { supabase } from '../supabase/config';
 import { notificationService } from '../utils/notificationService';
 import { hasFullDataVisibility, isAdminRole } from '../utils/accessControl';
 import {
+    CUSTOMER_WAREHOUSE_DEFAULT_CODE,
+    getCustomerWarehouseOptionLabel,
+    getCustomerWarehouseOptionValue,
+    resolveCustomerWarehouseForDatabase,
+    resolvePreferredWarehouseId,
+} from '../utils/customerWarehouse';
+import {
     appendCustomerAssigneeScope,
     getCurrentUserNames,
     isSalesAssigneeScopePending,
@@ -355,28 +362,7 @@ const Customers = () => {
     const visibleCount = visibleColumns.filter((k) => pickerDisplayKeys.includes(k)).length;
     const totalCount = pickerDisplayKeys.length;
 
-    const warehouseLabelMap = useMemo(() => {
-        const map = new Map();
-        for (const warehouse of warehousesList) {
-            const name = String(warehouse?.name || '').trim();
-            if (!name) continue;
-            const id = String(warehouse?.id || '').trim();
-            const code = String(warehouse?.code || '').trim();
-            if (id) map.set(id, name);
-            if (code) map.set(code, name);
-            map.set(name.toLowerCase(), name);
-        }
-        return map;
-    }, [warehousesList]);
-
-    const getCustomerWarehouseLabel = useCallback(
-        (warehouseValue) => {
-            const raw = String(warehouseValue || '').trim();
-            if (!raw) return '—';
-            return warehouseLabelMap.get(raw) || warehouseLabelMap.get(raw.toLowerCase()) || raw;
-        },
-        [warehouseLabelMap]
-    );
+    const getCustomerWarehouseLabel = useCallback(() => CUSTOMER_WAREHOUSE_DEFAULT_CODE, []);
 
     useEffect(() => {
         fetchWarehouses();
@@ -446,11 +432,9 @@ const Customers = () => {
             let query = supabase
                 .from('customers')
                 .select('*', { count: 'exact' });
-            query = applyCustomerVisibilityScope(query);
-
-            // Keep customer listing full on frontend; backend RLS (if any) remains the source of truth.
 
             if (filterType === 'lead') {
+                query = applyCustomerVisibilityScope(query);
                 query = appendLeadCustomerFilters(query, {
                     searchTrimmed: debouncedSearchTerm,
                     leadCreatedFrom,
@@ -466,9 +450,7 @@ const Customers = () => {
                     .order('created_at', { ascending: false });
             } else {
                 query = appendCustomerTextSearch(query, debouncedSearchTerm);
-                query = query
-                    .eq('status', 'Thành công')
-                    .order('created_at', { ascending: false });
+                query = query.order('created_at', { ascending: false });
             }
 
             const { data, count, error } = await query.range(from, to);
@@ -750,9 +732,8 @@ const Customers = () => {
                       selectedManagedBy.length === 0 || selectedManagedBy.includes(c.managed_by);
                   const matchesCareBy = selectedCareBy.length === 0 || selectedCareBy.includes(c.care_by);
                   const matchesStatus =
-                      filterType !== 'lead'
-                          ? c.status === 'Thành công'
-                          : selectedStatuses.length === 0 ||
+                      filterType === 'lead'
+                          ? selectedStatuses.length === 0 ||
                             selectedStatuses.some((s) => {
                                 if (s === 'Chưa thành công') {
                                     if (c.status === 'Chưa thành công') return true;
@@ -760,7 +741,8 @@ const Customers = () => {
                                     return false;
                                 }
                                 return c.status === s;
-                            });
+                            })
+                          : true;
 
         const matchesDate = (() => {
             if (!fromDate && !toDate) return true;
@@ -938,7 +920,14 @@ const Customers = () => {
         const patch = {
             status: newStatus,
             success_at: newStatus === 'Thành công' ? new Date().toISOString() : null,
-            ...(selectedWarehouseId ? { warehouse_id: selectedWarehouseId } : {}),
+            ...(selectedWarehouseId
+                ? {
+                      warehouse_id: resolveCustomerWarehouseForDatabase(
+                          selectedWarehouseId,
+                          warehousesList,
+                      ),
+                  }
+                : {}),
         };
 
         const runUpdate = () => supabase.from('customers').update(patch).eq('id', id);
@@ -1022,7 +1011,8 @@ const Customers = () => {
                 customerId: id,
                 customerName: selectedCustomerRow?.name || '',
                 targetStatus: newStatus,
-                warehouseId: warehousesList?.[0]?.id || '',
+                warehouseId:
+                    resolvePreferredWarehouseId(warehousesList) || CUSTOMER_WAREHOUSE_DEFAULT_CODE,
                 isSubmitting: false,
                 error: '',
             });
@@ -1393,7 +1383,7 @@ const Customers = () => {
                 'Số điện thoại': '0912345678',
                 'Địa chỉ': '123 Đường ABC, Phường XYZ, TP. Hà Nội',
                 'Người đại diện': 'Nguyễn Văn A',
-                'Kho quản lý': warehousesList[0]?.name || 'Kho tổng',
+                'Kho quản lý': CUSTOMER_WAREHOUSE_DEFAULT_CODE,
                 'KD chăm sóc': 'Nguyễn Thị B',
                 'Đại lý': 'Đại lý ABC',
                 'NVKD phụ trách': 'Trần Văn C',
@@ -1431,12 +1421,6 @@ const Customers = () => {
 
                 setIsLoading(true);
 
-                // Map warehouse names to IDs
-                const warehouseMap = (warehousesList || []).reduce((acc, w) => {
-                    acc[w.name.toLowerCase()] = w.id;
-                    return acc;
-                }, {});
-
                 // Find if any rows need auto-generated codes
                 const rowsNeedingCode = data.filter(row => !row['Mã khách hàng']);
                 let nextCodeNum = 1;
@@ -1460,51 +1444,73 @@ const Customers = () => {
                     }
                 }
 
-                const customersToInsert = data.map(row => {
-                    let code = row['Mã khách hàng']?.toString();
+                const currentUserName =
+                    localStorage.getItem('user_name')
+                    || sessionStorage.getItem('user_name')
+                    || '';
+                const importTimestamp = new Date().toISOString();
+
+                const customersToUpsert = data.map(row => {
+                    let code = row['Mã khách hàng']?.toString()?.trim();
                     if (!code) {
                         code = `KH${(nextCodeNum++).toString().padStart(5, '0')}`;
                     }
 
+                    const managedBy = row['NVKD phụ trách']?.toString()?.trim() || currentUserName || null;
+                    const careBy = row['KD chăm sóc']?.toString()?.trim() || currentUserName || null;
+
                     return {
-                        code: code,
-                        name: row['Tên khách hàng']?.toString(),
+                        code,
+                        name: row['Tên khách hàng']?.toString()?.trim(),
                         category: row['Loại khách hàng (BV/TM/PK/NG/GD/SP)']?.toString() || 'BV',
                         phone: row['Số điện thoại']?.toString(),
                         address: row['Địa chỉ']?.toString(),
                         legal_rep: row['Người đại diện']?.toString(),
-                        warehouse_id: warehouseMap[row['Kho quản lý']?.toString()?.toLowerCase()] || null,
-                        care_by: row['KD chăm sóc']?.toString(),
+                        warehouse_id: resolveCustomerWarehouseForDatabase(
+                            row['Kho quản lý'],
+                            warehousesList,
+                        ),
+                        care_by: careBy,
                         agency_name: row['Đại lý']?.toString(),
-                        managed_by: row['NVKD phụ trách']?.toString(),
+                        managed_by: managedBy,
                         contact_info: row['Người liên hệ phụ']?.toString(),
                         business_group: row['Nhóm kinh doanh']?.toString(),
                         tax_code: row['Mã số thuế']?.toString(),
                         invoice_email: row['Email hoá đơn']?.toString(),
                         invoice_company_name: row['Tên công ty hoá đơn']?.toString(),
                         invoice_address: row['Địa chỉ hoá đơn']?.toString(),
-                        updated_at: new Date().toISOString()
+                        status: 'Thành công',
+                        success_at: importTimestamp,
+                        updated_at: importTimestamp,
                     };
-                }).filter(c => c.name);
+                }).filter((c) => c.name);
 
-                if (customersToInsert.length === 0) {
+                // Gộp trùng mã trong cùng file Excel (giữ dòng cuối)
+                const dedupedByCode = new Map();
+                for (const row of customersToUpsert) {
+                    dedupedByCode.set(row.code, row);
+                }
+                const customersPayload = [...dedupedByCode.values()];
+
+                if (customersPayload.length === 0) {
                     alert('Không tìm thấy dữ liệu hợp lệ (thiếu tên khách hàng)!');
                     setIsLoading(false);
                     return;
                 }
 
-                const { error } = await supabase.from('customers').insert(customersToInsert);
-
-                if (error) {
-                    if (error.code === '23505') {
-                        alert('Lỗi: Một số mã khách hàng đã tồn tại trên hệ thống. Vui lòng kiểm tra lại!');
-                    } else {
-                        throw error;
-                    }
-                } else {
-                    alert(`🎉 Đã import thành công ${customersToInsert.length} khách hàng!`);
-                    fetchCustomers();
+                const CHUNK_SIZE = 100;
+                let upserted = 0;
+                for (let i = 0; i < customersPayload.length; i += CHUNK_SIZE) {
+                    const chunk = customersPayload.slice(i, i + CHUNK_SIZE);
+                    const { error } = await supabase
+                        .from('customers')
+                        .upsert(chunk, { onConflict: 'code' });
+                    if (error) throw error;
+                    upserted += chunk.length;
                 }
+
+                alert(`🎉 Đã import / cập nhật ${upserted} khách hàng!`);
+                fetchCustomers();
             } catch (err) {
                 console.error('Error importing excel:', err);
                 alert('Có lỗi xảy ra khi xử lý file: ' + err.message);
@@ -3019,15 +3025,21 @@ const Customers = () => {
                                 className="w-full h-12 rounded-2xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40"
                             >
                                 <option value="">-- Chọn kho --</option>
-                                {warehousesList.map((warehouse) => (
-                                    <option key={warehouse.id} value={warehouse.id}>
-                                        {warehouse.name}
+                                {warehousesList.length > 0 ? (
+                                    warehousesList.map((warehouse) => (
+                                        <option
+                                            key={warehouse.id}
+                                            value={getCustomerWarehouseOptionValue(warehouse)}
+                                        >
+                                            {getCustomerWarehouseOptionLabel()}
+                                        </option>
+                                    ))
+                                ) : (
+                                    <option value={CUSTOMER_WAREHOUSE_DEFAULT_CODE}>
+                                        {CUSTOMER_WAREHOUSE_DEFAULT_CODE}
                                     </option>
-                                ))}
+                                )}
                             </select>
-                            {warehousesList.length === 0 && (
-                                <p className="text-xs font-semibold text-amber-600">Hiện chưa có kho hoạt động để gán.</p>
-                            )}
                             {statusApprovalModal.error && (
                                 <p className="text-xs font-semibold text-rose-600">{statusApprovalModal.error}</p>
                             )}
@@ -3044,7 +3056,7 @@ const Customers = () => {
                             <button
                                 type="button"
                                 onClick={submitStatusApproval}
-                                disabled={statusApprovalModal.isSubmitting || warehousesList.length === 0}
+                                disabled={statusApprovalModal.isSubmitting}
                                 className="h-11 px-5 rounded-2xl bg-primary text-white font-bold hover:brightness-105 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {statusApprovalModal.isSubmitting ? 'Đang duyệt...' : 'Xác nhận duyệt'}

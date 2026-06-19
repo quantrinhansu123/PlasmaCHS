@@ -23,7 +23,6 @@ import {
     X
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import * as XLSX from 'xlsx';
 import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 import MobilePageHeader from '../components/layout/MobilePageHeader';
@@ -47,6 +46,11 @@ import {
 } from '../utils/machineCustomerFromOrders';
 import { isThuKhoRole, isWarehouseRole } from '../utils/accessControl';
 import { canViewAllWarehouses, applyManagingWarehouseOrFilter, buildScopedWarehouseFilterKeys, expandWarehouseSelectionKeys, filterWarehousesForCurrentUser, getCustomerMatchLabelsForManagingWarehouses, resolveWarehouseRecordsFromSelection, rowMatchesManagingWarehouseRecord } from '../utils/orderWarehouseScope';
+import {
+    downloadMachineImportTemplate,
+    importMachinesFromExcelRows,
+    readExcelFileToRows,
+} from '../utils/machineExcelImport';
 import { normalizeCustomerLookupKey } from '../utils/machineCustomerFromOrders';
 import { supabase } from '../supabase/config';
 
@@ -166,7 +170,7 @@ async function enrichInUseMachineCustomersFromOrders(supabaseClient, machineRows
         const part = cidList.slice(i, i + chunkSize);
         const { data: custChunk } = await supabaseClient
             .from('customers')
-            .select('id, name, warehouse_id')
+            .select('id, name, warehouse_id, code')
             .in('id', part);
         (custChunk || []).forEach((c) => {
             if (c?.id) {
@@ -176,7 +180,7 @@ async function enrichInUseMachineCustomersFromOrders(supabaseClient, machineRows
         });
     }
 
-    /** @type {Record<string, { created_at?: string; customerLabel?: string; warehouseCode?: string; customerWarehouseKh?: string }>} */
+    /** @type {Record<string, { created_at?: string; customerLabel?: string; warehouseCode?: string; customerWarehouseKh?: string; customerCode?: string }>} */
     const bestByNormSerial = {};
     machineItems.forEach((r) => {
         const o = orderMap[r.order_id];
@@ -188,7 +192,10 @@ async function enrichInUseMachineCustomersFromOrders(supabaseClient, machineRows
         const customerWarehouseKh = o.customer_id
             ? customerWarehouseById[o.customer_id] || ''
             : '';
-        if (!customerLabel && !warehouseCode && !customerWarehouseKh) return;
+        const customerCode = o.customer_id
+            ? String(customersById[o.customer_id]?.code || '').trim()
+            : '';
+        if (!customerLabel && !warehouseCode && !customerWarehouseKh && !customerCode) return;
         const prev = bestByNormSerial[nkItem];
         if (!prev || new Date(o.created_at) > new Date(prev.created_at || 0)) {
             bestByNormSerial[nkItem] = {
@@ -196,6 +203,7 @@ async function enrichInUseMachineCustomersFromOrders(supabaseClient, machineRows
                 customerLabel,
                 warehouseCode,
                 customerWarehouseKh,
+                customerCode,
             };
         }
     });
@@ -204,11 +212,12 @@ async function enrichInUseMachineCustomersFromOrders(supabaseClient, machineRows
         if (!MACHINE_STATUSES_ENRICH_CUSTOMER_FROM_ORDERS.has(m.status)) return m;
         const nk = normalizeMachineSerialKey(m.serial_number);
         const hit = bestByNormSerial[nk];
-        if (!hit?.customerLabel && !hit?.warehouseCode && !hit?.customerWarehouseKh) return m;
+        if (!hit?.customerLabel && !hit?.warehouseCode && !hit?.customerWarehouseKh && !hit?.customerCode) return m;
         return {
             ...m,
             ...(hit.customerLabel ? { customer_name: hit.customerLabel } : {}),
             ...(hit.customerWarehouseKh ? { customer_warehouse: hit.customerWarehouseKh } : {}),
+            ...(hit.customerCode ? { customer_code: hit.customerCode } : {}),
         };
     });
     }
@@ -221,6 +230,7 @@ const TABLE_COLUMNS = [
     { key: 'machine_type', label: 'Loại Máy' },
     { key: 'warehouse', label: 'Kho Quản Lý' },
     { key: 'customer_name', label: 'Cơ sở đang sử dụng máy' },
+    { key: 'customer_code', label: 'Mã KH' },
     { key: 'customer_warehouse', label: 'Kho phụ trách KH' },
     { key: 'status', label: 'Trạng Thái' },
     { key: 'department_in_charge', label: 'Đại lý' },
@@ -229,19 +239,21 @@ const TABLE_COLUMNS = [
 const Machines = () => {
     const { role: rawRole, department, user, loading: permissionsLoading } = usePermissions();
     const isAdminOrManager = canViewAllWarehouses(rawRole);
+    const canImportMachinesExcel = isAdminOrManager || isThuKhoRole(rawRole) || isWarehouseRole(rawRole);
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
     const [selectedIds, setSelectedIds] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [machines, setMachines] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
+    const [isLoading, setIsLoading] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
     const [selectedMachine, setSelectedMachine] = useState(null);
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
-    const [pageSize, setPageSize] = useState(50);
+    const [pageSize, setPageSize] = useState(2000);
     const [totalRecords, setTotalRecords] = useState(0);
     const [stats, setStats] = useState({
         total: 0,
@@ -314,10 +326,8 @@ const Machines = () => {
     const isColumnVisible = (key) => visibleColumns.includes(key);
     const visibleCount = visibleColumns.length;
     const totalCount = defaultColOrder.length;
-    const shouldScopeMachinesByWarehouse = useMemo(
-        () => Boolean(rawRole) && !canViewAllWarehouses(rawRole) && (isThuKhoRole(rawRole) || isWarehouseRole(rawRole)),
-        [rawRole],
-    );
+    /** /may: hiển thị tất cả máy; lọc kho chỉ khi user chọn bộ lọc thủ công. */
+    const shouldScopeMachinesByWarehouse = false;
 
     const allowedWarehouses = useMemo(() => {
         if (!shouldScopeMachinesByWarehouse) return warehousesList;
@@ -351,34 +361,38 @@ const Machines = () => {
         return customer?.warehouse_id || '';
     };
 
+    const getMachineCustomerCode = (machine) => {
+        const stored = String(machine?.customer_code || '').trim();
+        if (stored) return stored;
+        const label = String(machine?.customer_name || '').trim();
+        if (!label) return '';
+        const baseName = label.split(' / ')[0].trim();
+        const lookupKeys = [label, baseName]
+            .map((value) => normalizeCustomerLookupKey(value))
+            .filter(Boolean);
+        const customer = customersList.find((item) => {
+            const candidateKeys = [item.name, item.legal_rep, item.invoice_company_name]
+                .map((value) => normalizeCustomerLookupKey(value))
+                .filter(Boolean);
+            return lookupKeys.some((key) => candidateKeys.includes(key));
+        });
+        return customer?.code || '';
+    };
+
     const applyWarehouseFiltersToQuery = (query) => {
-        const warehouseCatalog = shouldScopeMachinesByWarehouse ? allowedWarehouses : warehousesList;
+        if (selectedWarehouses.length === 0) return query;
 
-        if (selectedWarehouses.length > 0) {
-            const selectedRecords = resolveWarehouseRecordsFromSelection(selectedWarehouses, warehouseCatalog);
-            const targetWarehouses = selectedRecords.length ? selectedRecords : warehouseCatalog;
-            const whKeys = expandWarehouseSelectionKeys(selectedWarehouses, warehouseCatalog);
-            const customerNames = getCustomerMatchLabelsForManagingWarehouses(customersList, targetWarehouses, warehousesList);
-            return applyManagingWarehouseOrFilter(query, {
-                warehouseColumn: 'warehouse',
-                warehouseKeys: whKeys,
-                secondaryColumn: 'customer_name',
-                secondaryValues: customerNames,
-                noAccessValue: NO_WAREHOUSE_ACCESS_MARKER,
-            });
-        }
-
-        if (shouldScopeMachinesByWarehouse) {
-            return applyManagingWarehouseOrFilter(query, {
-                warehouseColumn: 'warehouse',
-                warehouseKeys: scopedWarehouseKeys,
-                secondaryColumn: 'customer_name',
-                secondaryValues: scopedCustomerNames,
-                noAccessValue: NO_WAREHOUSE_ACCESS_MARKER,
-            });
-        }
-
-        return query;
+        const selectedRecords = resolveWarehouseRecordsFromSelection(selectedWarehouses, warehousesList);
+        const targetWarehouses = selectedRecords.length ? selectedRecords : warehousesList;
+        const whKeys = expandWarehouseSelectionKeys(selectedWarehouses, warehousesList);
+        const customerNames = getCustomerMatchLabelsForManagingWarehouses(customersList, targetWarehouses, warehousesList);
+        return applyManagingWarehouseOrFilter(query, {
+            warehouseColumn: 'warehouse',
+            warehouseKeys: whKeys,
+            secondaryColumn: 'customer_name',
+            secondaryValues: customerNames,
+            noAccessValue: NO_WAREHOUSE_ACCESS_MARKER,
+        });
     };
 
     useEffect(() => {
@@ -387,11 +401,10 @@ const Machines = () => {
 
     useEffect(() => {
         if (permissionsLoading) return;
-        if (shouldScopeMachinesByWarehouse && warehousesList.length === 0) return;
         fetchMachines();
         fetchGlobalStats();
         fetchMetadataForCharts();
-    }, [currentPage, searchTerm, selectedStatuses, selectedMachineTypes, selectedCustomers, selectedDepartments, selectedWarehouses, scopedWarehouseKeys, scopedCustomerNames, isAdminOrManager, rawRole, user, department, warehousesList, customersList, permissionsLoading, shouldScopeMachinesByWarehouse]);
+    }, [currentPage, searchTerm, selectedStatuses, selectedMachineTypes, selectedCustomers, selectedDepartments, selectedWarehouses, permissionsLoading]);
 
     const fetchMetadataForCharts = async () => {
         try {
@@ -617,7 +630,7 @@ const Machines = () => {
                     .order('name'),
                 supabase
                     .from('customers')
-                    .select('id, name, legal_rep, invoice_company_name, warehouse_id')
+                    .select('id, name, code, legal_rep, invoice_company_name, warehouse_id')
                     .order('name'),
             ]);
             if (data) {
@@ -672,159 +685,48 @@ const Machines = () => {
     };
 
     const downloadTemplate = () => {
-        const headers = [
-            'Mã máy (Serial)',
-            'Loại máy (BV/TM/FM/IOT)',
-            'Tài khoản máy',
-            'Bluetooth MAC',
-            'Phiên bản',
-            'Thể tích bình',
-            'Loại khí',
-            'Loại van',
-            'Loại đầu phát',
-            'Đại lý',
-            'Kho quản lý',
-            'Cơ sở đang sử dụng máy',
-            'Trạng thái',
-            'Ngày bảo trì gần nhất (YYYY-MM-DD)',
-            'Loại bảo trì',
-            'Ghi chú bảo trì',
-            'Ngày bảo trì tiếp theo (YYYY-MM-DD)',
-            'Người thực hiện bảo trì',
-        ];
-
-        const exampleData = [
-            {
-                'Mã máy (Serial)': 'PLT-25D1-50-TM',
-                'Loại máy (BV/TM/FM/IOT)': 'TM',
-                'Tài khoản máy': 'ACC-001',
-                'Bluetooth MAC': '00:1A:2B:3C:4D:5E',
-                'Phiên bản': 'V1.0',
-                'Thể tích bình': 'Bình 4L/ CGA870',
-                'Loại khí': 'ArgonMed',
-                'Loại van': 'Van Messer',
-                'Loại đầu phát': 'Tia thường',
-                'Đại lý': 'Đại lý A',
-                'Kho quản lý': warehousesList[0]?.name || 'Kho tổng',
-                'Cơ sở đang sử dụng máy': 'Bệnh viện Đa khoa Tỉnh',
-                'Trạng thái': 'thuộc khách hàng',
-                'Ngày bảo trì gần nhất (YYYY-MM-DD)': '2023-10-01',
-                'Loại bảo trì': 'Bảo dưỡng',
-                'Ghi chú bảo trì': 'Thay dây dẫn khí',
-                'Ngày bảo trì tiếp theo (YYYY-MM-DD)': '2024-01-01',
-                'Người thực hiện bảo trì': 'Nguyễn Văn A',
-            },
-        ];
-
-        const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Template Import Máy');
-        XLSX.writeFile(wb, 'mau_import_may_moc.xlsx');
+        downloadMachineImportTemplate(allowedWarehouses.length ? allowedWarehouses : warehousesList, {
+            user,
+            department,
+        });
     };
 
     const handleImportExcel = async (e) => {
-        const file = e.target.files[0];
+        const file = e.target.files?.[0];
         if (!file) return;
 
-        const reader = new FileReader();
-        reader.onload = async (evt) => {
-            try {
-                const bstr = evt.target.result;
-                const wb = XLSX.read(bstr, { type: 'binary' });
-                const wsname = wb.SheetNames[0];
-                const ws = wb.Sheets[wsname];
-                const data = XLSX.utils.sheet_to_json(ws);
-
-                if (data.length === 0) {
-                    alert('File Excel không có dữ liệu!');
-                    return;
-                }
-
-                setIsLoading(true);
-
-                // Map tên kho → mã lưu DB (ưu tiên code, fallback id) — khớp orders/machines chuẩn hóa
-                const warehouseMap = (warehousesList || []).reduce((acc, w) => {
-                    const val = (w.code || w.id || '').toString();
-                    if (w.name) acc[w.name.toLowerCase()] = val;
-                    return acc;
-                }, {});
-
-                const machinesToInsert = data.map(row => {
-                    // Try to find status value regardless of header case
-                    const statusKey = Object.keys(row).find(k => k.toLowerCase() === 'trạng thái');
-                    const statusVal = statusKey ? row[statusKey]?.toString().trim() : null;
-
-                    let machineStatus = 'sẵn sàng';
-
-                    if (statusVal) {
-                        // Map label or ID to machine status ID
-                        const foundStatus = MACHINE_STATUSES.find(s =>
-                            s.label.toLowerCase() === statusVal.toLowerCase() ||
-                            s.id.toLowerCase() === statusVal.toLowerCase()
-                        );
-                        if (foundStatus) {
-                            machineStatus = foundStatus.id;
-                        } else {
-                            machineStatus = statusVal.toLowerCase();
-                        }
-                    } else if (row['Cơ sở đang sử dụng máy'] || row['Khách hàng đang sử dụng máy']) {
-                        machineStatus = 'thuộc khách hàng';
-                    }
-
-                    const facilityName =
-                        row['Cơ sở đang sử dụng máy']?.toString() ||
-                        row['Khách hàng đang sử dụng máy']?.toString() ||
-                        null;
-
-                    return {
-                        serial_number: row['Mã máy (Serial)']?.toString(),
-                        machine_type: row['Loại máy (BV/TM/FM/IOT)']?.toString() || 'TM',
-                        machine_account: row['Tài khoản máy']?.toString() || row['Mã máy (Serial)']?.toString(),
-                        bluetooth_mac: row['Bluetooth MAC']?.toString(),
-                        version: row['Phiên bản']?.toString(),
-                        cylinder_volume: row['Thể tích bình']?.toString(),
-                        gas_type: row['Loại khí']?.toString(),
-                        valve_type: row['Loại van']?.toString(),
-                        emission_head_type: row['Loại đầu phát']?.toString(),
-                        department_in_charge: row['Đại lý']?.toString(),
-                        warehouse: warehouseMap[row['Kho quản lý']?.toString()?.toLowerCase()] || null,
-                        customer_name: facilityName,
-                        status: machineStatus,
-                        maintenance_date: row['Ngày bảo trì gần nhất (YYYY-MM-DD)'] || null,
-                        maintenance_type: row['Loại bảo trì']?.toString() || null,
-                        maintenance_note: row['Ghi chú bảo trì']?.toString() || null,
-                        next_maintenance_date: row['Ngày bảo trì tiếp theo (YYYY-MM-DD)'] || null,
-                        maintenance_by: row['Người thực hiện bảo trì']?.toString() || null
-                    };
-                }).filter(m => m.serial_number);
-
-                if (machinesToInsert.length === 0) {
-                    alert('Không tìm thấy dữ liệu hợp lệ (thiếu mã máy)!');
-                    setIsLoading(false);
-                    return;
-                }
-
-                const { error } = await supabase.from('machines').insert(machinesToInsert);
-
-                if (error) {
-                    if (error.code === '23505') {
-                        alert('Lỗi: Một số mã máy (Serial) đã tồn tại trên hệ thống. Vui lòng kiểm tra lại!');
-                    } else {
-                        throw error;
-                    }
-                } else {
-                    alert(`🎉 Đã import thành công ${machinesToInsert.length} máy móc!`);
-                    fetchMachines();
-                }
-            } catch (err) {
-                console.error('Error importing excel:', err);
-                alert('Có lỗi xảy ra khi xử lý file: ' + err.message);
-            } finally {
-                setIsLoading(false);
-                if (e.target) e.target.value = null; // Reset input
+        try {
+            setIsImporting(true);
+            const rows = await readExcelFileToRows(file);
+            if (!rows.length) {
+                alert('File Excel không có dữ liệu hợp lệ!\nDùng sheet «Mẫu import máy» và điền cột Mã máy (Serial).');
+                return;
             }
-        };
-        reader.readAsBinaryString(file);
+
+            const replaceAll = window.confirm(
+                `Tìm thấy ${rows.length} dòng trong file.\n\n`
+                + 'OK = Xóa hết máy cũ rồi import lại\n'
+                + 'Hủy = Giữ máy cũ, thêm mới và cập nhật máy trùng Serial',
+            );
+
+            const warehouseCatalog = warehousesList;
+
+            const { count } = await importMachinesFromExcelRows(supabase, rows, {
+                warehousesList: warehouseCatalog,
+                clearExisting: replaceAll,
+                user,
+                department,
+            });
+
+            alert(`🎉 Đã import / cập nhật ${count} máy móc!`);
+            fetchMachines();
+        } catch (err) {
+            console.error('Error importing excel:', err);
+            alert(`Có lỗi xảy ra khi xử lý file:\n${err.message || err}`);
+        } finally {
+            setIsImporting(false);
+            if (e.target) e.target.value = null;
+        }
     };
 
     const normalizeText = (value) => (value || '')
@@ -1156,7 +1058,7 @@ const Machines = () => {
                         }
                         actions={
                             <>
-                                {isAdminOrManager && (
+                                {canImportMachinesExcel && (
                                     <div className="relative">
                                         <button
                                             id="more-actions-btn-machines"
@@ -1191,6 +1093,7 @@ const Machines = () => {
                                                         accept=".xlsx, .xls"
                                                         onChange={(e) => { handleImportExcel(e); setShowMoreActions(false); }}
                                                         className="hidden"
+                                                        disabled={isImporting}
                                                     />
                                                 </label>
                                             </div>
@@ -1286,6 +1189,7 @@ const Machines = () => {
                                                 <div className="min-w-0 flex-1">
                                                     <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Cơ sở</p>
                                                     <p className="text-[12px] text-foreground font-bold truncate">{machine.customer_name || '—'}</p>
+                                                    <p className="text-[10px] text-primary font-semibold truncate">Mã KH: {getMachineCustomerCode(machine) || '—'}</p>
                                                 </div>
                                             </div>
                                         </div>
@@ -1401,7 +1305,7 @@ const Machines = () => {
                                     </button>
                                 )}
 
-                                {isAdminOrManager && (
+                                {canImportMachinesExcel && (
                                     <button
                                         onClick={downloadTemplate}
                                         className="flex items-center gap-2 px-4 h-10 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-[13px] font-bold hover:bg-indigo-100 shadow-sm transition-all active:scale-95"
@@ -1412,7 +1316,7 @@ const Machines = () => {
                                     </button>
                                 )}
 
-                                {isAdminOrManager && (
+                                {canImportMachinesExcel && (
                                     <div className="relative">
                                         <input
                                             type="file"
@@ -1420,14 +1324,20 @@ const Machines = () => {
                                             onChange={handleImportExcel}
                                             className="hidden"
                                             id="machine-excel-import"
+                                            disabled={isImporting}
                                         />
                                         <label
                                             htmlFor="machine-excel-import"
-                                            className="flex items-center gap-2 px-4 h-10 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-[13px] font-bold hover:bg-emerald-100 shadow-sm transition-all cursor-pointer active:scale-95 select-none"
+                                            className={clsx(
+                                                'flex items-center gap-2 px-4 h-10 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-[13px] font-bold shadow-sm transition-all select-none',
+                                                isImporting
+                                                    ? 'opacity-50 cursor-not-allowed'
+                                                    : 'hover:bg-emerald-100 cursor-pointer active:scale-95',
+                                            )}
                                             title="Nhập dữ liệu từ Excel"
                                         >
                                             <Upload size={16} />
-                                            Import Excel
+                                            {isImporting ? 'Đang import...' : 'Import Excel'}
                                         </label>
                                     </div>
                                 )}
@@ -1655,6 +1565,7 @@ const Machines = () => {
                                             if (colKey === 'machine_type') return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{getLabel(MACHINE_TYPES, machine.machine_type)}</td>;
                                             if (colKey === 'warehouse') return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{getMachineManagingWarehouseLabel(machine)}</td>;
                                             if (colKey === 'customer_name') return <td key={colKey} className="px-4 py-4 text-sm font-semibold text-foreground">{machine.customer_name || '—'}</td>;
+                                            if (colKey === 'customer_code') return <td key={colKey} className="px-4 py-4 text-sm font-semibold text-primary">{getMachineCustomerCode(machine) || '—'}</td>;
                                             if (colKey === 'customer_warehouse') return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{getWarehouseLabel(machine.customer_warehouse)}</td>;
                                             if (colKey === 'status') return (
                                                 <td key={colKey} className="px-4 py-4">
@@ -1870,7 +1781,10 @@ const Machines = () => {
                                                     <div className="mt-3 space-y-2 rounded-lg bg-slate-50 border border-slate-100 p-2">
                                                         <div className="flex items-start gap-2">
                                                             <User size={13} className="text-blue-500 mt-0.5 shrink-0" />
-                                                            <p className="text-[12px] font-semibold text-slate-700 line-clamp-2">{machine.customer_name || '-'}</p>
+                                                            <div className="min-w-0">
+                                                                <p className="text-[12px] font-semibold text-slate-700 line-clamp-2">{machine.customer_name || '-'}</p>
+                                                                <p className="text-[11px] font-semibold text-primary truncate">Mã KH: {getMachineCustomerCode(machine) || '—'}</p>
+                                                            </div>
                                                         </div>
                                                         <div className="flex items-center gap-2">
                                                             <Warehouse size={13} className="text-emerald-600 shrink-0" />

@@ -51,6 +51,7 @@ import { isAdminRole } from '../utils/accessControl';
 import {
     filterWarehousesForCurrentUser,
     getCylinderKhoValue,
+    getWarehouseDisplayName,
     rowMatchesCylinderWarehouseStorage,
 } from '../utils/orderWarehouseScope';
 import { supabase } from '../supabase/config';
@@ -69,6 +70,7 @@ ChartJS.register(
 
 const TABLE_COLUMNS_DEF = [
     { key: 'name', label: 'Tên kho' },
+    { key: 'code', label: 'Mã kho' },
     { key: 'branch_office', label: 'Chi nhánh / VPĐD' },
     { key: 'manager_name', label: 'Thủ kho' },
     { key: 'address', label: 'Địa chỉ' },
@@ -149,6 +151,10 @@ const Warehouses = () => {
     }, [permissionsLoading, rawRole, user?.name, user?.username, user?.chi_nhanh, department]);
 
     useEffect(() => {
+        setVisibleColumns((prev) => (prev.includes('name') ? prev : ['name', ...prev]));
+    }, []);
+
+    useEffect(() => {
         const managers = [...new Set(warehouses.map(w => w.manager_name).filter(Boolean))];
         setUniqueManagers(managers);
     }, [warehouses]);
@@ -224,16 +230,21 @@ const Warehouses = () => {
         try {
             const { data, error } = await supabase
                 .from('warehouses')
-                .select('*')
+                .select('id, name, code, manager_name, address, capacity, status, branch_office, created_at')
                 .order('created_at', { ascending: false });
 
             if (error && error.code !== '42P01') throw error;
 
-            const baseWarehouses = filterWarehousesForCurrentUser(data || [], {
+            const allWarehouses = data || [];
+            let baseWarehouses = filterWarehousesForCurrentUser(allWarehouses, {
                 role: rawRole,
                 user,
                 department,
             });
+            // Trang danh sách kho: nếu lọc quyền trả rỗng nhưng DB có dữ liệu → hiển thị toàn bộ
+            if (baseWarehouses.length === 0 && allWarehouses.length > 0) {
+                baseWarehouses = allWarehouses;
+            }
             if (baseWarehouses.length === 0) {
                 setWarehouses([]);
                 setSelectedIds([]);
@@ -434,9 +445,11 @@ const Warehouses = () => {
     const filteredWarehouses = warehouses.filter(w => {
         const search = searchTerm.toLowerCase();
         const matchesSearch = (
-            (w.name?.toLowerCase().includes(search)) ||
-            (w.manager_name?.toLowerCase().includes(search)) ||
-            (w.address?.toLowerCase().includes(search))
+            getWarehouseDisplayName(w).toLowerCase().includes(search)
+            || (w.code?.toLowerCase().includes(search))
+            || (w.name?.toLowerCase().includes(search))
+            || (w.manager_name?.toLowerCase().includes(search))
+            || (w.address?.toLowerCase().includes(search))
         );
 
         const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(w.status);
@@ -488,7 +501,7 @@ const Warehouses = () => {
 
     const getCapacityStats = () => {
         return filteredWarehouses
-            .map(w => ({ name: w.name || 'Không tên', value: w.capacity || 0 }))
+            .map(w => ({ name: getWarehouseDisplayName(w), value: w.capacity || 0 }))
             .sort((a, b) => b.value - a.value)
             .slice(0, 10);
     };
@@ -707,7 +720,7 @@ const Warehouses = () => {
                                                             {w.status || 'Không xác định'}
                                                         </span>
                                                     </div>
-                                                    <h3 className="font-extrabold text-[14px] text-foreground tracking-tight mt-1 leading-tight">{w.name}</h3>
+                                                    <h3 className="font-extrabold text-[14px] text-foreground tracking-tight mt-1 leading-tight">{getWarehouseDisplayName(w)}</h3>
                                                 </div>
                                             </div>
                                         </div>
@@ -752,7 +765,7 @@ const Warehouses = () => {
                                             )}
                                             {isAdminOrManager && (
                                                 <button
-                                                    onClick={() => handleDeleteWarehouse(w.id, w.name)}
+                                                    onClick={() => handleDeleteWarehouse(w.id, getWarehouseDisplayName(w))}
                                                     className="px-2.5 py-1.5 rounded-md border border-rose-100 text-rose-500 hover:bg-rose-50 transition-all active:scale-[0.98]"
                                                 >
                                                     <Trash2 size={14} />
@@ -984,7 +997,10 @@ const Warehouses = () => {
                                         </td>
                                         {visibleTableColumns.map(col => {
                                             if (col.key === 'name') {
-                                                return <td key={col.key} className={getNameCellClass(w.status)}>{w.name}</td>;
+                                                return <td key={col.key} className={getNameCellClass(w.status)}>{getWarehouseDisplayName(w)}</td>;
+                                            }
+                                            if (col.key === 'code') {
+                                                return <td key={col.key} className="px-4 py-4 text-sm font-semibold text-primary">{w.code || '—'}</td>;
                                             }
                                             if (col.key === 'status') {
                                                 return (
@@ -1008,7 +1024,7 @@ const Warehouses = () => {
                                                 <button onClick={() => handleEditWarehouse(w)} className="text-amber-600/80 hover:text-amber-700 transition-colors p-1 rounded hover:bg-amber-50" title="Chỉnh sửa">
                                                     <Edit size={18} />
                                                 </button>
-                                                <button onClick={() => handleDeleteWarehouse(w.id, w.name)} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
+                                                <button onClick={() => handleDeleteWarehouse(w.id, getWarehouseDisplayName(w))} className="text-red-600/80 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Xóa">
                                                     <Trash2 size={18} />
                                                 </button>
                                             </div>

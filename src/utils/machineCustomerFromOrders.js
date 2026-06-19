@@ -136,6 +136,73 @@ export function normalizeCustomerLookupKey(value) {
         .toLowerCase();
 }
 
+/** Map tên/đại diện KH → mã hoặc field khác (code, warehouse_id…). */
+export function buildCustomerFieldByLabelMap(customers = [], field = 'code') {
+    /** @type {Record<string, string>} */
+    const map = {};
+    (customers || []).forEach((customer) => {
+        const value = String(customer?.[field] || '').trim();
+        if (!value) return;
+        [customer.name, customer.legal_rep, customer.invoice_company_name].forEach((label) => {
+            const key = normalizeCustomerLookupKey(label);
+            if (key) map[key] = value;
+        });
+    });
+    return map;
+}
+
+export function resolveCustomerFieldFromMachineLabel(label, map = {}) {
+    const raw = String(label || '').trim();
+    if (!raw) return '';
+    const baseName = raw.split(' / ')[0].trim();
+    for (const candidate of [raw, baseName]) {
+        const key = normalizeCustomerLookupKey(candidate);
+        if (key && map[key]) return map[key];
+    }
+    return '';
+}
+
+/** Gắn mã KH (customers.code) theo tên cơ sở trên máy. */
+export async function attachCustomerCodesToMachines(supabaseClient, machineRows) {
+    const rows = machineRows || [];
+    const needsCode = rows.some(
+        (machine) => String(machine.customer_name || '').trim() && !String(machine.customer_code || '').trim(),
+    );
+    if (!needsCode) return rows;
+
+    const { data: customers, error } = await supabaseClient
+        .from('customers')
+        .select('id, code, name, legal_rep, invoice_company_name')
+        .not('code', 'is', null);
+
+    if (error) {
+        console.warn('[machines] attachCustomerCodes:', error);
+        return rows;
+    }
+
+    const codeByLabel = buildCustomerFieldByLabelMap(customers, 'code');
+    /** @type {Record<string, string>} */
+    const codeById = {};
+    (customers || []).forEach((customer) => {
+        if (customer?.id && customer?.code) {
+            codeById[customer.id] = String(customer.code).trim();
+        }
+    });
+
+    return rows.map((machine) => {
+        if (String(machine.customer_code || '').trim()) return machine;
+        const label = String(machine.customer_name || '').trim();
+        if (!label) return machine;
+
+        let code = resolveCustomerFieldFromMachineLabel(label, codeByLabel);
+        if (!code && machine.customer_id && codeById[machine.customer_id]) {
+            code = codeById[machine.customer_id];
+        }
+
+        return code ? { ...machine, customer_code: code } : machine;
+    });
+}
+
 /**
  * Gắn kho từ hồ sơ KH (warehouse_id) hoặc đơn hoàn thành — khớp tên cơ sở, đại diện, v.v.
  */
@@ -146,7 +213,7 @@ export async function attachCustomerWarehousesToMachines(supabaseClient, machine
         const wh = String(m.warehouse || m.customer_warehouse || '').trim();
         return cust && !wh;
     });
-    if (!needsWarehouse) return rows;
+    if (!needsWarehouse) return attachCustomerCodesToMachines(supabaseClient, rows);
 
     const { data: customers, error: custErr } = await supabaseClient
         .from('customers')
@@ -256,5 +323,5 @@ export async function attachCustomerWarehousesToMachines(supabaseClient, machine
         });
     }
 
-    return result;
+    return attachCustomerCodesToMachines(supabaseClient, result);
 }
