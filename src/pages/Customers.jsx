@@ -65,6 +65,11 @@ import {
     resolvePreferredWarehouseId,
 } from '../utils/customerWarehouse';
 import {
+    downloadCustomerMachineLinkTemplate,
+    importCustomerMachineLinksFromRows,
+    readCustomerMachineLinkExcel,
+} from '../utils/customerMachineLinkExcel';
+import {
     appendCustomerAssigneeScope,
     getCurrentUserNames,
     isSalesAssigneeScopePending,
@@ -184,6 +189,7 @@ const Customers = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [customers, setCustomers] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [isLinkingMachines, setIsLinkingMachines] = useState(false);
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
     const [selectedCustomer, setSelectedCustomer] = useState(null);
@@ -227,6 +233,7 @@ const Customers = () => {
     const [showMoreActions, setShowMoreActions] = useState(false);
     const [isSearchExpanded, setIsSearchExpanded] = useState(false);
     const searchInputRef = useRef(null);
+    const customerMachineLinkInputRef = useRef(null);
 
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [filterSearch, setFilterSearch] = useState('');
@@ -1522,6 +1529,47 @@ const Customers = () => {
         reader.readAsBinaryString(file);
     };
 
+    const handleImportCustomerMachineLink = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        try {
+            setIsLinkingMachines(true);
+            const rows = await readCustomerMachineLinkExcel(file);
+            const { linked, customerUpdates, errors } = await importCustomerMachineLinksFromRows(supabase, rows);
+
+            if (linked === 0) {
+                const detail = errors.slice(0, 5).map((err) => {
+                    const prefix = err.row ? `Dòng ${err.row}: ` : '';
+                    return `${prefix}${err.message}`;
+                }).join('\n');
+                alert(`Không gán được máy nào.\n${detail || 'Kiểm tra lại Mã KH và Mã máy.'}`);
+                return;
+            }
+
+            let message = `Đã gán ${linked} máy cho ${customerUpdates} khách hàng.`;
+            if (errors.length > 0) {
+                const detail = errors.slice(0, 8).map((err) => {
+                    const prefix = err.row ? `Dòng ${err.row}: ` : '';
+                    return `${prefix}${err.message}`;
+                }).join('\n');
+                message += `\n\nBỏ qua / lỗi (${errors.length}):\n${detail}`;
+                if (errors.length > 8) message += '\n...';
+            }
+            alert(message);
+            fetchCustomers();
+        } catch (err) {
+            console.error('Error linking machines to customers:', err);
+            alert('Có lỗi khi gán máy cho KH: ' + (err.message || err));
+        } finally {
+            setIsLinkingMachines(false);
+            if (customerMachineLinkInputRef.current) {
+                customerMachineLinkInputRef.current.value = '';
+            }
+            e.target.value = '';
+        }
+    };
+
     const getCategoryStats = () => {
         const stats = {};
         filteredCustomers.forEach(customer => {
@@ -1666,6 +1714,41 @@ const Customers = () => {
                                                     className="hidden"
                                                 />
                                             </label>
+
+                                            {filterType !== 'lead' && (
+                                                <>
+                                                    <div
+                                                        role="button"
+                                                        onClick={() => {
+                                                            downloadCustomerMachineLinkTemplate();
+                                                            setShowMoreActions(false);
+                                                        }}
+                                                        className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-violet-700 hover:bg-violet-50 transition-colors text-left cursor-pointer border-t border-slate-50"
+                                                    >
+                                                        <div className="w-5 flex justify-center flex-shrink-0">
+                                                            <Download size={18} className="text-violet-500" />
+                                                        </div>
+                                                        Tải mẫu KH–Máy
+                                                    </div>
+                                                    <label className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-violet-700 hover:bg-violet-50 transition-colors cursor-pointer text-left">
+                                                        <div className="w-5 flex justify-center flex-shrink-0">
+                                                            <Upload size={18} className="text-violet-500" />
+                                                        </div>
+                                                        {isLinkingMachines ? 'Đang gán máy…' : 'Import gán máy KH'}
+                                                        <input
+                                                            ref={customerMachineLinkInputRef}
+                                                            type="file"
+                                                            accept=".xlsx, .xls"
+                                                            disabled={isLinkingMachines}
+                                                            onChange={(e) => {
+                                                                handleImportCustomerMachineLink(e);
+                                                                setShowMoreActions(false);
+                                                            }}
+                                                            className="hidden"
+                                                        />
+                                                    </label>
+                                                </>
+                                            )}
 
                                             <div
                                                 role="button"
@@ -2008,6 +2091,39 @@ const Customers = () => {
                                         className="hidden"
                                     />
                                 </label>
+
+                                {filterType !== 'lead' && (
+                                    <>
+                                        <div
+                                            onClick={downloadCustomerMachineLinkTemplate}
+                                            className="flex items-center gap-2 px-4 py-2 h-10 bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200 rounded-lg transition-all text-[13px] font-bold shadow-sm cursor-pointer select-none"
+                                            title="Tải mẫu Excel: Mã KH + Mã máy"
+                                        >
+                                            <Download size={16} className="shrink-0" />
+                                            <span>Mẫu KH–Máy</span>
+                                        </div>
+                                        <label
+                                            className={clsx(
+                                                'flex items-center gap-2 px-4 py-2 h-10 border rounded-lg transition-all text-[13px] font-bold shadow-sm cursor-pointer select-none',
+                                                isLinkingMachines
+                                                    ? 'bg-violet-100 text-violet-400 border-violet-200 cursor-wait'
+                                                    : 'bg-violet-50 text-violet-700 hover:bg-violet-100 border-violet-200',
+                                            )}
+                                            title="Import Excel gán Mã máy cho Mã KH"
+                                        >
+                                            <Upload size={16} className="shrink-0" />
+                                            <span>{isLinkingMachines ? 'Đang gán…' : 'Gán máy KH'}</span>
+                                            <input
+                                                ref={customerMachineLinkInputRef}
+                                                type="file"
+                                                accept=".xlsx, .xls"
+                                                disabled={isLinkingMachines}
+                                                onChange={handleImportCustomerMachineLink}
+                                                className="hidden"
+                                            />
+                                        </label>
+                                    </>
+                                )}
 
                                 <button
                                     onClick={handleExportCustomers}

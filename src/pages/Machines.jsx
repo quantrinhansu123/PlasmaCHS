@@ -37,12 +37,8 @@ import { SummaryCard } from '../components/ui/SummaryCard';
 import { MACHINE_STATUSES, MACHINE_TYPES } from '../constants/machineConstants';
 import usePermissions from '../hooks/usePermissions';
 import {
-    MACHINE_STATUSES_ENRICH_CUSTOMER_FROM_ORDERS,
-    isOrderDeliveredCompleted,
-    normalizeMachineSerialKey,
-    attachCustomerWarehousesToMachines,
-    resolveOrderCustomerDisplay,
-    resolveOrderWarehouseForMachine,
+    buildCustomerFieldByLabelMap,
+    resolveCustomerFieldFromMachineLabel,
 } from '../utils/machineCustomerFromOrders';
 import { isThuKhoRole, isWarehouseRole } from '../utils/accessControl';
 import { canViewAllWarehouses, applyManagingWarehouseOrFilter, buildScopedWarehouseFilterKeys, expandWarehouseSelectionKeys, filterWarehousesForCurrentUser, getCustomerMatchLabelsForManagingWarehouses, resolveWarehouseRecordsFromSelection, rowMatchesManagingWarehouseRecord } from '../utils/orderWarehouseScope';
@@ -51,7 +47,6 @@ import {
     importMachinesFromExcelRows,
     readExcelFileToRows,
 } from '../utils/machineExcelImport';
-import { normalizeCustomerLookupKey } from '../utils/machineCustomerFromOrders';
 import { supabase } from '../supabase/config';
 
 const NO_WAREHOUSE_ACCESS_MARKER = '__NO_WAREHOUSE_ACCESS__';
@@ -65,164 +60,23 @@ function escapeIlikeOrFragment(text) {
         .replace(/,/g, '');
 }
 
-/** Giá trị có thể lưu ở machines.warehouse: code (HN), UUID, hoặc tên kho */
-function warehouseRowStorageKeys(w) {
-    if (!w) return [];
-    const code = (w.code || '').toString().trim();
-    const id = (w.id || '').toString().trim();
-    const name = (w.name || '').toString().trim();
-    return [...new Set([code, id, name].filter(Boolean))];
-}
-
-function machineWarehouseMatchesRow(storedValue, whRow) {
-    const v = (storedValue || '').toString().trim();
-    if (!v || !whRow) return false;
-    if (whRow.code && v === whRow.code) return true;
-    if (whRow.id && v === String(whRow.id)) return true;
-    if (whRow.name && v === whRow.name) return true;
-    return false;
-}
-
-/** Khớp loại máy trên order_items (tránh nhầm dòng bình) */
-function isMachineProductLine(productType) {
-    if (!productType) return false;
-    const n = String(productType).trim();
-    const u = n.toUpperCase();
-    if (u.startsWith('MAY') || n.startsWith('MÁY')) return true;
-    return ['TM', 'SD', 'FM', 'Khac', 'KHAC', 'DNXM', 'MAY_ROSY', 'MAY_MED', 'MAY_MED_NEW'].includes(n);
-}
-
-/**
- * Hiển thị đúng “khách đang dùng máy”: chuẩn hóa serial, nhiều trạng thái máy + đơn hoàn thành (nhiều kiểu lưu status).
- */
-async function enrichInUseMachineCustomersFromOrders(supabaseClient, machineRows) {
-    const rows = machineRows || [];
-    const targets = rows.filter(
-        (m) =>
-            MACHINE_STATUSES_ENRICH_CUSTOMER_FROM_ORDERS.has(m.status) &&
-            String(m.serial_number || '').trim(),
-    );
-    let result = rows;
-
-    if (!targets.length) {
-        return attachCustomerWarehousesToMachines(supabaseClient, result);
-    }
-
-    const variantSet = new Set();
-    targets.forEach((m) => {
-        const s = String(m.serial_number).trim();
-        [s, s.replace(/\s+/g, ' ').trim(), s.replace(/\s+/g, '')].forEach((v) => {
-            if (v) variantSet.add(v);
-        });
-    });
-    const variants = [...variantSet];
-    const chunkSize = 90;
-    /** @type {{ serial_number?: string; order_id: string; product_type?: string }[]} */
-    let allItems = [];
-
-    for (let i = 0; i < variants.length; i += chunkSize) {
-        const part = variants.slice(i, i + chunkSize);
-        const { data: itemChunk, error: itemErr } = await supabaseClient
-            .from('order_items')
-            .select('serial_number, order_id, product_type')
-            .in('serial_number', part);
-        if (itemErr) {
-            console.warn('[Machines] enrich customer (order_items):', itemErr);
-            return attachCustomerWarehousesToMachines(supabaseClient, result);
+/** Gắn mã KH / kho phụ trách từ danh sách KH đã tải — không gọi orders/order_items. */
+function enrichMachinesListFromCustomers(rawList, customersList) {
+    if (!customersList?.length) return rawList || [];
+    const codeByLabel = buildCustomerFieldByLabelMap(customersList, 'code');
+    const whByLabel = buildCustomerFieldByLabelMap(customersList, 'warehouse_id');
+    return (rawList || []).map((machine) => {
+        let next = machine;
+        if (!String(machine.customer_code || '').trim() && machine.customer_name) {
+            const code = resolveCustomerFieldFromMachineLabel(machine.customer_name, codeByLabel);
+            if (code) next = { ...next, customer_code: code };
         }
-        allItems.push(...(itemChunk || []));
-    }
-
-    const machineItems = allItems.filter((it) => isMachineProductLine(it?.product_type));
-
-    const orderIds = [...new Set(machineItems.map((r) => r.order_id).filter(Boolean))];
-
-    if (orderIds.length) {
-    /** @type {Record<string, unknown>} */
-    const orderMap = {};
-    /** @type {Set<string>} */
-    const customerIds = new Set();
-
-    for (let i = 0; i < orderIds.length; i += chunkSize) {
-        const part = orderIds.slice(i, i + chunkSize);
-        const { data: ordChunk, error: ordErr } = await supabaseClient
-            .from('orders')
-            .select('id, customer_name, recipient_name, customer_id, status, created_at, order_type, order_code, warehouse, note')
-            .in('id', part);
-
-        if (ordErr) {
-            console.warn('[Machines] enrich customer (orders):', ordErr);
-            return attachCustomerWarehousesToMachines(supabaseClient, result);
+        if (!String(machine.warehouse || '').trim() && machine.customer_name) {
+            const wh = resolveCustomerFieldFromMachineLabel(machine.customer_name, whByLabel);
+            if (wh) next = { ...next, customer_warehouse: wh };
         }
-        (ordChunk || []).forEach((o) => {
-            if (!isOrderDeliveredCompleted(o.status)) return;
-            orderMap[o.id] = o;
-            if (o.customer_id) customerIds.add(o.customer_id);
-        });
-    }
-
-    /** @type {Record<string, { name?: string | null; warehouse_id?: string | null }>} */
-    const customersById = {};
-    /** @type {Record<string, string>} */
-    const customerWarehouseById = {};
-    const cidList = [...customerIds];
-    for (let i = 0; i < cidList.length; i += chunkSize) {
-        const part = cidList.slice(i, i + chunkSize);
-        const { data: custChunk } = await supabaseClient
-            .from('customers')
-            .select('id, name, warehouse_id, code')
-            .in('id', part);
-        (custChunk || []).forEach((c) => {
-            if (c?.id) {
-                customersById[c.id] = c;
-                if (c.warehouse_id) customerWarehouseById[c.id] = String(c.warehouse_id).trim();
-            }
-        });
-    }
-
-    /** @type {Record<string, { created_at?: string; customerLabel?: string; warehouseCode?: string; customerWarehouseKh?: string; customerCode?: string }>} */
-    const bestByNormSerial = {};
-    machineItems.forEach((r) => {
-        const o = orderMap[r.order_id];
-        if (!o?.created_at) return;
-        const nkItem = normalizeMachineSerialKey(r.serial_number);
-        if (!nkItem) return;
-        const customerLabel = resolveOrderCustomerDisplay(o, customersById);
-        const warehouseCode = resolveOrderWarehouseForMachine(o, customerWarehouseById);
-        const customerWarehouseKh = o.customer_id
-            ? customerWarehouseById[o.customer_id] || ''
-            : '';
-        const customerCode = o.customer_id
-            ? String(customersById[o.customer_id]?.code || '').trim()
-            : '';
-        if (!customerLabel && !warehouseCode && !customerWarehouseKh && !customerCode) return;
-        const prev = bestByNormSerial[nkItem];
-        if (!prev || new Date(o.created_at) > new Date(prev.created_at || 0)) {
-            bestByNormSerial[nkItem] = {
-                created_at: o.created_at,
-                customerLabel,
-                warehouseCode,
-                customerWarehouseKh,
-                customerCode,
-            };
-        }
+        return next;
     });
-
-    result = rows.map((m) => {
-        if (!MACHINE_STATUSES_ENRICH_CUSTOMER_FROM_ORDERS.has(m.status)) return m;
-        const nk = normalizeMachineSerialKey(m.serial_number);
-        const hit = bestByNormSerial[nk];
-        if (!hit?.customerLabel && !hit?.warehouseCode && !hit?.customerWarehouseKh && !hit?.customerCode) return m;
-        return {
-            ...m,
-            ...(hit.customerLabel ? { customer_name: hit.customerLabel } : {}),
-            ...(hit.customerWarehouseKh ? { customer_warehouse: hit.customerWarehouseKh } : {}),
-            ...(hit.customerCode ? { customer_code: hit.customerCode } : {}),
-        };
-    });
-    }
-
-    return attachCustomerWarehousesToMachines(supabaseClient, result);
 }
 
 const TABLE_COLUMNS = [
@@ -231,9 +85,7 @@ const TABLE_COLUMNS = [
     { key: 'warehouse', label: 'Kho Quản Lý' },
     { key: 'customer_name', label: 'Cơ sở đang sử dụng máy' },
     { key: 'customer_code', label: 'Mã KH' },
-    { key: 'customer_warehouse', label: 'Kho phụ trách KH' },
     { key: 'status', label: 'Trạng Thái' },
-    { key: 'department_in_charge', label: 'Đại lý' },
 ];
 
 const Machines = () => {
@@ -244,6 +96,7 @@ const Machines = () => {
     const [activeView, setActiveView] = useState('list');
     const [selectedIds, setSelectedIds] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
+    const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
     const [machines, setMachines] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
@@ -253,7 +106,7 @@ const Machines = () => {
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
-    const [pageSize, setPageSize] = useState(2000);
+    const [pageSize, setPageSize] = useState(50);
     const [totalRecords, setTotalRecords] = useState(0);
     const [stats, setStats] = useState({
         total: 0,
@@ -266,11 +119,8 @@ const Machines = () => {
     const [selectedStatuses, setSelectedStatuses] = useState([]);
     const [selectedMachineTypes, setSelectedMachineTypes] = useState([]);
     const [selectedCustomers, setSelectedCustomers] = useState([]);
-    const [selectedDepartments, setSelectedDepartments] = useState([]);
     const [selectedWarehouses, setSelectedWarehouses] = useState([]);
-    const [uniqueCustomers, setUniqueCustomers] = useState([]);
     const [customersList, setCustomersList] = useState([]);
-    const [uniqueDepartments, setUniqueDepartments] = useState([]);
     const [warehousesList, setWarehousesList] = useState([]);
 
     const [showMobileFilter, setShowMobileFilter] = useState(false);
@@ -278,7 +128,6 @@ const Machines = () => {
     const [pendingStatuses, setPendingStatuses] = useState([]);
     const [pendingMachineTypes, setPendingMachineTypes] = useState([]);
     const [pendingCustomers, setPendingCustomers] = useState([]);
-    const [pendingDepartments, setPendingDepartments] = useState([]);
     const [pendingWarehouses, setPendingWarehouses] = useState([]);
     const [showMoreActions, setShowMoreActions] = useState(false);
 
@@ -298,7 +147,7 @@ const Machines = () => {
             if (Array.isArray(saved) && saved.length > 0) {
                 const valid = saved.filter(key => defaultColOrder.includes(key));
                 // Ensure 'quantity' is NOT in the valid list since it was removed
-                const filtered = valid.filter(key => key !== 'quantity');
+                const filtered = valid.filter(key => !['quantity', 'customer_warehouse', 'department_in_charge'].includes(key));
                 const missing = defaultColOrder.filter(key => !filtered.includes(key));
                 return [...filtered, ...missing];
             }
@@ -309,7 +158,7 @@ const Machines = () => {
         try {
             const saved = JSON.parse(localStorage.getItem('columns_machines') || 'null');
             if (Array.isArray(saved) && saved.length > 0) {
-                const valid = saved.filter(key => defaultColOrder.includes(key));
+                const valid = saved.filter(key => defaultColOrder.includes(key) && !['customer_warehouse', 'department_in_charge'].includes(key));
                 // Add any missing default columns that were added since last save
                 const newDefaults = defaultColOrder.filter(key => !valid.includes(key));
                 return [...valid, ...newDefaults];
@@ -345,38 +194,25 @@ const Machines = () => {
         return getCustomerMatchLabelsForManagingWarehouses(customersList, allowedWarehouses, warehousesList);
     }, [customersList, allowedWarehouses, warehousesList]);
 
+    const customerCodeByLabel = useMemo(
+        () => buildCustomerFieldByLabelMap(customersList, 'code'),
+        [customersList],
+    );
+    const customerWarehouseByLabel = useMemo(
+        () => buildCustomerFieldByLabelMap(customersList, 'warehouse_id'),
+        [customersList],
+    );
+
     const getMachineCustomerWarehouse = (machine) => {
-        const label = String(machine?.customer_name || '').trim();
-        if (!label) return '';
-        const baseName = label.split(' / ')[0].trim();
-        const lookupKeys = [label, baseName]
-            .map((value) => normalizeCustomerLookupKey(value))
-            .filter(Boolean);
-        const customer = customersList.find((item) => {
-            const candidateKeys = [item.name, item.legal_rep, item.invoice_company_name]
-                .map((value) => normalizeCustomerLookupKey(value))
-                .filter(Boolean);
-            return lookupKeys.some((key) => candidateKeys.includes(key));
-        });
-        return customer?.warehouse_id || '';
+        const stored = String(machine?.customer_warehouse || '').trim();
+        if (stored) return stored;
+        return resolveCustomerFieldFromMachineLabel(machine?.customer_name, customerWarehouseByLabel);
     };
 
     const getMachineCustomerCode = (machine) => {
         const stored = String(machine?.customer_code || '').trim();
         if (stored) return stored;
-        const label = String(machine?.customer_name || '').trim();
-        if (!label) return '';
-        const baseName = label.split(' / ')[0].trim();
-        const lookupKeys = [label, baseName]
-            .map((value) => normalizeCustomerLookupKey(value))
-            .filter(Boolean);
-        const customer = customersList.find((item) => {
-            const candidateKeys = [item.name, item.legal_rep, item.invoice_company_name]
-                .map((value) => normalizeCustomerLookupKey(value))
-                .filter(Boolean);
-            return lookupKeys.some((key) => candidateKeys.includes(key));
-        });
-        return customer?.code || '';
+        return resolveCustomerFieldFromMachineLabel(machine?.customer_name, customerCodeByLabel);
     };
 
     const applyWarehouseFiltersToQuery = (query) => {
@@ -400,11 +236,24 @@ const Machines = () => {
     }, []);
 
     useEffect(() => {
+        const timer = setTimeout(() => setDebouncedSearchTerm(searchTerm.trim()), 350);
+        return () => clearTimeout(timer);
+    }, [searchTerm]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [debouncedSearchTerm, selectedStatuses, selectedMachineTypes, selectedCustomers, selectedWarehouses]);
+
+    useEffect(() => {
         if (permissionsLoading) return;
         fetchMachines();
         fetchGlobalStats();
+    }, [currentPage, pageSize, debouncedSearchTerm, selectedStatuses, selectedMachineTypes, selectedCustomers, selectedWarehouses, permissionsLoading, customersList]);
+
+    useEffect(() => {
+        if (permissionsLoading || activeView !== 'stats') return;
         fetchMetadataForCharts();
-    }, [currentPage, searchTerm, selectedStatuses, selectedMachineTypes, selectedCustomers, selectedDepartments, selectedWarehouses, permissionsLoading]);
+    }, [activeView, debouncedSearchTerm, selectedStatuses, selectedMachineTypes, selectedCustomers, selectedWarehouses, permissionsLoading]);
 
     const fetchMetadataForCharts = async () => {
         try {
@@ -412,14 +261,13 @@ const Machines = () => {
                 .from('machines')
                 .select('status, machine_type, customer_name, department_in_charge, warehouse');
 
-            if (searchTerm) {
-                const p = `%${escapeIlikeOrFragment(searchTerm)}%`;
+            if (debouncedSearchTerm) {
+                const p = `%${escapeIlikeOrFragment(debouncedSearchTerm)}%`;
                 query = query.or(`serial_number.ilike.${p},machine_type.ilike.${p},customer_name.ilike.${p},department_in_charge.ilike.${p},warehouse.ilike.${p}`);
             }
             if (selectedStatuses.length > 0) query = query.in('status', selectedStatuses);
             if (selectedMachineTypes.length > 0) query = query.in('machine_type', selectedMachineTypes);
             if (selectedCustomers.length > 0) query = query.in('customer_name', selectedCustomers);
-            if (selectedDepartments.length > 0) query = query.in('department_in_charge', selectedDepartments);
 
             query = applyWarehouseFiltersToQuery(query);
 
@@ -441,8 +289,8 @@ const Machines = () => {
 
             // Apply same filters to stat queries
             Object.keys(queries).forEach(key => {
-                if (searchTerm) {
-                    const p = `%${escapeIlikeOrFragment(searchTerm)}%`;
+                if (debouncedSearchTerm) {
+                    const p = `%${escapeIlikeOrFragment(debouncedSearchTerm)}%`;
                     queries[key] = queries[key].or(`serial_number.ilike.${p},machine_type.ilike.${p},customer_name.ilike.${p},department_in_charge.ilike.${p},warehouse.ilike.${p}`);
                 }
                 if (key === 'total') {
@@ -450,7 +298,6 @@ const Machines = () => {
                 }
                 if (selectedMachineTypes.length > 0) queries[key] = queries[key].in('machine_type', selectedMachineTypes);
                 if (selectedCustomers.length > 0) queries[key] = queries[key].in('customer_name', selectedCustomers);
-                if (selectedDepartments.length > 0) queries[key] = queries[key].in('department_in_charge', selectedDepartments);
                 queries[key] = applyWarehouseFiltersToQuery(queries[key]);
             });
 
@@ -471,13 +318,6 @@ const Machines = () => {
             console.error('Error fetching global stats:', err);
         }
     };
-
-    useEffect(() => {
-        const customers = [...new Set(allMetadata.map(m => m.customer_name).filter(Boolean))].sort();
-        const departments = [...new Set(allMetadata.map(m => m.department_in_charge).filter(Boolean))].sort();
-        setUniqueCustomers(customers);
-        setUniqueDepartments(departments);
-    }, [allMetadata]);
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -515,7 +355,6 @@ const Machines = () => {
         setPendingStatuses(selectedStatuses);
         setPendingMachineTypes(selectedMachineTypes);
         setPendingCustomers(selectedCustomers);
-        setPendingDepartments(selectedDepartments);
         setPendingWarehouses(selectedWarehouses);
         setShowMobileFilter(true);
     };
@@ -524,7 +363,6 @@ const Machines = () => {
         setSelectedStatuses(pendingStatuses);
         setSelectedMachineTypes(pendingMachineTypes);
         setSelectedCustomers(pendingCustomers);
-        setSelectedDepartments(pendingDepartments);
         setSelectedWarehouses(pendingWarehouses);
         closeMobileFilter();
     };
@@ -537,8 +375,8 @@ const Machines = () => {
                 .select('*', { count: 'exact' });
 
             // Apply Filters (Server-side)
-            if (searchTerm) {
-                const p = `%${escapeIlikeOrFragment(searchTerm)}%`;
+            if (debouncedSearchTerm) {
+                const p = `%${escapeIlikeOrFragment(debouncedSearchTerm)}%`;
                 query = query.or(`serial_number.ilike.${p},machine_type.ilike.${p},customer_name.ilike.${p},department_in_charge.ilike.${p},warehouse.ilike.${p}`);
             }
             if (selectedStatuses.length > 0) {
@@ -549,9 +387,6 @@ const Machines = () => {
             }
             if (selectedCustomers.length > 0) {
                 query = query.in('customer_name', selectedCustomers);
-            }
-            if (selectedDepartments.length > 0) {
-                query = query.in('department_in_charge', selectedDepartments);
             }
 
             query = applyWarehouseFiltersToQuery(query);
@@ -565,12 +400,7 @@ const Machines = () => {
 
             if (error && error.code !== '42P01') throw error;
             const rawList = data || [];
-            let list = rawList;
-            try {
-                list = await enrichInUseMachineCustomersFromOrders(supabase, rawList);
-            } catch (enrichErr) {
-                console.warn('[Machines] enrich in-use customer display:', enrichErr);
-            }
+            const list = enrichMachinesListFromCustomers(rawList, customersList);
             setMachines(list);
             setTotalRecords(count || 0);
             setSelectedIds([]); // Clear selection on refresh
@@ -638,7 +468,6 @@ const Machines = () => {
             }
             if (custData) {
                 setCustomersList(custData);
-                setUniqueCustomers(custData.map((c) => c.name).filter(Boolean));
             }
         } catch (error) {
             console.error('Error fetching warehouses:', error);
@@ -804,53 +633,53 @@ const Machines = () => {
         selectedStatuses.length > 0 ||
         selectedMachineTypes.length > 0 ||
         selectedCustomers.length > 0 ||
-        selectedDepartments.length > 0 ||
         selectedWarehouses.length > 0;
 
     const totalActiveFilters = selectedStatuses.length
         + selectedMachineTypes.length
         + selectedCustomers.length
-        + selectedDepartments.length
         + selectedWarehouses.length;
+
+    const hasMetadataForFilters = allMetadata.length > 0;
+
+    const machineCustomerFilterNames = useMemo(() => {
+        if (allMetadata.length > 0) {
+            return [...new Set(allMetadata.map((m) => m.customer_name).filter(Boolean))].sort();
+        }
+        return [...new Set(customersList.map((c) => c.name).filter(Boolean))].sort();
+    }, [allMetadata, customersList]);
 
     const statusOptions = MACHINE_STATUSES.map(item => ({
         id: item.id,
         label: item.label,
-        count: allMetadata.filter(m => m.status === item.id).length
+        count: hasMetadataForFilters ? allMetadata.filter(m => m.status === item.id).length : undefined,
     }));
 
     const machineTypeOptions = MACHINE_TYPES.map(item => ({
         id: item.id,
         label: item.label,
-        count: allMetadata.filter(m => m.machine_type === item.id).length
+        count: hasMetadataForFilters ? allMetadata.filter(m => m.machine_type === item.id).length : undefined,
     }));
 
-    const customerOptions = uniqueCustomers.map(item => ({
+    const customerOptions = machineCustomerFilterNames.map(item => ({
         id: item,
         label: item,
-        count: allMetadata.filter(m => m.customer_name === item).length
-    }));
-
-    const departmentOptions = uniqueDepartments.map(item => ({
-        id: item,
-        label: item,
-        count: allMetadata.filter(m => m.department_in_charge === item).length
+        count: hasMetadataForFilters ? allMetadata.filter(m => m.customer_name === item).length : undefined,
     }));
 
     const warehouseOptions = allowedWarehouses.map((item) => ({
         id: item.id,
         label: item.name || item.code || item.id,
-        count: allMetadata.filter((m) => rowMatchesManagingWarehouseRecord(m, item, warehousesList, {
+        count: hasMetadataForFilters ? allMetadata.filter((m) => rowMatchesManagingWarehouseRecord(m, item, warehousesList, {
             warehouseValue: m.warehouse,
             customerWarehouseValue: getMachineCustomerWarehouse(m),
-        })).length,
+        })).length : undefined,
     }));
 
     const clearAllFilters = () => {
         setSelectedStatuses([]);
         setSelectedMachineTypes([]);
         setSelectedCustomers([]);
-        setSelectedDepartments([]);
         setSelectedWarehouses([]);
     };
 
@@ -877,18 +706,6 @@ const Machines = () => {
         allMetadata.forEach(machine => {
             const customer = machine.customer_name || '—';
             statsMap[customer] = (statsMap[customer] || 0) + 1;
-        });
-        return Object.entries(statsMap)
-            .map(([name, value]) => ({ name, value }))
-            .sort((a, b) => b.value - a.value)
-            .slice(0, 10);
-    };
-
-    const getDepartmentStats = () => {
-        const statsMap = {};
-        allMetadata.forEach(machine => {
-            const dept = machine.department_in_charge || 'Không xác định';
-            statsMap[dept] = (statsMap[dept] || 0) + 1;
         });
         return Object.entries(statsMap)
             .map(([name, value]) => ({ name, value }))
@@ -1029,7 +846,10 @@ const Machines = () => {
     ), [machines]);
 
     return (
-        <div className="font-roboto animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5">
+        <div
+            className="font-roboto animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex-1 flex flex-col mt-1 min-h-0 px-1 md:px-1.5"
+            style={{ fontFamily: "'Roboto', ui-sans-serif, system-ui, sans-serif" }}
+        >
             <PageViewSwitcher
                 activeView={activeView}
                 setActiveView={setActiveView}
@@ -1177,10 +997,6 @@ const Machines = () => {
                                                 <span className={getMachineTypeBadgeClass(machine.machine_type)}>{getLabel(MACHINE_TYPES, machine.machine_type)}</span>
                                             </div>
                                         </div>
-                                        <div>
-                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Đại lý</p>
-                                            <p className="text-[12px] text-foreground font-medium truncate">{machine.department_in_charge || '—'}</p>
-                                        </div>
                                         <div className="col-span-2">
                                             <div className="flex items-center gap-2">
                                                 <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
@@ -1192,10 +1008,6 @@ const Machines = () => {
                                                     <p className="text-[10px] text-primary font-semibold truncate">Mã KH: {getMachineCustomerCode(machine) || '—'}</p>
                                                 </div>
                                             </div>
-                                        </div>
-                                        <div className="col-span-2">
-                                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Kho phụ trách KH</p>
-                                            <p className="text-[12px] text-foreground font-medium truncate">{getWarehouseLabel(machine.customer_warehouse)}</p>
                                         </div>
                                     </div>
 
@@ -1432,34 +1244,6 @@ const Machines = () => {
 
                             <div className="relative">
                                 <button
-                                    onClick={() => setActiveDropdown(activeDropdown === 'departments' ? null : 'departments')}
-                                    className={clsx(
-                                        'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        getFilterButtonClass('departments', activeDropdown === 'departments' || selectedDepartments.length > 0)
-                                    )}
-                                >
-                                    <Activity size={14} className={getFilterIconClass('departments', activeDropdown === 'departments' || selectedDepartments.length > 0)} />
-                                    Đại lý
-                                    {selectedDepartments.length > 0 && (
-                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('departments'))}>
-                                            {selectedDepartments.length}
-                                        </span>
-                                    )}
-                                    <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'departments' ? 'rotate-180' : '')} />
-                                </button>
-                                {activeDropdown === 'departments' && (
-                                    <FilterDropdown
-                                        options={departmentOptions}
-                                        selected={selectedDepartments}
-                                        setSelected={setSelectedDepartments}
-                                        filterSearch={filterSearch}
-                                        setFilterSearch={setFilterSearch}
-                                    />
-                                )}
-                            </div>
-
-                            <div className="relative">
-                                <button
                                     onClick={() => setActiveDropdown(activeDropdown === 'warehouses' ? null : 'warehouses')}
                                     className={clsx(
                                         'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
@@ -1566,7 +1350,6 @@ const Machines = () => {
                                             if (colKey === 'warehouse') return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{getMachineManagingWarehouseLabel(machine)}</td>;
                                             if (colKey === 'customer_name') return <td key={colKey} className="px-4 py-4 text-sm font-semibold text-foreground">{machine.customer_name || '—'}</td>;
                                             if (colKey === 'customer_code') return <td key={colKey} className="px-4 py-4 text-sm font-semibold text-primary">{getMachineCustomerCode(machine) || '—'}</td>;
-                                            if (colKey === 'customer_warehouse') return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{getWarehouseLabel(machine.customer_warehouse)}</td>;
                                             if (colKey === 'status') return (
                                                 <td key={colKey} className="px-4 py-4">
                                                     <span className={clsx('inline-flex items-center px-3 py-1 text-[11px] font-bold rounded-full border', getStatusBadgeClass(machine.status))}>
@@ -1574,7 +1357,6 @@ const Machines = () => {
                                                     </span>
                                                 </td>
                                             );
-                                            if (colKey === 'department_in_charge') return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{machine.department_in_charge || '—'}</td>;
                                             return null;
                                         })}
                                         <td className="px-4 py-4 text-center border-l border-r border-primary/20">
@@ -1787,20 +1569,10 @@ const Machines = () => {
                                                             </div>
                                                         </div>
                                                         <div className="flex items-center gap-2">
-                                                            <Warehouse size={13} className="text-emerald-600 shrink-0" />
-                                                            <p className="text-[12px] text-muted-foreground truncate">
-                                                                Kho Quản Lý KH: {getWarehouseLabel(machine.customer_warehouse)}
-                                                            </p>
-                                                        </div>
-                                                        <div className="flex items-center gap-2">
                                                             <Warehouse size={13} className="text-indigo-500 shrink-0" />
                                                             <p className="text-[12px] text-muted-foreground truncate">
-                                                                Kho Quản Lý QL: {getMachineManagingWarehouseLabel(machine)}
+                                                                Kho Quản Lý: {getMachineManagingWarehouseLabel(machine)}
                                                             </p>
-                                                        </div>
-                                                        <div className="flex items-center gap-2">
-                                                            <Activity size={13} className="text-amber-500 shrink-0" />
-                                                            <p className="text-[12px] text-muted-foreground truncate">{machine.department_in_charge || '-'}</p>
                                                         </div>
                                                     </div>
 
@@ -1945,34 +1717,6 @@ const Machines = () => {
                                             options={customerOptions}
                                             selected={selectedCustomers}
                                             setSelected={setSelectedCustomers}
-                                            filterSearch={filterSearch}
-                                            setFilterSearch={setFilterSearch}
-                                        />
-                                    )}
-                                </div>
-
-                                <div className="relative">
-                                    <button
-                                        onClick={() => setActiveDropdown(activeDropdown === 'departments' ? null : 'departments')}
-                                        className={clsx(
-                                            'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                            getFilterButtonClass('departments', activeDropdown === 'departments' || selectedDepartments.length > 0)
-                                        )}
-                                    >
-                                        <Activity size={14} className={getFilterIconClass('departments', activeDropdown === 'departments' || selectedDepartments.length > 0)} />
-                                        Đại lý
-                                        {selectedDepartments.length > 0 && (
-                                            <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('departments'))}>
-                                                {selectedDepartments.length}
-                                            </span>
-                                        )}
-                                        <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'departments' ? 'rotate-180' : '')} />
-                                    </button>
-                                    {activeDropdown === 'departments' && (
-                                        <FilterDropdown
-                                            options={departmentOptions}
-                                            selected={selectedDepartments}
-                                            setSelected={setSelectedDepartments}
                                             filterSearch={filterSearch}
                                             setFilterSearch={setFilterSearch}
                                         />
@@ -2141,31 +1885,6 @@ const Machines = () => {
                                     />
                                 </div>
                             </div>
-
-                            <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
-                                <h3 className="text-lg font-bold text-foreground mb-4">Top 10 Đại lý</h3>
-                                <div style={{ height: '300px' }}>
-                                    <BarChartJS
-                                        data={{
-                                            labels: getDepartmentStats().map(item => item.name.length > 20 ? item.name.substring(0, 20) + '...' : item.name),
-                                            datasets: [{
-                                                label: 'Số máy',
-                                                data: getDepartmentStats().map(item => item.value),
-                                                backgroundColor: chartColors[1],
-                                                borderColor: chartColors[1],
-                                                borderWidth: 1
-                                            }]
-                                        }}
-                                        options={{
-                                            responsive: true,
-                                            maintainAspectRatio: false,
-                                            indexAxis: 'y',
-                                            plugins: { legend: { display: false } },
-                                            scales: { x: { beginAtZero: true } }
-                                        }}
-                                    />
-                                </div>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -2202,14 +1921,6 @@ const Machines = () => {
                             options: customerOptions,
                             selectedValues: pendingCustomers,
                             onSelectionChange: setPendingCustomers,
-                        },
-                        {
-                            id: 'departments',
-                            label: 'Đại lý',
-                            icon: <Activity size={16} className="text-amber-600" />,
-                            options: departmentOptions,
-                            selectedValues: pendingDepartments,
-                            onSelectionChange: setPendingDepartments,
                         },
                         {
                             id: 'warehouses',
