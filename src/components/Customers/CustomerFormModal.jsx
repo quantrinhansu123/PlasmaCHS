@@ -109,14 +109,11 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
             };
             generateCode();
 
-            // Set default care_expiry_date (60 days from now) và care_assigned_at
+            // Mặc định ngày đăng ký; thời hạn CS không bắt buộc
             const now = new Date();
-            const expiry = new Date();
-            expiry.setDate(expiry.getDate() + 60);
             setFormData(prev => ({
                 ...prev,
                 care_assigned_at: now.toISOString(),
-                care_expiry_date: expiry.toISOString().split('T')[0],
                 status: isLeadMode ? 'Chưa thành công' : prev.status
             }));
         }
@@ -227,6 +224,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
             ...formData,
             code: trimmedCode,
             care_assigned_at: formData.care_assigned_at || null,
+            care_expiry_date: formData.care_expiry_date?.trim() || null,
             warehouse_id: resolveCustomerWarehouseForDatabase(
                 formData.warehouse_id,
                 warehouses,
@@ -287,7 +285,18 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
             if (existing && existing.length > 0) {
                 const existingCustomer = existing[0];
                 const now = new Date();
-                const expiryDate = new Date(existingCustomer.care_expiry_date);
+                const expiryRaw = existingCustomer.care_expiry_date;
+                const expiryDate = expiryRaw ? new Date(expiryRaw) : null;
+
+                if (!expiryDate || Number.isNaN(expiryDate.getTime())) {
+                    setErrorMsg(
+                        `❌ Khách hàng "${existingCustomer.name}" đã tồn tại trong hệ thống${
+                            existingCustomer.care_by ? ` (phụ trách: ${existingCustomer.care_by})` : ''
+                        }!`,
+                    );
+                    setIsLoading(false);
+                    return;
+                }
 
                 // Nếu khách hàng đã QUÁ HẠN (expired)
                 if (now > expiryDate) {
@@ -617,7 +626,7 @@ export default function CustomerFormModal({ customer, onClose, onSuccess, catego
                                             onChange={handleChange}
                                             className="w-full h-12 px-4 bg-primary/5 border border-primary/20 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white outline-none transition-all font-black text-primary"
                                         />
-                                        <p className="text-[10px] font-bold text-primary/60 ml-1 italic">* Mặc định 60 ngày kể từ lúc tạo</p>
+                                        <p className="text-[10px] font-bold text-primary/60 ml-1 italic">Không bắt buộc — có thể để trống</p>
                                     </div>
                                 </div>
                             </div>
