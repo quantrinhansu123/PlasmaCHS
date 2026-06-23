@@ -111,7 +111,7 @@ function appendCustomerTextSearch(query, searchTrimmed) {
     return q;
 }
 
-/** Bộ lọc lead trên Supabase (khớp phân trang + đếm tổng). */
+/** Bộ lọc lead trên Supabase (khớp phân trang + đếm tổng). Chỉ lead chưa chốt. */
 function appendLeadCustomerFilters(query, {
     searchTrimmed,
     leadCreatedFrom,
@@ -119,10 +119,10 @@ function appendLeadCustomerFilters(query, {
     selectedCareBy,
     selectedManagedBy,
     selectedCategories,
-    selectedStatuses,
     categoryDefinitions,
 }) {
     let q = appendCustomerTextSearch(query, searchTrimmed);
+    q = q.or('status.eq.Chưa thành công,status.is.null');
     if (leadCreatedFrom) {
         q = q.gte('created_at', new Date(`${leadCreatedFrom}T00:00:00`).toISOString());
     }
@@ -139,12 +139,6 @@ function appendLeadCustomerFilters(query, {
             if (def?.label) vals.add(def.label);
         }
         q = q.in('category', [...vals]);
-    }
-    if (selectedStatuses?.length === 1) {
-        if (selectedStatuses[0] === 'Thành công') q = q.eq('status', 'Thành công');
-        else if (selectedStatuses[0] === 'Chưa thành công') {
-            q = q.or('status.eq.Chưa thành công,status.is.null');
-        }
     }
     return q;
 }
@@ -196,6 +190,7 @@ const Customers = () => {
     const [statusApprovalModal, setStatusApprovalModal] = useState({
         open: false,
         customerId: null,
+        customerIds: [],
         customerName: '',
         targetStatus: '',
         warehouseId: '',
@@ -211,6 +206,8 @@ const Customers = () => {
     const [uniqueCareBy, setUniqueCareBy] = useState([]);
     const [warehousesList, setWarehousesList] = useState([]);
     const [selectedIds, setSelectedIds] = useState([]);
+    const [bulkStatusValue, setBulkStatusValue] = useState('Chưa thành công');
+    const [isBulkUpdatingStatus, setIsBulkUpdatingStatus] = useState(false);
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
@@ -414,7 +411,6 @@ const Customers = () => {
         selectedCareBy,
         selectedManagedBy,
         selectedCategories,
-        selectedStatuses,
         debouncedSearchTerm,
     ]);
 
@@ -449,12 +445,9 @@ const Customers = () => {
                     selectedCareBy,
                     selectedManagedBy,
                     selectedCategories,
-                    selectedStatuses,
                     categoryDefinitions: CUSTOMER_CATEGORIES,
                 });
-                query = query
-                    .order('status', { ascending: true, nullsFirst: true })
-                    .order('created_at', { ascending: false });
+                query = query.order('created_at', { ascending: false });
             } else {
                 query = appendCustomerTextSearch(query, debouncedSearchTerm);
                 query = query.order('created_at', { ascending: false });
@@ -528,7 +521,6 @@ const Customers = () => {
         selectedCareBy,
         selectedManagedBy,
         selectedCategories,
-        selectedStatuses,
     ]);
 
     useEffect(() => {
@@ -782,14 +774,15 @@ const Customers = () => {
         selectedCategories.length > 0 ||
         selectedManagedBy.length > 0 ||
         selectedCareBy.length > 0 ||
-        (filterType === 'lead' && selectedStatuses.length > 0) ||
+        (filterType === 'lead' && (!!leadCreatedFrom || !!leadCreatedTo)) ||
         !!fromDate ||
         !!toDate;
     const totalActiveFilters =
         selectedCategories.length +
         selectedManagedBy.length +
         selectedCareBy.length +
-        (filterType === 'lead' ? selectedStatuses.length : 0) +
+        (filterType === 'lead' && leadCreatedFrom ? 1 : 0) +
+        (filterType === 'lead' && leadCreatedTo ? 1 : 0) +
         (fromDate ? 1 : 0) +
         (toDate ? 1 : 0);
 
@@ -813,19 +806,6 @@ const Customers = () => {
         label: name,
         count: filterType === 'lead' ? '—' : customers.filter((x) => x.care_by === name).length,
     }));
-
-    const statusOptions = useMemo(() => {
-        if (filterType === 'lead') {
-            return [
-                { id: 'Chưa thành công', label: 'Chưa thành công', count: '—' },
-                { id: 'Thành công', label: 'Thành công', count: '—' },
-            ];
-        }
-        return [
-            { id: 'Thành công', label: 'Thành công', count: customers.filter((x) => x.status === 'Thành công').length },
-            { id: 'Chưa thành công', label: 'Chưa thành công', count: customers.filter((x) => x.status === 'Chưa thành công').length },
-        ];
-    }, [filterType, customers]);
 
     const handleEditCustomer = (customer) => {
         if (filterType === 'lead' && !canActOnLeadCustomer(customer)) {
@@ -976,9 +956,14 @@ const Customers = () => {
                 }
             }
 
-            setCustomers((prev) =>
-                prev.map((c) => (c.id === id ? { ...c, ...patch } : c))
-            );
+            if (filterType === 'lead' && newStatus === 'Thành công') {
+                setCustomers((prev) => prev.filter((c) => c.id !== id));
+                setTotalRecords((n) => Math.max(0, n - 1));
+            } else {
+                setCustomers((prev) =>
+                    prev.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+                );
+            }
 
             if (newStatus === 'Thành công') {
                 const customer = customers.find(c => c.id === id);
@@ -1016,6 +1001,7 @@ const Customers = () => {
             setStatusApprovalModal({
                 open: true,
                 customerId: id,
+                customerIds: [],
                 customerName: selectedCustomerRow?.name || '',
                 targetStatus: newStatus,
                 warehouseId:
@@ -1029,10 +1015,134 @@ const Customers = () => {
         await runStatusUpdate(id, newStatus, null);
     };
 
+    const getBulkEligibleStatusIds = (ids = selectedIds) =>
+        ids.filter((id) => {
+            const customerRow = customers.find((c) => c.id === id);
+            if (!customerRow) return false;
+            if (filterType === 'lead' && !canChangeLeadCustomerStatus(customerRow)) return false;
+            return true;
+        });
+
+    const runBulkStatusUpdate = async (ids, newStatus, selectedWarehouseId = null) => {
+        if (!ids?.length) return;
+
+        const patch = {
+            status: newStatus,
+            success_at: newStatus === 'Thành công' ? new Date().toISOString() : null,
+            ...(newStatus === 'Thành công' && selectedWarehouseId
+                ? {
+                      warehouse_id: resolveCustomerWarehouseForDatabase(
+                          selectedWarehouseId,
+                          warehousesList,
+                      ),
+                  }
+                : {}),
+        };
+
+        setIsBulkUpdatingStatus(true);
+        try {
+            const { error } = await supabase.from('customers').update(patch).in('id', ids);
+            if (error) throw error;
+
+            if (filterType === 'lead' && newStatus === 'Thành công') {
+                setCustomers((prev) => prev.filter((c) => !ids.includes(c.id)));
+                setTotalRecords((n) => Math.max(0, n - ids.length));
+            } else {
+                setCustomers((prev) =>
+                    prev.map((c) => (ids.includes(c.id) ? { ...c, ...patch } : c)),
+                );
+            }
+            setSelectedIds((prev) => prev.filter((id) => !ids.includes(id)));
+            alert(`✅ Đã cập nhật trạng thái ${ids.length} khách hàng sang "${newStatus}".`);
+        } catch (error) {
+            console.error('Error bulk updating customer status:', error);
+            alert('❌ Không thể cập nhật trạng thái hàng loạt: ' + (error?.message || error));
+        } finally {
+            setIsBulkUpdatingStatus(false);
+        }
+    };
+
+    const handleBulkStatusChange = async () => {
+        const eligibleIds = getBulkEligibleStatusIds();
+        if (eligibleIds.length === 0) {
+            alert('Không có khách hàng nào được phép đổi trạng thái.');
+            return;
+        }
+
+        if (selectedIds.length > eligibleIds.length) {
+            const skipped = selectedIds.length - eligibleIds.length;
+            if (!window.confirm(
+                `${skipped} khách hàng không có quyền đổi trạng thái sẽ bỏ qua.\nTiếp tục đổi ${eligibleIds.length} khách còn lại sang "${bulkStatusValue}"?`,
+            )) {
+                return;
+            }
+        }
+
+        if (filterType === 'lead' && bulkStatusValue === 'Thành công') {
+            setStatusApprovalModal({
+                open: true,
+                customerId: null,
+                customerIds: eligibleIds,
+                customerName: `${eligibleIds.length} khách hàng`,
+                targetStatus: bulkStatusValue,
+                warehouseId:
+                    resolvePreferredWarehouseId(warehousesList) || CUSTOMER_WAREHOUSE_DEFAULT_CODE,
+                isSubmitting: false,
+                error: '',
+            });
+            return;
+        }
+
+        if (!window.confirm(`Đổi trạng thái ${eligibleIds.length} khách hàng sang "${bulkStatusValue}"?`)) {
+            return;
+        }
+
+        await runBulkStatusUpdate(eligibleIds, bulkStatusValue, null);
+    };
+
+    const handleBulkMarkThanhCong = () => {
+        if (selectedIds.length === 0) {
+            alert('Vui lòng tick chọn ít nhất một khách hàng.');
+            return;
+        }
+
+        const eligibleIds = getBulkEligibleStatusIds().filter((id) => {
+            const customerRow = customers.find((c) => c.id === id);
+            return customerRow?.status !== 'Thành công';
+        });
+
+        if (eligibleIds.length === 0) {
+            alert('Các khách đã chọn đều đang ở trạng thái Thành công hoặc bạn không có quyền đổi.');
+            return;
+        }
+
+        if (selectedIds.length > eligibleIds.length) {
+            const skipped = selectedIds.length - eligibleIds.length;
+            if (!window.confirm(
+                `${skipped} khách sẽ bỏ qua. Chuyển ${eligibleIds.length} khách còn lại sang Thành công?`,
+            )) {
+                return;
+            }
+        }
+
+        setStatusApprovalModal({
+            open: true,
+            customerId: null,
+            customerIds: eligibleIds,
+            customerName: `${eligibleIds.length} khách hàng`,
+            targetStatus: 'Thành công',
+            warehouseId:
+                resolvePreferredWarehouseId(warehousesList) || CUSTOMER_WAREHOUSE_DEFAULT_CODE,
+            isSubmitting: false,
+            error: '',
+        });
+    };
+
     const closeStatusApprovalModal = () => {
         setStatusApprovalModal({
             open: false,
             customerId: null,
+            customerIds: [],
             customerName: '',
             targetStatus: '',
             warehouseId: '',
@@ -1042,7 +1152,7 @@ const Customers = () => {
     };
 
     const submitStatusApproval = async () => {
-        if (!statusApprovalModal.customerId) return;
+        if (!statusApprovalModal.customerId && !statusApprovalModal.customerIds?.length) return;
 
         if (!statusApprovalModal.warehouseId) {
             setStatusApprovalModal((prev) => ({
@@ -1053,11 +1163,19 @@ const Customers = () => {
         }
 
         setStatusApprovalModal((prev) => ({ ...prev, isSubmitting: true, error: '' }));
-        await runStatusUpdate(
-            statusApprovalModal.customerId,
-            statusApprovalModal.targetStatus,
-            statusApprovalModal.warehouseId
-        );
+        if (statusApprovalModal.customerIds?.length) {
+            await runBulkStatusUpdate(
+                statusApprovalModal.customerIds,
+                statusApprovalModal.targetStatus,
+                statusApprovalModal.warehouseId,
+            );
+        } else {
+            await runStatusUpdate(
+                statusApprovalModal.customerId,
+                statusApprovalModal.targetStatus,
+                statusApprovalModal.warehouseId,
+            );
+        }
         closeStatusApprovalModal();
     };
 
@@ -1645,6 +1763,8 @@ const Customers = () => {
         setSelectedStatuses([]);
         setFromDate('');
         setToDate('');
+        setLeadCreatedFrom('');
+        setLeadCreatedTo('');
     };
 
     const leadSummarySlot =
@@ -1784,13 +1904,43 @@ const Customers = () => {
                                     <span className="text-[13px] font-bold text-slate-600">
                                         Đã chọn <span className="text-primary">{selectedIds.length}</span> khách hàng
                                     </span>
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap justify-end">
                                         <button
                                             onClick={toggleSelectAll}
                                             className="text-[12px] font-bold text-primary hover:underline px-2 py-1"
                                         >
                                             Bỏ chọn
                                         </button>
+                                        {filterType === 'lead' ? (
+                                            <button
+                                                onClick={handleBulkMarkThanhCong}
+                                                disabled={isBulkUpdatingStatus}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-[12px] font-bold border border-emerald-700 shadow-sm disabled:opacity-50"
+                                            >
+                                                <ClipboardCheck size={14} />
+                                                {isBulkUpdatingStatus ? 'Đang đổi…' : 'Thành công'}
+                                            </button>
+                                        ) : (
+                                            <>
+                                                <select
+                                                    value={bulkStatusValue}
+                                                    onChange={(e) => setBulkStatusValue(e.target.value)}
+                                                    disabled={isBulkUpdatingStatus}
+                                                    className="h-8 px-2 rounded-lg border border-slate-200 bg-white text-[12px] font-bold text-slate-700"
+                                                >
+                                                    <option value="Chưa thành công">Chưa thành công</option>
+                                                    <option value="Thành công">Thành công</option>
+                                                </select>
+                                                <button
+                                                    onClick={handleBulkStatusChange}
+                                                    disabled={isBulkUpdatingStatus}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-[12px] font-bold border border-primary/20 disabled:opacity-50"
+                                                >
+                                                    <ClipboardCheck size={14} />
+                                                    {isBulkUpdatingStatus ? 'Đang đổi…' : 'Đổi TT'}
+                                                </button>
+                                            </>
+                                        )}
                                         {isAdminOrManager && (
                                             <button
                                                 onClick={handleBulkDelete}
@@ -2145,13 +2295,45 @@ const Customers = () => {
                                 </button>
 
                                 {selectedIds.length > 0 && (
-                                    <button
-                                        onClick={handleBulkDelete}
-                                        className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-600 text-[13px] font-bold hover:bg-rose-100 shadow-sm transition-all animate-in slide-in-from-right-4"
-                                    >
-                                        <Trash2 size={16} />
-                                        Xóa ({selectedIds.length})
-                                    </button>
+                                    <>
+                                        {filterType === 'lead' ? (
+                                            <button
+                                                onClick={handleBulkMarkThanhCong}
+                                                disabled={isBulkUpdatingStatus}
+                                                className="flex items-center gap-2 px-4 py-1.5 rounded-xl bg-emerald-600 text-white text-[13px] font-bold hover:bg-emerald-700 shadow-md shadow-emerald-600/20 transition-all animate-in slide-in-from-right-4 disabled:opacity-50"
+                                            >
+                                                <ClipboardCheck size={16} />
+                                                {isBulkUpdatingStatus ? 'Đang đổi…' : `Thành công (${selectedIds.length})`}
+                                            </button>
+                                        ) : (
+                                            <>
+                                                <select
+                                                    value={bulkStatusValue}
+                                                    onChange={(e) => setBulkStatusValue(e.target.value)}
+                                                    disabled={isBulkUpdatingStatus}
+                                                    className="h-9 px-3 rounded-xl border border-slate-200 bg-white text-[13px] font-bold text-slate-700"
+                                                >
+                                                    <option value="Chưa thành công">Chưa thành công</option>
+                                                    <option value="Thành công">Thành công</option>
+                                                </select>
+                                                <button
+                                                    onClick={handleBulkStatusChange}
+                                                    disabled={isBulkUpdatingStatus}
+                                                    className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-primary/20 bg-primary/5 text-primary text-[13px] font-bold hover:bg-primary/10 shadow-sm transition-all animate-in slide-in-from-right-4 disabled:opacity-50"
+                                                >
+                                                    <ClipboardCheck size={16} />
+                                                    {isBulkUpdatingStatus ? 'Đang đổi…' : `Đổi TT (${selectedIds.length})`}
+                                                </button>
+                                            </>
+                                        )}
+                                        <button
+                                            onClick={handleBulkDelete}
+                                            className="flex items-center gap-2 px-4 py-1.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-600 text-[13px] font-bold hover:bg-rose-100 shadow-sm transition-all animate-in slide-in-from-right-4"
+                                        >
+                                            <Trash2 size={16} />
+                                            Xóa ({selectedIds.length})
+                                        </button>
+                                    </>
                                 )}
                             </div>
                         </div>
@@ -2241,37 +2423,6 @@ const Customers = () => {
                                         />
                                     )}
                                 </div>
-                            )}
-
-                            {filterType === 'lead' && (
-                                <div className="relative">
-                                <button
-                                    onClick={() => setActiveDropdown(activeDropdown === 'status' ? null : 'status')}
-                                    className={clsx(
-                                        'flex items-center gap-2.5 px-4 py-2 rounded-xl border text-[13px] font-bold transition-all',
-                                        getFilterButtonClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)
-                                    )}
-                                >
-                                    <List size={14} className={getFilterIconClass('status', activeDropdown === 'status' || selectedStatuses.length > 0)} />
-                                    Trạng thái
-                                    {selectedStatuses.length > 0 && (
-                                        <span className={clsx('px-1.5 py-0.5 rounded-full text-[10px] font-bold', getFilterCountBadgeClass('status'))}>
-                                            {selectedStatuses.length}
-                                        </span>
-                                    )}
-                                    <ChevronDown size={14} className={clsx('transition-transform', activeDropdown === 'status' ? 'rotate-180' : '')} />
-                                </button>
-                                {activeDropdown === 'status' && (
-                                    <FilterDropdown
-                                        options={statusOptions}
-                                        selected={selectedStatuses}
-                                        setSelected={setSelectedStatuses}
-                                        filterSearch={filterSearch}
-                                        setFilterSearch={setFilterSearch}
-                                        showSearch={false}
-                                    />
-                                )}
-                            </div>
                             )}
 
                             <div className="flex items-center gap-1.5 ml-1">
@@ -2549,47 +2700,7 @@ const Customers = () => {
                                 Nhóm theo: {filterType === 'lead' ? 'Trạng thái CS' : 'Loại khách'}
                             </div>
                             <div className="h-5 w-px bg-slate-200" />
-                            {filterType === 'lead' ? (
-                                <>
-                                    <span className="text-[12px] font-semibold text-slate-600">Trạng thái:</span>
-                                    <button
-                                        type="button"
-                                        onClick={() => setSelectedStatuses([])}
-                                        className={clsx(
-                                            'h-8 px-3 rounded-lg text-[12px] font-bold border transition-all',
-                                            selectedStatuses.length === 0
-                                                ? 'bg-primary/10 text-primary border-primary/30'
-                                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                                        )}
-                                    >
-                                        Tất cả
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setSelectedStatuses(['Chưa thành công'])}
-                                        className={clsx(
-                                            'h-8 px-3 rounded-lg text-[12px] font-bold border transition-all',
-                                            selectedStatuses.length === 1 && selectedStatuses[0] === 'Chưa thành công'
-                                                ? 'bg-slate-100 text-slate-800 border-slate-300'
-                                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                                        )}
-                                    >
-                                        Chưa thành công
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setSelectedStatuses(['Thành công'])}
-                                        className={clsx(
-                                            'h-8 px-3 rounded-lg text-[12px] font-bold border transition-all',
-                                            selectedStatuses.length === 1 && selectedStatuses[0] === 'Thành công'
-                                                ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                                        )}
-                                    >
-                                        Thành công
-                                    </button>
-                                </>
-                            ) : (
+                            {filterType !== 'lead' && (
                                 <>
                                     <span className="text-[12px] font-semibold text-slate-600">Loại khách:</span>
                                     <button
@@ -3076,19 +3187,6 @@ const Customers = () => {
                             selectedValues: pendingCareBy,
                             onSelectionChange: setPendingCareBy,
                         },
-                        ...(filterType === 'lead'
-                            ? [
-                                  {
-                                      id: 'status',
-                                      label: 'Trạng thái',
-                                      icon: <List size={16} className="text-primary" />,
-                                      options: statusOptions,
-                                      selectedValues: pendingStatuses,
-                                      onSelectionChange: setPendingStatuses,
-                                      searchable: false,
-                                  },
-                              ]
-                            : []),
                     ]}
                 />
             )}
@@ -3110,10 +3208,16 @@ const Customers = () => {
                     <div className="relative w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
                         <div className="flex items-start justify-between gap-4">
                             <div>
-                                <h3 className="text-xl font-black text-slate-800">Duyệt khách hàng thành công</h3>
+                                <h3 className="text-xl font-black text-slate-800">
+                                    {statusApprovalModal.customerIds?.length
+                                        ? `Duyệt ${statusApprovalModal.customerIds.length} khách hàng`
+                                        : 'Duyệt khách hàng thành công'}
+                                </h3>
                                 <p className="mt-1 text-sm text-slate-500">
                                     {statusApprovalModal.customerName
-                                        ? `Khách hàng: ${statusApprovalModal.customerName}`
+                                        ? (statusApprovalModal.customerIds?.length
+                                            ? `Sẽ chuyển ${statusApprovalModal.customerIds.length} khách sang Thành công.`
+                                            : `Khách hàng: ${statusApprovalModal.customerName}`)
                                         : 'Vui lòng chọn kho để gán khách hàng.'}
                                 </p>
                             </div>

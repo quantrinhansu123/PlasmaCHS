@@ -1643,19 +1643,27 @@ export default function OrderFormModal({ order, onClose, onSuccess, initialMode 
                                                                                     className="w-full h-10 pl-4 pr-4 bg-white border border-slate-200 rounded-xl text-[13px] font-mono font-bold text-slate-600"
                                                                                 />
                                                                             ) : (
-                                                                                <select
-                                                                                    value={currentVal}
-                                                                                    onChange={(e) => handleCylinderSerialChange(idx, cIdx, e.target.value)}
-                                                                                    disabled={isFetchingCyls}
-                                                                                    className="w-full h-10 pl-3 pr-10 bg-white border border-slate-200 rounded-xl text-[13px] font-mono font-bold text-primary focus:border-primary/50 focus:ring-2 focus:ring-primary/5 appearance-none cursor-pointer"
-                                                                                >
-                                                                                    <option value="">— Chọn mã bình #{cIdx + 1} —</option>
-                                                                                    {options.map((c) => (
-                                                                                        <option key={c.serial_number} value={(c.serial_number || '').trim().toUpperCase()}>
-                                                                                            {(c.serial_number || '').trim().toUpperCase()}{c.volume ? ` — ${c.volume}` : ''}
-                                                                                        </option>
-                                                                                    ))}
-                                                                                </select>
+                                                                                <>
+                                                                                    <input
+                                                                                        list={dropKey}
+                                                                                        value={currentVal}
+                                                                                        onChange={(e) => handleCylinderSerialChange(idx, cIdx, e.target.value)}
+                                                                                        disabled={isFetchingCyls}
+                                                                                        placeholder={`Chọn / gõ mã bình #${cIdx + 1}`}
+                                                                                        className="w-full h-10 pl-3 pr-3 bg-white border border-slate-200 rounded-xl text-[13px] font-mono font-bold text-primary focus:border-primary/50 focus:ring-2 focus:ring-primary/5"
+                                                                                    />
+                                                                                    <datalist id={dropKey}>
+                                                                                        {options.map((c) => {
+                                                                                            const serial = (c.serial_number || '').trim().toUpperCase();
+                                                                                            const label = c.volume ? `${serial} — ${c.volume}` : serial;
+                                                                                            return (
+                                                                                                <option key={serial} value={serial}>
+                                                                                                    {label}
+                                                                                                </option>
+                                                                                            );
+                                                                                        })}
+                                                                                    </datalist>
+                                                                                </>
                                                                             )}
                                                                             {!rowReadOnly && (
                                                                                 <button

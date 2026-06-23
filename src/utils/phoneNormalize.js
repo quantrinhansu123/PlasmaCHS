@@ -7,3 +7,14 @@ export function normalizeVnPhoneDigits(phone) {
     if (d.length === 9) return `0${d}`;
     return d;
 }
+
+/** Thêm số 0 đầu nếu SĐT VN đang thiếu. Trả về null khi không cần đổi hoặc trống. */
+export function ensureVnPhoneLeadingZero(phone) {
+    const raw = String(phone ?? '').trim();
+    if (!raw) return null;
+    const normalized = normalizeVnPhoneDigits(raw);
+    if (!normalized || raw === normalized) return null;
+    const rawDigits = raw.replace(/\D/g, '');
+    if (rawDigits === normalized && raw.startsWith('0')) return null;
+    return normalized;
+}

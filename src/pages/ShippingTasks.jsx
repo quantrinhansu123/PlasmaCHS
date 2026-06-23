@@ -52,6 +52,16 @@ const giaoHangActionBtnCls =
 
 const TRANSFER_STATUS_SHIPPING_VISIBLE = 'DA_DUYET';
 
+function isMissingSupabaseTableError(error) {
+    const code = String(error?.code || '');
+    const message = String(error?.message || '');
+    return (
+        code === '42P01' ||
+        code === 'PGRST205' ||
+        message.includes('Could not find the table')
+    );
+}
+
 /** Chỉ đơn giao hàng (`orders`) — không gộp phiếu thu hồi vỏ. */
 const ShippingTasks = () => {
     const navigate = useNavigate();
@@ -186,15 +196,19 @@ const ShippingTasks = () => {
             if (recoveryErr) throw recoveryErr;
             if (custErr) throw custErr;
             if (receiptErr) throw receiptErr;
-            if (issueErr) throw issueErr;
+            if (issueErr && !isMissingSupabaseTableError(issueErr)) throw issueErr;
             if (supErr) throw supErr;
+
+            if (issueErr && isMissingSupabaseTableError(issueErr)) {
+                console.warn('[ShippingTasks] Thiếu bảng goods_issues — chạy setup_goods_issues.sql trên Supabase.');
+            }
 
             const whMap = Object.fromEntries((whRows || []).map((w) => [String(w.id), String(w.name || w.id)]));
             setWarehouseNameById(whMap);
             setTransferTasks(Array.isArray(transferRows) ? transferRows : []);
             setRecoveryTasks(Array.isArray(recoveryRows) ? recoveryRows : []);
             setReceiptTasks(Array.isArray(receiptRows) ? receiptRows : []);
-            setIssueTasks(Array.isArray(issueRows) ? issueRows : []);
+            setIssueTasks(issueErr ? [] : (Array.isArray(issueRows) ? issueRows : []));
             
             const custMap = Object.fromEntries((customerRows || []).map((c) => [String(c.id), c]));
             setCustomersMap(custMap);

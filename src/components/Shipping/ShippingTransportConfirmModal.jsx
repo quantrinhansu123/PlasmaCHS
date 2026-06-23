@@ -97,12 +97,15 @@ export default function ShippingTransportConfirmModal({
         setIsSubmitting(true);
         try {
             const table = isIssue ? 'goods_issues' : 'goods_receipts';
+            const existingNotes = isIssue ? record?.notes : record?.note;
             const payload = {
                 status: 'HOAN_THANH',
                 deliverer_name: name,
                 deliverer_address: address,
                 updated_at: new Date().toISOString(),
-                notes: appendProofToNotes(record?.notes, photoUrls),
+                ...(isIssue
+                    ? { notes: appendProofToNotes(existingNotes, photoUrls) }
+                    : { note: appendProofToNotes(existingNotes, photoUrls) }),
             };
             if (!isIssue) {
                 payload.received_by = receivedBy.trim() || record?.received_by || null;
