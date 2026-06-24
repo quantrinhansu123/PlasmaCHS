@@ -17,6 +17,7 @@ const ColumnPicker = ({
   defaultColOrder,
   columnDefs,
   excludeColumnIds,
+  lockedColumnIds = [],
 }) => {
   const dragColIdx = useRef(null);
   const [dragOverIdx, setDragOverIdx] = useState(null);
@@ -77,16 +78,19 @@ const ColumnPicker = ({
             )}
           >
             <GripVertical size={14} className="text-muted-foreground/30 cursor-grab shrink-0" />
-            <label className="flex items-center gap-2.5 cursor-pointer flex-1">
+            <label className={clsx('flex items-center gap-2.5 flex-1', lockedColumnIds.includes(colId) ? 'cursor-default opacity-80' : 'cursor-pointer')}>
               <input
                 type="checkbox"
                 className="rounded border-border text-primary focus:ring-primary/20 w-4 h-4 shrink-0"
-                checked={visibleColumns.includes(colId)}
-                onChange={() => setVisibleColumns(prev =>
+                checked={visibleColumns.includes(colId) || lockedColumnIds.includes(colId)}
+                disabled={lockedColumnIds.includes(colId)}
+                onChange={() => {
+                  if (lockedColumnIds.includes(colId)) return;
+                  setVisibleColumns(prev =>
                   prev.includes(colId)
                     ? prev.filter(id => id !== colId)
                     : [...prev, colId]
-                )}
+                )}}
               />
               <span className="text-[13px] font-medium text-foreground">{columnDefs[colId].label}</span>
             </label>

@@ -54,7 +54,7 @@ import InventoryTransfer from './pages/InventoryTransfer';
 import ReturnOrders from './pages/ReturnOrders';
 import TransferList from './pages/TransferList';
 
-const moduleRoutes = ['/don-hang-kinh-doanh', '/quan-ly-thiet-bi', '/van-chuyen', '/thu-hoi', '/mua-hang-nha-cung-cap', '/kho', '/he-thong', '/vat-tu', '/thong-ke'];
+const moduleRoutes = ['/don-hang-kinh-doanh', '/quan-ly-thiet-bi', '/van-chuyen', '/thu-hoi', '/mua-hang-nha-cung-cap', '/kho', '/he-thong', '/thong-ke'];
 
 const legacyRedirects = [
   ['/hanh-chinh', '/don-hang-kinh-doanh'],
@@ -64,7 +64,7 @@ const legacyRedirects = [
   ['/tai-chinh', '/thu-hoi'],
   ['/mua-hang', '/mua-hang-nha-cung-cap'],
   ['/kho-van', '/kho'],
-  ['/tro-ly-ai', '/vat-tu'],
+  ['/tro-ly-ai', '/trang-chu'],
   ['/danh-sach-don-hang', '/don-hang'],
   ['/tao-don-hang', '/don-hang/tao'],
   ['/danh-sach-binh', '/binh'],

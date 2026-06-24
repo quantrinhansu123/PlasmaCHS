@@ -69,8 +69,6 @@ export const extraMenuItems = [
   { path: '/don-vi-van-chuyen/tao', label: 'Thêm ĐVVC mới', icon: Layout },
   { path: '/nhiem-vu-giao-hang', label: 'Nhiệm vụ giao hàng', icon: Layout },
   { path: '/lich-su-giao-hang', label: 'Lịch sử giao hàng', icon: Layout },
-  { path: '/vat-tu/danh-sach', label: 'Nguồn vật tư', icon: Layout },
-  { path: '/vat-tu/tao', label: 'Thêm mới vật tư', icon: Layout },
   { path: '/khuyen-mai', label: 'Khuyến mãi', icon: Layout },
   { path: '/khuyen-mai/tao', label: 'Tạo mã khuyến mãi', icon: Layout },
   { path: '/nguoi-dung', label: 'Người dùng', icon: Layout },

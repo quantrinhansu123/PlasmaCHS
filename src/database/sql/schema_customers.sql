@@ -19,6 +19,7 @@ CREATE TABLE customers (
     tax_code VARCHAR(50), -- Mã số thuế
     invoice_address TEXT, -- Địa chỉ xuất hoá đơn GTGT
     invoice_email VARCHAR(255), -- Email nhận hoá đơn điện tử
+    machine_received_date DATE, -- Ngày khách nhận máy
     customer_type VARCHAR(50), -- Loại khách hàng: công (BV công), tư (BV tư, TM, PK, NG, SP)
     last_order_date DATE, -- Ngày đặt hàng gần nhất (dùng tính KH quá hạn)
     care_expiry_date DATE, -- Ngày hết hạn chăm sóc (mặc định 60 ngày)

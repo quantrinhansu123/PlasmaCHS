@@ -70,6 +70,16 @@ import {
     readCustomerMachineLinkExcel,
 } from '../utils/customerMachineLinkExcel';
 import {
+    downloadCustomerAddressTemplate,
+    importCustomerAddressFromRows,
+    readCustomerAddressExcel,
+} from '../utils/customerAddressExcel';
+import {
+    downloadCustomerMachineReceiveDateTemplate,
+    importCustomerMachineReceiveDateFromRows,
+    readCustomerMachineReceiveDateExcel,
+} from '../utils/customerMachineReceiveDateExcel';
+import {
     appendCustomerAssigneeScope,
     getCurrentUserNames,
     isSalesAssigneeScopePending,
@@ -110,6 +120,24 @@ function appendCustomerTextSearch(query, searchTrimmed) {
     }
     return q;
 }
+
+/** Độ rộng cột (px) — bảng /khach-hang cân đối, tránh giãn loãng */
+const CUSTOMER_LIST_COL_WIDTH_PX = {
+    code: 92,
+    name: 176,
+    phone: 108,
+    address: 176,
+    machine_received_date: 108,
+    legal_rep: 120,
+    managed_by: 108,
+    warehouse_id: 80,
+    category: 88,
+    invoice_email: 132,
+    current_cylinders: 56,
+    current_machines: 56,
+    borrowed_cylinders: 56,
+    care_by: 108,
+};
 
 /** Bộ lọc lead trên Supabase (khớp phân trang + đếm tổng). Chỉ lead chưa chốt. */
 function appendLeadCustomerFilters(query, {
@@ -184,6 +212,8 @@ const Customers = () => {
     const [customers, setCustomers] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isLinkingMachines, setIsLinkingMachines] = useState(false);
+    const [isImportingAddresses, setIsImportingAddresses] = useState(false);
+    const [isImportingMachineReceiveDate, setIsImportingMachineReceiveDate] = useState(false);
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
     const [selectedCustomer, setSelectedCustomer] = useState(null);
@@ -231,6 +261,8 @@ const Customers = () => {
     const [isSearchExpanded, setIsSearchExpanded] = useState(false);
     const searchInputRef = useRef(null);
     const customerMachineLinkInputRef = useRef(null);
+    const customerAddressInputRef = useRef(null);
+    const customerMachineReceiveDateInputRef = useRef(null);
 
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [filterSearch, setFilterSearch] = useState('');
@@ -251,6 +283,7 @@ const Customers = () => {
         { key: 'name', label: 'Tên khách hàng / Tên cơ sở' },
         { key: 'phone', label: 'Số điện thoại' },
         { key: 'address', label: 'Địa chỉ' },
+        { key: 'machine_received_date', label: 'Ngày nhận máy' },
         { key: 'legal_rep', label: 'Người đại diện pháp luật' },
         { key: 'managed_by', label: 'Nhân viên phụ trách' },
         { key: 'warehouse_id', label: 'Kho phụ trách' },
@@ -288,6 +321,8 @@ const Customers = () => {
         'care_status',
         'success_at',
     ];
+    /** Cột luôn hiển thị trên /khach-hang (không tắt được). */
+    const CUSTOMER_LIST_PINNED_COLUMN_KEYS = ['address', 'machine_received_date'];
     const hiddenColumnKeys =
         filterType === 'lead' ? LEAD_HIDDEN_COLUMN_KEYS : CUSTOMER_LIST_HIDDEN_COLUMN_KEYS;
     const canActOnLeadCustomer = useCallback(
@@ -324,6 +359,10 @@ const Customers = () => {
     ];
 
     const defaultColOrder = TABLE_COLUMNS_DEF.map(col => col.key);
+    const isLeadPagePath =
+        typeof window !== 'undefined' &&
+        (window.location.pathname === '/khach-hang-lead' ||
+            new URLSearchParams(window.location.search).get('filter') === 'lead');
     const columnDefs = useMemo(
         () =>
             TABLE_COLUMNS_DEF.reduce((acc, col) => {
@@ -340,7 +379,13 @@ const Customers = () => {
             if (Array.isArray(saved) && saved.length > 0) {
                 const valid = saved.filter(key => defaultColOrder.includes(key));
                 const missing = defaultColOrder.filter(key => !valid.includes(key));
-                return [...valid, ...missing];
+                let order = [...valid, ...missing];
+                if (!isLeadPagePath && order.includes('address') && order.includes('phone')) {
+                    order = order.filter((k) => k !== 'address');
+                    const phoneIdx = order.indexOf('phone');
+                    order.splice(phoneIdx + 1, 0, 'address');
+                }
+                return order;
             }
         } catch { }
         return defaultColOrder;
@@ -350,18 +395,46 @@ const Customers = () => {
             const saved = JSON.parse(localStorage.getItem('columns_customers') || 'null');
             if (Array.isArray(saved) && saved.length > 0) {
                 const normalized = saved.filter(key => defaultColOrder.includes(key));
-                if (!normalized.includes('warehouse_id')) normalized.push('warehouse_id');
+                if (!isLeadPagePath) {
+                    if (!normalized.includes('warehouse_id')) normalized.push('warehouse_id');
+                    if (!normalized.includes('address')) normalized.push('address');
+                    if (!normalized.includes('machine_received_date')) normalized.push('machine_received_date');
+                }
                 return normalized;
             }
         } catch { }
         return defaultColOrder;
     });
     const [showColumnPicker, setShowColumnPicker] = useState(false);
-    const visibleTableColumns = columnOrder
-        .filter(key => visibleColumns.includes(key))
-        .filter(key => !hiddenColumnKeys.includes(key))
-        .map(key => TABLE_COLUMNS_DEF.find(col => col.key === key))
-        .filter(Boolean);
+    const visibleTableColumns = useMemo(() => {
+        const isPinned = (key) =>
+            filterType !== 'lead' && CUSTOMER_LIST_PINNED_COLUMN_KEYS.includes(key);
+
+        let keys = columnOrder.filter((key) => {
+            if (hiddenColumnKeys.includes(key)) return false;
+            if (isPinned(key)) return true;
+            return visibleColumns.includes(key);
+        });
+
+        if (filterType !== 'lead') {
+            const pinnedOrder = ['address', 'machine_received_date'];
+            const presentPinned = pinnedOrder.filter((k) => keys.includes(k));
+            if (presentPinned.length) {
+                keys = keys.filter((k) => !presentPinned.includes(k));
+                const anchorIdx =
+                    keys.indexOf('phone') >= 0 ? keys.indexOf('phone') : keys.indexOf('name');
+                if (anchorIdx >= 0) {
+                    keys.splice(anchorIdx + 1, 0, ...presentPinned);
+                } else {
+                    keys.push(...presentPinned);
+                }
+            }
+        }
+
+        return keys
+            .map((key) => TABLE_COLUMNS_DEF.find((col) => col.key === key))
+            .filter(Boolean);
+    }, [columnOrder, visibleColumns, hiddenColumnKeys, filterType]);
     const pickerDisplayKeys = defaultColOrder.filter((k) => !hiddenColumnKeys.includes(k));
     const visibleCount = visibleColumns.filter((k) => pickerDisplayKeys.includes(k)).length;
     const totalCount = pickerDisplayKeys.length;
@@ -374,7 +447,32 @@ const Customers = () => {
 
     useEffect(() => {
         if (filterType === 'lead') return;
-        setVisibleColumns((prev) => (prev.includes('warehouse_id') ? prev : [...prev, 'warehouse_id']));
+        setVisibleColumns((prev) => {
+            let next = prev;
+            if (!prev.includes('warehouse_id')) next = [...next, 'warehouse_id'];
+            if (!prev.includes('address')) next = [...next, 'address'];
+            if (!prev.includes('machine_received_date')) next = [...next, 'machine_received_date'];
+            return next === prev ? prev : next;
+        });
+        setColumnOrder((prev) => {
+            if (!prev.includes('phone')) return prev;
+            let next = [...prev];
+
+            if (next.includes('address')) {
+                next = next.filter((k) => k !== 'address');
+                const phoneIdx = next.indexOf('phone');
+                if (phoneIdx >= 0) next.splice(phoneIdx + 1, 0, 'address');
+            }
+
+            if (next.includes('machine_received_date')) {
+                next = next.filter((k) => k !== 'machine_received_date');
+                const addressIdx = next.indexOf('address');
+                const insertIdx = addressIdx >= 0 ? addressIdx + 1 : next.indexOf('phone') + 1;
+                if (insertIdx > 0) next.splice(insertIdx, 0, 'machine_received_date');
+            }
+
+            return next;
+        });
     }, [filterType]);
 
     useEffect(() => {
@@ -694,8 +792,41 @@ const Customers = () => {
         }
     };
 
+    const isCustomerListTable = filterType !== 'lead';
+    const tableCellPad = isCustomerListTable ? 'px-3 py-2.5' : 'px-4 py-4';
+
+    const getCustomerColumnHeaderLabel = (col) => {
+        if (filterType === 'lead' && col.key === 'code') return 'STT';
+        if (isCustomerListTable) {
+            const shortLabels = {
+                name: 'Tên KH',
+                legal_rep: 'Đại diện PL',
+                managed_by: 'NV phụ trách',
+                warehouse_id: 'Kho',
+                category: 'Loại KH',
+                machine_received_date: 'Ngày nhận máy',
+                care_by: 'KD CS',
+                current_cylinders: 'Vỏ bình',
+                current_machines: 'Máy',
+                borrowed_cylinders: 'Vỏ mượn',
+            };
+            if (shortLabels[col.key]) return shortLabels[col.key];
+        }
+        return col.label;
+    };
+
+    const customerTableMinWidth = useMemo(() => {
+        if (!isCustomerListTable) return undefined;
+        const dataWidth = visibleTableColumns.reduce(
+            (sum, col) => sum + (CUSTOMER_LIST_COL_WIDTH_PX[col.key] || 100),
+            0,
+        );
+        return dataWidth + 44 + 88;
+    }, [isCustomerListTable, visibleTableColumns]);
+
     const getCodeCellClass = (categoryId) => clsx(
-        'px-4 py-4 whitespace-nowrap text-sm font-semibold text-foreground border-r border-primary/20 border-l-4',
+        tableCellPad,
+        'whitespace-nowrap text-sm font-semibold text-foreground border-r border-primary/20 border-l-4',
         categoryId === 'BV' && 'border-l-blue-400',
         categoryId === 'TM' && 'border-l-pink-400',
         categoryId === 'PK' && 'border-l-emerald-400',
@@ -1317,30 +1448,58 @@ const Customers = () => {
                 }
                 return <td key={colKey} className={getCodeCellClass(c.category)}>{c.code}</td>;
             case 'name':
-                return <td key={colKey} className="px-4 py-4 text-sm font-semibold text-foreground">{c.name}</td>;
+                return (
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm font-semibold text-foreground max-w-0')}>
+                        <span className="block truncate" title={c.name || ''}>{c.name}</span>
+                    </td>
+                );
             case 'phone':
-                return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{c.phone || '—'}</td>;
+                return (
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm text-muted-foreground whitespace-nowrap tabular-nums')}>
+                        {c.phone || '—'}
+                    </td>
+                );
             case 'address':
-                return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{c.address || '—'}</td>;
+                return (
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm text-muted-foreground max-w-0')}>
+                        <span className="block truncate" title={c.address || ''}>{c.address || '—'}</span>
+                    </td>
+                );
+            case 'machine_received_date':
+                return (
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm text-muted-foreground whitespace-nowrap tabular-nums')}>
+                        {c.machine_received_date
+                            ? new Date(c.machine_received_date).toLocaleDateString('vi-VN')
+                            : '—'}
+                    </td>
+                );
             case 'legal_rep':
-                return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{c.legal_rep || '—'}</td>;
+                return (
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm text-muted-foreground max-w-0')}>
+                        <span className="block truncate" title={c.legal_rep || ''}>{c.legal_rep || '—'}</span>
+                    </td>
+                );
             case 'managed_by':
-                return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{c.managed_by || '—'}</td>;
+                return (
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm text-muted-foreground max-w-0')}>
+                        <span className="block truncate" title={c.managed_by || ''}>{c.managed_by || '—'}</span>
+                    </td>
+                );
             case 'warehouse_id':
                 return (
-                    <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm text-muted-foreground whitespace-nowrap')}>
                         {getCustomerWarehouseLabel(c.warehouse_id)}
                     </td>
                 );
             case 'category':
                 return (
-                    <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm text-muted-foreground whitespace-nowrap')}>
                         <span className={getCategoryBadgeClass(c.category)}>{getLabel(CUSTOMER_CATEGORIES, c.category)}</span>
                     </td>
                 );
             case 'care_assigned_at':
                 return (
-                    <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground whitespace-nowrap">
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm text-muted-foreground whitespace-nowrap')}>
                         {c.care_assigned_at
                             ? new Date(c.care_assigned_at).toLocaleString('vi-VN', {
                                   day: '2-digit',
@@ -1352,7 +1511,7 @@ const Customers = () => {
                 );
             case 'days_left':
                 return (
-                    <td key={colKey} className="px-4 py-4 text-sm whitespace-nowrap">
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm whitespace-nowrap')}>
                         {diff == null ? (
                             '—'
                         ) : diff <= 0 ? (
@@ -1364,7 +1523,7 @@ const Customers = () => {
                 );
             case 'care_status':
                 return (
-                    <td key={colKey} className="px-4 py-4 text-sm whitespace-nowrap">
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm whitespace-nowrap')}>
                         {diff == null ? (
                             '—'
                         ) : diff <= 0 ? (
@@ -1381,7 +1540,7 @@ const Customers = () => {
                     c.status === 'Thành công' ? 'Thành công' : 'Chưa thành công';
                 const canEditStatus = filterType !== 'lead' || canChangeLeadCustomerStatus(c);
                 return (
-                    <td key={colKey} className="px-4 py-4 text-sm relative z-10">
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm relative z-10')}>
                         <select
                             value={statusValue}
                             onChange={(e) => handleStatusChange(c.id, e.target.value)}
@@ -1403,7 +1562,7 @@ const Customers = () => {
             }
             case 'success_at':
                 return (
-                    <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground whitespace-nowrap">
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm text-muted-foreground whitespace-nowrap')}>
                         {c.success_at
                             ? new Date(c.success_at).toLocaleString('vi-VN', {
                                   day: '2-digit',
@@ -1417,7 +1576,7 @@ const Customers = () => {
                 );
             case 'care_expiry_date':
                 return (
-                    <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground whitespace-nowrap">
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm text-muted-foreground whitespace-nowrap')}>
                         {c.care_expiry_date
                             ? new Date(c.care_expiry_date).toLocaleDateString('vi-VN')
                             : '—'}
@@ -1427,17 +1586,25 @@ const Customers = () => {
             case 'current_machines':
             case 'borrowed_cylinders':
                 return (
-                    <td key={colKey} className="px-4 py-4 text-sm font-semibold text-foreground">
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm font-semibold text-foreground text-center tabular-nums')}>
                         {formatNumber(c[colKey] || 0)}
                     </td>
                 );
             case 'care_by':
-                return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{c.care_by || '—'}</td>;
+                return (
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm text-muted-foreground max-w-0')}>
+                        <span className="block truncate" title={c.care_by || ''}>{c.care_by || '—'}</span>
+                    </td>
+                );
             case 'invoice_email':
-                return <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">{c.invoice_email || '—'}</td>;
+                return (
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm text-muted-foreground max-w-0')}>
+                        <span className="block truncate" title={c.invoice_email || ''}>{c.invoice_email || '—'}</span>
+                    </td>
+                );
             default:
                 return (
-                    <td key={colKey} className="px-4 py-4 text-sm text-muted-foreground">
+                    <td key={colKey} className={clsx(tableCellPad, 'text-sm text-muted-foreground')}>
                         —
                     </td>
                 );
@@ -1688,6 +1855,88 @@ const Customers = () => {
         }
     };
 
+    const handleImportCustomerAddress = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        try {
+            setIsImportingAddresses(true);
+            const rows = await readCustomerAddressExcel(file);
+            const { updated, errors } = await importCustomerAddressFromRows(supabase, rows);
+
+            if (updated === 0) {
+                const detail = errors.slice(0, 6).map((err) => {
+                    const prefix = err.row ? `Dòng ${err.row}: ` : '';
+                    return `${prefix}${err.message}`;
+                }).join('\n');
+                alert(`Không cập nhật được địa chỉ nào.\n${detail || 'Kiểm tra lại cột Mã KH và Địa chỉ.'}`);
+                return;
+            }
+
+            let message = `Đã cập nhật địa chỉ cho ${updated} khách hàng.`;
+            if (errors.length > 0) {
+                const detail = errors.slice(0, 8).map((err) => {
+                    const prefix = err.row ? `Dòng ${err.row}: ` : '';
+                    return `${prefix}${err.message}`;
+                }).join('\n');
+                message += `\n\nBỏ qua / lỗi (${errors.length}):\n${detail}`;
+                if (errors.length > 8) message += '\n...';
+            }
+            alert(message);
+            fetchCustomers();
+        } catch (err) {
+            console.error('Error importing customer addresses:', err);
+            alert('Có lỗi khi cập nhật địa chỉ KH: ' + (err.message || err));
+        } finally {
+            setIsImportingAddresses(false);
+            if (customerAddressInputRef.current) {
+                customerAddressInputRef.current.value = '';
+            }
+            e.target.value = '';
+        }
+    };
+
+    const handleImportCustomerMachineReceiveDate = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        try {
+            setIsImportingMachineReceiveDate(true);
+            const rows = await readCustomerMachineReceiveDateExcel(file);
+            const { updated, errors } = await importCustomerMachineReceiveDateFromRows(supabase, rows);
+
+            if (updated === 0) {
+                const detail = errors.slice(0, 6).map((err) => {
+                    const prefix = err.row ? `Dòng ${err.row}: ` : '';
+                    return `${prefix}${err.message}`;
+                }).join('\n');
+                alert(`Không cập nhật được Ngày nhận máy nào.\n${detail || 'Kiểm tra lại cột Mã KH và Ngày nhận máy.'}`);
+                return;
+            }
+
+            let message = `Đã cập nhật Ngày nhận máy cho ${updated} khách hàng.`;
+            if (errors.length > 0) {
+                const detail = errors.slice(0, 8).map((err) => {
+                    const prefix = err.row ? `Dòng ${err.row}: ` : '';
+                    return `${prefix}${err.message}`;
+                }).join('\n');
+                message += `\n\nBỏ qua / lỗi (${errors.length}):\n${detail}`;
+                if (errors.length > 8) message += '\n...';
+            }
+            alert(message);
+            fetchCustomers();
+        } catch (err) {
+            console.error('Error importing machine receive dates:', err);
+            alert('Có lỗi khi cập nhật Ngày nhận máy: ' + (err.message || err));
+        } finally {
+            setIsImportingMachineReceiveDate(false);
+            if (customerMachineReceiveDateInputRef.current) {
+                customerMachineReceiveDateInputRef.current.value = '';
+            }
+            e.target.value = '';
+        }
+    };
+
     const getCategoryStats = () => {
         const stats = {};
         filteredCustomers.forEach(customer => {
@@ -1862,6 +2111,66 @@ const Customers = () => {
                                                             disabled={isLinkingMachines}
                                                             onChange={(e) => {
                                                                 handleImportCustomerMachineLink(e);
+                                                                setShowMoreActions(false);
+                                                            }}
+                                                            className="hidden"
+                                                        />
+                                                    </label>
+                                                    <div
+                                                        role="button"
+                                                        onClick={() => {
+                                                            downloadCustomerAddressTemplate();
+                                                            setShowMoreActions(false);
+                                                        }}
+                                                        className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-sky-700 hover:bg-sky-50 transition-colors text-left cursor-pointer border-t border-slate-50"
+                                                    >
+                                                        <div className="w-5 flex justify-center flex-shrink-0">
+                                                            <Download size={18} className="text-sky-500" />
+                                                        </div>
+                                                        Tải mẫu KH–Địa chỉ
+                                                    </div>
+                                                    <label className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-sky-700 hover:bg-sky-50 transition-colors cursor-pointer text-left">
+                                                        <div className="w-5 flex justify-center flex-shrink-0">
+                                                            <Upload size={18} className="text-sky-500" />
+                                                        </div>
+                                                        {isImportingAddresses ? 'Đang cập nhật địa chỉ…' : 'Import KH–Địa chỉ'}
+                                                        <input
+                                                            ref={customerAddressInputRef}
+                                                            type="file"
+                                                            accept=".xlsx, .xls"
+                                                            disabled={isImportingAddresses}
+                                                            onChange={(e) => {
+                                                                handleImportCustomerAddress(e);
+                                                                setShowMoreActions(false);
+                                                            }}
+                                                            className="hidden"
+                                                        />
+                                                    </label>
+                                                    <div
+                                                        role="button"
+                                                        onClick={() => {
+                                                            downloadCustomerMachineReceiveDateTemplate();
+                                                            setShowMoreActions(false);
+                                                        }}
+                                                        className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-indigo-700 hover:bg-indigo-50 transition-colors text-left cursor-pointer border-t border-slate-50"
+                                                    >
+                                                        <div className="w-5 flex justify-center flex-shrink-0">
+                                                            <Download size={18} className="text-indigo-500" />
+                                                        </div>
+                                                        Tải mẫu KH–Ngày nhận máy
+                                                    </div>
+                                                    <label className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-indigo-700 hover:bg-indigo-50 transition-colors cursor-pointer text-left">
+                                                        <div className="w-5 flex justify-center flex-shrink-0">
+                                                            <Upload size={18} className="text-indigo-500" />
+                                                        </div>
+                                                        {isImportingMachineReceiveDate ? 'Đang cập nhật ngày nhận máy…' : 'Import KH–Ngày nhận máy'}
+                                                        <input
+                                                            ref={customerMachineReceiveDateInputRef}
+                                                            type="file"
+                                                            accept=".xlsx, .xls"
+                                                            disabled={isImportingMachineReceiveDate}
+                                                            onChange={(e) => {
+                                                                handleImportCustomerMachineReceiveDate(e);
                                                                 setShowMoreActions(false);
                                                             }}
                                                             className="hidden"
@@ -2218,6 +2527,9 @@ const Customers = () => {
                                             setVisibleColumns={setVisibleColumns}
                                             defaultColOrder={defaultColOrder}
                                             columnDefs={columnDefs}
+                                            lockedColumnIds={
+                                                filterType !== 'lead' ? CUSTOMER_LIST_PINNED_COLUMN_KEYS : []
+                                            }
                                         />
                                     )}
                                 </div>
@@ -2269,6 +2581,62 @@ const Customers = () => {
                                                 accept=".xlsx, .xls"
                                                 disabled={isLinkingMachines}
                                                 onChange={handleImportCustomerMachineLink}
+                                                className="hidden"
+                                            />
+                                        </label>
+                                        <div
+                                            onClick={downloadCustomerAddressTemplate}
+                                            className="flex items-center gap-2 px-4 py-2 h-10 bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 rounded-lg transition-all text-[13px] font-bold shadow-sm cursor-pointer select-none"
+                                            title="Tải mẫu Excel: Mã KH + Địa chỉ"
+                                        >
+                                            <Download size={16} className="shrink-0" />
+                                            <span>Mẫu KH–Địa chỉ</span>
+                                        </div>
+                                        <label
+                                            className={clsx(
+                                                'flex items-center gap-2 px-4 py-2 h-10 border rounded-lg transition-all text-[13px] font-bold shadow-sm cursor-pointer select-none',
+                                                isImportingAddresses
+                                                    ? 'bg-sky-100 text-sky-400 border-sky-200 cursor-wait'
+                                                    : 'bg-sky-50 text-sky-700 hover:bg-sky-100 border-sky-200',
+                                            )}
+                                            title="Import Excel cập nhật Địa chỉ theo Mã KH"
+                                        >
+                                            <Upload size={16} className="shrink-0" />
+                                            <span>{isImportingAddresses ? 'Đang cập nhật…' : 'Cập nhật Địa chỉ'}</span>
+                                            <input
+                                                ref={customerAddressInputRef}
+                                                type="file"
+                                                accept=".xlsx, .xls"
+                                                disabled={isImportingAddresses}
+                                                onChange={handleImportCustomerAddress}
+                                                className="hidden"
+                                            />
+                                        </label>
+                                        <div
+                                            onClick={downloadCustomerMachineReceiveDateTemplate}
+                                            className="flex items-center gap-2 px-4 py-2 h-10 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-all text-[13px] font-bold shadow-sm cursor-pointer select-none"
+                                            title="Tải mẫu Excel: Mã KH + Ngày nhận máy"
+                                        >
+                                            <Download size={16} className="shrink-0" />
+                                            <span>Mẫu KH–Ngày nhận máy</span>
+                                        </div>
+                                        <label
+                                            className={clsx(
+                                                'flex items-center gap-2 px-4 py-2 h-10 border rounded-lg transition-all text-[13px] font-bold shadow-sm cursor-pointer select-none',
+                                                isImportingMachineReceiveDate
+                                                    ? 'bg-indigo-100 text-indigo-400 border-indigo-200 cursor-wait'
+                                                    : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200',
+                                            )}
+                                            title="Import Excel cập nhật Ngày nhận máy theo Mã KH"
+                                        >
+                                            <Upload size={16} className="shrink-0" />
+                                            <span>{isImportingMachineReceiveDate ? 'Đang cập nhật ngày…' : 'Cập nhật Ngày nhận máy'}</span>
+                                            <input
+                                                ref={customerMachineReceiveDateInputRef}
+                                                type="file"
+                                                accept=".xlsx, .xls"
+                                                disabled={isImportingMachineReceiveDate}
+                                                onChange={handleImportCustomerMachineReceiveDate}
                                                 className="hidden"
                                             />
                                         </label>
@@ -2483,10 +2851,30 @@ const Customers = () => {
                     </div>
 
                     <div className="hidden md:block flex-1 overflow-x-auto bg-white">
-                        <table className="customers-data-table app-data-table w-full border-separate border-spacing-0">
+                        <table
+                            className={clsx(
+                                'customers-data-table app-data-table border-separate border-spacing-0',
+                                isCustomerListTable
+                                    ? 'customers-data-table--balanced table-fixed w-max min-w-full'
+                                    : 'w-full',
+                            )}
+                            style={customerTableMinWidth ? { minWidth: customerTableMinWidth } : undefined}
+                        >
+                            {isCustomerListTable && (
+                                <colgroup>
+                                    <col style={{ width: 44 }} />
+                                    {visibleTableColumns.map((col) => (
+                                        <col
+                                            key={col.key}
+                                            style={{ width: CUSTOMER_LIST_COL_WIDTH_PX[col.key] || 100 }}
+                                        />
+                                    ))}
+                                    <col style={{ width: 88 }} />
+                                </colgroup>
+                            )}
                             <thead>
                                 <tr>
-                                    <th className="px-4 py-3.5 text-center border-r border-primary/30">
+                                    <th className={clsx(tableCellPad, 'text-center border-r border-primary/30 w-11')}>
                                         <input
                                             type="checkbox"
                                             checked={
@@ -2505,17 +2893,20 @@ const Customers = () => {
                                         <th
                                             key={col.key}
                                             className={clsx(
-                                                'px-4 py-3.5 text-[12px] font-bold text-muted-foreground uppercase tracking-wide',
+                                                tableCellPad,
+                                                'text-[11px] font-bold text-muted-foreground',
+                                                isCustomerListTable ? 'tracking-normal normal-case' : 'uppercase tracking-wide',
                                                 col.key === 'code' && filterType === 'lead'
                                                     ? 'text-center'
                                                     : 'text-left',
-                                                col.key === 'code' && 'border-l border-r border-primary/30'
+                                                col.key === 'code' && 'border-l border-r border-primary/30',
+                                                (col.key === 'phone' || col.key === 'machine_received_date') && 'whitespace-nowrap',
                                             )}
                                         >
-                                            {col.key === 'code' && filterType === 'lead' ? 'STT' : col.label}
+                                            {getCustomerColumnHeaderLabel(col)}
                                         </th>
                                     ))}
-                                    <th className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-center uppercase tracking-wide border-l border-r border-primary/30 min-w-[120px]">
+                                    <th className={clsx(tableCellPad, 'text-[11px] font-bold text-muted-foreground text-center border-l border-r border-primary/30 w-[88px]')}>
                                         Thao tác
                                     </th>
                                 </tr>
@@ -2546,7 +2937,7 @@ const Customers = () => {
                                                 filterType === 'lead' && c.status === 'Thành công' && "!bg-slate-50/80 !border-l-[4px] !border-l-emerald-500 opacity-70 grayscale-[20%]"
                                             )}
                                         >
-                                            <td className="px-4 py-4 text-center border-r border-primary/10">
+                                            <td className={clsx(tableCellPad, 'text-center border-r border-primary/10 w-11')}>
                                                 <input
                                                     type="checkbox"
                                                     checked={selectedIds.includes(c.id)}
@@ -2559,7 +2950,7 @@ const Customers = () => {
                                                 />
                                             </td>
                                             {visibleTableColumns.map((col) => renderCustomerTableCell(c, col.key))}
-                                            <td className="px-4 py-4 text-center border-l border-r border-primary/20 relative z-10">
+                                            <td className={clsx(tableCellPad, 'text-center border-l border-r border-primary/20 relative z-10 w-[88px]')}>
                                                 <div className="flex items-center justify-center gap-3 flex-nowrap customer-row-actions">
                                                     {c.status === 'Thành công' && (
                                                         <button

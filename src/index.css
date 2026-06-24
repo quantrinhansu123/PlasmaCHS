@@ -129,6 +129,24 @@ textarea {
   justify-content: center !important;
 }
 
+/* Bảng /khach-hang: cột cố định, khoảng cách đồng đều */
+.customers-data-table.customers-data-table--balanced th,
+.customers-data-table.customers-data-table--balanced td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle !important;
+}
+
+.customers-data-table.customers-data-table--balanced th {
+  font-size: 11px !important;
+  line-height: 1.25 !important;
+  white-space: nowrap;
+}
+
+.customers-data-table.customers-data-table--balanced td {
+  font-size: 13px !important;
+}
+
 /* Buttons - consistent 14px, compact and single line */
 button {
   font-size: 14px !important;
