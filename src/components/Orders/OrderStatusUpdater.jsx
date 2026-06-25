@@ -903,7 +903,8 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                         .from('cylinders')
                         .update({
                             status: 'đang vận chuyển',
-                            customer_name: resolvedOrderCustomerAssetName(order) || order.customer_name
+                            customer_name: resolvedOrderCustomerAssetName(order) || order.customer_name,
+                            customer_id: order.customer_id || null,
                         })
                         .in('serial_number', serials)
                         .select('id, serial_number, category');
@@ -999,7 +1000,8 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     .from('cylinders')
                     .update({
                         status: 'đang vận chuyển',
-                        customer_name: resolvedOrderCustomerAssetName(order) || order.customer_name
+                        customer_name: resolvedOrderCustomerAssetName(order) || order.customer_name,
+                        customer_id: order.customer_id || null,
                     })
                     .in('serial_number', serials)
                     .select('id, serial_number');
@@ -1143,7 +1145,8 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                         .update({
                             status: 'thuộc khách hàng',
                             customer_name: resolvedOrderCustomerAssetName(order),
-                            updated_at: new Date().toISOString()
+                            customer_id: order.customer_id || null,
+                            updated_at: new Date().toISOString(),
                         })
                         .in('serial_number', deliveredCylinderSerials);
 

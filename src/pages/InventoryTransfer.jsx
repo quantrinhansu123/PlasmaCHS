@@ -36,208 +36,28 @@ import {
     CYLINDER_KHO_COLUMN,
     filterWarehousesForCurrentUser,
     getCylinderKhoValue,
+    getManagingWarehouseNameKey,
+    resolveInventoryWarehouseName,
 } from '../utils/orderWarehouseScope';
+import {
+    cylinderBelongsToWarehouse,
+    fetchReadyCylindersAtWarehouse,
+    fetchReadyMachinesAtWarehouse,
+    formatCylinderTransferItemName,
+    formatMachineTransferItemName,
+    indexSerialRecords,
+    isReadyCylinderStatus,
+    isReadyMachineStatus,
+    machineBelongsToWarehouse,
+    machineSerialLookupVariants,
+    normalizeSerialInput,
+    resolveDbRecord,
+    resolveWarehouseRow,
+} from '../utils/transferWarehouseMatch';
 import { supabase } from '../supabase/config';
 import { notificationService } from '../utils/notificationService';
 import { uploadFileToCloudinary } from '../utils/cloudinaryUpload';
 import { normalizeMachineSerialKey } from '../utils/machineCustomerFromOrders';
-import { storedValueMatchesWarehouse } from '../utils/transferWarehouseMatch';
-
-/** Biến thể serial máy để .in() khớp DB (phân biệt hoa thường / khoảng trắng). */
-function machineSerialLookupVariants(raw) {
-    const t = String(raw || '').trim();
-    if (!t) return [];
-    const collapsed = normalizeMachineSerialKey(t);
-    return [...new Set([t, t.toUpperCase(), t.toLowerCase(), collapsed, collapsed.toLowerCase()])].filter(Boolean);
-}
-
-function normalizeSerialInput(raw, itemType) {
-    const t = String(raw || '').trim();
-    if (!t) return '';
-    if (itemType === 'MAY') return normalizeMachineSerialKey(t) || t.toUpperCase();
-    if (itemType === 'BINH') return t.replace(/\s+/g, '').toUpperCase();
-    return t.toUpperCase();
-}
-
-function indexSerialRecords(records, itemType) {
-    const map = {};
-    (records || []).forEach((row) => {
-        const sn = String(row?.serial_number || '').trim();
-        if (!sn) return;
-        const keys =
-            itemType === 'MAY'
-                ? machineSerialLookupVariants(sn)
-                : [...new Set([sn, sn.toUpperCase(), sn.replace(/\s+/g, '').toUpperCase()])];
-        keys.forEach((k) => {
-            map[k] = row;
-        });
-    });
-    return map;
-}
-
-function resolveDbRecord(map, code, itemType) {
-    if (!code) return null;
-    const direct = map[code];
-    if (direct) return direct;
-    const norm = normalizeSerialInput(code, itemType);
-    return map[norm] || null;
-}
-
-function resolveWarehouseRow(warehouseId, warehouseList = []) {
-    const key = String(warehouseId || '').trim();
-    if (!key) return null;
-    return (
-        warehouseList.find((w) => String(w.id) === key) ||
-        warehouseList.find((w) => String(w.code || '').trim() === key) ||
-        warehouseList.find((w) => String(w.name || '').trim() === key) ||
-        null
-    );
-}
-
-function warehouseStorageKeys(whRow) {
-    if (!whRow) return [];
-    const keys = new Set(
-        [whRow.code, whRow.name, whRow.id].map((v) => String(v || '').trim()).filter(Boolean),
-    );
-    String(whRow.name || '')
-        .split(/[\s,;/|()-]+/)
-        .map((t) => t.trim())
-        .filter((t) => t.length >= 2)
-        .forEach((t) => keys.add(t));
-    return [...keys];
-}
-
-function machineWarehouseCandidates(whRow) {
-    return warehouseStorageKeys(whRow);
-}
-
-function normalizeStatusKey(status) {
-    return String(status || '')
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase()
-        .trim();
-}
-
-function isReadyMachineStatus(status) {
-    const s = normalizeStatusKey(status);
-    return s === 'san sang' || s === 'sẵn sàng' || s.includes('san sang') || s.includes('sẵn');
-}
-
-function isReadyCylinderStatus(status) {
-    const s = normalizeStatusKey(status);
-    return (
-        s === 'san sang' ||
-        s === 'sẵn sàng' ||
-        s === 'binh rong' ||
-        s === 'bình rỗng' ||
-        s.includes('san sang') ||
-        s.includes('binh rong')
-    );
-}
-
-async function fetchReadyMachinesAtWarehouse(supabaseClient, whRow, warehouseId) {
-    const keys = machineWarehouseCandidates(whRow);
-    const collected = new Map();
-
-    const absorb = (rows) => {
-        (rows || []).forEach((m) => {
-            if (!m?.id || !isReadyMachineStatus(m.status)) return;
-            collected.set(m.id, m);
-        });
-    };
-
-    if (keys.length > 0) {
-        const { data, error } = await supabaseClient
-            .from('machines')
-            .select('id, machine_type, status, serial_number, warehouse')
-            .in('warehouse', keys)
-            .limit(5000);
-        if (error) throw error;
-        absorb(data);
-    }
-
-    if (collected.size === 0 && whRow?.code) {
-        const { data, error } = await supabaseClient
-            .from('machines')
-            .select('id, machine_type, status, serial_number, warehouse')
-            .eq('warehouse', String(whRow.code).trim())
-            .limit(5000);
-        if (error) throw error;
-        absorb(data);
-    }
-
-    if (collected.size === 0 && keys.length > 0) {
-        for (const key of keys) {
-            const { data } = await supabaseClient
-                .from('machines')
-                .select('id, machine_type, status, serial_number, warehouse')
-                .ilike('warehouse', key)
-                .limit(800);
-            absorb(data);
-            if (collected.size > 0) break;
-        }
-    }
-
-    if (collected.size === 0 && warehouseId) {
-        const { data } = await supabaseClient
-            .from('machines')
-            .select('id, machine_type, status, serial_number, warehouse')
-            .eq('warehouse', warehouseId)
-            .limit(500);
-        absorb(data);
-    }
-
-    return [...collected.values()];
-}
-
-async function fetchReadyCylindersAtWarehouse(supabaseClient, cylinderWhId, whRow) {
-    const warehouseCode = String(whRow?.code || whRow?.name || cylinderWhId || '').trim();
-
-    if (warehouseCode) {
-        const { data, error } = await supabaseClient
-            .from('cylinders')
-            .select(`id, volume, status, serial_number, ${CYLINDER_KHO_COLUMN}`)
-            .eq(CYLINDER_KHO_COLUMN, warehouseCode)
-            .limit(5000);
-        if (!error) {
-            const rows = (data || []).filter((c) => isReadyCylinderStatus(c.status));
-            if (rows.length > 0) return rows;
-        }
-    }
-
-    const keys = machineWarehouseCandidates(whRow);
-    const { data: allReady, error } = await supabaseClient
-        .from('cylinders')
-        .select(`id, volume, status, serial_number, ${CYLINDER_KHO_COLUMN}`)
-        .eq('status', 'sẵn sàng')
-        .limit(10000);
-    if (error) return [];
-
-    return (allReady || []).filter((c) => {
-        if (!isReadyCylinderStatus(c.status)) return false;
-        const stored = getCylinderKhoValue(c).toLowerCase();
-        if (warehouseCode && stored === warehouseCode.toLowerCase()) return true;
-        return keys.some((k) => stored === String(k || '').trim().toLowerCase());
-    });
-}
-
-function machineBelongsToWarehouse(storedWarehouse, fromWarehouseId, warehouseList) {
-    const v = String(storedWarehouse || '').trim();
-    if (!v) return false;
-    const keys = machineWarehouseCandidates(resolveWarehouseRow(fromWarehouseId, warehouseList));
-    if (keys.length === 0) return v === String(fromWarehouseId || '').trim();
-    if (keys.includes(v)) return true;
-    const vLow = v.toLowerCase();
-    return keys.some((k) => {
-        const kl = k.toLowerCase();
-        return kl === vLow || vLow.includes(kl) || kl.includes(vLow);
-    });
-}
-
-function cylinderBelongsToWarehouse(storedWarehouse, fromWarehouseId, warehouseList) {
-    return storedValueMatchesWarehouse(storedWarehouse, fromWarehouseId, warehouseList);
-}
 
 // Helper functions for smart categorization
 const isMachine = (item) => {
@@ -254,6 +74,8 @@ const isCylinder = (item) => {
     // Match 'BINH', 'BINH_CO_KHI', etc or name containing 'bình'
     return type.startsWith('BINH') || name.includes('bình');
 };
+
+const warehouseSelectValue = (w) => getManagingWarehouseNameKey(w) || String(w?.name || '').trim();
 
 const InventoryTransfer = () => {
     const { role, user, department } = usePermissions();
@@ -326,10 +148,13 @@ const InventoryTransfer = () => {
         return {
             id: 'bbbg_transfer',
             created_at: new Date().toISOString(),
-            customer_name: destinationWarehouses.find(w => w.id === formData.to_warehouse_id)?.name || 'Kho Nhận',
+            customer_name:
+                destinationWarehouses.find((w) => warehouseSelectValue(w) === formData.to_warehouse_id)?.name ||
+                formData.to_warehouse_id ||
+                'Kho Nhận',
             recipient_name:
-                destinationWarehouses.find(w => w.id === formData.to_warehouse_id)?.manager_name?.trim() ||
-                `Thủ kho ${destinationWarehouses.find(w => w.id === formData.to_warehouse_id)?.name || 'nhận'}`,
+                destinationWarehouses.find((w) => warehouseSelectValue(w) === formData.to_warehouse_id)?.manager_name?.trim() ||
+                `Thủ kho ${destinationWarehouses.find((w) => warehouseSelectValue(w) === formData.to_warehouse_id)?.name || formData.to_warehouse_id || 'nhận'}`,
             recipient_address: 'Luân chuyển nội bộ',
             items: orderItems,
             product_type: orderItems[0]?.product_type,
@@ -394,44 +219,52 @@ const InventoryTransfer = () => {
         if (isThuKhoRole(role) && scopedSource.length === 1) {
             setFormData((prev) => ({
                 ...prev,
-                from_warehouse_id: scopedSource[0].id,
+                from_warehouse_id: warehouseSelectValue(scopedSource[0]),
             }));
         }
     };
 
-    const fetchInventory = async (warehouseId, warehouseList = warehouses) => {
+    const fetchInventory = async (warehouseRef, warehouseList = warehouses) => {
         try {
-            const whRow = resolveWarehouseRow(warehouseId, warehouseList);
-            const cylinderWhId = whRow?.id || warehouseId;
+            const whRow = resolveWarehouseRow(warehouseRef, warehouseList);
+            const invWarehouseName = resolveInventoryWarehouseName(whRow, warehouseRef, warehouseList);
 
-            // 1. Fetch Materials (VAT_TU)
+            // 1. Fetch Materials (VAT_TU) — inventory.warehouse_id lưu tên kho
             const { data: invData } = await supabase
                 .from('inventory')
                 .select('*')
-                .eq('warehouse_id', cylinderWhId)
+                .eq('warehouse_id', invWarehouseName)
                 .eq('item_type', 'VAT_TU')
                 .gt('quantity', 0);
 
-            // 2. Máy — machines.warehouse = mã kho (OCP1, CT…); lọc trạng thái linh hoạt (Sẵn sàng / sẵn sàng)
-            const machinesData = await fetchReadyMachinesAtWarehouse(supabase, whRow, warehouseId);
+            // 2. Máy — machines.warehouse lưu tên kho; lọc trạng thái sẵn sàng
+            const machinesData = await fetchReadyMachinesAtWarehouse(supabase, {
+                warehouseRef: invWarehouseName || warehouseRef,
+                warehouseList,
+                whRow,
+            });
 
-            // 3. Bình
-            const cylindersData = await fetchReadyCylindersAtWarehouse(supabase, cylinderWhId, whRow);
+            // 3. Bình — cylinders.kho lưu tên kho
+            const cylindersData = await fetchReadyCylindersAtWarehouse(supabase, {
+                warehouseRef: invWarehouseName || warehouseRef,
+                warehouseList,
+                whRow,
+            });
 
             // Process counts
             const machCounts = (machinesData || []).reduce((acc, m) => {
-                const name = `Máy ${m.machine_type}`;
+                const name = formatMachineTransferItemName(m.machine_type);
                 acc[name] = (acc[name] || 0) + 1;
                 return acc;
             }, {});
 
             const cylCounts = (cylindersData || []).reduce((acc, c) => {
-                const name = `Bình ${c.volume || 'khác'}`;
+                const name = formatCylinderTransferItemName(c.volume);
                 acc[name] = (acc[name] || 0) + 1;
                 return acc;
             }, {});
             const machineSerials = (machinesData || []).reduce((acc, machine) => {
-                const name = `Máy ${machine.machine_type}`;
+                const name = formatMachineTransferItemName(machine.machine_type);
                 const serial = normalizeMachineSerialKey(machine.serial_number) || (machine.serial_number || '').trim().toUpperCase();
                 if (!serial) return acc;
                 if (!acc[name]) acc[name] = new Set();
@@ -439,7 +272,7 @@ const InventoryTransfer = () => {
                 return acc;
             }, {});
             const cylinderSerials = (cylindersData || []).reduce((acc, cylinder) => {
-                const name = `Bình ${cylinder.volume || 'khác'}`;
+                const name = formatCylinderTransferItemName(cylinder.volume);
                 const serial = String(cylinder.serial_number || '').replace(/\s+/g, '').trim().toUpperCase();
                 if (!serial) return acc;
                 if (!acc[name]) acc[name] = new Set();
@@ -454,14 +287,14 @@ const InventoryTransfer = () => {
                     item_name: name,
                     item_type: 'MAY',
                     quantity: qty,
-                    warehouse_id: warehouseId
+                    warehouse_id: invWarehouseName || warehouseRef
                 })),
                 ...Object.entries(cylCounts).map(([name, qty]) => ({
                     id: `cyl-${name}`,
                     item_name: name,
                     item_type: 'BINH',
                     quantity: qty,
-                    warehouse_id: warehouseId
+                    warehouse_id: invWarehouseName || warehouseRef
                 }))
             ];
 
@@ -488,7 +321,7 @@ const InventoryTransfer = () => {
     const sourceWarehouseOptions = useMemo(
         () =>
             warehouses.map((w) => ({
-                value: w.id,
+                value: warehouseSelectValue(w),
                 label: w.manager_name?.trim()
                     ? `${w.name} · ${w.manager_name.trim()}`
                     : w.name,
@@ -499,7 +332,7 @@ const InventoryTransfer = () => {
     const destinationWarehouseOptions = useMemo(
         () =>
             destinationWarehouses.map((w) => ({
-                value: w.id,
+                value: warehouseSelectValue(w),
                 label: w.manager_name?.trim()
                     ? `${w.name} · ${w.manager_name.trim()}`
                     : w.name,
@@ -508,12 +341,12 @@ const InventoryTransfer = () => {
     );
 
     const selectedFromWarehouse = useMemo(
-        () => warehouses.find((w) => w.id === formData.from_warehouse_id),
+        () => resolveWarehouseRow(formData.from_warehouse_id, warehouses),
         [warehouses, formData.from_warehouse_id],
     );
 
     const selectedToWarehouse = useMemo(
-        () => destinationWarehouses.find((w) => w.id === formData.to_warehouse_id),
+        () => resolveWarehouseRow(formData.to_warehouse_id, destinationWarehouses),
         [destinationWarehouses, formData.to_warehouse_id],
     );
 
@@ -739,7 +572,7 @@ const InventoryTransfer = () => {
                 ];
                 const { data: macs } = await supabase
                     .from('machines')
-                    .select(`id, serial_number, status, ${CYLINDER_KHO_COLUMN}`)
+                    .select('id, serial_number, status, warehouse')
                     .in('serial_number', macQuerySerials);
                 const remoteMap = indexSerialRecords(macs, 'MAY');
                 dbMap.machines = { ...dbMap.machines, ...remoteMap };
@@ -942,8 +775,16 @@ const InventoryTransfer = () => {
         setLoading(true);
         try {
             const transferCode = `TRF${Date.now().toString().slice(-6)}`;
-            const toName = destinationWarehouses.find(w => w.id === formData.to_warehouse_id)?.name;
-            const fromName = warehouses.find(w => w.id === formData.from_warehouse_id)?.name;
+            const fromWhRow = resolveWarehouseRow(formData.from_warehouse_id, warehouses);
+            const toWhRow = resolveWarehouseRow(formData.to_warehouse_id, destinationWarehouses);
+            const fromStorageName = resolveInventoryWarehouseName(fromWhRow, formData.from_warehouse_id, warehouses);
+            const toStorageName = resolveInventoryWarehouseName(toWhRow, formData.to_warehouse_id, destinationWarehouses);
+            if (!fromStorageName || !toStorageName) {
+                toast.error('Không xác định được tên kho xuất/nhận');
+                setLoading(false);
+                return;
+            }
+
             const currentUserName =
                 localStorage.getItem('user_name') ||
                 sessionStorage.getItem('user_name') ||
@@ -958,17 +799,18 @@ const InventoryTransfer = () => {
                     code: entry.code || '',
                     status: entry.status || 'pending',
                     message: entry.message || '',
-                    dbId: entry.dbId || null
-                }))
+                    dbId: entry.dbId || null,
+                })),
             }));
 
             const totalQuantity = requestItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+
             const { error: requestError } = await supabase
                 .from('inventory_transfer_requests')
                 .insert([{
                     transfer_code: transferCode,
-                    from_warehouse_id: formData.from_warehouse_id,
-                    to_warehouse_id: formData.to_warehouse_id,
+                    from_warehouse_id: fromStorageName,
+                    to_warehouse_id: toStorageName,
                     status: 'CHO_DUYET',
                     note: formData.note || '',
                     handover_image_url: uploadedImage || null,
@@ -981,7 +823,7 @@ const InventoryTransfer = () => {
 
             await notificationService.add({
                 title: 'Tạo yêu cầu điều chuyển kho',
-                description: `Phiếu ${transferCode} từ ${fromName} tới ${toName} đang chờ duyệt.`,
+                description: `Phiếu ${transferCode} từ ${fromStorageName} tới ${toStorageName} đang chờ duyệt.`,
                 type: 'info',
                 link: '/danh-sach-dieu-chuyen'
             });
@@ -1190,8 +1032,8 @@ const InventoryTransfer = () => {
                                                     <p className="text-[11px] font-medium text-amber-700 px-1">
                                                         Không thấy{' '}
                                                         {item.item_type === 'MAY' ? 'máy' : 'bình'} trạng
-                                                        thái sẵn sàng tại kho đã chọn — kiểm tra mã kho
-                                                        (vd. OCP1) trên danh mục máy.
+                                                        thái sẵn sàng tại kho đã chọn — kiểm tra cột kho/tên kho
+                                                        trên danh mục máy và bình.
                                                     </p>
                                                 )}
                                             </div>

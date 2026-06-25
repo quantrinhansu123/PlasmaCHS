@@ -396,3 +396,69 @@ export async function fetchReadyCylindersAtWarehouse(
         String(a.serial_number || '').localeCompare(String(b.serial_number || ''), 'vi'),
     );
 }
+
+/** Tên dòng bình trên phiếu điều chuyển — tránh «Bình bình …» khi volume đã có tiền tố. */
+export function formatCylinderTransferItemName(volume) {
+    const v = String(volume ?? '').trim();
+    if (!v) return 'Bình khác';
+    if (/^bình\b/i.test(v)) return v;
+    return `Bình ${v}`;
+}
+
+/** Tên dòng máy trên phiếu điều chuyển. */
+export function formatMachineTransferItemName(machineType) {
+    const v = String(machineType ?? '').trim();
+    if (!v) return 'Máy';
+    if (/^m[aá]y\b/i.test(v)) return v;
+    return `Máy ${v}`;
+}
+
+/** Biến thể tên hàng để khớp bảng inventory (dữ liệu cũ có thể khác nhãn). */
+export function transferInventoryItemNameVariants(itemName) {
+    const names = new Set();
+    const t = String(itemName || '').trim();
+    if (!t) return [];
+    names.add(t);
+    if (/^Bình\s+bình/i.test(t)) names.add(t.replace(/^Bình\s+/i, ''));
+    if (/^Máy\s+m[aá]y/i.test(t)) names.add(t.replace(/^Máy\s+/i, ''));
+    return [...names];
+}
+
+const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isWarehouseUuidLike(value) {
+    return UUID_LIKE.test(String(value || '').trim());
+}
+
+/** Khóa tra cứu inventory.warehouse_id — tên kho trước; không dùng UUID. */
+export function buildInventoryWarehouseLookupKeys(whRow, warehouseRef = '') {
+    const keys = new Set();
+    const name = String(whRow?.name || '').trim();
+    if (name) keys.add(name);
+    const code = String(whRow?.code || '').trim();
+    if (code && code !== name) keys.add(code);
+    const ref = String(warehouseRef || '').trim();
+    if (ref && !isWarehouseUuidLike(ref) && ref !== name) keys.add(ref);
+    return [...keys];
+}
+
+export async function findInventoryRowForTransfer(
+    supabaseClient,
+    { warehouseKeys = [], itemType, itemName },
+) {
+    const names = transferInventoryItemNameVariants(itemName);
+    for (const wh of warehouseKeys) {
+        for (const name of names) {
+            const { data, error } = await supabaseClient
+                .from('inventory')
+                .select('id, quantity')
+                .eq('warehouse_id', wh)
+                .eq('item_type', itemType)
+                .eq('item_name', name)
+                .maybeSingle();
+            if (error) throw error;
+            if (data) return { ...data, matchedWarehouseId: wh, matchedItemName: name };
+        }
+    }
+    return null;
+}

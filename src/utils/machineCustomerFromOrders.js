@@ -80,6 +80,86 @@ export function isOrderDeliveredCompleted(status) {
     return compact === 'HOANTHANH';
 }
 
+const normalizeOrderStatusKey = (status) =>
+    String(status || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, '_')
+        .trim()
+        .toUpperCase();
+
+/** Trạng thái bình trên cylinders.* coi là đang ở khách (kể cả đang giao). */
+export const CYLINDER_STATUSES_AT_CUSTOMER = new Set([
+    'thuộc khách hàng',
+    'đang sử dụng',
+    'đang vận chuyển',
+]);
+
+/** Đơn đã xuất kho / đang giao — serial trong assigned_cylinders hiển thị ở hồ sơ khách. */
+const ORDER_STATUS_KEYS_CUSTOMER_CYLINDER_VISIBLE = new Set([
+    'DA_DUYET',
+    'CHO_GIAO_HANG',
+    'DANG_GIAO_HANG',
+    'CHO_DOI_SOAT',
+    'DOI_SOAT_THAT_BAI',
+]);
+
+export function isOrderCustomerCylinderVisible(status) {
+    if (isOrderDeliveredCompleted(status)) return true;
+    const key = normalizeOrderStatusKey(status);
+    if (!key) return false;
+    if (ORDER_STATUS_KEYS_CUSTOMER_CYLINDER_VISIBLE.has(key)) return true;
+    if (key.includes('GIAO_HANG') && !key.includes('HOAN_THANH')) return true;
+    if (key.includes('DOI_SOAT')) return true;
+    return false;
+}
+
+function isCylinderProductType(productType) {
+    const u = String(productType || '').trim().toUpperCase();
+    return Boolean(u && u.includes('BINH'));
+}
+
+function normalizeDeliveryChecklist(dc) {
+    if (dc == null) return {};
+    if (typeof dc === 'string') {
+        try {
+            return JSON.parse(dc);
+        } catch {
+            return {};
+        }
+    }
+    if (typeof dc === 'object' && !Array.isArray(dc)) return dc;
+    return {};
+}
+
+/** Gom mã bình từ đơn (assigned_cylinders, order_items, checklist) để hiển thị ở khách hàng. */
+export function collectCylinderSerialsFromOrderForCustomer(order, orderItems = []) {
+    const out = new Set();
+    const push = (serialRaw) => {
+        const t = String(serialRaw || '').trim();
+        if (!t) return;
+        out.add(t);
+        out.add(t.replace(/\s+/g, ''));
+    };
+
+    (order?.assigned_cylinders || []).forEach((s) => push(s));
+
+    (orderItems || []).forEach((it) => {
+        if (!isCylinderProductType(it?.product_type)) return;
+        push(it.serial_number);
+        (it.assigned_cylinders || []).forEach((s) => push(s));
+    });
+
+    const chk = normalizeDeliveryChecklist(order?.delivery_checklist);
+    Object.keys(chk).forEach((key) => {
+        const k = String(key).trim();
+        if (/^BINH:/i.test(k)) push(k.replace(/^BINH:/i, '').trim());
+        else if (/^BINH\s+/i.test(k)) push(k.replace(/^BINH\s+/i, '').trim());
+    });
+
+    return [...out];
+}
+
 /** Gom dòng order_items có thể thuộc serial (nhiều biến thể lưu DB). */
 export async function fetchOrderItemsForMachineSerialVariants(supabaseClient, serialRaw) {
     const serial = String(serialRaw || '').trim();

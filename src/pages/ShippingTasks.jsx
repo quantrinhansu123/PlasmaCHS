@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
     Truck,
@@ -12,6 +12,7 @@ import {
     LayoutGrid,
     List,
     Package,
+    Trash2,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase/config';
@@ -42,6 +43,8 @@ import {
     isTerminalShippingOrderStatus,
     ORDER_STATUSES_SHIPPING_PIPELINE,
 } from '../utils/shippingTaskStatus';
+import { buildWarehouseLabelMap } from '../utils/orderWarehouseScope';
+import { deleteOrdersWithRollback } from '../utils/deleteOrderCascade';
 
 const isTransferHandoverCompleted = (tr) =>
     Boolean(tr?.handover_image_url) ||
@@ -51,6 +54,20 @@ const giaoHangActionBtnCls =
     'shrink-0 rounded-lg border border-primary bg-primary px-3 py-2 text-[11px] font-bold text-white shadow-sm hover:opacity-95 !h-auto !min-h-0';
 
 const TRANSFER_STATUS_SHIPPING_VISIBLE = 'DA_DUYET';
+
+const taskRowKey = (it) => `${it.kind}::${it.row.id}`;
+
+function parseTaskRowKey(key) {
+    const idx = String(key).indexOf('::');
+    if (idx === -1) return null;
+    return { kind: key.slice(0, idx), id: key.slice(idx + 2) };
+}
+
+function chunkArray(arr, size) {
+    const out = [];
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+}
 
 function isMissingSupabaseTableError(error) {
     const code = String(error?.code || '');
@@ -105,6 +122,9 @@ const ShippingTasks = () => {
     const [selectedGoodsReceipt, setSelectedGoodsReceipt] = useState(null);
     const [isGoodsReceiptModalOpen, setIsGoodsReceiptModalOpen] = useState(false);
     const [transportConfirm, setTransportConfirm] = useState(null);
+    const [selectedTaskKeys, setSelectedTaskKeys] = useState([]);
+    const [bulkDeleting, setBulkDeleting] = useState(false);
+    const selectAllRef = useRef(null);
     useEffect(() => {
         if (permissionsLoading) return;
         fetchShippingTasks();
@@ -203,7 +223,7 @@ const ShippingTasks = () => {
                 console.warn('[ShippingTasks] Thiếu bảng goods_issues — chạy setup_goods_issues.sql trên Supabase.');
             }
 
-            const whMap = Object.fromEntries((whRows || []).map((w) => [String(w.id), String(w.name || w.id)]));
+            const whMap = Object.fromEntries([...buildWarehouseLabelMap(whRows || [])]);
             setWarehouseNameById(whMap);
             setTransferTasks(Array.isArray(transferRows) ? transferRows : []);
             setRecoveryTasks(Array.isArray(recoveryRows) ? recoveryRows : []);
@@ -661,7 +681,8 @@ const ShippingTasks = () => {
                         .update({
                             status: 'thuộc khách hàng',
                             customer_name: cylCust,
-                            updated_at: new Date().toISOString()
+                            customer_id: selectedOrder.customer_id || null,
+                            updated_at: new Date().toISOString(),
                         })
                         .in('serial_number', cylinderSerials);
                     if (cylinderErr) throw cylinderErr;
@@ -786,6 +807,119 @@ const ShippingTasks = () => {
 
     const listTasks = combinedTasks;
 
+    const listTaskKeys = listTasks.map(taskRowKey);
+    const allListTasksSelected =
+        listTaskKeys.length > 0 && listTaskKeys.every((k) => selectedTaskKeys.includes(k));
+    const someListTasksSelected =
+        listTaskKeys.some((k) => selectedTaskKeys.includes(k)) && !allListTasksSelected;
+
+    useEffect(() => {
+        if (selectAllRef.current) {
+            selectAllRef.current.indeterminate = someListTasksSelected;
+        }
+    }, [someListTasksSelected]);
+
+    const isTaskSelected = (it) => selectedTaskKeys.includes(taskRowKey(it));
+
+    const toggleTaskSelected = (it) => {
+        const key = taskRowKey(it);
+        setSelectedTaskKeys((prev) =>
+            prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+        );
+    };
+
+    const toggleSelectAllListTasks = () => {
+        if (listTaskKeys.length === 0) return;
+        if (allListTasksSelected) {
+            setSelectedTaskKeys((prev) => prev.filter((k) => !listTaskKeys.includes(k)));
+        } else {
+            setSelectedTaskKeys((prev) => [...new Set([...prev, ...listTaskKeys])]);
+        }
+    };
+
+    const clearTaskSelection = () => setSelectedTaskKeys([]);
+
+    const handleBulkDelete = async () => {
+        if (selectedTaskKeys.length === 0) return;
+        if (
+            !window.confirm(
+                `Xóa ${selectedTaskKeys.length} nhiệm vụ đã chọn?\n\nĐơn hàng sẽ được hoàn tác tồn kho/bình/máy trước khi xóa. Thao tác không hoàn tác.`,
+            )
+        ) {
+            return;
+        }
+
+        setBulkDeleting(true);
+        try {
+            const byKind = { ORDER: [], TRANSFER: [], RECOVERY: [], RECEIPT: [], ISSUE: [] };
+            for (const key of selectedTaskKeys) {
+                const p = parseTaskRowKey(key);
+                if (!p || !byKind[p.kind]) continue;
+                byKind[p.kind].push(p.id);
+            }
+
+            if (byKind.ORDER.length > 0) {
+                const { deleted, failed } = await deleteOrdersWithRollback(supabase, byKind.ORDER);
+                if (failed.length > 0) {
+                    const detail = failed.map((f) => `• ${f.orderId}: ${f.message}`).join('\n');
+                    throw new Error(
+                        `Xóa đơn: ${deleted}/${byKind.ORDER.length} thành công.\n${detail}`,
+                    );
+                }
+            }
+
+            for (const chunk of chunkArray(byKind.TRANSFER, 80)) {
+                if (!chunk.length) continue;
+                const { error } = await supabase.from('inventory_transfer_requests').delete().in('id', chunk);
+                if (error) throw error;
+            }
+
+            for (const chunk of chunkArray(byKind.RECOVERY, 80)) {
+                if (!chunk.length) continue;
+                const { error: errItems } = await supabase
+                    .from('cylinder_recovery_items')
+                    .delete()
+                    .in('recovery_id', chunk);
+                if (errItems) console.warn('cylinder_recovery_items delete:', errItems);
+                const { error } = await supabase.from('cylinder_recoveries').delete().in('id', chunk);
+                if (error) throw error;
+            }
+
+            for (const chunk of chunkArray(byKind.RECEIPT, 80)) {
+                if (!chunk.length) continue;
+                const { error } = await supabase.from('goods_receipts').delete().in('id', chunk);
+                if (error) throw error;
+            }
+
+            for (const chunk of chunkArray(byKind.ISSUE, 80)) {
+                if (!chunk.length) continue;
+                const { error } = await supabase.from('goods_issues').delete().in('id', chunk);
+                if (error) throw error;
+            }
+
+            toast.success(`Đã xóa ${selectedTaskKeys.length} nhiệm vụ`);
+            setSelectedTaskKeys([]);
+            await fetchShippingTasks();
+        } catch (e) {
+            console.error('Bulk delete shipping tasks:', e);
+            toast.error('Lỗi xóa: ' + (e.message || String(e)));
+        } finally {
+            setBulkDeleting(false);
+        }
+    };
+
+    const renderTaskCheckbox = (it) => (
+        <input
+            type="checkbox"
+            checked={isTaskSelected(it)}
+            onChange={() => toggleTaskSelected(it)}
+            disabled={bulkDeleting}
+            onClick={(e) => e.stopPropagation()}
+            className="h-4 w-4 shrink-0 rounded border-slate-300 text-primary focus:ring-primary/20"
+            aria-label="Chọn nhiệm vụ"
+        />
+    );
+
     const transferStatusBadge = (status) => {
         const s = String(status || '').trim().toUpperCase();
         if (s === 'DA_DUYET') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
@@ -852,11 +986,14 @@ const ShippingTasks = () => {
                 const customerAddress = cust.address || '—';
 
                 return (
-                    <article key={`rec-${rec.id}`} className="rounded-xl border border-slate-200 bg-white shadow-sm p-3 flex flex-col gap-2">
+                    <article key={`rec-${rec.id}`} className={clsx('rounded-xl border border-slate-200 bg-white shadow-sm p-3 flex flex-col gap-2', isTaskSelected(it) && 'ring-2 ring-primary/30 bg-sky-50/40')}>
                         <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
+                            <div className="flex gap-2 min-w-0 flex-1">
+                                {renderTaskCheckbox(it)}
+                                <div className="min-w-0">
                                 <span className="inline-block text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded uppercase">Thu hồi vỏ</span>
                                 <p className="text-[13px] font-black text-primary mt-1.5 leading-tight">{rec.recovery_code || '—'}</p>
+                                </div>
                             </div>
                             <span className={clsx('px-1.5 py-0.5 rounded-full text-[8px] font-bold border uppercase shrink-0', rec.status === 'DANG_THU_HOI' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700')}>
                                 {rec.status === 'DANG_THU_HOI' ? 'Đang thu hồi' : 'Chờ phân công'}
@@ -886,11 +1023,14 @@ const ShippingTasks = () => {
             if (it.kind === 'RECEIPT') {
                 const rec = it.row;
                 return (
-                    <article key={`receipt-${rec.id}`} className="rounded-xl border border-slate-200 bg-white shadow-sm p-3 flex flex-col gap-2">
+                    <article key={`receipt-${rec.id}`} className={clsx('rounded-xl border border-slate-200 bg-white shadow-sm p-3 flex flex-col gap-2', isTaskSelected(it) && 'ring-2 ring-primary/30 bg-sky-50/40')}>
                         <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
+                            <div className="flex gap-2 min-w-0 flex-1">
+                                {renderTaskCheckbox(it)}
+                                <div className="min-w-0">
                                 <span className="inline-block text-[9px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-1.5 py-0.5 rounded uppercase">Nhập hàng NCC</span>
                                 <p className="text-[13px] font-black text-primary mt-1.5 leading-tight">{rec.receipt_code || '—'}</p>
+                                </div>
                             </div>
                             <span className={clsx('px-1.5 py-0.5 rounded-full text-[8px] font-bold border uppercase shrink-0', 'bg-blue-100 text-blue-700')}>
                                 Chờ vận chuyển
@@ -914,11 +1054,14 @@ const ShippingTasks = () => {
                 const iss = it.row;
                 const supplierName = suppliersMap[String(iss.supplier_id)]?.name || '—';
                 return (
-                    <article key={`issue-${iss.id}`} className="rounded-xl border border-slate-200 bg-white shadow-sm p-3 flex flex-col gap-2">
+                    <article key={`issue-${iss.id}`} className={clsx('rounded-xl border border-slate-200 bg-white shadow-sm p-3 flex flex-col gap-2', isTaskSelected(it) && 'ring-2 ring-primary/30 bg-sky-50/40')}>
                         <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
+                            <div className="flex gap-2 min-w-0 flex-1">
+                                {renderTaskCheckbox(it)}
+                                <div className="min-w-0">
                                 <span className="inline-block text-[9px] font-bold text-rose-700 bg-rose-50 border border-rose-100 px-1.5 py-0.5 rounded uppercase">Xuất trả NCC</span>
                                 <p className="text-[13px] font-black text-primary mt-1.5 leading-tight">{iss.issue_code || '—'}</p>
+                                </div>
                             </div>
                             <span className={clsx('px-1.5 py-0.5 rounded-full text-[8px] font-bold border uppercase shrink-0', 'bg-blue-100 text-blue-700')}>
                                 Chờ vận chuyển
@@ -943,12 +1086,15 @@ const ShippingTasks = () => {
                 const fromName = warehouseNameById[String(tr.from_warehouse_id)] || tr.from_warehouse_id || '—';
                 const toName = warehouseNameById[String(tr.to_warehouse_id)] || tr.to_warehouse_id || '—';
                 return (
-                    <article key={`tr-${tr.id}`} className="rounded-xl border border-slate-200 bg-white shadow-sm p-3 flex flex-col gap-2">
+                    <article key={`tr-${tr.id}`} className={clsx('rounded-xl border border-slate-200 bg-white shadow-sm p-3 flex flex-col gap-2', isTaskSelected(it) && 'ring-2 ring-primary/30 bg-sky-50/40')}>
                         <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
+                            <div className="flex gap-2 min-w-0 flex-1">
+                                {renderTaskCheckbox(it)}
+                                <div className="min-w-0">
                                 <span className="inline-block text-[9px] font-bold text-sky-700 bg-sky-50 border border-sky-100 px-1.5 py-0.5 rounded uppercase">Luân chuyển</span>
                                 <p className="text-[13px] font-black text-primary mt-1.5 leading-tight">{tr.transfer_code || '—'}</p>
                                 <p className="text-[11px] font-semibold text-slate-800 mt-0.5 line-clamp-2">{fromName} → {toName}</p>
+                                </div>
                             </div>
                             <span className={clsx('px-1.5 py-0.5 rounded-full text-[8px] font-bold border uppercase shrink-0', transferStatusBadge(tr.status))}>
                                 {transferStatusLabel(tr.status)}
@@ -967,12 +1113,15 @@ const ShippingTasks = () => {
 
             const order = it.row;
             return (
-                <article key={`od-${order.id}`} className="rounded-xl border border-slate-200 bg-white shadow-sm p-3 flex flex-col gap-2">
+                <article key={`od-${order.id}`} className={clsx('rounded-xl border border-slate-200 bg-white shadow-sm p-3 flex flex-col gap-2', isTaskSelected(it) && 'ring-2 ring-primary/30 bg-sky-50/40')}>
                     <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
+                        <div className="flex gap-2 min-w-0 flex-1">
+                            {renderTaskCheckbox(it)}
+                            <div className="min-w-0">
                             <span className="inline-block text-[9px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-1.5 py-0.5 rounded uppercase">Giao hàng</span>
                             <p className="text-[13px] font-black text-primary mt-1.5 leading-tight">#{order.order_code}</p>
                             <p className="text-[11px] font-semibold text-slate-800 mt-0.5 line-clamp-2">{order.recipient_name || order.customer_name}</p>
+                            </div>
                         </div>
                         <span className={clsx('px-1.5 py-0.5 rounded-full text-[9px] font-bold border uppercase shrink-0', getStatusBadge(order.status))}>
                             {getStatusLabel(order.status)}
@@ -1074,6 +1223,46 @@ const ShippingTasks = () => {
                         className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-medium"
                     />
                 </div>
+
+                {listTasks.length > 0 && (
+                    <div className="mt-3 flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50/90 px-3 py-2.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <label className="inline-flex items-center gap-2 text-[11px] font-bold text-slate-700 cursor-pointer">
+                                <input
+                                    ref={selectAllRef}
+                                    type="checkbox"
+                                    checked={allListTasksSelected}
+                                    onChange={toggleSelectAllListTasks}
+                                    disabled={bulkDeleting || listTaskKeys.length === 0}
+                                    className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary/20"
+                                />
+                                Chọn tất cả ({listTaskKeys.length})
+                            </label>
+                            <button
+                                type="button"
+                                onClick={clearTaskSelection}
+                                disabled={selectedTaskKeys.length === 0 || bulkDeleting}
+                                className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-black text-slate-500 disabled:opacity-40"
+                            >
+                                Bỏ chọn
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleBulkDelete}
+                                disabled={selectedTaskKeys.length === 0 || bulkDeleting}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-rose-200 bg-rose-50 text-[10px] font-black text-rose-700 disabled:opacity-40"
+                            >
+                                <Trash2 size={12} />
+                                {bulkDeleting ? 'Đang xóa…' : `Xóa (${selectedTaskKeys.length})`}
+                            </button>
+                        </div>
+                        {selectedTaskKeys.length > 0 && (
+                            <p className="text-[10px] font-semibold text-slate-500">
+                                Đang chọn {selectedTaskKeys.length} nhiệm vụ (đơn / luân chuyển / thu hồi / nhập / xuất).
+                            </p>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Content */}

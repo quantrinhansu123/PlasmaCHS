@@ -5,7 +5,7 @@ import {
     isWarehouseRole as isWarehouseRoleHelper,
     normalizeRole,
 } from './accessControl';
-import { buildWarehouseModalAliases, storedValueMatchesWarehouse } from './transferWarehouseMatch';
+import { buildWarehouseModalAliases, resolveWarehouseRow, storedValueMatchesWarehouse } from './transferWarehouseMatch';
 import { getCylinderKhoValue, buildCylinderKhoScopeKeys } from './cylinderKho';
 export {
     CYLINDER_KHO_COLUMN,
@@ -226,6 +226,37 @@ export function getManagingWarehouseNameKey(warehouse) {
     return String(warehouse?.name || '').trim();
 }
 
+const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isWarehouseUuidLike(value) {
+    return UUID_LIKE.test(String(value || '').trim());
+}
+
+/**
+ * Giá trị lưu cột inventory.warehouse_id — luôn là tên kho, không UUID/mã.
+ */
+export function resolveInventoryWarehouseName(whRow, warehouseRef = '', warehouseList = []) {
+    const row = whRow || resolveWarehouseRow(warehouseRef, warehouseList);
+    const name = getManagingWarehouseNameKey(row);
+    if (name) return name;
+    const ref = String(warehouseRef || '').trim();
+    if (ref && !isWarehouseUuidLike(ref)) return ref;
+    return '';
+}
+
+/** Khóa tra cứu inventory — ưu tiên tên kho; vẫn đọc legacy mã/tên cũ. */
+export function buildInventoryWarehouseLookupKeys(whRow, warehouseRef = '', warehouseList = []) {
+    const row = whRow || resolveWarehouseRow(warehouseRef, warehouseList);
+    const keys = new Set();
+    const name = resolveInventoryWarehouseName(row, warehouseRef, warehouseList);
+    if (name) keys.add(name);
+    const code = String(row?.code || '').trim();
+    if (code && code !== name) keys.add(code);
+    const ref = String(warehouseRef || '').trim();
+    if (ref && !isWarehouseUuidLike(ref) && ref !== name) keys.add(ref);
+    return [...keys];
+}
+
 export function buildManagingWarehouseNameKeys(warehouses = []) {
     return [...new Set(
         (warehouses || []).map(getManagingWarehouseNameKey).filter(Boolean),
@@ -334,9 +365,9 @@ export function rowMatchesWarehouseNameStorage(storedValue, warehouse, warehouse
     );
 }
 
-/** Giá trị lưu cylinders.kho — mã kho (OCP1…). */
+/** Giá trị lưu cylinders.kho / machines.warehouse — ưu tiên tên kho. */
 export function resolveWarehouseStorageName(warehouse) {
-    return String(warehouse?.code || warehouse?.name || '').trim();
+    return String(warehouse?.name || warehouse?.code || '').trim();
 }
 
 /** Tên hiển thị danh sách kho — ưu tiên name, fallback code/chi nhánh. */
@@ -717,13 +748,20 @@ export function filterTransfersForCurrentUser(transferRows = [], warehouses = []
     }
 
     const allowedWarehouses = filterWarehousesForCurrentUser(warehouses, { role, user, department });
-    const allowedIds = new Set(allowedWarehouses.map((w) => w.id).filter(Boolean));
+    const allowedKeys = new Set();
+    allowedWarehouses.forEach((w) => {
+        [w.id, w.code, w.name].forEach((v) => {
+            const key = String(v || '').trim();
+            if (key) allowedKeys.add(key);
+        });
+    });
 
-    if (allowedIds.size === 0) return [];
+    if (allowedKeys.size === 0) return [];
 
     return (transferRows || []).filter(
         (row) =>
-            allowedIds.has(row.from_warehouse_id) || allowedIds.has(row.to_warehouse_id)
+            allowedKeys.has(String(row.from_warehouse_id || '').trim())
+            || allowedKeys.has(String(row.to_warehouse_id || '').trim()),
     );
 }
 

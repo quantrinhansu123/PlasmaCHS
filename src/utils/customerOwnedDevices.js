@@ -1,11 +1,11 @@
 import {
-    isOrderDeliveredCompleted,
+    collectCylinderSerialsFromOrderForCustomer,
+    CYLINDER_STATUSES_AT_CUSTOMER,
+    isOrderCustomerCylinderVisible,
     MACHINE_STATUSES_ENRICH_CUSTOMER_FROM_ORDERS,
     normalizeMachineSerialKey,
 } from './machineCustomerFromOrders';
 import { collectMachineSerialsForOrder } from './orderMachineSerials';
-
-const CYLINDER_STATUSES_AT_CUSTOMER = new Set(['thuộc khách hàng', 'đang sử dụng']);
 
 function escapeIlikeOrFragment(text) {
     return String(text || '')
@@ -21,11 +21,6 @@ function chunkArray(arr, chunkSize) {
         out.push(arr.slice(i, i + chunkSize));
     }
     return out;
-}
-
-function isCylinderProductType(productType) {
-    const u = String(productType || '').trim().toUpperCase();
-    return Boolean(u && u.includes('BINH'));
 }
 
 function serialVariantsForLookup(serialRaw) {
@@ -195,7 +190,7 @@ export async function fetchCustomerOwnedDevices(supabaseClient, customer) {
         if (o?.id && !orderMap.has(o.id)) orderMap.set(o.id, o);
     };
 
-    const orderSelect = 'id, status, delivery_checklist, customer_name, recipient_name';
+    const orderSelect = 'id, status, delivery_checklist, customer_name, recipient_name, assigned_cylinders';
     if (custId) {
         const { data: o1 } = await supabaseClient.from('orders').select(orderSelect).eq('customer_id', custId);
         (o1 || []).forEach(mergeOrder);
@@ -256,19 +251,11 @@ export async function fetchCustomerOwnedDevices(supabaseClient, customer) {
         }
     }
 
-    const completedOrderIds = [...orderMap.values()]
-        .filter((o) => isOrderDeliveredCompleted(o.status))
-        .map((o) => o.id);
-
-    for (const oid of completedOrderIds) {
-        const items = itemsByOrderId.get(oid) || [];
-        for (const it of items) {
-            const sn = String(it.serial_number || '').trim();
-            if (!sn) continue;
-            if (isCylinderProductType(it.product_type)) {
-                cylinderSerialRawFromOrders.add(sn);
-                cylinderSerialRawFromOrders.add(sn.replace(/\s+/g, ''));
-            }
+    for (const o of orderMap.values()) {
+        if (!isOrderCustomerCylinderVisible(o.status)) continue;
+        const items = itemsByOrderId.get(o.id) || [];
+        for (const sn of collectCylinderSerialsFromOrderForCustomer(o, items)) {
+            cylinderSerialRawFromOrders.add(sn);
         }
     }
 
@@ -371,7 +358,7 @@ export async function fetchCustomerOwnedCylinders(supabaseClient, customer) {
     const mergeOrder = (o) => {
         if (o?.id && !orderMap.has(o.id)) orderMap.set(o.id, o);
     };
-    const orderSelect = 'id, status';
+    const orderSelect = 'id, status, assigned_cylinders, delivery_checklist';
     if (custId) {
         const { data: o1 } = await supabaseClient.from('orders').select(orderSelect).eq('customer_id', custId);
         (o1 || []).forEach(mergeOrder);
@@ -396,13 +383,11 @@ export async function fetchCustomerOwnedCylinders(supabaseClient, customer) {
         }
     }
 
-    for (const oid of [...orderMap.values()].filter((o) => isOrderDeliveredCompleted(o.status)).map((o) => o.id)) {
-        const items = itemsByOrderId.get(oid) || [];
-        for (const it of items) {
-            const sn = String(it.serial_number || '').trim();
-            if (!sn || !isCylinderProductType(it.product_type)) continue;
+    for (const o of orderMap.values()) {
+        if (!isOrderCustomerCylinderVisible(o.status)) continue;
+        const items = itemsByOrderId.get(o.id) || [];
+        for (const sn of collectCylinderSerialsFromOrderForCustomer(o, items)) {
             cylinderSerialRawFromOrders.add(sn);
-            cylinderSerialRawFromOrders.add(sn.replace(/\s+/g, ''));
         }
     }
 

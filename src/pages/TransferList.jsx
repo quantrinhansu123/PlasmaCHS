@@ -35,11 +35,12 @@ import PrintOptionsModal from '../components/Orders/PrintOptionsModal';
 import usePermissions from '../hooks/usePermissions';
 import { supabase } from '../supabase/config';
 import { isAdminRole, isWarehouseRole } from '../utils/accessControl';
-import { CYLINDER_KHO_COLUMN, filterTransfersForCurrentUser, getCylinderKhoValue, resolveCylinderWarehouseValue } from '../utils/orderWarehouseScope';
+import { CYLINDER_KHO_COLUMN, buildWarehouseLabelMap, filterTransfersForCurrentUser, getCylinderKhoValue, resolveCylinderWarehouseValue, resolveInventoryWarehouseName, buildInventoryWarehouseLookupKeys } from '../utils/orderWarehouseScope';
 import { persistTransferHandover } from '../utils/persistTransferHandover';
 import {
     collectSerialQueryVariants,
     cylinderBelongsToWarehouse,
+    findInventoryRowForTransfer,
     indexSerialRecords,
     machineBelongsToWarehouse,
     resolveDbRecord,
@@ -193,7 +194,9 @@ export default function TransferList() {
     const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
     const [printOptions, setPrintOptions] = useState({ copies: 2, paperSize: 'A5', orientation: 'landscape' });
     const [deleteRecord, setDeleteRecord] = useState(null);
+    const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
     const [deletingTransfer, setDeletingTransfer] = useState(false);
+    const [selectedTransferIds, setSelectedTransferIds] = useState([]);
     const rowMenuRef = useRef(null);
     const columnPickerRef = useRef(null);
     const ROW_MENU_WIDTH = 220;
@@ -265,7 +268,7 @@ export default function TransferList() {
                 department,
             });
 
-            const whMap = Object.fromEntries((warehouseRows || []).map((w) => [w.id, w.name]));
+            const whMap = Object.fromEntries([...buildWarehouseLabelMap(warehouseRows || [])]);
             const normalized = scopedTransferRows.map((row) => {
                 const items = Array.isArray(row.items_json) ? row.items_json : [];
                 const fromWarehouseName = whMap[row.from_warehouse_id] || row.from_warehouse_id || '—';
@@ -302,6 +305,7 @@ export default function TransferList() {
             });
 
             setRecords(normalized);
+            setSelectedTransferIds([]);
         } catch (error) {
             console.error('Error loading transfer records:', error);
         } finally {
@@ -384,6 +388,31 @@ export default function TransferList() {
     const totalItems = filteredRecords.reduce((sum, r) => sum + r.items.length, 0);
     const totalQty = filteredRecords.reduce((sum, r) => sum + r.totalQuantity, 0);
     const visibleTableColumns = columnOrder.filter((key) => visibleColumns.includes(key));
+    const selectedTransferSet = useMemo(() => new Set(selectedTransferIds), [selectedTransferIds]);
+    const paginatedRecordIds = useMemo(() => paginatedRecords.map((record) => record.id), [paginatedRecords]);
+    const selectedOnPageCount = paginatedRecordIds.filter((id) => selectedTransferSet.has(id)).length;
+    const isAllPageSelected = paginatedRecordIds.length > 0 && selectedOnPageCount === paginatedRecordIds.length;
+    const isSomePageSelected = selectedOnPageCount > 0 && !isAllPageSelected;
+
+    useEffect(() => {
+        const visibleIds = new Set(filteredRecords.map((record) => record.id));
+        setSelectedTransferIds((prev) => prev.filter((id) => visibleIds.has(id)));
+    }, [filteredRecords]);
+
+    const toggleSelectTransfer = (id) => {
+        setSelectedTransferIds((prev) =>
+            prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+        );
+    };
+
+    const toggleSelectPageTransfers = () => {
+        if (isAllPageSelected) {
+            setSelectedTransferIds((prev) => prev.filter((id) => !paginatedRecordIds.includes(id)));
+            return;
+        }
+
+        setSelectedTransferIds((prev) => [...new Set([...prev, ...paginatedRecordIds])]);
+    };
 
     const openMobileFilter = () => {
         setPendingItemTypes(selectedItemTypes);
@@ -457,6 +486,25 @@ export default function TransferList() {
         setActiveRowMenu(null);
         setActionRecord(null);
         setDeleteRecord(null);
+        fetchTransfers();
+    };
+    const handleBulkDeleteTransfers = async () => {
+        if (selectedTransferIds.length === 0) return;
+        setDeletingTransfer(true);
+        const idsToDelete = [...selectedTransferIds];
+        const { error } = await supabase
+            .from('inventory_transfer_requests')
+            .delete()
+            .in('id', idsToDelete);
+        setDeletingTransfer(false);
+        if (error) {
+            toast.error(error.message || 'Xóa danh sách phiếu thất bại');
+            return;
+        }
+        toast.success(`Đã xóa ${idsToDelete.length} phiếu`);
+        setBulkDeleteOpen(false);
+        setSelectedTransferIds([]);
+        setActiveRowMenu(null);
         fetchTransfers();
     };
     useEffect(() => {
@@ -580,6 +628,32 @@ export default function TransferList() {
                 whList = whRows || [];
             }
 
+            const fromWhRow = resolveWarehouseRow(record.fromWarehouseId, whList);
+            const toWhRow = resolveWarehouseRow(record.toWarehouseId, whList);
+            const fromWarehouseName = resolveInventoryWarehouseName(
+                fromWhRow,
+                record.fromWarehouseId,
+                whList,
+            );
+            const toWarehouseName = resolveInventoryWarehouseName(
+                toWhRow,
+                record.toWarehouseId,
+                whList,
+            );
+            if (!fromWarehouseName || !toWarehouseName) {
+                throw new Error('Không xác định được tên kho xuất hoặc kho nhận trên phiếu.');
+            }
+            const fromInventoryWhKeys = buildInventoryWarehouseLookupKeys(
+                fromWhRow,
+                record.fromWarehouseId,
+                whList,
+            );
+            const toInventoryWhKeys = buildInventoryWarehouseLookupKeys(
+                toWhRow,
+                record.toWarehouseId,
+                whList,
+            );
+
             for (const item of record.items || []) {
                 const itemType = item.itemType;
                 const itemName = item.itemName;
@@ -589,6 +663,7 @@ export default function TransferList() {
                 const sourceTable = itemType.startsWith('BINH') ? 'cylinders' : 'machines';
                 const sourceWarehouseColumn = sourceTable === 'cylinders' ? CYLINDER_KHO_COLUMN : 'warehouse';
                 const serializedCodes = (item.codes || []).filter(Boolean);
+                let serializedValidated = false;
 
                 // For cylinders/machines, trust serialized stock by codes and warehouse before inventory aggregate.
                 if (itemType === 'MAY' || itemType.startsWith('BINH')) {
@@ -627,26 +702,56 @@ export default function TransferList() {
                             `Mã không nằm ở kho xuất (${fromLabel}): ${invalidCodes.join(', ')}`,
                         );
                     }
+                    serializedValidated = true;
                 }
 
-                let { data: sourceInv, error: sourceInvErr } = await supabase
-                    .from('inventory')
-                    .select('id, quantity')
-                    .eq('warehouse_id', record.fromWarehouseId)
-                    .eq('item_type', itemType)
-                    .eq('item_name', itemName)
-                    .maybeSingle();
-                if (sourceInvErr) throw sourceInvErr;
+                let sourceInv = await findInventoryRowForTransfer(supabase, {
+                    warehouseKeys: fromInventoryWhKeys,
+                    itemType,
+                    itemName,
+                });
 
-                // Aggregate row may be missing for serialized items; create fallback row to keep transaction history compatible.
-                if (!sourceInv && (itemType === 'MAY' || itemType.startsWith('BINH'))) {
+                // Máy/bình: đã quét đủ mã hợp lệ → tin tồn thực tế theo serial, không chặn vì dòng inventory tổng hợp.
+                if (serializedValidated) {
+                    const invWhName = fromWarehouseName;
+                    if (!sourceInv) {
+                        const { data: createdSourceInv, error: createSourceInvErr } = await supabase
+                            .from('inventory')
+                            .insert([{
+                                warehouse_id: invWhName,
+                                item_type: itemType,
+                                item_name: itemName,
+                                quantity: qty,
+                            }])
+                            .select('id, quantity')
+                            .single();
+                        if (!createSourceInvErr) {
+                            sourceInv = createdSourceInv;
+                        } else {
+                            sourceInv = await findInventoryRowForTransfer(supabase, {
+                                warehouseKeys: fromInventoryWhKeys,
+                                itemType,
+                                itemName,
+                            });
+                        }
+                    }
+                    if (sourceInv && (sourceInv.quantity || 0) < qty) {
+                        const { data: syncedInv, error: syncErr } = await supabase
+                            .from('inventory')
+                            .update({ quantity: qty })
+                            .eq('id', sourceInv.id)
+                            .select('id, quantity')
+                            .single();
+                        if (!syncErr && syncedInv) sourceInv = syncedInv;
+                    }
+                } else if (!sourceInv) {
                     const { data: createdSourceInv, error: createSourceInvErr } = await supabase
                         .from('inventory')
                         .insert([{
-                            warehouse_id: record.fromWarehouseId,
+                            warehouse_id: fromWarehouseName,
                             item_type: itemType,
                             item_name: itemName,
-                            quantity: qty
+                            quantity: qty,
                         }])
                         .select('id, quantity')
                         .single();
@@ -654,8 +759,13 @@ export default function TransferList() {
                     sourceInv = createdSourceInv;
                 }
 
-                if (!sourceInv || (sourceInv.quantity || 0) < qty) {
+                if (!serializedValidated && (!sourceInv || (sourceInv.quantity || 0) < qty)) {
                     throw new Error(`Không đủ tồn kho cho "${itemName}" tại kho xuất.`);
+                }
+                if (!sourceInv?.id) {
+                    throw new Error(
+                        `Không tìm thấy hoặc tạo được dòng tồn kho cho "${itemName}" tại kho xuất.`,
+                    );
                 }
 
                 const { error: sourceUpdateErr } = await supabase
@@ -664,14 +774,19 @@ export default function TransferList() {
                     .eq('id', sourceInv.id);
                 if (sourceUpdateErr) throw sourceUpdateErr;
 
-                const { data: destInv, error: destInvErr } = await supabase
-                    .from('inventory')
-                    .select('id, quantity')
-                    .eq('warehouse_id', record.toWarehouseId)
-                    .eq('item_type', itemType)
-                    .eq('item_name', itemName)
-                    .maybeSingle();
-                if (destInvErr) throw destInvErr;
+                const inventoryItemName = sourceInv.matchedItemName || itemName;
+
+                const destInv =
+                    (await findInventoryRowForTransfer(supabase, {
+                        warehouseKeys: toInventoryWhKeys,
+                        itemType,
+                        itemName: inventoryItemName,
+                    })) ||
+                    (await findInventoryRowForTransfer(supabase, {
+                        warehouseKeys: toInventoryWhKeys,
+                        itemType,
+                        itemName,
+                    }));
 
                 let destInventoryId = destInv?.id;
                 if (destInv) {
@@ -684,9 +799,9 @@ export default function TransferList() {
                     const { data: newDest, error: destInsertErr } = await supabase
                         .from('inventory')
                         .insert([{
-                            warehouse_id: record.toWarehouseId,
+                            warehouse_id: toWarehouseName,
                             item_type: itemType,
-                            item_name: itemName,
+                            item_name: inventoryItemName,
                             quantity: qty,
                         }])
                         .select('id')
@@ -805,13 +920,24 @@ export default function TransferList() {
                         hasActiveFilters={hasActiveFilters}
                         totalActiveFilters={totalActiveFilters}
                         actions={
-                            <button
+                            <div className="flex items-center gap-2">
+                                {selectedTransferIds.length > 0 && (
+                                    <button
+                                        onClick={() => setBulkDeleteOpen(true)}
+                                        className="p-2 rounded-xl bg-rose-600 text-white shadow-lg shadow-rose-500/20 active:scale-95 transition-all"
+                                        title="Xóa phiếu đã chọn"
+                                    >
+                                        <Trash2 size={20} />
+                                    </button>
+                                )}
+                                <button
                                 onClick={() => navigate('/kho/dieu-chuyen')}
                                 className="p-2 rounded-xl bg-primary text-white shadow-lg shadow-primary/30 active:scale-95 transition-all"
                                 title="Thêm phiếu điều chuyển"
                             >
                                 <Plus size={20} />
-                            </button>
+                                </button>
+                            </div>
                         }
                         summary={
                             <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-0.5 -mx-0.5 px-0.5">
@@ -837,9 +963,18 @@ export default function TransferList() {
                             paginatedRecords.map((record, index) => (
                                 <div key={record.id} className="rounded-2xl border shadow-sm p-4 transition-all duration-200 border-primary/15 bg-white">
                                     <div className="flex items-start justify-between gap-2 mb-2">
-                                        <div>
-                                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">#{index + 1}</p>
-                                            <h3 className="text-[14px] font-bold text-foreground leading-tight mt-0.5">{record.transferCode}</h3>
+                                        <div className="flex items-start gap-3 min-w-0">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedTransferSet.has(record.id)}
+                                                onChange={() => toggleSelectTransfer(record.id)}
+                                                className="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                                aria-label={`Chọn phiếu ${record.transferCode}`}
+                                            />
+                                            <div className="min-w-0">
+                                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">#{index + 1}</p>
+                                                <h3 className="text-[14px] font-bold text-foreground leading-tight mt-0.5 truncate">{record.transferCode}</h3>
+                                            </div>
                                         </div>
                                         <span className={getTransferStatusClass(record.status)}>
                                             {record.status}
@@ -974,6 +1109,15 @@ export default function TransferList() {
                                 <Plus size={18} />
                                 Thêm
                             </button>
+                            {selectedTransferIds.length > 0 && (
+                                <button
+                                    onClick={() => setBulkDeleteOpen(true)}
+                                    className="flex items-center gap-2 px-4 py-1.5 rounded-xl bg-rose-600 text-white text-[13px] font-bold hover:bg-rose-700 shadow-md shadow-rose-500/20 transition-all"
+                                >
+                                    <Trash2 size={16} />
+                                    Xóa ({selectedTransferIds.length})
+                                </button>
+                            )}
                         </div>
 
                         <div className="rounded-lg border border-slate-200/90 bg-gradient-to-br from-slate-50 to-white px-2 py-1.5 shadow-sm">
@@ -1117,6 +1261,18 @@ export default function TransferList() {
                         <table className="w-full border-collapse">
                             <thead className="bg-[#F1F5FF]">
                                 <tr>
+                                    <th className="w-12 px-4 py-3.5 text-center">
+                                        <input
+                                            type="checkbox"
+                                            checked={isAllPageSelected}
+                                            ref={(node) => {
+                                                if (node) node.indeterminate = isSomePageSelected;
+                                            }}
+                                            onChange={toggleSelectPageTransfers}
+                                            className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                            aria-label="Chọn tất cả trên trang"
+                                        />
+                                    </th>
                                     {visibleTableColumns.map((key) => (
                                         <th key={key} className="px-4 py-3.5 text-[12px] font-bold text-muted-foreground text-left uppercase tracking-wide">
                                             {COLUMN_DEFS[key].label}
@@ -1129,12 +1285,21 @@ export default function TransferList() {
                             </thead>
                             <tbody className="divide-y divide-primary/10">
                                 {loading ? (
-                                    <tr><td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center text-muted-foreground">Đang tải dữ liệu...</td></tr>
+                                    <tr><td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center text-muted-foreground">Đang tải dữ liệu...</td></tr>
                                 ) : paginatedRecords.length === 0 ? (
-                                    <tr><td colSpan={visibleTableColumns.length + 1} className="px-4 py-16 text-center text-muted-foreground">Không tìm thấy dữ liệu luân chuyển</td></tr>
+                                    <tr><td colSpan={visibleTableColumns.length + 2} className="px-4 py-16 text-center text-muted-foreground">Không tìm thấy dữ liệu luân chuyển</td></tr>
                                 ) : (
                                     paginatedRecords.map((record) => (
                                         <tr key={record.id} className="hover:bg-slate-50/60">
+                                            <td className="px-4 py-4 text-center">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedTransferSet.has(record.id)}
+                                                    onChange={() => toggleSelectTransfer(record.id)}
+                                                    className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                                    aria-label={`Chọn phiếu ${record.transferCode}`}
+                                                />
+                                            </td>
                                             {visibleTableColumns.map((key) => (
                                                 <td key={`${record.id}-${key}`} className="px-4 py-4">{renderCell(key, record)}</td>
                                             ))}
@@ -1679,6 +1844,33 @@ export default function TransferList() {
                     onConfirm={executeTransferPrint}
                     title="Tùy chọn in phiếu"
                 />,
+                document.body
+            )}
+            {bulkDeleteOpen && createPortal(
+                <div className="fixed inset-0 z-[100010] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setBulkDeleteOpen(false)}>
+                    <div className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+                        <h4 className="text-lg font-black text-rose-700">Xóa nhiều phiếu</h4>
+                        <p className="text-sm text-slate-600">
+                            Xác nhận xóa <span className="font-bold text-rose-600">{selectedTransferIds.length}</span> phiếu đã chọn? Thao tác này không thể hoàn tác.
+                        </p>
+                        <div className="flex items-center justify-end gap-2 pt-2">
+                            <button
+                                onClick={() => setBulkDeleteOpen(false)}
+                                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-bold text-sm"
+                                disabled={deletingTransfer}
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                onClick={handleBulkDeleteTransfers}
+                                disabled={deletingTransfer || selectedTransferIds.length === 0}
+                                className="px-4 py-2 rounded-xl bg-rose-600 text-white font-bold text-sm disabled:opacity-60"
+                            >
+                                {deletingTransfer ? 'Đang xóa...' : 'Xác nhận xóa'}
+                            </button>
+                        </div>
+                    </div>
+                </div>,
                 document.body
             )}
             {deleteRecord && createPortal(

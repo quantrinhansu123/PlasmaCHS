@@ -30,10 +30,13 @@ import { supabase } from '../../supabase/config';
 import CustomerAssetsHistoryPanel from './CustomerAssetsHistoryPanel';
 import { getCustomerIdsForCareHistory } from '../../utils/customerCareHistory';
 import {
-    isOrderDeliveredCompleted,
+    collectCylinderSerialsFromOrderForCustomer,
+    CYLINDER_STATUSES_AT_CUSTOMER,
+    isOrderCustomerCylinderVisible,
     MACHINE_STATUSES_ENRICH_CUSTOMER_FROM_ORDERS,
     normalizeMachineSerialKey,
 } from '../../utils/machineCustomerFromOrders';
+import { customerOwnsAssetName } from '../../utils/customerOwnedDevices';
 import { collectMachineSerialsForOrder } from '../../utils/orderMachineSerials';
 import * as XLSX from 'xlsx';
 
@@ -50,14 +53,6 @@ function chunkArray(arr, chunkSize) {
     for (let i = 0; i < arr.length; i += chunkSize) out.push(arr.slice(i, i + chunkSize));
     return out;
 }
-
-function isCylinderProductType(productType) {
-    const u = String(productType || '').trim().toUpperCase();
-    if (!u) return false;
-    return u.includes('BINH');
-}
-
-const CYLINDER_STATUSES_AT_CUSTOMER = new Set(['thuộc khách hàng', 'đang sử dụng']);
 
 /** Biến thể để match `machines.serial_number` trong DB (.in phân biệt hoa thường). */
 function serialVariantsForMachinesLookup(serialRaw) {
@@ -289,7 +284,7 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
                 };
 
                 const orderSelect =
-                    'id, status, department, note, delivery_checklist, customer_name, recipient_name, recipient_phone';
+                    'id, status, department, note, delivery_checklist, customer_name, recipient_name, recipient_phone, assigned_cylinders';
                 if (custId) {
                     const { data: o1, error: e1 } = await supabase
                         .from('orders')
@@ -334,10 +329,6 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
 
                 for (const hint of machineSerialHintsFromCustomerRecord(customer)) addMachineHints(hint);
 
-                const completedOrderIds = [...orderMap.values()]
-                    .filter((o) => isOrderDeliveredCompleted(o.status))
-                    .map((o) => o.id);
-
                 const allOrderIds = [...orderMap.keys()];
                 const itemsByOrderId = new Map();
 
@@ -380,16 +371,12 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
                     for (const sn of collectMachineSerialsForOrder(o, items, cl)) addMachineHints(sn);
                 }
 
-                for (const oid of completedOrderIds) {
+                for (const o of orderMap.values()) {
                     if (cancelled) break;
-                    const items = itemsByOrderId.get(oid) || [];
-                    for (const it of items) {
-                        const sn = String(it.serial_number || '').trim();
-                        if (!sn) continue;
-                        if (isCylinderProductType(it.product_type)) {
-                            cylinderSerialRawFromOrders.add(sn);
-                            cylinderSerialRawFromOrders.add(sn.replace(/\s+/g, ''));
-                        }
+                    if (!isOrderCustomerCylinderVisible(o.status)) continue;
+                    const items = itemsByOrderId.get(o.id) || [];
+                    for (const sn of collectCylinderSerialsFromOrderForCustomer(o, items)) {
+                        cylinderSerialRawFromOrders.add(sn);
                     }
                 }
 
@@ -484,6 +471,7 @@ export default function CustomerDetailsModal({ customer, onClose, hideCommerceTa
                     if (nameMatchedCylinderIds.has(c.id)) return true;
                     const st = String(c.status || '').trim();
                     if (CYLINDER_STATUSES_AT_CUSTOMER.has(st)) return true;
+                    if (customerOwnsAssetName(c.customer_name, customer)) return true;
                     return cylinderSerMatch(c);
                 });
 
