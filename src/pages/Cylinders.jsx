@@ -167,6 +167,9 @@ const CATEGORY_OPTIONS = [
     { id: 'TM', label: 'TM' },
 ];
 
+const TARGET_NCC_RECEIVER_NAME = 'CÔNG TY TNHH MEDIGAS VIỆT NAM';
+const normalizeSupplierName = (value) => String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
+
 const Cylinders = () => {
     const { role, user, department, loading: permissionsLoading } = usePermissions();
     const canManageCylinders = isAdminRole(role);
@@ -185,6 +188,7 @@ const Cylinders = () => {
     const [showMoreActions, setShowMoreActions] = useState(false);
     const [bulkAssignWarehouseId, setBulkAssignWarehouseId] = useState('');
     const [bulkAssignVolume, setBulkAssignVolume] = useState('');
+    const [isBulkAssignSupplierLoading, setIsBulkAssignSupplierLoading] = useState(false);
 
     const [selectedStatuses, setSelectedStatuses] = useState([]);
     const [selectedVolumes, setSelectedVolumes] = useState([]);
@@ -817,6 +821,104 @@ const Cylinders = () => {
             alert('❌ Có lỗi xảy ra khi điền loại bình: ' + error.message);
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const findTargetNccSupplier = async () => {
+        const targetName = normalizeSupplierName(TARGET_NCC_RECEIVER_NAME);
+        const fromLoadedSuppliers = Object.entries(supplierIdToName).find(
+            ([, name]) => {
+                const normalizedName = normalizeSupplierName(name);
+                return normalizedName === targetName || normalizedName.includes('MEDIGAS');
+            },
+        );
+        if (fromLoadedSuppliers) {
+            return { id: fromLoadedSuppliers[0], name: fromLoadedSuppliers[1] };
+        }
+
+        const { data, error } = await supabase
+            .from('suppliers')
+            .select('id, name')
+            .order('name');
+        if (error) throw error;
+
+        const existingSupplier = (data || []).find((supplier) => {
+            const normalizedName = normalizeSupplierName(supplier.name);
+            return normalizedName === targetName || normalizedName.includes('MEDIGAS');
+        });
+        if (existingSupplier) return existingSupplier;
+
+        const { data: createdSupplier, error: createError } = await supabase
+            .from('suppliers')
+            .insert({
+                name: TARGET_NCC_RECEIVER_NAME,
+                phone: '0000000000',
+                address: 'Chưa cập nhật',
+                updated_at: new Date().toISOString(),
+            })
+            .select('id, name')
+            .single();
+        if (createError) throw createError;
+
+        setSupplierIdToName((prev) => ({
+            ...prev,
+            [createdSupplier.id]: createdSupplier.name,
+        }));
+        return createdSupplier;
+    };
+
+    const handleBulkAssignTargetNcc = async () => {
+        if (!canManageCylinders) return;
+
+        try {
+            setIsBulkAssignSupplierLoading(true);
+            const supplier = await findTargetNccSupplier();
+            if (!supplier?.id) {
+                alert(`Không tìm thấy NCC "${TARGET_NCC_RECEIVER_NAME}" trong danh sách Nhà cung cấp.`);
+                return;
+            }
+
+            if (!window.confirm(
+                `Điền toàn bộ cột NCC nhận vỏ thành "${supplier.name}" cho TẤT CẢ bình trong /binh?`,
+            )) {
+                return;
+            }
+
+            const { data: rows, error: fetchError } = await supabase
+                .from('cylinders')
+                .select('id');
+            if (fetchError) throw fetchError;
+
+            const ids = (rows || []).map((row) => row.id).filter(Boolean);
+            if (!ids.length) {
+                alert('Không có bình phù hợp để điền NCC nhận vỏ.');
+                return;
+            }
+
+            const updatedAt = new Date().toISOString();
+            const BATCH_SIZE = 200;
+            for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+                const batch = ids.slice(i, i + BATCH_SIZE);
+                const { error } = await supabase
+                    .from('cylinders')
+                    .update({
+                        supplier_id: supplier.id,
+                        updated_at: updatedAt,
+                    })
+                    .in('id', batch);
+                if (error) throw error;
+            }
+
+            alert(`Đã điền NCC nhận vỏ "${supplier.name}" cho ${ids.length} bình.`);
+            setSelectedIds([]);
+            fetchCylinders();
+            fetchGlobalStats();
+            fetchMetadataForCharts();
+        } catch (error) {
+            console.error('Error bulk assigning NCC receiver:', error);
+            alert('Có lỗi xảy ra khi điền NCC nhận vỏ: ' + error.message);
+        } finally {
+            setIsBulkAssignSupplierLoading(false);
         }
     };
 
@@ -1637,6 +1739,21 @@ const Cylinders = () => {
                                                     </button>
                                                 </div>
                                             )}
+                                            {canManageCylinders && (
+                                                <div className="px-4 py-3 border-t border-slate-100 space-y-2">
+                                                    <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Điền NCC nhận vỏ</p>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { handleBulkAssignTargetNcc(); setShowMoreActions(false); }}
+                                                        disabled={isBulkAssignSupplierLoading}
+                                                        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-amber-50 text-amber-800 text-[13px] font-bold border border-amber-100 disabled:opacity-50"
+                                                        title={TARGET_NCC_RECEIVER_NAME}
+                                                    >
+                                                        <Building2 size={16} />
+                                                        MEDIGAS tất cả
+                                                    </button>
+                                                </div>
+                                            )}
                                             {canManageCylinders && totalRecords > 0 && (
                                                 <div
                                                     role="button"
@@ -1756,7 +1873,7 @@ const Cylinders = () => {
                                                         </p>
                                                     </div>
                                                 </div>
-                                                {cylinder.status === 'đã trả ncc' && (
+                                                {resolveCylinderNccSupplierName(cylinder) && (
                                                     <div className="flex items-center gap-2">
                                                         <div className="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center text-orange-600 shrink-0">
                                                             <Building2 size={14} />
@@ -1971,6 +2088,19 @@ const Cylinders = () => {
                                     </div>
                                 )}
 
+                                {canManageCylinders && (
+                                    <button
+                                        type="button"
+                                        onClick={handleBulkAssignTargetNcc}
+                                        disabled={isBulkAssignSupplierLoading}
+                                        className="flex items-center gap-2 px-4 h-10 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-[13px] font-bold hover:bg-amber-100 shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        title={`Điền NCC nhận vỏ thành ${TARGET_NCC_RECEIVER_NAME} cho tất cả bình trong /binh`}
+                                    >
+                                        <Building2 size={16} />
+                                        NCC MEDIGAS tất cả
+                                    </button>
+                                )}
+
                                 {canManageCylinders && totalRecords > 0 && (
                                     <button
                                         type="button"
@@ -2090,7 +2220,7 @@ const Cylinders = () => {
                                                 const nccName = resolveCylinderNccSupplierName(cylinder);
                                                 return (
                                                     <td key={col.key} className="px-4 py-4 text-sm font-semibold text-orange-800">
-                                                        {cylinder.status === 'đã trả ncc' ? (nccName || '—') : '—'}
+                                                        {nccName || '—'}
                                                     </td>
                                                 );
                                             }
