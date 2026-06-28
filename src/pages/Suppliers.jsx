@@ -65,7 +65,7 @@ const TABLE_COLUMNS_DEF = [
 ];
 
 const Suppliers = () => {
-    const { role } = usePermissions();
+    const { role, user, department, loading: permissionsLoading } = usePermissions();
     const canManageSuppliers = isAdminRole(role);
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');

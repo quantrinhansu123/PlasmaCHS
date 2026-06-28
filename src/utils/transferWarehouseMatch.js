@@ -1,5 +1,10 @@
 import { normalizeMachineSerialKey } from './machineCustomerFromOrders';
-import { CYLINDER_KHO_COLUMN, applyCylinderKhoFilterToQuery, getCylinderKhoValue } from './cylinderKho';
+import {
+    CYLINDER_KHO_COLUMN,
+    applyCylinderKhoFilterToQuery,
+    getCylinderKhoValue,
+    isMissingKhoColumnError,
+} from './cylinderKho';
 import {
     buildCylinderWarehouseQueryKeys,
 } from './orderWarehouseScope';
@@ -393,6 +398,92 @@ export async function fetchReadyCylindersAtWarehouse(
     }
 
     return [...collected.values()].sort((a, b) =>
+        String(a.serial_number || '').localeCompare(String(b.serial_number || ''), 'vi'),
+    );
+}
+
+const CYLINDER_RETURN_SELECT = 'id, serial_number, status, volume, kho, warehouse, customer_name, supplier_id';
+
+function applyGoodsIssueCylinderStatusFilter(query, issueType) {
+    if (issueType === 'TRA_VO') {
+        return query.in('status', ['bình rỗng']);
+    }
+    return query.not('status', 'in', '("đang sử dụng", "thuộc khách hàng", "đã trả ncc")');
+}
+
+function cylinderMatchesWarehouseKeys(cylinder, ref, warehouseList, matchKeys) {
+    const stored = getCylinderKhoValue(cylinder);
+    if (!stored) return false;
+    if (cylinderBelongsToWarehouse(stored, ref, warehouseList)) return true;
+    return (matchKeys || []).some(
+        (key) => stored.toLowerCase() === String(key || '').trim().toLowerCase(),
+    );
+}
+
+/**
+ * Bình khả dụng cho phiếu xuất trả NCC — khớp kho linh hoạt (kho/warehouse/mã/tên/alias).
+ */
+export async function fetchReturnableCylindersAtWarehouse(
+    supabaseClient,
+    { warehouseRef = '', warehouseList = [], whRow = null, issueType = 'TRA_VO' } = {},
+) {
+    const ref = String(warehouseRef || '').trim();
+    if (!ref) return [];
+
+    const row =
+        whRow ||
+        resolveWarehouseRow(ref, warehouseList) ||
+        { code: ref, name: ref, id: ref };
+
+    const matchKeys = buildWarehouseMatchKeys(row, ref, warehouseList);
+    const nameKeys = [
+        ...new Set([
+            ...buildCylinderWarehouseQueryKeys([row]),
+            ...matchKeys,
+            ref,
+        ]),
+    ].filter(Boolean);
+
+    const runQuery = async (filterMode = 'default') => {
+        let query = supabaseClient.from('cylinders').select(CYLINDER_RETURN_SELECT);
+        const options =
+            filterMode === 'warehouse'
+                ? { column: 'warehouse' }
+                : filterMode === 'kho'
+                    ? { column: 'kho', legacyWarehouse: false }
+                    : {};
+        query = applyCylinderKhoFilterToQuery(query, nameKeys, options);
+        query = applyGoodsIssueCylinderStatusFilter(query, issueType);
+        return query.limit(5000);
+    };
+
+    let { data, error } = await runQuery('default');
+
+    if (error && isMissingKhoColumnError(error)) {
+        ({ data, error } = await runQuery('warehouse'));
+    }
+
+    if (!error && (!data || data.length === 0)) {
+        const retry = await runQuery('warehouse');
+        if (!retry.error && retry.data?.length > 0) {
+            data = retry.data;
+        }
+    }
+
+    if (!error && (!data || data.length === 0)) {
+        const { data: allRows, error: scanError } = await applyGoodsIssueCylinderStatusFilter(
+            supabaseClient.from('cylinders').select(CYLINDER_RETURN_SELECT),
+            issueType,
+        ).limit(10000);
+
+        if (!scanError && allRows?.length) {
+            data = allRows.filter((cylinder) =>
+                cylinderMatchesWarehouseKeys(cylinder, ref, warehouseList, matchKeys),
+            );
+        }
+    }
+
+    return (data || []).sort((a, b) =>
         String(a.serial_number || '').localeCompare(String(b.serial_number || ''), 'vi'),
     );
 }

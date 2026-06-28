@@ -11,7 +11,7 @@ import {
 } from '../../constants/machineConstants';
 import { toast } from 'react-toastify';
 import usePermissions from '../../hooks/usePermissions';
-import { CYLINDER_KHO_COLUMN, filterWarehousesForCurrentUser, getCylinderKhoValue } from '../../utils/orderWarehouseScope';
+import { CYLINDER_KHO_COLUMN, CYLINDER_WAREHOUSE_LEGACY_COLUMN, filterWarehousesForCurrentUser, getCylinderKhoValue } from '../../utils/orderWarehouseScope';
 import { supabase } from '../../supabase/config';
 import BarcodeScanner from '../Common/BarcodeScanner';
 import { SearchableSelect } from '../ui/SearchableSelect';
@@ -304,6 +304,7 @@ export default function CylinderFormModal({ cylinder, onClose, onSuccess }) {
             if (payload.status === 'đã trả ncc') {
                 payload.supplier_id = String(payload.supplier_id).trim();
                 payload[CYLINDER_KHO_COLUMN] = null;
+                payload[CYLINDER_WAREHOUSE_LEGACY_COLUMN] = null;
                 payload.customer_id = null;
                 payload.customer_name = '';
             } else {

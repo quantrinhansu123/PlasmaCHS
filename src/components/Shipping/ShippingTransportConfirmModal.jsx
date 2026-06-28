@@ -7,15 +7,7 @@ import {
     isCloudinaryConfigured,
     uploadDeliveryProofFile,
 } from '../../utils/cloudinaryUpload';
-
-const appendProofToNotes = (existingNotes, photoUrls) => {
-    const base = String(existingNotes || '').trim();
-    const proofLine = photoUrls.length
-        ? `[GIAO_HANG_PROOF]: ${photoUrls.join(', ')}`
-        : '';
-    if (!proofLine) return base || null;
-    return base ? `${base}\n${proofLine}` : proofLine;
-};
+import { appendDeliveryProofToNotes } from '../../utils/orderNoteSanitize';
 
 export default function ShippingTransportConfirmModal({
     kind,
@@ -58,6 +50,54 @@ export default function ShippingTransportConfirmModal({
         };
     }, [isIssue, record?.id]);
 
+    const submitDelivery = async (photos, nameOverride, addressOverride) => {
+        const name = String(nameOverride ?? delivererName).trim();
+        const address = String(addressOverride ?? delivererAddress).trim();
+        if (!name) {
+            toast.error('Vui lòng nhập người vận chuyển.');
+            return false;
+        }
+        if (!address) {
+            toast.error('Vui lòng nhập địa chỉ giao hàng.');
+            return false;
+        }
+
+        setIsSubmitting(true);
+        try {
+            const table = isIssue ? 'goods_issues' : 'goods_receipts';
+            const existingNotes = isIssue ? record?.notes : record?.note;
+            const payload = {
+                status: 'HOAN_THANH',
+                deliverer_name: name,
+                deliverer_address: address,
+                updated_at: new Date().toISOString(),
+                ...(isIssue
+                    ? { notes: appendDeliveryProofToNotes(existingNotes, photos) }
+                    : { note: appendDeliveryProofToNotes(existingNotes, photos) }),
+            };
+            if (!isIssue) {
+                payload.received_by = receivedBy.trim() || record?.received_by || null;
+            }
+
+            const { error } = await supabase.from(table).update(payload).eq('id', record.id);
+            if (error) throw error;
+
+            toast.success(
+                isIssue
+                    ? `Đã xác nhận giao hàng — phiếu ${code}`
+                    : `Đã xác nhận giao hàng — phiếu ${code}`,
+            );
+            onSuccess?.();
+            return true;
+        } catch (err) {
+            console.error(err);
+            toast.error('Lỗi xác nhận: ' + (err?.message || ''));
+            return false;
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
     const handleUploadImages = async (e) => {
         const files = Array.from(e.target.files || []);
         if (files.length === 0) return;
@@ -73,7 +113,12 @@ export default function ShippingTransportConfirmModal({
                 next.push(url);
             }
             setPhotoUrls(next);
-            toast.success(`Đã tải ${files.length} ảnh.`);
+            toast.success(`Đã tải ${files.length} ảnh — tự xác nhận đã giao.`);
+            await submitDelivery(
+                next,
+                delivererName.trim() || record?.deliverer_name,
+                delivererAddress.trim() || record?.deliverer_address,
+            );
         } catch (err) {
             toast.error('Lỗi tải ảnh: ' + (err?.message || ''));
         } finally {
@@ -83,49 +128,11 @@ export default function ShippingTransportConfirmModal({
     };
 
     const handleConfirm = async () => {
-        const name = delivererName.trim();
-        const address = delivererAddress.trim();
-        if (!name) {
-            toast.error('Vui lòng nhập người vận chuyển.');
+        if (photoUrls.length === 0) {
+            toast.error('Vui lòng chụp ít nhất 1 ảnh bằng chứng giao hàng.');
             return;
         }
-        if (!address) {
-            toast.error('Vui lòng nhập địa chỉ giao hàng.');
-            return;
-        }
-
-        setIsSubmitting(true);
-        try {
-            const table = isIssue ? 'goods_issues' : 'goods_receipts';
-            const existingNotes = isIssue ? record?.notes : record?.note;
-            const payload = {
-                status: 'HOAN_THANH',
-                deliverer_name: name,
-                deliverer_address: address,
-                updated_at: new Date().toISOString(),
-                ...(isIssue
-                    ? { notes: appendProofToNotes(existingNotes, photoUrls) }
-                    : { note: appendProofToNotes(existingNotes, photoUrls) }),
-            };
-            if (!isIssue) {
-                payload.received_by = receivedBy.trim() || record?.received_by || null;
-            }
-
-            const { error } = await supabase.from(table).update(payload).eq('id', record.id);
-            if (error) throw error;
-
-            toast.success(
-                isIssue
-                    ? `Đã xác nhận vận chuyển thành công — phiếu ${code}`
-                    : `Đã xác nhận giao hàng thành công — phiếu ${code}`,
-            );
-            onSuccess?.();
-        } catch (err) {
-            console.error(err);
-            toast.error('Lỗi xác nhận: ' + (err?.message || ''));
-        } finally {
-            setIsSubmitting(false);
-        }
+        await submitDelivery(photoUrls);
     };
 
     const addressLabel = isIssue ? 'Địa chỉ giao (NCC)' : 'Địa chỉ nhận hàng';
@@ -249,7 +256,7 @@ export default function ShippingTransportConfirmModal({
                             isSubmitting && 'opacity-60',
                         )}
                     >
-                        {isSubmitting ? 'Đang lưu...' : 'Xác nhận giao thành công'}
+                        {isSubmitting ? 'Đang lưu...' : photoUrls.length > 0 ? 'Xác nhận lại' : 'Chụp ảnh để xác nhận'}
                     </button>
                 </div>
             </div>

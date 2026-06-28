@@ -9,6 +9,7 @@ import { buildWarehouseModalAliases, resolveWarehouseRow, storedValueMatchesWare
 import { getCylinderKhoValue, buildCylinderKhoScopeKeys } from './cylinderKho';
 export {
     CYLINDER_KHO_COLUMN,
+    CYLINDER_WAREHOUSE_LEGACY_COLUMN,
     buildCylinderKhoScopeKeys,
     cylinderKhoMatchesWarehouseRecord,
     getCylinderKhoValue,
@@ -446,8 +447,9 @@ export function cylinderMatchesManagingWarehouseNames(cylinder, targetNames = []
     return cylinderMatchesManagingWarehouseFilter(cylinder, records);
 }
 
-/** Hiển thị Kho Quản Lý — chuẩn theo tên kho. */
+/** Hiển thị Kho Quản Lý — chuẩn theo tên kho. Bình đã trả NCC không còn thuộc kho. */
 export function getCylinderManagingWarehouseDisplayName(cylinder, warehouses = []) {
+    if (String(cylinder?.status || '').trim().toLowerCase() === 'đã trả ncc') return '—';
     if (cylinder?.warehouses?.name) return cylinder.warehouses.name;
     const stored = resolveStoredWarehouseName(getCylinderKhoValue(cylinder), warehouses);
     if (!stored) return '—';

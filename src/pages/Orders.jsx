@@ -95,7 +95,8 @@ import {
 } from '../utils/salesVisibilityScope';
 import { deleteOrdersWithRollback } from '../utils/deleteOrderCascade';
 import { scopeOrdersForWarehouseAccess } from '../utils/orderWarehouseScope';
-import { stripDeliveryMediaFromNote } from '../utils/orderNoteSanitize';
+import { stripDeliveryMediaFromNote, extractDeliveryProofUrlsFromNote } from '../utils/orderNoteSanitize';
+import DeliveryProofGallery from '../components/Common/DeliveryProofGallery';
 import {
     downloadOrderImportTemplate,
     importOrdersFromExcelRows,
@@ -1333,10 +1334,26 @@ const Orders = () => {
                 return order.created_at ? new Date(order.created_at).toLocaleDateString('vi-VN') : '---';
             case 'note': {
                 const cleaned = stripDeliveryMediaFromNote(order.note);
+                const proofUrls = [
+                    ...extractDeliveryProofUrlsFromNote(order.note),
+                    ...(order.delivery_image_url ? [order.delivery_image_url] : []),
+                    ...(order.delivery_proof_base64 && order.delivery_proof_base64 !== order.delivery_image_url
+                        ? [order.delivery_proof_base64]
+                        : []),
+                ].filter((url, i, arr) => url && arr.indexOf(url) === i);
                 return (
-                    <span className="text-[13px] text-muted-foreground font-normal line-clamp-3 whitespace-pre-wrap" title={cleaned || undefined}>
-                        {cleaned || '—'}
-                    </span>
+                    <div className="max-w-xs">
+                        {cleaned ? (
+                            <span className="text-[13px] text-muted-foreground font-normal line-clamp-3 whitespace-pre-wrap" title={cleaned}>
+                                {cleaned}
+                            </span>
+                        ) : proofUrls.length ? null : (
+                            <span className="text-[13px] text-muted-foreground">—</span>
+                        )}
+                        {proofUrls.length > 0 && (
+                            <DeliveryProofGallery urls={proofUrls} compact className="mt-1.5" />
+                        )}
+                    </div>
                 );
             }
             default:

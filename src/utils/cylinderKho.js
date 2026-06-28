@@ -26,6 +26,7 @@ const addKhoKeyVariants = (keys, rawValue) => {
 
 /** Giá trị kho trên bình — ưu tiên cột kho, fallback warehouse khi chưa migrate. */
 export function getCylinderKhoValue(cylinder) {
+    if (String(cylinder?.status || '').trim().toLowerCase() === 'đã trả ncc') return '';
     return String(cylinder?.kho ?? cylinder?.warehouse ?? '').trim();
 }
 

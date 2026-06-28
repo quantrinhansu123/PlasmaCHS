@@ -36,6 +36,7 @@ const InventorySearchableSelect = ({
 }) => {
     const [open, setOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
+    const displayValue = open ? searchTerm : (value || "");
 
     // Group items by asset type (volume or machine_type)
     const groupedItems = useMemo(() => {
@@ -68,13 +69,22 @@ const InventorySearchableSelect = ({
         setSearchTerm("");
     };
 
+    const handleSearchInputChange = (event) => {
+        setSearchTerm(event.target.value);
+        if (!open) setOpen(true);
+    };
+
+    const handleSearchInputFocus = () => {
+        setSearchTerm("");
+        setOpen(true);
+    };
+
     const sortedGroups = Object.keys(groupedItems).sort();
 
     return (
         <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
-                <button
-                    type="button"
+                <div
                     className={cn(
                         "flex h-10 w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-black tracking-tight transition-all hover:border-primary/40 hover:bg-slate-50/50 outline-none",
                         open && "border-primary ring-4 ring-primary/10 bg-white shadow-sm",
@@ -82,22 +92,26 @@ const InventorySearchableSelect = ({
                         value && "text-slate-900 border-primary/20 bg-primary/5 shadow-inner"
                     )}
                 >
-                    <span className="truncate flex items-center gap-2">
-                        {value ? (
-                            <>
-                                <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                                {value}
-                            </>
-                        ) : placeholder}
-                    </span>
+                    {value && !open && <div className="w-2 h-2 rounded-full bg-primary animate-pulse shrink-0 mr-2" />}
+                    <input
+                        type="text"
+                        value={displayValue}
+                        onChange={handleSearchInputChange}
+                        onFocus={handleSearchInputFocus}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter') event.preventDefault();
+                        }}
+                        placeholder={placeholder}
+                        className="min-w-0 flex-1 bg-transparent border-none outline-none text-[13px] font-black text-slate-900 placeholder:text-slate-400 placeholder:font-bold"
+                    />
                     <ChevronDown 
                         size={16} 
                         className={cn(
-                            "text-slate-400 transition-transform duration-300",
+                            "ml-2 shrink-0 text-slate-400 transition-transform duration-300",
                             open && "rotate-180 text-primary"
                         )} 
                     />
-                </button>
+                </div>
             </PopoverTrigger>
 
             <PopoverContent className="p-0 border-none">
@@ -108,7 +122,6 @@ const InventorySearchableSelect = ({
                         placeholder="Tìm theo Serial..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        autoFocus
                     />
                 </div>
 

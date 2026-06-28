@@ -824,7 +824,9 @@ export default function CylinderDetailsModal({ cylinder, onClose }) {
                                 </span>
                                 <span className="flex items-center gap-1.5 text-slate-500">
                                     <Warehouse className="w-4 h-4 text-slate-400" />
-                                    {warehouseName || cylinder.warehouses?.name || '—'}
+                                    {cylinder.status === 'đã trả ncc'
+                                        ? '—'
+                                        : (warehouseName || cylinder.warehouses?.name || '—')}
                                 </span>
                                 {cylinder.expiry_date && <span className="flex items-center gap-1.5 text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-100 italic">Hạn: {formatDate(cylinder.expiry_date)}</span>}
                             </div>

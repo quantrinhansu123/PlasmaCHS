@@ -89,6 +89,51 @@ const parseTransferNote = (note = '') => {
     };
 };
 
+const collectTransferSerials = (items = [], note = '') => {
+    const fromItems = (items || []).flatMap((item) =>
+        (item?.codes || []).map((code) => String(code || '').trim()).filter(Boolean),
+    );
+    const fromNote = parseTransferNote(note).codes;
+    return [...new Set([...fromItems, ...fromNote])];
+};
+
+const copyTransferText = async (text, successMessage = 'Đã sao chép') => {
+    const value = String(text || '').trim();
+    if (!value) {
+        toast.info('Không có nội dung để sao chép');
+        return;
+    }
+    try {
+        await navigator.clipboard.writeText(value);
+        toast.success(successMessage);
+    } catch {
+        toast.error('Không sao chép được — thử chọn và copy thủ công');
+    }
+};
+
+const formatTransferSerialsForCopy = (record) => {
+    const lines = [
+        `Phiếu: ${record.transferCode}`,
+        `Kho xuất: ${record.fromWarehouses?.join(', ') || '—'}`,
+        `Kho nhận: ${record.toWarehouses?.join(', ') || '—'}`,
+        '',
+    ];
+    (record.items || []).forEach((item, idx) => {
+        const codes = (item.codes || []).map((c) => String(c).trim()).filter(Boolean);
+        lines.push(`${idx + 1}. ${item.itemName || '—'} (${item.itemType || '—'}) x${item.quantity || 0}`);
+        if (codes.length) {
+            codes.forEach((code) => lines.push(`   - ${code}`));
+        } else {
+            lines.push('   - (chưa ghi mã)');
+        }
+    });
+    const all = collectTransferSerials(record.items, record.notes?.[0]);
+    if (all.length) {
+        lines.push('', 'Danh sách mã (tra cứu):', all.join(', '));
+    }
+    return lines.join('\n');
+};
+
 const FILTER_TONES = {
     status: {
         active: 'border-blue-300 bg-blue-50 text-blue-700 shadow-sm',
@@ -273,6 +318,25 @@ export default function TransferList() {
                 const items = Array.isArray(row.items_json) ? row.items_json : [];
                 const fromWarehouseName = whMap[row.from_warehouse_id] || row.from_warehouse_id || '—';
                 const toWarehouseName = whMap[row.to_warehouse_id] || row.to_warehouse_id || '—';
+                const parsedNote = parseTransferNote(row.note || '');
+
+                const mappedItems = items.map((item) => {
+                    const codesFromJson = (item.specific_codes || [])
+                        .map((entry) => String(entry?.code || '').trim())
+                        .filter(Boolean);
+                    const codes = codesFromJson.length
+                        ? codesFromJson
+                        : (items.length === 1 ? parsedNote.codes : []);
+
+                    return {
+                        itemName: item.item_name || '—',
+                        itemType: item.item_type || 'KHAC',
+                        quantity: Number(item.quantity) || 0,
+                        codes,
+                    };
+                });
+
+                const allSerials = collectTransferSerials(mappedItems, row.note || '');
 
                 return {
                     id: row.id,
@@ -287,20 +351,16 @@ export default function TransferList() {
                     toWarehouseId: row.to_warehouse_id,
                     fromWarehouses: [fromWarehouseName],
                     toWarehouses: [toWarehouseName],
-                    itemTypes: [...new Set(items.map((item) => item.item_type || 'KHAC'))],
-                    totalQuantity: row.total_quantity || items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0),
+                    itemTypes: [...new Set(mappedItems.map((item) => item.itemType || 'KHAC'))],
+                    totalQuantity: row.total_quantity || mappedItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0),
                     notes: row.note ? [row.note] : [],
                     rawNotes: row.note ? [row.note] : [],
                     images: row.handover_image_url ? [row.handover_image_url] : [],
                     referenceIds: [],
                     inventoryIds: [],
                     transactionIds: [],
-                    items: items.map((item) => ({
-                        itemName: item.item_name || '—',
-                        itemType: item.item_type || 'KHAC',
-                        quantity: Number(item.quantity) || 0,
-                        codes: (item.specific_codes || []).map((entry) => entry?.code).filter(Boolean),
-                    })),
+                    items: mappedItems,
+                    allSerials,
                 };
             });
 
@@ -1391,18 +1451,6 @@ export default function TransferList() {
                                                             </button>
                                                             <button
                                                                 onClick={() => {
-                                                                    navigator.clipboard?.writeText(record.transferCode || '');
-                                                                    setActiveRowMenu(null);
-                                                                }}
-                                                                className="w-full grid grid-cols-[22px_minmax(0,1fr)] items-center gap-3 px-4 py-3 text-slate-700 hover:bg-slate-50 transition-colors text-[13px] font-bold leading-none"
-                                                            >
-                                                                <span className="w-[22px] h-[22px] shrink-0 flex items-center justify-center">
-                                                                    <Copy className="w-4 h-4" />
-                                                                </span>
-                                                                <span className="text-left leading-none">Sao chép mã phiếu</span>
-                                                            </button>
-                                                            <button
-                                                                onClick={() => {
                                                                     setDeleteRecord(record);
                                                                     setActiveRowMenu(null);
                                                                 }}
@@ -1629,12 +1677,47 @@ export default function TransferList() {
                             </div>
 
                             <div className="rounded-3xl border border-primary/20 bg-white p-5 sm:p-6 space-y-5 shadow-sm">
-                                <div className="flex items-center gap-2.5 pb-3 border-b border-primary/10">
-                                    <ArrowLeftRight className="w-4 h-4 text-primary/80" />
-                                    <h4 className="text-[18px] !font-extrabold !text-primary">Danh sách hàng hóa</h4>
+                                <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-primary/10">
+                                    <div className="flex items-center gap-2.5">
+                                        <ArrowLeftRight className="w-4 h-4 text-primary/80" />
+                                        <h4 className="text-[18px] !font-extrabold !text-primary">Danh sách hàng hóa &amp; mã Serial</h4>
+                                    </div>
+                                    {transferFormModal.mode === 'view' && collectTransferSerials(transferFormModal.record.items, editingNote).length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => copyTransferText(
+                                                formatTransferSerialsForCopy(transferFormModal.record),
+                                                'Đã sao chép chi tiết phiếu',
+                                            )}
+                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-primary/20 bg-primary/5 text-primary text-[12px] font-bold hover:bg-primary/10 transition-colors"
+                                        >
+                                            <Copy className="w-3.5 h-3.5" />
+                                            Sao chép tất cả
+                                        </button>
+                                    )}
                                 </div>
                                 <div className="space-y-3">
-                                    {(transferFormModal.mode === 'edit' ? editingItems : transferFormModal.record.items).map((item, idx) => (
+                                    {(() => {
+                                        const allSerialsForView = collectTransferSerials(
+                                            transferFormModal.record.items,
+                                            editingNote,
+                                        );
+                                        const itemsList = transferFormModal.mode === 'edit'
+                                            ? editingItems
+                                            : transferFormModal.record.items;
+
+                                        return itemsList.map((item, idx) => {
+                                        const viewCodes = transferFormModal.mode === 'view'
+                                            ? (item.codes || []).map((c) => String(c).trim()).filter(Boolean)
+                                            : [];
+                                        const noteFallback = transferFormModal.mode === 'view'
+                                            && viewCodes.length === 0
+                                            && itemsList.length === 1
+                                            ? parseTransferNote(editingNote).codes
+                                            : [];
+                                        const displayCodes = viewCodes.length ? viewCodes : noteFallback;
+
+                                        return (
                                         <div key={`${transferFormModal.record.id}-item-${idx}`} className="p-3 border border-slate-200 rounded-2xl bg-slate-50/50 space-y-2">
                                             <div className="flex items-center justify-between gap-3">
                                                 <div className="font-semibold text-slate-800">{item.itemName}</div>
@@ -1643,6 +1726,50 @@ export default function TransferList() {
                                                     <span className="font-black text-primary">x {item.quantity}</span>
                                                 </div>
                                             </div>
+                                            {transferFormModal.mode === 'view' && (
+                                                <div className="space-y-2 pt-1">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">
+                                                            Mã {item.itemType === 'MAY' ? 'máy' : 'bình'} ({displayCodes.length}/{item.quantity || displayCodes.length})
+                                                        </p>
+                                                        {displayCodes.length > 0 && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => copyTransferText(
+                                                                    displayCodes.join('\n'),
+                                                                    `Đã sao chép ${displayCodes.length} mã`,
+                                                                )}
+                                                                className="inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:underline"
+                                                            >
+                                                                <Copy className="w-3 h-3" />
+                                                                Copy dòng này
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    {displayCodes.length > 0 ? (
+                                                        <div className="flex flex-wrap gap-1.5">
+                                                            {displayCodes.map((code) => (
+                                                                <button
+                                                                    key={`${idx}-${code}`}
+                                                                    type="button"
+                                                                    onClick={() => copyTransferText(code, `Đã sao chép ${code}`)}
+                                                                    title="Bấm để sao chép mã"
+                                                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-slate-200 font-mono text-[12px] font-bold text-slate-800 hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                                                                >
+                                                                    {code}
+                                                                    <Copy className="w-3 h-3 text-slate-400" />
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    ) : allSerialsForView.length > 0 ? (
+                                                        <p className="text-[12px] text-slate-500 italic">
+                                                            Mã nằm trong ghi chú phiếu — xem bảng tra cứu bên dưới
+                                                        </p>
+                                                    ) : (
+                                                        <p className="text-[12px] text-slate-400 italic">Chưa ghi mã serial trên phiếu</p>
+                                                    )}
+                                                </div>
+                                            )}
                                             {transferFormModal.mode === 'edit' && (
                                                 <div className="space-y-1.5">
                                                     <label className="text-[12px] font-bold text-slate-500">Mã hàng hóa (phân tách bằng dấu phẩy)</label>
@@ -1655,13 +1782,42 @@ export default function TransferList() {
                                                             )));
                                                         }}
                                                         className="w-full h-11 px-3 bg-white border border-slate-200 rounded-xl text-[13px] font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-primary/20"
-                                                        placeholder="Ví dụ: CGA870001, CGA870002"
+                                                        placeholder="Ví dụ: TN13556, TC00002"
                                                     />
                                                 </div>
                                             )}
                                         </div>
-                                    ))}
+                                        );
+                                    });
+                                    })()}
                                 </div>
+                                {transferFormModal.mode === 'view' && collectTransferSerials(transferFormModal.record.items, editingNote).length > 0 && (
+                                    <div className="space-y-2 pt-2 border-t border-slate-100">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">
+                                                Bảng mã tra cứu (copy nhanh)
+                                            </p>
+                                            <button
+                                                type="button"
+                                                onClick={() => copyTransferText(
+                                                    collectTransferSerials(transferFormModal.record.items, editingNote).join('\n'),
+                                                    'Đã sao chép danh sách mã',
+                                                )}
+                                                className="inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:underline"
+                                            >
+                                                <Copy className="w-3 h-3" />
+                                                Copy danh sách
+                                            </button>
+                                        </div>
+                                        <textarea
+                                            readOnly
+                                            rows={Math.min(8, Math.max(3, collectTransferSerials(transferFormModal.record.items, editingNote).length))}
+                                            value={collectTransferSerials(transferFormModal.record.items, editingNote).join('\n')}
+                                            onFocus={(e) => e.target.select()}
+                                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono text-[12px] text-slate-800 resize-none focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                        />
+                                    </div>
+                                )}
                             </div>
 
                             <div className="rounded-3xl border border-primary/20 bg-white p-5 sm:p-6 space-y-2 shadow-sm">

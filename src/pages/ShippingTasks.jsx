@@ -264,7 +264,25 @@ const ShippingTasks = () => {
                 newImages.push(url);
             }
             setUploadedImages(newImages);
+            setDeliveryStatus('HOAN_THANH');
             toast.success(`Đã tải lên Cloudinary ${files.length} ảnh.`);
+
+            const machineSerials = resolveMachineSerialsForShippingConfirm(selectedOrder, shippingOrderItems);
+            const autoChecklist = { ...machineChecklist };
+            machineSerials.forEach((serial) => {
+                autoChecklist[serial] = true;
+            });
+            if (machineSerials.length > 0) {
+                setMachineChecklist(autoChecklist);
+            }
+
+            setTimeout(() => {
+                void confirmDelivery({
+                    images: newImages,
+                    status: 'HOAN_THANH',
+                    machineChecklist: autoChecklist,
+                });
+            }, 0);
         } catch (error) {
             console.error('Error uploading images:', error);
             toast.error('❌ Lỗi tải ảnh: ' + error.message);
@@ -579,19 +597,23 @@ const ShippingTasks = () => {
         return [...new Set([...fromAssigned, ...fromChecklist])];
     };
 
-    const confirmDelivery = async () => {
+    const confirmDelivery = async (options = {}) => {
         if (!selectedOrder) return;
+        const images = options.images ?? uploadedImages;
+        const effectiveStatus = options.status ?? deliveryStatus;
+        const checklistOverride = options.machineChecklist ?? machineChecklist;
+
         const machineSerialsForConfirm = resolveMachineSerialsForShippingConfirm(
             selectedOrder,
             shippingOrderItems,
         );
         
-        if (deliveryStatus === 'TRA_HANG' && !notes.trim()) {
+        if (effectiveStatus === 'TRA_HANG' && !notes.trim()) {
             toast.error('Vui lòng nhập lý do giao hàng chưa thành công!');
             return;
         }
-        if (deliveryStatus === 'HOAN_THANH' && machineSerialsForConfirm.length > 0) {
-            const uncheckedMachines = machineSerialsForConfirm.filter((serial) => !machineChecklist[serial]);
+        if (effectiveStatus === 'HOAN_THANH' && machineSerialsForConfirm.length > 0) {
+            const uncheckedMachines = machineSerialsForConfirm.filter((serial) => !checklistOverride[serial]);
             if (uncheckedMachines.length > 0) {
                 toast.error(`Vui lòng tích xác nhận đủ mã máy trước khi hoàn tất (${uncheckedMachines.length} mã chưa tích).`);
                 return;
@@ -606,17 +628,14 @@ const ShippingTasks = () => {
              * nên không chạy cập nhật máy/bình — shipper có ảnh + đã tick mã là xác nhận giao xong.
              */
             const finalStatus =
-                deliveryStatus !== 'HOAN_THANH' ? 'TRA_HANG' : 'HOAN_THANH';
+                effectiveStatus !== 'HOAN_THANH' ? 'TRA_HANG' : 'HOAN_THANH';
             const notePrefix = finalStatus === 'TRA_HANG' ? '[Lý do Giao Không Thành Công]: ' : '[Ghi chú Shipper]: ';
             const newNoteText = notes ? `\n${notePrefix}${notes}` : '';
-            const proofUrls = uploadedImages.filter((url) => isCloudinaryDeliveryUrl(url));
-            if (finalStatus === 'HOAN_THANH' && uploadedImages.length > 0 && proofUrls.length !== uploadedImages.length) {
+            const proofUrls = images.filter((url) => isCloudinaryDeliveryUrl(url));
+            if (finalStatus === 'HOAN_THANH' && images.length > 0 && proofUrls.length !== images.length) {
                 throw new Error('Một hoặc nhiều ảnh chưa upload Cloudinary. Vui lòng chọn lại ảnh sau khi cấu hình .env.');
             }
             const firstProof = proofUrls[0] || '';
-            const uploadedProofText = finalStatus === 'HOAN_THANH' && proofUrls.length > 0
-                ? `\n[Ảnh giao hàng]: ${proofUrls.join(', ')}`
-                : '';
             const deliveryImageUrl = finalStatus === 'HOAN_THANH'
                 ? (firstProof || selectedOrder.delivery_image_url || null)
                 : selectedOrder.delivery_image_url;
@@ -633,7 +652,7 @@ const ShippingTasks = () => {
                     : {};
             if (finalStatus === 'HOAN_THANH' && machineSerialsForConfirm.length > 0) {
                 machineSerialsForConfirm.forEach((sn) => {
-                    if (machineChecklist[sn]) {
+                    if (checklistOverride[sn]) {
                         nextDeliveryChecklist[`MAY:${sn}`] = true;
                     }
                 });
@@ -643,7 +662,7 @@ const ShippingTasks = () => {
                 status: finalStatus,
                 delivery_image_url: deliveryImageUrl,
                 delivery_proof_base64: deliveryProofBase64,
-                note: (selectedOrder.note || '') + newNoteText + uploadedProofText,
+                note: (selectedOrder.note || '') + newNoteText,
                 updated_at: new Date().toISOString(),
                 ...(finalStatus === 'HOAN_THANH' && Object.keys(nextDeliveryChecklist).length > 0
                     ? { delivery_checklist: nextDeliveryChecklist }

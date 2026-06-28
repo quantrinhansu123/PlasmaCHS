@@ -28,7 +28,14 @@ import { PRODUCT_TYPES } from '../../constants/orderConstants';
 import { supabase } from '../../supabase/config';
 import usePermissions from '../../hooks/usePermissions';
 import { notificationService } from '../../utils/notificationService';
-import { CYLINDER_KHO_COLUMN, filterWarehousesForCurrentUser, getCylinderKhoValue, resolveCylinderWarehouseValue } from '../../utils/orderWarehouseScope';
+import {
+    appendDeliveryProofToNotes,
+    extractDeliveryProofUrlsFromNote,
+    stripDeliveryMediaFromNote,
+} from '../../utils/orderNoteSanitize';
+import DeliveryProofGallery from '../Common/DeliveryProofGallery';
+import { CYLINDER_KHO_COLUMN, CYLINDER_WAREHOUSE_LEGACY_COLUMN, filterWarehousesForCurrentUser, getCylinderKhoValue } from '../../utils/orderWarehouseScope';
+import { fetchReturnableCylindersAtWarehouse } from '../../utils/transferWarehouseMatch';
 
 /** goods_issues có thể lưu warehouses.id hoặc code/tên cũ — cylinders.warehouse lưu mã kho (OCP1…). */
 function resolveWarehouseRowForForm(storedWarehouseId, warehousesList = []) {
@@ -46,7 +53,11 @@ function resolveWarehouseRowForForm(storedWarehouseId, warehousesList = []) {
 /** machines.warehouse trong DB là mã/ngắn hoặc tên kho, không phải UUID. */
 function machineWarehouseCandidates(whRow) {
     if (!whRow) return [];
-    return [...new Set([String(whRow.code || '').trim(), String(whRow.name || '').trim(), String(whRow.id || '').trim()].filter(Boolean))];
+    return [...new Set([String(whRow.code || '').trim(), String(whRow.name || '').trim()].filter(Boolean))];
+}
+
+function warehouseStorageValue(warehouse) {
+    return String(warehouse?.name || '').trim();
 }
 
 export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedType, prefill = null }) {
@@ -134,8 +145,9 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
         if (!warehousesList.length) return;
         setFormData((prev) => {
             const row = resolveWarehouseRowForForm(prev.warehouse_id, warehousesList);
-            if (!row || prev.warehouse_id === row.id) return prev;
-            return { ...prev, warehouse_id: row.id };
+            const nextWarehouseId = warehouseStorageValue(row);
+            if (!row || !nextWarehouseId || prev.warehouse_id === nextWarehouseId) return prev;
+            return { ...prev, warehouse_id: nextWarehouseId };
         });
     }, [warehousesList, issue?.id]);
 
@@ -251,7 +263,7 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                 const scoped = filterWarehousesForCurrentUser(data, { role, user, department });
                 setWarehousesList(scoped);
                 if (!isEdit && scoped.length > 0) {
-                    setFormData(prev => !prev.warehouse_id ? { ...prev, warehouse_id: scoped[0].id } : prev);
+                    setFormData(prev => !prev.warehouse_id ? { ...prev, warehouse_id: warehouseStorageValue(scoped[0]) } : prev);
                 }
             }
         } catch (error) {
@@ -286,20 +298,12 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                 if (error) throw error;
                 setInventoryItems(data || []);
             } else {
-                const cylinderWhId = resolveCylinderWarehouseValue(whRow || formData.warehouse_id, warehousesList);
-
-                let query = supabase
-                    .from('cylinders')
-                    .select('*')
-                    .eq(CYLINDER_KHO_COLUMN, cylinderWhId);
-
-                // Return-empty cylinders should allow selecting all cylinders in the warehouse.
-                if (formData.issue_type !== 'TRA_VO') {
-                    query = query.not('status', 'in', '("đang sử dụng", "thuộc khách hàng")');
-                }
-
-                const { data, error } = await query;
-                if (error) throw error;
+                const data = await fetchReturnableCylindersAtWarehouse(supabase, {
+                    warehouseRef: formData.warehouse_id,
+                    warehouseList: warehousesList,
+                    whRow,
+                    issueType: formData.issue_type,
+                });
                 setInventoryItems(data || []);
             }
         } catch (error) {
@@ -589,14 +593,18 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
             delete issuePayload.id;
             delete issuePayload.created_at;
 
-            const uuidOrNull = (v) => {
+            const valueOrNull = (v) => {
                 if (v == null) return null;
                 const s = String(v).trim();
                 return s || null;
             };
-            issuePayload.supplier_id = uuidOrNull(issuePayload.supplier_id);
-            issuePayload.warehouse_id = uuidOrNull(issuePayload.warehouse_id);
+            issuePayload.supplier_id = valueOrNull(issuePayload.supplier_id);
+            issuePayload.warehouse_id = valueOrNull(issuePayload.warehouse_id);
             issuePayload.deliverer_name = delivererName;
+            issuePayload.notes = appendDeliveryProofToNotes(
+                issuePayload.notes,
+                extractDeliveryProofUrlsFromNote(issue?.notes || formData.notes),
+            );
             delete issuePayload.deliverer_name_manual;
 
             const currentCreatorRaw =
@@ -699,6 +707,7 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                                 .update({
                                     status: 'đã trả ncc',
                                     [CYLINDER_KHO_COLUMN]: null,
+                                    [CYLINDER_WAREHOUSE_LEGACY_COLUMN]: null,
                                     customer_id: null,
                                     customer_name: null,
                                     supplier_id: issuePayload.supplier_id
@@ -894,7 +903,7 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                                             required
                                         >
                                             <option value="">Chọn kho xuất</option>
-                                            {warehousesList.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                                            {warehousesList.map(w => <option key={w.id} value={warehouseStorageValue(w)}>{w.name}</option>)}
                                         </select>
                                         <ChevronDown className="w-4 h-4 text-primary/70 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                                     </div>
@@ -932,10 +941,19 @@ export default function GoodsIssueFormModal({ issue, onClose, onSuccess, forcedT
                                         <StickyNote className="w-4 h-4 text-primary/70" /> Ghi chú
                                     </label>
                                     <textarea
-                                        value={formData.notes || ''}
-                                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                                        value={stripDeliveryMediaFromNote(formData.notes || '')}
+                                        onChange={(e) => {
+                                            const proofUrls = extractDeliveryProofUrlsFromNote(formData.notes);
+                                            setFormData({
+                                                ...formData,
+                                                notes: appendDeliveryProofToNotes(e.target.value, proofUrls) || '',
+                                            });
+                                        }}
                                         placeholder="Lý do xuất, phương tiện v.v"
                                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-[15px] font-medium text-slate-800 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary/40 focus:bg-white transition-all min-h-[80px]"
+                                    />
+                                    <DeliveryProofGallery
+                                        urls={extractDeliveryProofUrlsFromNote(formData.notes)}
                                     />
                                 </div>
 

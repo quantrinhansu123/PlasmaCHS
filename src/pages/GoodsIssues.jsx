@@ -55,7 +55,12 @@ import { supabase } from '../supabase/config';
 import { ISSUE_STATUSES, ISSUE_TABLE_COLUMNS, ISSUE_TYPES } from '../constants/goodsIssueConstants';
 import usePermissions from '../hooks/usePermissions';
 import { isAccountantRole, isAdminRole, isWarehouseRole } from '../utils/accessControl';
-import { buildCylinderWarehouseQueryKeys, filterWarehousesForCurrentUser } from '../utils/orderWarehouseScope';
+import { filterWarehousesForCurrentUser } from '../utils/orderWarehouseScope';
+import {
+    extractDeliveryProofUrlsFromNote,
+    stripDeliveryMediaFromNote,
+} from '../utils/orderNoteSanitize';
+import DeliveryProofGallery from '../components/Common/DeliveryProofGallery';
 
 // Register ChartJS components
 ChartJS.register(
@@ -251,7 +256,9 @@ const GoodsIssues = () => {
                     user,
                     department,
                 });
-                const allowedKeys = buildCylinderWarehouseQueryKeys(allowedWarehouses || []);
+                const allowedKeys = (allowedWarehouses || [])
+                    .map((warehouse) => String(warehouse?.name || '').trim())
+                    .filter(Boolean);
                 if (allowedKeys.length === 0) {
                     setIssues([]);
                     return;
@@ -349,8 +356,16 @@ const GoodsIssues = () => {
         return ISSUE_TYPES.find(t => t.id === typeId)?.label || typeId;
     };
 
+    const getWarehouseValue = (warehouse) => String(warehouse?.name || '').trim();
+
     const getWarehouseLabel = (id) => {
-        return warehouses.find(w => w.id === id)?.name || id;
+        const raw = String(id || '').trim();
+        return warehouses.find((w) =>
+            String(w.id) === raw
+            || String(w.code || '').trim() === raw
+            || String(w.name || '').trim() === raw
+            || getWarehouseValue(w) === raw
+        )?.name || id;
     };
 
     const getSupplierName = (id) => {
@@ -680,9 +695,9 @@ const GoodsIssues = () => {
     }));
 
     const warehouseOptions = warehouses.map(w => ({
-        id: w.id,
+        id: getWarehouseValue(w),
         label: w.name,
-        count: issues.filter(i => i.warehouse_id === w.id).length
+        count: issues.filter(i => i.warehouse_id === getWarehouseValue(w)).length
     }));
 
     const supplierOptions = suppliers.map(s => ({
@@ -725,8 +740,22 @@ const GoodsIssues = () => {
                 return <span className="text-[13px] font-medium text-slate-700">{getWarehouseLabel(issue.warehouse_id)}</span>;
             case 'total_items':
                 return <span className="text-[13px] font-black text-foreground">{formatNumber(issue.total_items)}</span>;
-            case 'notes':
-                return <span className="text-[13px] text-muted-foreground italic max-w-xs truncate">{issue.notes || '---'}</span>;
+            case 'notes': {
+                const noteText = stripDeliveryMediaFromNote(issue.notes);
+                const proofUrls = extractDeliveryProofUrlsFromNote(issue.notes);
+                return (
+                    <div className="max-w-xs">
+                        {noteText ? (
+                            <span className="text-[13px] text-muted-foreground italic line-clamp-2">{noteText}</span>
+                        ) : proofUrls.length ? null : (
+                            <span className="text-[13px] text-muted-foreground">---</span>
+                        )}
+                        {proofUrls.length > 0 && (
+                            <DeliveryProofGallery urls={proofUrls} compact className="mt-1.5" />
+                        )}
+                    </div>
+                );
+            }
             case 'status':
                 const status = getStatusConfig(issue.status);
                 return (
@@ -1429,8 +1458,18 @@ const GoodsIssues = () => {
                                                                     SL {formatNumber(issue.total_items)}
                                                                 </span>
                                                             </div>
-                                                            {issue.notes && (
-                                                                <p className="text-[10px] font-medium text-slate-500 line-clamp-2 italic">{issue.notes}</p>
+                                                            {(stripDeliveryMediaFromNote(issue.notes) || extractDeliveryProofUrlsFromNote(issue.notes).length > 0) && (
+                                                                <div className="space-y-1">
+                                                                    {stripDeliveryMediaFromNote(issue.notes) ? (
+                                                                        <p className="text-[10px] font-medium text-slate-500 line-clamp-2 italic">
+                                                                            {stripDeliveryMediaFromNote(issue.notes)}
+                                                                        </p>
+                                                                    ) : null}
+                                                                    <DeliveryProofGallery
+                                                                        urls={extractDeliveryProofUrlsFromNote(issue.notes)}
+                                                                        compact
+                                                                    />
+                                                                </div>
                                                             )}
                                                             <div className="flex items-center justify-end gap-1 pt-1 border-t border-border/50">
                                                                 <button
