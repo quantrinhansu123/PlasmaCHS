@@ -28,6 +28,7 @@ import {
     Monitor,
     Package,
     Plus,
+    Printer,
     Search,
     ClipboardList,
     Table2,
@@ -36,6 +37,7 @@ import {
     Truck,
     Upload,
     User,
+    Warehouse,
     X,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -71,6 +73,12 @@ import {
     importDnxmFromExcelRows,
     readExcelFileToRows,
 } from '../utils/dnxmExcelImport';
+import {
+    createWarehouseReturnFromOrder,
+    fetchWarehouseReturnReceiptForOrder,
+    hasWarehouseReturnForOrder,
+} from '../utils/warehouseReturnReceipt';
+import { useGoodsReceiptPrint } from '../hooks/useGoodsReceiptPrint';
 
 const getApprovedQuantityFromRequest = (request) => {
     const directApproved = parseInt(request?.quantityApproved ?? request?.quantity_approved, 10);
@@ -160,6 +168,8 @@ export default function MachineRequests() {
     const { role, user, department, roleScope, loading: permissionsLoading } = usePermissions();
     const isAdmin = isAdminRole(role);
     const canManageAllRequests = isAdmin || isThuKhoRole(role);
+    const canReturnToWarehouse = isAdmin || isThuKhoRole(role) || isWarehouseRoleHelper(role);
+    const [returningOrderId, setReturningOrderId] = useState(null);
     const [requests, setRequests] = useState([]);
     const [warehousesList, setWarehousesList] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -231,6 +241,7 @@ export default function MachineRequests() {
         () => buildWarehouseLabelMap(warehousesList),
         [warehousesList],
     );
+    const { printReceipt, PrintPortal: GoodsReceiptPrintPortal } = useGoodsReceiptPrint(warehousesList);
 
     const getWarehouseName = useCallback(
         (row) => getOrderWarehouseDisplayName(row, warehouseLabelMap) || '—',
@@ -522,6 +533,103 @@ export default function MachineRequests() {
     const handleViewAsOrder = (order) => {
         setOrderToView(order);
         setIsOrderModalOpen(true);
+    };
+
+    const handleReturnToWarehouse = async (order) => {
+        if (!order?.id) return;
+        if (
+            !window.confirm(
+                `Nhập lại kho cho đơn ${order.order_code}?\n\nHệ thống sẽ tạo phiếu nhập kho, đưa máy về kho, chuyển đơn sang «Đơn hàng trả về» và mở hộp thoại in phiếu.`,
+            )
+        ) {
+            return;
+        }
+
+        setReturningOrderId(order.id);
+        try {
+            const actorName =
+                user?.name ||
+                user?.full_name ||
+                localStorage.getItem('user_name') ||
+                sessionStorage.getItem('user_name') ||
+                '';
+            const result = await createWarehouseReturnFromOrder(supabase, order, {
+                warehouses: warehousesList,
+                actorName,
+            });
+            toast.success(
+                `Đã tạo phiếu nhập ${result.receiptCode} và nhập lại ${result.machineCount} máy về kho.`,
+            );
+            fetchData();
+            try {
+                await printReceipt(result.receipt, result.items);
+            } catch (printErr) {
+                console.error('Print warehouse return receipt:', printErr);
+                toast.warn('Phiếu đã tạo nhưng không mở được hộp thoại in. Dùng nút In trên dòng đơn.');
+            }
+        } catch (error) {
+            console.error('Return to warehouse:', error);
+            toast.error(error.message || 'Không thể nhập lại kho');
+        } finally {
+            setReturningOrderId(null);
+        }
+    };
+
+    const handlePrintWarehouseReturn = async (order) => {
+        try {
+            const receipt = await fetchWarehouseReturnReceiptForOrder(supabase, order);
+            if (!receipt) {
+                toast.error('Không tìm thấy phiếu nhập kho của đơn này');
+                return;
+            }
+            await printReceipt(receipt);
+        } catch (error) {
+            console.error('Print warehouse return:', error);
+            toast.error(error.message || 'Không thể in phiếu');
+        }
+    };
+
+    const renderReturnToWarehouseButton = (order, className = '') => {
+        if (order.status !== 'DOI_SOAT_THAT_BAI' || !canReturnToWarehouse) return null;
+        if (hasWarehouseReturnForOrder(order)) return null;
+
+        const busy = returningOrderId === order.id;
+        return (
+            <button
+                type="button"
+                onClick={() => handleReturnToWarehouse(order)}
+                disabled={busy}
+                className={clsx(
+                    'rounded-lg p-1.5 text-slate-400 transition-all hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-50',
+                    className,
+                )}
+                title="Nhập lại kho"
+            >
+                {busy ? (
+                    <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" />
+                ) : (
+                    <Warehouse size={16} />
+                )}
+            </button>
+        );
+    };
+
+    const renderPrintWarehouseReturnButton = (order, className = '') => {
+        if (!hasWarehouseReturnForOrder(order)) return null;
+
+        return (
+            <button
+                type="button"
+                onClick={() => handlePrintWarehouseReturn(order)}
+                className={clsx(
+                    'rounded-lg p-1.5 text-slate-400 transition-all hover:bg-blue-50 hover:text-blue-600',
+                    className,
+                )}
+                title="In phiếu nhập kho"
+            >
+                <Printer size={16} />
+            </button>
+        );
     };
 
     // Đã chuyển logic duyệt sang MachineIssueRequestForm.jsx
@@ -923,6 +1031,8 @@ export default function MachineRequests() {
                                                 <div className="rounded-lg border border-gray-100 bg-gray-50 px-2 py-1.5 text-[11px] font-semibold text-gray-600">Kho: {getWarehouseName(r)}</div>
                                                 <div className="flex items-center justify-end gap-2 border-t border-gray-100/80 pt-2">
                                                     <button type="button" onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)} className="rounded-lg border border-blue-100 bg-blue-50 p-2 text-blue-600"><Eye size={16} /></button>
+                                                    {renderReturnToWarehouseButton(r, 'rounded-lg border border-indigo-100 bg-indigo-50 p-2 text-indigo-700')}
+                                                    {renderPrintWarehouseReturnButton(r, 'rounded-lg border border-blue-100 bg-blue-50 p-2 text-blue-600')}
                                                     <button type="button" onClick={() => handleViewAsOrder(r)} className="rounded-lg border border-emerald-100 bg-emerald-50 p-2 text-emerald-700"><Package size={16} /></button>
                                                     <button type="button" onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)} className="rounded-lg border border-amber-100 bg-amber-50 p-2 text-amber-700"><Edit size={16} /></button>
                                                     <button type="button" onClick={() => handleDelete(r.id, r.order_code)} className="rounded-lg border border-rose-100 bg-rose-50 p-2 text-rose-700"><Trash2 size={16} /></button>
@@ -1166,6 +1276,8 @@ export default function MachineRequests() {
                                                 <td className="px-5 py-3.5">
                                                     <div className="flex items-center justify-center gap-1.5">
                                                         <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}&viewOnly=true`)} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-all" title="Xem chi tiết"><Eye size={16} /></button>
+                                                        {renderReturnToWarehouseButton(r)}
+                                                        {renderPrintWarehouseReturnButton(r)}
                                                         <button onClick={() => handleViewAsOrder(r)} className="p-1.5 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 rounded-lg transition-all" title="Thao tác Đơn hàng"><Package size={16} /></button>
                                                         <button onClick={() => navigate(`/de-nghi-xuat-may/tao?orderId=${r.id}`)} className="p-1.5 text-slate-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-all" title="Chỉnh sửa"><Edit size={16} /></button>
                                                         <button onClick={() => handleDelete(r.id, r.order_code)} className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all" title="Xóa"><Trash2 size={16} /></button>
@@ -1292,6 +1404,8 @@ export default function MachineRequests() {
                                                                     >
                                                                         <Eye size={16} />
                                                                     </button>
+                                                                    {renderReturnToWarehouseButton(r)}
+                                                                    {renderPrintWarehouseReturnButton(r)}
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => handleViewAsOrder(r)}
@@ -1417,6 +1531,8 @@ export default function MachineRequests() {
                     }}
                 />
             )}
+
+            <GoodsReceiptPrintPortal />
 
             <MobileFilterSheet
                 isOpen={showMobileFilter}

@@ -1,4 +1,4 @@
-import { AlertCircle, AlertTriangle, ArrowRightCircle, Camera, Check, CheckCircle, CheckCircle2, Clock, CloudUpload, Package, Plus, ScanLine, Truck, X, XCircle, ZoomIn, FileText } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowRightCircle, Camera, Check, CheckCircle, CheckCircle2, Clock, CloudUpload, Package, Plus, Printer, ScanLine, Truck, Warehouse, X, XCircle, ZoomIn, FileText } from 'lucide-react';
 import clsx from 'clsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -30,7 +30,7 @@ import {
     uploadDeliveryProofFile,
 } from '../../utils/cloudinaryUpload';
 import Combobox from '../ui/Combobox';
-import { cylinderVolumeMatchesProduct, resolveInventoryLineForOrder } from '../../utils/inventoryMatch';
+import { cylinderVolumeMatchesProduct, resolveInventoryLineForOrder, syncBinhInventoryFromReadyCylinders } from '../../utils/inventoryMatch';
 import {
     fetchReadyCylindersAtWarehouse,
     fetchReadyMachinesAtWarehouse,
@@ -50,6 +50,23 @@ import {
     isWarehouseRole,
     normalizeRole,
 } from '../../utils/accessControl';
+import {
+    getOrderCylinderExportQuantity,
+    getOrderCylinderExportSerials,
+    getOrderCylinderLineItems,
+} from '../../utils/orderCylinderExport';
+import {
+    collectDeliveredCylinderSerials,
+    fetchCylindersBySerials,
+    markCylindersDeliveredToCustomer,
+    updateCylindersBySerials,
+} from '../../utils/cylinderSerialUpdate';
+import {
+    createWarehouseReturnFromOrder,
+    fetchWarehouseReturnReceiptForOrder,
+    hasWarehouseReturnForOrder,
+} from '../../utils/warehouseReturnReceipt';
+import { useGoodsReceiptPrint } from '../../hooks/useGoodsReceiptPrint';
 
 const readCachedUserRole = () =>
     localStorage.getItem('user_role') ||
@@ -208,6 +225,8 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     const [machineAssignErrorMsg, setMachineAssignErrorMsg] = useState('');
     const [approvalHistory, setApprovalHistory] = useState([]);
     const [isFetchingApprovalHistory, setIsFetchingApprovalHistory] = useState(true);
+    const [isReturningToWarehouse, setIsReturningToWarehouse] = useState(false);
+    const { printReceipt, PrintPortal: GoodsReceiptPrintPortal } = useGoodsReceiptPrint(warehouseList);
 
     const isDNXM = order?.order_code?.startsWith('DNXM-');
     const hasMachineItems = orderItems.length > 0
@@ -599,6 +618,18 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         orderItems,
     ]);
 
+    // Gợi ý sẵn mã bình đã gán trên đơn khi kho xuất (tránh xuất mà không đổi trạng thái bình).
+    useEffect(() => {
+        if (!order?.id || !hasCylinderItems) return;
+        if (!['CHO_DUYET', 'CHO_CTY_DUYET', 'KHO_XU_LY'].includes(order.status)) return;
+        if (String(scannedSerials || '').trim()) return;
+
+        const preset = getOrderCylinderExportSerials(order, orderItems, '');
+        if (preset.length > 0) {
+            setScannedSerials(preset.join('\n'));
+        }
+    }, [order?.id, order?.status, order?.assigned_cylinders, hasCylinderItems, orderItems, scannedSerials]);
+
     const handleProofImageChange = (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -796,6 +827,68 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
     const orderRole = mapUserRoleToOrderRole(effectiveUserRole, effectiveDepartment);
     const availableActions = transitions.filter((t) => orderRoleCanRunTransition(orderRole, t));
 
+    const canReturnToWarehouse =
+        isAdminRole(effectiveUserRole) ||
+        isAdminRole(effectiveDepartment) ||
+        hasWarehouseOrderAdminAccess(effectiveUserRole, effectiveDepartment);
+
+    const showReturnToWarehouseAction =
+        statusKey === 'DOI_SOAT_THAT_BAI' &&
+        canReturnToWarehouse &&
+        !hasWarehouseReturnForOrder(order);
+
+    const handleReturnToWarehouse = async () => {
+        if (!showReturnToWarehouseAction) return;
+        if (
+            !window.confirm(
+                `Nhập lại kho cho đơn ${order.order_code}?\n\nHệ thống sẽ tạo phiếu nhập kho, đưa máy về kho, chuyển đơn sang «Đơn hàng trả về» và mở hộp thoại in phiếu.`,
+            )
+        ) {
+            return;
+        }
+
+        setIsReturningToWarehouse(true);
+        setErrorMsg('');
+        try {
+            const actorName =
+                user?.name ||
+                localStorage.getItem('user_name') ||
+                sessionStorage.getItem('user_name') ||
+                'Hệ thống';
+            const result = await createWarehouseReturnFromOrder(supabase, order, {
+                warehouses: warehouseList,
+                actorName,
+            });
+            try {
+                await printReceipt(result.receipt, result.items);
+            } catch (printErr) {
+                console.error('Print warehouse return receipt:', printErr);
+            }
+            alert(`✅ Đã tạo phiếu nhập ${result.receiptCode} và nhập lại ${result.machineCount} máy về kho.`);
+            if (onUpdateSuccess) onUpdateSuccess();
+        } catch (error) {
+            console.error('Return to warehouse:', error);
+            setErrorMsg(error.message || 'Không thể nhập lại kho');
+        } finally {
+            setIsReturningToWarehouse(false);
+        }
+    };
+
+    const handlePrintWarehouseReturn = async () => {
+        setErrorMsg('');
+        try {
+            const receipt = await fetchWarehouseReturnReceiptForOrder(supabase, order);
+            if (!receipt) {
+                setErrorMsg('Không tìm thấy phiếu nhập kho của đơn này');
+                return;
+            }
+            await printReceipt(receipt);
+        } catch (error) {
+            console.error('Print warehouse return:', error);
+            setErrorMsg(error.message || 'Không thể in phiếu nhập kho');
+        }
+    };
+
     const handleUpdateStatus = async (transition) => {
         if (
             statusKey === 'CHO_CTY_DUYET' &&
@@ -851,29 +944,35 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
 
             // 1. ADVANCED VALIDATION & INVENTORY DEDUCTION (Multi-product)
             if ((transition.nextStatus === 'CHO_GIAO_HANG' || transition.nextStatus === 'DA_DUYET') && order.status === 'KHO_XU_LY') {
-                const cylItems = orderItems.filter(it => it.product_type?.startsWith('BINH'));
-                const totalCylQty = cylItems.reduce((sum, it) => sum + (it.quantity || 0), 0);
+                const cylItems = getOrderCylinderLineItems(order, orderItems);
+                const totalCylQty = getOrderCylinderExportQuantity(order, orderItems);
+                let cylindersExported = false;
 
-                // For cylinders, we need scanned serials
+                // For cylinders, we need scanned serials (or mã đã gán sẵn trên đơn)
                 if (totalCylQty > 0) {
-                    const serials = scannedSerials.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+                    const serials = getOrderCylinderExportSerials(order, orderItems, scannedSerials);
                     if (serials.length !== totalCylQty) {
-                        throw new Error(`Kho xuất: Bạn cần quét đúng ${totalCylQty} mã bình. Hiện tại đã quét: ${serials.length}`);
+                        throw new Error(`Kho xuất: Bạn cần quét đúng ${totalCylQty} mã bình. Hiện tại đã có: ${serials.length}`);
                     }
 
                     const requiredByType = {};
                     cylItems.forEach((it) => {
-                        requiredByType[it.product_type] = (requiredByType[it.product_type] || 0) + (it.quantity || 0);
+                        requiredByType[it.product_type] = (requiredByType[it.product_type] || 0) + (parseInt(it.quantity, 10) || 0);
                     });
 
-                    const { data: scannedCylinders, error: scanCheckErr } = await supabase
-                        .from('cylinders')
-                        .select('serial_number, volume')
-                        .in('serial_number', serials);
-                    if (scanCheckErr) throw scanCheckErr;
+                    const scannedCylinders = await fetchCylindersBySerials(
+                        supabase,
+                        serials,
+                        'serial_number, volume, status',
+                    );
 
                     if (!scannedCylinders || scannedCylinders.length !== serials.length) {
                         throw new Error('Phát hiện mã bình không tồn tại! Vui lòng kiểm tra lại.');
+                    }
+
+                    const notReady = (scannedCylinders || []).find((c) => !isReadyCylinderStatus(c.status));
+                    if (notReady) {
+                        throw new Error(`Mã ${notReady.serial_number} không còn trạng thái sẵn sàng (${notReady.status || '—'}).`);
                     }
 
                     const matchedByType = {};
@@ -899,26 +998,20 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     }
 
                     // Cập nhật trạng thái vỏ bình sang đang vận chuyển
-                    const { data: updatedCylinders, error: cylError } = await supabase
-                        .from('cylinders')
-                        .update({
-                            status: 'đang vận chuyển',
-                            customer_name: resolvedOrderCustomerAssetName(order) || order.customer_name,
-                            customer_id: order.customer_id || null,
-                        })
-                        .in('serial_number', serials)
-                        .select('id, serial_number, category');
+                    const cylUpdateResult = await updateCylindersBySerials(supabase, serials, {
+                        status: 'đang vận chuyển',
+                        customer_name: resolvedOrderCustomerAssetName(order) || order.customer_name,
+                        customer_id: order.customer_id || null,
+                    });
 
-                    if (cylError) throw new Error('Cập nhật mã bình trên kho thất bại: ' + cylError.message);
-
-                    if (!updatedCylinders || updatedCylinders.length !== totalCylQty) {
-                        throw new Error(`Phát hiện mã bình không tồn tại! Vui lòng kiểm tra lại.`);
+                    if (cylUpdateResult.updated !== totalCylQty) {
+                        const missingHint = cylUpdateResult.missing.length
+                            ? ` (không tìm thấy: ${cylUpdateResult.missing.join(', ')})`
+                            : '';
+                        throw new Error(`Phát hiện mã bình không tồn tại! Vui lòng kiểm tra lại.${missingHint}`);
                     }
 
-                    // Update serials back to order_items (optional but good for tracking)
-                    // Simplified: We just update the main order record for now if needed, 
-                    // but according to protocol we should ideally update each order_item line with its specific serials.
-                    // For now, we'll keep it simple as the original code had a single array.
+                    cylindersExported = true;
                 }
 
                 // Trừ tồn kho cho từng sản phẩm từ order_items
@@ -935,6 +1028,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     if (!item.quantity || item.quantity <= 0) continue;
 
                     if (isMachineProductType(item.product_type)) continue;
+                    if (String(item.product_type || '').startsWith('BINH')) continue;
 
                     const productLabel = PRODUCT_TYPES.find(p => p.id === item.product_type)?.label || item.product_type;
 
@@ -944,7 +1038,7 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                             warehouseRef: order.warehouse,
                             warehouseList: warehousesForInv,
                             productType: item.product_type,
-                            allowCylinderSync: true,
+                            allowCylinderSync: false,
                         });
                     } catch (invErr) {
                         throw new Error(`Lỗi kiểm tra tồn kho cho ${productLabel}: ` + invErr.message);
@@ -973,15 +1067,20 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                         note: `Bán cho ${order.customer_name || 'Khách lẻ'} | Đơn ${order.order_code} | Sản phẩm ${productLabel} x${item.quantity} | Đang ở: ${order.customer_name || 'Khách hàng'} | Kho xuất: ${order.warehouse || '—'} | Người giao: ${deliveryUnit || 'Chưa gán'} | Người duyệt: ${actorName} | Thời gian: ${actionTime}`
                     }]);
                 }
+
+                if (cylindersExported || totalCylQty > 0) {
+                    await syncBinhInventoryFromReadyCylinders(supabase, {
+                        warehouseRef: order.warehouse,
+                        warehouseList: warehousesForInv,
+                    });
+                }
             }
 
-            const isCylinder1 = order.product_type?.startsWith('BINH');
-            const isCylinder2 = order.product_type_2?.startsWith('BINH');
-            let totalCylindersNeeded = (isCylinder1 ? order.quantity : 0) + (isCylinder2 ? order.quantity_2 : 0);
-            if (totalCylindersNeeded === 0 && (orderItems || []).length > 0) {
-                totalCylindersNeeded = orderItems
-                    .filter((it) => it.product_type?.startsWith('BINH'))
-                    .reduce((sum, it) => sum + (parseInt(it.quantity, 10) || 0), 0);
+            let totalCylindersNeeded = getOrderCylinderExportQuantity(order, orderItems);
+            if (totalCylindersNeeded === 0) {
+                const isCylinder1 = order.product_type?.startsWith('BINH');
+                const isCylinder2 = order.product_type_2?.startsWith('BINH');
+                totalCylindersNeeded = (isCylinder1 ? order.quantity : 0) + (isCylinder2 ? order.quantity_2 : 0);
             }
 
             // Nếu Shipper gán mã lỗi do Kho quên
@@ -990,27 +1089,34 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 (!order.assigned_cylinders || order.assigned_cylinders.length < totalCylindersNeeded);
 
             if (needsCylinderAssignmentByShipper && transition.nextStatus !== 'HUY_DON') {
-                const serials = scannedSerials.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+                const serials = getOrderCylinderExportSerials(order, orderItems, scannedSerials);
                 if (serials.length !== totalCylindersNeeded) {
                     throw new Error(`Shipper: Bạn cần quét đúng ${totalCylindersNeeded} mã bình trước khi giao. Hiện tại đã quét: ${serials.length}`);
                 }
 
                 // Cập nhật trạng thái vỏ bình sang đang vận chuyển
-                const { data: updatedCylinders, error: cylError } = await supabase
-                    .from('cylinders')
-                    .update({
-                        status: 'đang vận chuyển',
-                        customer_name: resolvedOrderCustomerAssetName(order) || order.customer_name,
-                        customer_id: order.customer_id || null,
-                    })
-                    .in('serial_number', serials)
-                    .select('id, serial_number');
+                const shipperCylResult = await updateCylindersBySerials(supabase, serials, {
+                    status: 'đang vận chuyển',
+                    customer_name: resolvedOrderCustomerAssetName(order) || order.customer_name,
+                    customer_id: order.customer_id || null,
+                });
 
-                if (cylError) throw new Error('Cập nhật mã bình thất bại: ' + cylError.message);
-
-                if (!updatedCylinders || updatedCylinders.length !== totalCylindersNeeded) {
-                    throw new Error(`Phát hiện mã bình không hợp lệ! Vui lòng quét lại.`);
+                if (shipperCylResult.updated !== totalCylindersNeeded) {
+                    throw new Error('Phát hiện mã bình không hợp lệ! Vui lòng quét lại.');
                 }
+
+                let warehousesForShipperSync = warehouseList;
+                if (!warehousesForShipperSync?.length) {
+                    const { data: whData } = await supabase
+                        .from('warehouses')
+                        .select('id, name, code, branch_office')
+                        .order('name');
+                    warehousesForShipperSync = whData || [];
+                }
+                await syncBinhInventoryFromReadyCylinders(supabase, {
+                    warehouseRef: order.warehouse,
+                    warehouseList: warehousesForShipperSync,
+                });
             }
 
             if (transition.nextStatus === 'CHO_GIAO_HANG' && !deliveryUnit && order.status === 'KHO_XU_LY') {
@@ -1130,29 +1236,29 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                 }
 
                 // Khi shipper xác nhận giao xong, cập nhật các mã bình thuộc phiếu sang trạng thái thuộc khách hàng
-                const assignedCylinderSerials = (order.assigned_cylinders || [])
-                    .map((serial) => String(serial || '').trim().toUpperCase())
-                    .filter(Boolean);
-                const checklistCylinderSerials = Object.keys(deliveryChecklist || {})
-                    .filter((key) => String(key || '').startsWith('BINH:'))
-                    .map((key) => String(key).split(':')[1] || '')
-                    .map((serial) => serial.trim().toUpperCase())
-                    .filter(Boolean);
-                const deliveredCylinderSerials = [...new Set([...assignedCylinderSerials, ...checklistCylinderSerials])];
+                const deliveredCylinderSerials = collectDeliveredCylinderSerials(
+                    order,
+                    orderItems,
+                    deliveryChecklist,
+                );
                 if (deliveredCylinderSerials.length > 0) {
-                    const { error: deliveredCylinderErr } = await supabase
-                        .from('cylinders')
-                        .update({
-                            status: 'thuộc khách hàng',
-                            customer_name: resolvedOrderCustomerAssetName(order),
-                            customer_id: order.customer_id || null,
-                            updated_at: new Date().toISOString(),
-                        })
-                        .in('serial_number', deliveredCylinderSerials);
+                    await markCylindersDeliveredToCustomer(supabase, deliveredCylinderSerials, {
+                        customerName: resolvedOrderCustomerAssetName(order),
+                        customerId: order.customer_id,
+                    });
 
-                    if (deliveredCylinderErr) {
-                        throw new Error('Không thể cập nhật bình sang trạng thái thuộc khách hàng: ' + deliveredCylinderErr.message);
+                    let warehousesForDeliveredSync = warehouseList;
+                    if (!warehousesForDeliveredSync?.length) {
+                        const { data: whData } = await supabase
+                            .from('warehouses')
+                            .select('id, name, code, branch_office')
+                            .order('name');
+                        warehousesForDeliveredSync = whData || [];
                     }
+                    await syncBinhInventoryFromReadyCylinders(supabase, {
+                        warehouseRef: order.warehouse,
+                        warehouseList: warehousesForDeliveredSync,
+                    });
                 }
 
                 if (hasMachineItems) {
@@ -1194,9 +1300,10 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                     warehousesForRefund = whData || [];
                 }
 
-                // Refund inventory for each product
+                // Refund inventory for each product (không BINH — bình đồng bộ từ đếm thực tế)
                 for (const item of orderItems) {
                     if (!item.quantity || item.quantity <= 0) continue;
+                    if (String(item.product_type || '').startsWith('BINH')) continue;
 
                     const productLabel = PRODUCT_TYPES.find(p => p.id === item.product_type)?.label || item.product_type;
 
@@ -1231,6 +1338,11 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                         .update({ status: 'sẵn sàng', customer_name: null, updated_at: new Date().toISOString() })
                         .in('serial_number', order.assigned_cylinders);
                 }
+
+                await syncBinhInventoryFromReadyCylinders(supabase, {
+                    warehouseRef: order.warehouse,
+                    warehouseList: warehousesForRefund,
+                });
 
                 // Release any machines assigned to this order back to available
                 if (hasMachineItems) {
@@ -1385,7 +1497,9 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
         }
     };
 
-    return createPortal(
+    return (
+        <>
+        {createPortal(
         <div className={clsx(
             "fixed inset-0 z-[100005] flex justify-end transition-all duration-300",
             isClosing ? "opacity-0 pointer-events-none" : "opacity-100"
@@ -2092,6 +2206,48 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
                                 </div>
                             )}
 
+                            {/* Nhập lại kho khi đối soát thất bại */}
+                            {showReturnToWarehouseAction && (
+                                <div className="space-y-3 p-4 bg-indigo-50 border border-indigo-100 rounded-2xl">
+                                    <p className="text-[11px] font-black text-indigo-700 uppercase tracking-widest">
+                                        Đối soát thất bại — nhập máy về kho
+                                    </p>
+                                    <p className="text-[12px] font-medium text-indigo-900/80">
+                                        Tạo phiếu nhập kho (PN) và đưa máy trên đơn về trạng thái sẵn sàng tại kho.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={handleReturnToWarehouse}
+                                        disabled={isReturningToWarehouse || isLoading}
+                                        className="w-full p-4 flex items-center justify-center gap-3 font-black rounded-2xl transition-all border bg-indigo-600 text-white hover:bg-indigo-700 border-transparent shadow-lg shadow-indigo-200 uppercase tracking-wider text-[13px] disabled:opacity-50"
+                                    >
+                                        {isReturningToWarehouse ? (
+                                            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                        ) : (
+                                            <Warehouse className="w-5 h-5" />
+                                        )}
+                                        Nhập lại kho
+                                    </button>
+                                </div>
+                            )}
+
+                            {hasWarehouseReturnForOrder(order) && !showReturnToWarehouseAction && (
+                                <div className="space-y-3 p-4 bg-blue-50 border border-blue-100 rounded-2xl">
+                                    <p className="text-[11px] font-black text-blue-700 uppercase tracking-widest">
+                                        Phiếu nhập kho đã tạo
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={handlePrintWarehouseReturn}
+                                        disabled={isLoading}
+                                        className="w-full p-4 flex items-center justify-center gap-3 font-black rounded-2xl transition-all border bg-blue-600 text-white hover:bg-blue-700 border-transparent shadow-lg shadow-blue-200 uppercase tracking-wider text-[13px] disabled:opacity-50"
+                                    >
+                                        <Printer className="w-5 h-5" />
+                                        In phiếu nhập kho
+                                    </button>
+                                </div>
+                            )}
+
                             {/* Final Actions */}
                             <div className="pt-4 border-t border-slate-200 space-y-3">
                                 <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Các thao tác khả dụng</label>
@@ -2222,5 +2378,8 @@ export default function OrderStatusUpdater({ order, warehouseName, userRole, onC
             />
         </div>,
         document.body
+        )}
+        <GoodsReceiptPrintPortal />
+        </>
     );
 }

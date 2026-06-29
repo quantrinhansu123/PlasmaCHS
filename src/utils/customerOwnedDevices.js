@@ -84,6 +84,27 @@ export function customerOwnsAssetName(assetCustomerName, customer) {
     });
 }
 
+/** Khớp chặt tên khách — dùng dropdown thu hồi vỏ, tránh lẫn «test» / «TEST». */
+export function customerOwnsAssetNameStrict(assetCustomerName, customer) {
+    const lookupKeys = new Set(
+        getCustomerLookupNames(customer).map(normalizeNameKey).filter(Boolean),
+    );
+    if (lookupKeys.size === 0) return false;
+
+    const assetKey = normalizeNameKey(assetCustomerName);
+    if (!assetKey) return false;
+    if (lookupKeys.has(assetKey)) return true;
+
+    const segments = assetKey
+        .split(/\s*·\s*|\s*\/\s*|\s*-\s*/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    if (segments.length > 1) {
+        return segments.every((seg) => lookupKeys.has(seg));
+    }
+    return false;
+}
+
 function formatDeviceLabel(rawType, fallback) {
     if (!rawType) return fallback;
     let formatted = rawType.toString().replace(/_/g, ' ');
@@ -321,37 +342,23 @@ export async function fetchCustomerOwnedCylinders(supabaseClient, customer) {
     if (!custId && lookupNames.length === 0) return [];
 
     const cylindersById = new Map();
-    const nameMatchedCylinderIds = new Set();
     const cylinderSerialRawFromOrders = new Set();
 
     const markCylinder = (row) => {
         if (!row?.id) return;
         cylindersById.set(row.id, row);
     };
-    const markCylinderByName = (row) => {
-        markCylinder(row);
-        if (row?.id) nameMatchedCylinderIds.add(row.id);
-    };
 
-    const cylinderCols = 'id, serial_number, volume, category, status, customer_name';
+    const cylinderCols = 'id, serial_number, volume, category, status, customer_name, customer_id';
 
     if (custId) {
         const { data: cylById } = await supabaseClient.from('cylinders').select(cylinderCols).eq('customer_id', custId);
-        (cylById || []).forEach(markCylinderByName);
+        (cylById || []).forEach(markCylinder);
     }
 
     for (const name of lookupNames) {
         const { data: cExact } = await supabaseClient.from('cylinders').select(cylinderCols).eq('customer_name', name);
-        (cExact || []).forEach(markCylinderByName);
-
-        if (name.length >= 3) {
-            const esc = escapeIlikeOrFragment(name);
-            const { data: cLike } = await supabaseClient
-                .from('cylinders')
-                .select(cylinderCols)
-                .ilike('customer_name', `%${esc}%`);
-            (cLike || []).forEach(markCylinderByName);
-        }
+        (cExact || []).forEach(markCylinder);
     }
 
     const orderMap = new Map();
@@ -405,14 +412,16 @@ export async function fetchCustomerOwnedCylinders(supabaseClient, customer) {
         );
     };
 
+    const cylinderBelongsToCustomer = (c) => {
+        if (custId && String(c.customer_id || '') === String(custId)) return true;
+        return customerOwnsAssetNameStrict(c.customer_name, customer);
+    };
+
     const owned = [...cylindersById.values()].filter((c) => {
         const st = String(c.status || '').trim();
-        return (
-            nameMatchedCylinderIds.has(c.id) ||
-            CYLINDER_STATUSES_AT_CUSTOMER.has(st) ||
-            cylinderSerMatch(c) ||
-            customerOwnsAssetName(c.customer_name, customer)
-        );
+        const fromOrder = cylinderSerMatch(c);
+        if (!cylinderBelongsToCustomer(c) && !fromOrder) return false;
+        return CYLINDER_STATUSES_AT_CUSTOMER.has(st) || fromOrder;
     });
 
     const serialMap = new Map();

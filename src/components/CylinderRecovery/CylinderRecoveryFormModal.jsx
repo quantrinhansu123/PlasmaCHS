@@ -27,7 +27,7 @@ import { applyRecoveryCompletionInventory } from '../../utils/cylinderRecoveryCo
 import BarcodeScanner from '../Common/BarcodeScanner';
 import { SearchableSelect } from '../ui/SearchableSelect';
 import usePermissions from '../../hooks/usePermissions';
-import { customerOwnsAssetName, fetchCustomerOwnedCylinders } from '../../utils/customerOwnedDevices';
+import { customerOwnsAssetNameStrict, fetchCustomerOwnedCylinders } from '../../utils/customerOwnedDevices';
 import { filterWarehousesForCurrentUser } from '../../utils/orderWarehouseScope';
 
 /** prefillComplete: mở form ở trạng thái Hoàn thành; recovery vẫn là bản ghi DB (để xử lý kho đúng). */
@@ -409,7 +409,7 @@ export default function CylinderRecoveryFormModal({
                 : null;
             const matchedCustomer = resolveCustomerByName(cylData.customer_name);
             const ownsForSelected =
-                selectedCustomer && customerOwnsAssetName(cylData.customer_name, selectedCustomer);
+                selectedCustomer && customerOwnsAssetNameStrict(cylData.customer_name, selectedCustomer);
 
             if (!matchedCustomer && !ownsForSelected) {
                 setItems(prev => prev.map(i => i._id === newItemId ? { ...i, isValidating: false, isValid: false, error: `Của: ${cylData.customer_name}` } : i));
@@ -638,7 +638,7 @@ export default function CylinderRecoveryFormModal({
                 : null;
             const matchedCustomer = resolveCustomerByName(cylData.customer_name);
             const ownsForSelected =
-                selectedCustomer && customerOwnsAssetName(cylData.customer_name, selectedCustomer);
+                selectedCustomer && customerOwnsAssetNameStrict(cylData.customer_name, selectedCustomer);
 
             if (!matchedCustomer && !ownsForSelected) {
                 setItems(prev => prev.map(i => i._id === id ? { ...i, isValidating: false, isValid: false, error: `Của: ${cylData.customer_name}` } : i));

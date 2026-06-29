@@ -56,6 +56,7 @@ import MobilePagination from '../components/layout/MobilePagination';
 import { RECEIPT_STATUSES, TABLE_COLUMNS } from '../constants/goodsReceiptConstants';
 import { supabase } from '../supabase/config';
 import { notificationService } from '../utils/notificationService';
+import { syncBinhInventoryFromReadyCylinders } from '../utils/inventoryMatch';
 import usePermissions from '../hooks/usePermissions';
 import { isAccountantRole, isAdminRole, isWarehouseRole } from '../utils/accessControl';
 import {
@@ -776,6 +777,13 @@ const GoodsReceipts = () => {
                 .eq('id', receipt.id);
 
             if (updateReceiptError) throw updateReceiptError;
+
+            const hasBinhItems = (items || []).some((item) => String(item.item_type || '').startsWith('BINH'));
+            if (hasBinhItems) {
+                await syncBinhInventoryFromReadyCylinders(supabase, {
+                    warehouseRef: receipt.warehouse_id,
+                });
+            }
 
             // Log notification
             await notificationService.add({

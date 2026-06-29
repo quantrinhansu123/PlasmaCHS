@@ -37,6 +37,11 @@ import GoodsReceiptFormModal from '../components/GoodsReceipts/GoodsReceiptFormM
 import ShippingTransportConfirmModal from '../components/Shipping/ShippingTransportConfirmModal';
 import { tryQuickCompleteRecovery } from '../utils/cylinderRecoveryCompletion';
 import {
+    collectDeliveredCylinderSerials,
+    markCylindersDeliveredToCustomer,
+} from '../utils/cylinderSerialUpdate';
+import { syncBinhInventoryFromReadyCylinders } from '../utils/inventoryMatch';
+import {
     canOpenShippingDeliveryConfirm,
     deliveryUnitMatchesShipper,
     isShippingPipelineOrderStatus,
@@ -580,22 +585,8 @@ const ShippingTasks = () => {
         }
     }, [focusTransferId, isLoading, transferTasks, setSearchParams, openTransferHandover]);
 
-    const parseCylinderSerialsFromOrder = (order) => {
-        const fromAssigned = Array.isArray(order?.assigned_cylinders)
-            ? order.assigned_cylinders.map((s) => String(s || '').trim().toUpperCase()).filter(Boolean)
-            : [];
-
-        const checklist = order?.delivery_checklist && typeof order.delivery_checklist === 'object'
-            ? Object.keys(order.delivery_checklist)
-            : [];
-        const fromChecklist = checklist
-            .filter((key) => String(key || '').startsWith('BINH:'))
-            .map((key) => String(key).split(':')[1] || '')
-            .map((serial) => serial.trim().toUpperCase())
-            .filter(Boolean);
-
-        return [...new Set([...fromAssigned, ...fromChecklist])];
-    };
+    const parseCylinderSerialsFromOrder = (order, orderItems = [], deliveryChecklist = {}) =>
+        collectDeliveredCylinderSerials(order, orderItems, deliveryChecklist);
 
     const confirmDelivery = async (options = {}) => {
         if (!selectedOrder) return;
@@ -687,24 +678,30 @@ const ShippingTasks = () => {
             }
 
             if (finalStatus === 'HOAN_THANH') {
-                const cylinderSerials = parseCylinderSerialsFromOrder(selectedOrder);
+                const cylinderSerials = parseCylinderSerialsFromOrder(
+                    selectedOrder,
+                    shippingOrderItems,
+                    nextDeliveryChecklist,
+                );
                 const machineSerials = resolveMachineSerialsForShippingConfirm(
                     selectedOrder,
                     shippingOrderItems,
                 );
 
                 if (cylinderSerials.length > 0) {
-                    const cylCust = resolvedOrderCustomerAssetName(selectedOrder);
-                    const { error: cylinderErr } = await supabase
-                        .from('cylinders')
-                        .update({
-                            status: 'thuộc khách hàng',
-                            customer_name: cylCust,
-                            customer_id: selectedOrder.customer_id || null,
-                            updated_at: new Date().toISOString(),
-                        })
-                        .in('serial_number', cylinderSerials);
-                    if (cylinderErr) throw cylinderErr;
+                    await markCylindersDeliveredToCustomer(supabase, cylinderSerials, {
+                        customerName: resolvedOrderCustomerAssetName(selectedOrder),
+                        customerId: selectedOrder.customer_id,
+                    });
+
+                    const { data: whData } = await supabase
+                        .from('warehouses')
+                        .select('id, name, code, branch_office')
+                        .order('name');
+                    await syncBinhInventoryFromReadyCylinders(supabase, {
+                        warehouseRef: selectedOrder.warehouse,
+                        warehouseList: whData || [],
+                    });
                 }
 
                 if (machineSerials.length > 0) {

@@ -35,11 +35,13 @@ import {
     Upload,
     User,
     Warehouse,
+    RefreshCw,
     X
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bar as BarChartJS, Pie as PieChartJS } from 'react-chartjs-2';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
 import * as XLSX from 'xlsx';
 import CylinderDetailsModal from '../components/Cylinders/CylinderDetailsModal';
 import CylinderFormModal from '../components/Cylinders/CylinderFormModal';
@@ -58,6 +60,7 @@ import {
 } from '../utils/orderWarehouseScope';
 import { applyCylinderKhoFilterToQuery, CYLINDER_KHO_COLUMN, cylinderKhoMatchesWarehouseRecord, isMissingKhoColumnError } from '../utils/cylinderKho';
 import { supabase } from '../supabase/config';
+import { repairAndSyncAllBinhInventory } from '../utils/inventoryMatch';
 
 ChartJS.register(
     CategoryScale,
@@ -173,6 +176,7 @@ const normalizeSupplierName = (value) => String(value || '').trim().replace(/\s+
 const Cylinders = () => {
     const { role, user, department, loading: permissionsLoading } = usePermissions();
     const canManageCylinders = isAdminRole(role);
+    const canSyncBinhInventory = isAdminRole(role) || isThuKhoRole(role) || isWarehouseRole(role);
     const navigate = useNavigate();
     const [activeView, setActiveView] = useState('list');
     /** Kanban: nhóm cột theo vị trí (cột «Vị trí») hoặc theo trạng thái — chọn bằng sổ xuống trên view Kanban */
@@ -189,6 +193,7 @@ const Cylinders = () => {
     const [bulkAssignWarehouseId, setBulkAssignWarehouseId] = useState('');
     const [bulkAssignVolume, setBulkAssignVolume] = useState('');
     const [isBulkAssignSupplierLoading, setIsBulkAssignSupplierLoading] = useState(false);
+    const [isSyncingBinhInventory, setIsSyncingBinhInventory] = useState(false);
 
     const [selectedStatuses, setSelectedStatuses] = useState([]);
     const [selectedVolumes, setSelectedVolumes] = useState([]);
@@ -760,6 +765,38 @@ const Cylinders = () => {
             alert('❌ Có lỗi xảy ra khi gán kho: ' + error.message);
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const handleRepairAndSyncBinhInventory = async () => {
+        if (!canSyncBinhInventory || isSyncingBinhInventory) return;
+        if (!window.confirm(
+            'Đồng bộ tồn bình sẵn sàng?\n\n'
+            + '• Xóa kho trên bình đã giao / đang vận chuyển\n'
+            + '• Sửa bình sẵn sàng nhưng đã gán khách\n'
+            + '• Cập nhật số tồn BINH trên mọi kho',
+        )) {
+            return;
+        }
+
+        setIsSyncingBinhInventory(true);
+        try {
+            const result = await repairAndSyncAllBinhInventory(supabase);
+            toast.success(
+                `Đã đồng bộ: xóa kho ${result.clearedKho || 0} bình, `
+                + `sửa ${result.fixedCustomerReady || 0} bình lệch, `
+                + `cập nhật ${result.inventoryLinesUpdated || 0} dòng tồn `
+                + `(${result.warehouseCount || 0} kho).`,
+            );
+            fetchCylinders();
+            fetchGlobalStats();
+            fetchMetadataForCharts();
+        } catch (error) {
+            console.error('Error repairing/syncing binh inventory:', error);
+            toast.error('Không đồng bộ được tồn bình: ' + error.message);
+        } finally {
+            setIsSyncingBinhInventory(false);
+            setShowMoreActions(false);
         }
     };
 
@@ -1687,6 +1724,19 @@ const Cylinders = () => {
                                                     className="hidden"
                                                 />
                                             </label>
+                                            {canSyncBinhInventory && (
+                                                <button
+                                                    type="button"
+                                                    onClick={handleRepairAndSyncBinhInventory}
+                                                    disabled={isSyncingBinhInventory}
+                                                    className="w-full flex items-center justify-start gap-4 px-4 py-2.5 text-[14px] font-bold text-sky-700 hover:bg-sky-50 transition-colors text-left disabled:opacity-50"
+                                                >
+                                                    <div className="w-5 flex justify-center flex-shrink-0">
+                                                        <RefreshCw size={18} className={clsx('text-sky-500', isSyncingBinhInventory && 'animate-spin')} />
+                                                    </div>
+                                                    Đồng bộ tồn sẵn sàng
+                                                </button>
+                                            )}
                                             {canManageCylinders && totalRecords > 0 && warehouseAssignOptions.length > 0 && (
                                                 <div className="px-4 py-3 border-t border-slate-100 space-y-2">
                                                     <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Gán kho hết</p>
@@ -2031,6 +2081,19 @@ const Cylinders = () => {
                                         Import Excel
                                     </label>
                                 </div>
+
+                                {canSyncBinhInventory && (
+                                    <button
+                                        type="button"
+                                        onClick={handleRepairAndSyncBinhInventory}
+                                        disabled={isSyncingBinhInventory}
+                                        className="flex items-center gap-2 px-4 h-10 rounded-lg border border-sky-200 bg-sky-50 text-sky-800 text-[13px] font-bold hover:bg-sky-100 shadow-sm transition-all active:scale-95 disabled:opacity-50"
+                                        title="Sửa bình lệch và đồng bộ tồn sẵn sàng trên mọi kho"
+                                    >
+                                        <RefreshCw size={16} className={clsx(isSyncingBinhInventory && 'animate-spin')} />
+                                        Đồng bộ tồn sẵn sàng
+                                    </button>
+                                )}
 
                                 {canManageCylinders && totalRecords > 0 && warehouseAssignOptions.length > 0 && (
                                     <div className="flex items-center gap-2">

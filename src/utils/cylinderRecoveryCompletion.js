@@ -1,6 +1,7 @@
 import { toast } from 'react-toastify';
 import { CYLINDER_KHO_COLUMN } from './orderWarehouseScope';
 import { notificationService } from './notificationService';
+import { syncBinhInventoryFromReadyCylinders } from './inventoryMatch';
 
 /**
  * Cập nhật bình, khách (borrowed_cylinders), tồn kho khi phiếu thu hồi chốt Hoàn thành.
@@ -103,6 +104,10 @@ export async function applyRecoveryCompletionInventory(supabase, {
                 .eq('id', inventoryId);
         }
     }
+
+    await syncBinhInventoryFromReadyCylinders(supabase, {
+        warehouseRef: warehouseId,
+    });
 }
 
 /**
